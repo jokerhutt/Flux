@@ -435,53 +435,53 @@ namespace standard
 
         def lcm(i8 a, i8 b) -> i8
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
         
         def lcm(i16 a, i16 b) -> i16
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
         
         def lcm(i32 a, i32 b) -> i32
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
         
         def lcm(i64 a, i64 b) -> i64
         {
-            if (a == 0 || b == 0) {return 0;};
+            if (a == 0 | b == 0) {return 0;};
             return abs(a * b) / gcd(a, b);
         };
 
         def floor(float x) -> float
         {
             i64 int_part = (i64)x;
-            if (x >= 0.0f || x == (float)int_part) {return (float)int_part;};
+            if (x >= 0.0f | x == (float)int_part) {return (float)int_part;};
             return (float)(int_part - 1);
         };
         
         def floor(double x) -> double
         {
             i64 int_part = (i64)x;
-            if (x >= 0.0 || x == (double)int_part) {return (double)int_part;};
+            if (x >= 0.0 | x == (double)int_part) {return (double)int_part;};
             return (double)(int_part - 1);
         };
 
         def ceil(float x) -> float
         {
             i64 int_part = (i64)x;
-            if (x <= 0.0f || x == (float)int_part) {return (float)int_part;};
+            if (x <= 0.0f | x == (float)int_part) {return (float)int_part;};
             return (float)(int_part + 1);
         };
         
         def ceil(double x) -> double
         {
             i64 int_part = (i64)x;
-            if (x <= 0.0 || x == (double)int_part) {return (double)int_part;};
+            if (x <= 0.0 | x == (double)int_part) {return (double)int_part;};
             return (double)(int_part + 1);
         };
 
@@ -726,13 +726,13 @@ namespace standard
 
         def atanh(float x) -> float
         {
-            if (x <= -1.0f || x >= 1.0f) {return 0.0f;};
+            if (x <= -1.0f | x >= 1.0f) {return 0.0f;};
             return 0.5f * log((1.0f + x) / (1.0f - x));
         };
 
         def atanh(double x) -> double
         {
-            if (x <= -1.0 || x >= 1.0) {return 0.0;};
+            if (x <= -1.0 | x >= 1.0) {return 0.0;};
             return 0.5 * log((1.0 + x) / (1.0 - x));
         };
 
@@ -1172,22 +1172,22 @@ namespace standard
 
         def isfinite(float x) -> bool
         {
-            return x == x && x - x == 0.0f;
+            return x == x & x - x == 0.0f;
         };
 
         def isfinite(double x) -> bool
         {
-            return x == x && x - x == 0.0;
+            return x == x & x - x == 0.0;
         };
 
         def isinf(float x) -> bool
         {
-            return x != x || x - x != 0.0f;
+            return x != x | x - x != 0.0f;
         };
 
         def isinf(double x) -> bool
         {
-            return x != x || x - x != 0.0;
+            return x != x | x - x != 0.0;
         };
 
         def isnan(float x) -> bool
@@ -1203,7 +1203,7 @@ namespace standard
         def nextafter(float x, float y) -> float
         {
             if (x == y) {return x;};
-            if (isnan(x) || isnan(y)) {return x;};
+            if (isnan(x) | isnan(y)) {return x;};
             if (!isfinite(x)) {return x;};
             i32 ix = *(i32*)@x;
             if ((x < y) == (x > 0.0f)) {ix++;} else {ix--;};
@@ -1213,7 +1213,7 @@ namespace standard
         def nextafter(double x, double y) -> double
         {
             if (x == y) {return x;};
-            if (isnan(x) || isnan(y)) {return x;};
+            if (isnan(x) | isnan(y)) {return x;};
             if (!isfinite(x)) {return x;};
             i64 ix = *(i64*)@x;
             if ((x < y) == (x > 0.0)) {ix++;} else {ix--;};
