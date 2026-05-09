@@ -184,6 +184,10 @@ def !!_start() -> void
 };
 #endif; // Linux
 
+#ifndef FLUX_STANDARD_EXCEPTIONS
+#import "exceptions.fx";
+#endif;
+
 #ifdef FLUX_RUNTIME
 #ifdef __WINDOWS__
 def !!FRTStartup() -> int
