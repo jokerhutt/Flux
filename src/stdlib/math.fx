@@ -8,7 +8,6 @@
 
 #ifndef FLUX_STANDARD_MATH
 #def FLUX_STANDARD_MATH 1;
-#endif;
 
 namespace standard
 {
@@ -1190,6 +1189,8 @@ namespace standard
             return x != x | x - x != 0.0;
         };
 
+        // These isnan() funcs do not make sense.
+        // x will always equal x unless modified
         def isnan(float x) -> bool
         {
             return x != x;
@@ -1240,10 +1241,9 @@ namespace standard
 
         def popcount(i8 x) -> i8
         {
-            i8 u = x;
-            u -= (u >> 1) & 0x55;
-            u = (u & 0x33) + ((u >> 2) & 0x33);
-            u = (u + (u >> 4)) & 0x0F;
+            x -= (x >> 1) & 0x55;
+            x = (x & 0x33) + ((x >> 2) & 0x33);
+            x = (x + (x >> 4)) & 0x0F;
             return u;
         };
 
@@ -1258,11 +1258,10 @@ namespace standard
 
         def popcount(i16 x) -> i16
         {
-            i16 u = x;
-            u -= (u >> 1) & 0x5555;
-            u = (u & 0x3333) + ((u >> 2) & 0x3333);
-            u = (u + (u >> 4)) & 0x0F0F;
-            u = (u + (u >> 8)) & 0x00FF;
+            x -= (x >> 1) & 0x5555;
+            x = (x & 0x3333) + ((x >> 2) & 0x3333);
+            x = (x + (x >> 4)) & 0x0F0F;
+            x = (x + (x >> 8)) & 0x00FF;
             return u;
         };
 
@@ -1278,13 +1277,12 @@ namespace standard
 
         def popcount(i32 x) -> i32
         {
-            i32 u = x;
-            u -= (u >> 1) & 0x55555555;
-            u = (u & 0x33333333) + ((u >> 2) & 0x33333333);
-            u = (u + (u >> 4)) & 0x0F0F0F0F;
-            u += u >> 8;
-            u += u >> 16;
-            return u & 0x3F;
+            x -= (x >> 1) & 0x55555555;
+            x = (x & 0x33333333) + ((x >> 2) & 0x33333333);
+            x = (x + (x >> 4)) & 0x0F0F0F0F;
+            x += x >> 8;
+            x += x >> 16;
+            return x & 0x3F;
         };
 
         def popcount(u64 x) -> u64
@@ -1300,14 +1298,13 @@ namespace standard
 
         def popcount(i64 x) -> i64
         {
-            i64 u = x;
-            u -= (u >> 1) & 0x5555555555555555;
-            u = (u & 0x3333333333333333) + ((u >> 2) & 0x3333333333333333);
-            u = (u + (u >> 4)) & 0x0F0F0F0F0F0F0F0F;
-            u += u >> 8;
-            u += u >> 16;
-            u += u >> 32;
-            return u & 0x7F;
+            x -= (x >> 1) & 0x5555555555555555;
+            x = (x & 0x3333333333333333) + ((x >> 2) & 0x3333333333333333);
+            x = (x + (x >> 4)) & 0x0F0F0F0F0F0F0F0F;
+            x += x >> 8;
+            x += x >> 16;
+            x += x >> 32;
+            return x & 0x7F;
         };
 
         def reverse_bits(byte x) -> byte
@@ -1320,10 +1317,9 @@ namespace standard
 
         def reverse_bits(i8 x) -> i8
         {
-            i8 u = x;
-            u = ((u & 0xF0) >> 4) | ((u & 0x0F) << 4);
-            u = ((u & 0xCC) >> 2) | ((u & 0x33) << 2);
-            u = ((u & 0xAA) >> 1) | ((u & 0x55) << 1);
+            x = ((x & 0xF0) >> 4) | ((x & 0x0F) << 4);
+            x = ((x & 0xCC) >> 2) | ((x & 0x33) << 2);
+            x = ((x & 0xAA) >> 1) | ((x & 0x55) << 1);
             return u;
         };
 
@@ -1338,21 +1334,20 @@ namespace standard
 
         def reverse_bits(i16 x) -> i16
         {
-            i16 u = x;
-            u = ((u & 0xFF00) >> 8) | ((u & 0x00FF) << 8);
-            u = ((u & 0xF0F0) >> 4) | ((u & 0x0F0F) << 4);
-            u = ((u & 0xCCCC) >> 2) | ((u & 0x3333) << 2);
-            u = ((u & 0xAAAA) >> 1) | ((u & 0x5555) << 1);
+            x = ((x & 0xFF00) >> 8) | ((x & 0x00FF) << 8);
+            x = ((x & 0xF0F0) >> 4) | ((x & 0x0F0F) << 4);
+            x = ((x & 0xCCCC) >> 2) | ((x & 0x3333) << 2);
+            x = ((x & 0xAAAA) >> 1) | ((x & 0x5555) << 1);
             return u;
         };
 
         def reverse_bits(u32 x) -> u32
         {
             x = ((x & 0xFFFF0000) >> 16) | ((x & 0x0000FFFF) << 16);
-            x = ((x & 0xFF00FF00) >> 8) | ((x & 0x00FF00FF) << 8);
-            x = ((x & 0xF0F0F0F0) >> 4) | ((x & 0x0F0F0F0F) << 4);
-            x = ((x & 0xCCCCCCCC) >> 2) | ((x & 0x33333333) << 2);
-            x = ((x & 0xAAAAAAAA) >> 1) | ((x & 0x55555555) << 1);
+            x = ((x & 0xFF00FF00) >> 8)  | ((x & 0x00FF00FF) << 8);
+            x = ((x & 0xF0F0F0F0) >> 4)  | ((x & 0x0F0F0F0F) << 4);
+            x = ((x & 0xCCCCCCCC) >> 2)  | ((x & 0x33333333) << 2);
+            x = ((x & 0xAAAAAAAA) >> 1)  | ((x & 0x55555555) << 1);
             return x;
         };
 
@@ -1360,10 +1355,10 @@ namespace standard
         {
             i32 u = x;
             u = ((u & 0xFFFF0000) >> 16) | ((u & 0x0000FFFF) << 16);
-            u = ((u & 0xFF00FF00) >> 8) | ((u & 0x00FF00FF) << 8);
-            u = ((u & 0xF0F0F0F0) >> 4) | ((u & 0x0F0F0F0F) << 4);
-            u = ((u & 0xCCCCCCCC) >> 2) | ((u & 0x33333333) << 2);
-            u = ((u & 0xAAAAAAAA) >> 1) | ((u & 0x55555555) << 1);
+            u = ((u & 0xFF00FF00) >> 8)  | ((u & 0x00FF00FF) << 8);
+            u = ((u & 0xF0F0F0F0) >> 4)  | ((u & 0x0F0F0F0F) << 4);
+            u = ((u & 0xCCCCCCCC) >> 2)  | ((u & 0x33333333) << 2);
+            u = ((u & 0xAAAAAAAA) >> 1)  | ((u & 0x55555555) << 1);
             return u;
         };
 
@@ -1371,23 +1366,24 @@ namespace standard
         {
             x = ((x & 0xFFFFFFFF00000000) >> 32) | ((x & 0x00000000FFFFFFFF) << 32);
             x = ((x & 0xFFFF0000FFFF0000) >> 16) | ((x & 0x0000FFFF0000FFFF) << 16);
-            x = ((x & 0xFF00FF00FF00FF00) >> 8) | ((x & 0x00FF00FF00FF00FF) << 8);
-            x = ((x & 0xF0F0F0F0F0F0F0F0) >> 4) | ((x & 0x0F0F0F0F0F0F0F0F) << 4);
-            x = ((x & 0xCCCCCCCCCCCCCCCC) >> 2) | ((x & 0x3333333333333333) << 2);
-            x = ((x & 0xAAAAAAAAAAAAAAAA) >> 1) | ((x & 0x5555555555555555) << 1);
+            x = ((x & 0xFF00FF00FF00FF00) >> 8)  | ((x & 0x00FF00FF00FF00FF) << 8);
+            x = ((x & 0xF0F0F0F0F0F0F0F0) >> 4)  | ((x & 0x0F0F0F0F0F0F0F0F) << 4);
+            x = ((x & 0xCCCCCCCCCCCCCCCC) >> 2)  | ((x & 0x3333333333333333) << 2);
+            x = ((x & 0xAAAAAAAAAAAAAAAA) >> 1)  | ((x & 0x5555555555555555) << 1);
             return x;
         };
 
         def reverse_bits(i64 x) -> i64
         {
-            i64 u = x;
-            u = ((u & 0xFFFFFFFF00000000) >> 32) | ((u & 0x00000000FFFFFFFF) << 32);
-            u = ((u & 0xFFFF0000FFFF0000) >> 16) | ((u & 0x0000FFFF0000FFFF) << 16);
-            u = ((u & 0xFF00FF00FF00FF00) >> 8) | ((u & 0x00FF00FF00FF00FF) << 8);
-            u = ((u & 0xF0F0F0F0F0F0F0F0) >> 4) | ((u & 0x0F0F0F0F0F0F0F0F) << 4);
-            u = ((u & 0xCCCCCCCCCCCCCCCC) >> 2) | ((u & 0x3333333333333333) << 2);
-            u = ((u & 0xAAAAAAAAAAAAAAAA) >> 1) | ((u & 0x5555555555555555) << 1);
+            x = ((x & 0xFFFFFFFF00000000) >> 32) | ((x & 0x00000000FFFFFFFF) << 32);
+            x = ((x & 0xFFFF0000FFFF0000) >> 16) | ((x & 0x0000FFFF0000FFFF) << 16);
+            x = ((x & 0xFF00FF00FF00FF00) >> 8)  | ((x & 0x00FF00FF00FF00FF) << 8);
+            x = ((x & 0xF0F0F0F0F0F0F0F0) >> 4)  | ((x & 0x0F0F0F0F0F0F0F0F) << 4);
+            x = ((x & 0xCCCCCCCCCCCCCCCC) >> 2)  | ((x & 0x3333333333333333) << 2);
+            x = ((x & 0xAAAAAAAAAAAAAAAA) >> 1)  | ((x & 0x5555555555555555) << 1);
             return u;
         };
     };
 };
+
+#endif;
