@@ -2552,13 +2552,13 @@ vectorcall{}* someSIMDfunc() -> u64*;
 <a id="keyword-list"></a>
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, break, bool, byte, case,
-catch, cdecl, const, continue, contract, data, def, default, defer,
-deprecate, do, double, elif, else, enum, false, fastcall,
-float, for, global, goto, heap, if, in, is, int, jump, label,
-local, long, namespace, noinit, noreturn, not, object, or,
-private, public, register, return, signed, singinit, sizeof,
-stack, stdcall, struct, switch, this, thiscall, throw, true,
+alignof, and, as, asm, assert, auto, bool, break, byte, case,
+catch, cdecl, char, const, continue, contract, data, def, default, defer,
+deprecate, do, double, elif, else, enum, escape, export, extern,
+false, fastcall, float, for, global, goto, heap, if, is, in, int, jump,
+label, local, long, namespace, noinit, noreturn, not, object, operator,
+or, private, public, register, return, signed, singinit, sizeof,
+stack, stdcall, struct, switch, this, thiscall, throw, trait, true,
 try, typeof, uint, ulong, union, unsigned, using,  vectorcall, void,
 volatile, while, xor
 ```
