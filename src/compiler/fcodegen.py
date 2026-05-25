@@ -1699,6 +1699,14 @@ class CodegenVisitor:
                     # Stack/pointer var: null the alloca to invalidate -- cannot free stack memory
                     if isinstance(var_ptr.type.pointee, ir.PointerType):
                         null = ir.Constant(var_ptr.type.pointee, None)
+                    elif isinstance(var_ptr.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType, ir.ArrayType)):
+                        # `this` is a function argument of type T* (not an alloca of T*),
+                        # so var_ptr.type.pointee is the struct/array type itself.
+                        # ir.Constant(struct_type, 0) crashes because llvmlite expects a
+                        # list of per-field constants, not a scalar int.
+                        # Delegate to TypeSystem.get_default_initializer which handles
+                        # all aggregate types recursively (structs, arrays, nested structs).
+                        null = TypeSystem.get_default_initializer(var_ptr.type.pointee)
                     else:
                         null = ir.Constant(var_ptr.type.pointee, 0)
                     builder.store(null, var_ptr)

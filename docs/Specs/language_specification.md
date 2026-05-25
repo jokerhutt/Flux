@@ -2552,12 +2552,12 @@ vectorcall{}* someSIMDfunc() -> u64*;
 <a id="keyword-list"></a>
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, bool, break, byte, case,
-catch, cdecl, char, const, continue, contract, data, def, default, defer,
+alignof, and, as, asm, assert, auto, bool, break, byte, case, catch,
+cdecl, char, const, continue, contract, data, def, default, defer,
 deprecate, do, double, elif, else, enum, escape, export, extern,
 false, fastcall, float, for, global, goto, heap, if, is, in, int, jump,
-label, local, long, namespace, noinit, noreturn, not, object, operator,
-or, private, public, register, return, signed, singinit, sizeof,
+label, local, long, macro, namespace, noinit, noreturn, not, object,
+operator, or, private, public, register, return, signed, singinit, sizeof,
 stack, stdcall, struct, switch, this, thiscall, throw, trait, true,
 try, typeof, uint, ulong, union, unsigned, using,  vectorcall, void,
 volatile, while, xor
@@ -2620,9 +2620,10 @@ BITXNOT_ASSIGN = "`^^!="
 BITXNAND_ASSIGN = "`^^!&="
 BITXNOR_ASSIGN = "`^^!|="
 
-# Ternary assignment, assign if left side is null.
-TERN_ASSIGN = "?="
-NOT_NULL = "!?"     // unary boolean postfix operator, primary use for pointers `if (px!?) {...}`
+# Ternary operators / Null-oriented operators
+TERN_ASSIGN = "?="  // Assign if LHS is null
+NOT_NULL = "!?"     // unary boolean postfix operator, primary use for pointers `if (px!?) {...};`
+NULL_COALESCE = "??"
 
 # Shift
 BITSHIFT_LEFT = "<<"
@@ -2634,6 +2635,7 @@ BITSLICE = "``"
 
 ADDRESS_OF = "@"
 ADDRESS_ASSIGN = "@="
+ADDRESS_CAST = "(@)"
 RANGE = ".."
 SCOPE = "::"
 QUESTION = "?"
@@ -2642,11 +2644,9 @@ TIE = "~"
 STRINGIFY = "$"
 RETURN_ARROW = "->"
 CHAIN_ARROW = "<-"
-RECURSE_ARROW = "<~" // def foo() <~ void;  // Emits musttail, 0 stack growth
-NULL_COALESCE = "??"
-NO_MANGLE = "!!"
+RECURSE_ARROW = "<~"      // def foo() <~ void;  // Emits musttail, 0 stack growth
+NO_MANGLE = "!!"          // prevent the compiler from mangling the function name
 FUNCTION_POINTER = "{}*"
-ADDRESS_CAST = "(@)"
 ```
 
 ---

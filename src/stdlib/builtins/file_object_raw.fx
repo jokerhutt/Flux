@@ -43,6 +43,7 @@ namespace standard
             {
                 void* handle;
                 int size, error_state;
+                byte* contents;
 
                 def __init(byte* path, byte* mode) -> this
                 {
@@ -50,6 +51,9 @@ namespace standard
                     this.size = this.get_size();
                     if (this.is_open()) { this.error_state = 0; }
                     else { this.error_state = 1; };
+                    //standard::io::console::println(this.size);
+                    this.contents = (@)fmalloc(this.size + 1);
+                    read_file(path, this.contents, this.size);
                     return this;
                 };
 
@@ -73,12 +77,13 @@ namespace standard
                 def __exit() -> void
                 {
                     this.close();
+                    (void)this;
                     return;
                 };
 
-                def __expr() -> u64
+                def __expr() -> byte*
                 {
-                    return (u64)@this.handle;
+                    return this.contents;
                 };
 
                 // Returns file size without changing current position
@@ -121,7 +126,7 @@ namespace standard
                     int bytes_read = fread(buf, 1, s, this.handle);
                     if (bytes_read < 0)
                     {
-                        free(buf);
+                        ffree(buf);
                         string empty3("\0");
                         return empty3;
                     };

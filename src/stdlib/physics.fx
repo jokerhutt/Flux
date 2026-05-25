@@ -1105,29 +1105,30 @@ namespace physics
     // iteration_count: number of impulse solver passes (higher = more stable)
     def world_step(PhysWorld* w, float dt, i32 iteration_count) -> void
     {
-        i32      i, j, k, ci;
         RigidBody* ba;
         RigidBody* bb;
         Contact    tmp_contact;
+        Contact*   contact;
+        RigidBody* ra, rb;
         Vec3 min_a, max_a, min_b, max_b;
         float lin_sq, ang_sq;
 
         // 1. Integrate forces and update transforms
-        for (i = 0; i < w.body_count; i++)
+        for (i32 i = 0; i < w.body_count; i++)
         {
             integrate_body(@w.bodies[i], w.gravity, dt);
         };
 
         // 2. Broadphase + narrowphase: build contact list
         w.contact_count = 0;
-        for (i = 0; i < w.body_count; i++)
+        for (i32 i; i < w.body_count; i++)
         {
             ba = @w.bodies[i];
             if (!ba.active) { continue; };
             min_a = body_aabb_min(ba);
             max_a = body_aabb_max(ba);
 
-            for (j = i + 1; j < w.body_count; j++)
+            for (i32 j = i + 1; j < w.body_count; j++)
             {
                 bb = @w.bodies[j];
                 if (!bb.active) { continue; };
@@ -1150,13 +1151,13 @@ namespace physics
         };
 
         // 3. Resolve contacts (multiple passes)
-        for (k = 0; k < iteration_count; k++)
+        for (i32 k; k < iteration_count; k++)
         {
-            for (ci = 0; ci < w.contact_count; ci++)
+            for (i32 ci; ci < w.contact_count; ci++)
             {
-                Contact* contact = @w.contacts[ci];
-                RigidBody* ra    = @w.bodies[contact.body_a];
-                RigidBody* rb    = @w.bodies[contact.body_b];
+                contact = @w.contacts[ci];
+                ra      = @w.bodies[contact.body_a];
+                rb      = @w.bodies[contact.body_b];
                 // Skip if the dynamic body in this contact is sleeping
                 if (ra.sleeping & ra.inv_mass > PHYS_EPSILON) { continue; };
                 if (rb.sleeping & rb.inv_mass > PHYS_EPSILON) { continue; };
@@ -1167,11 +1168,11 @@ namespace physics
         // 4. Positional correction.
         // Plane contacts: hard clamp position exactly out of the plane. No Baumgarte.
         // Dynamic-dynamic: Baumgarte for significant penetration only.
-        for (ci = 0; ci < w.contact_count; ci++)
+        for (i32 ci; ci < w.contact_count; ci++)
         {
-            Contact* contact = @w.contacts[ci];
-            RigidBody* ra    = @w.bodies[contact.body_a];
-            RigidBody* rb    = @w.bodies[contact.body_b];
+            contact = @w.contacts[ci];
+            ra      = @w.bodies[contact.body_a];
+            rb      = @w.bodies[contact.body_b];
             if (ra.sleeping & ra.inv_mass > PHYS_EPSILON) { continue; };
             if (rb.sleeping & rb.inv_mass > PHYS_EPSILON) { continue; };
 
@@ -1200,11 +1201,11 @@ namespace physics
         };
 
         // 5. Wake sleeping bodies that are in contact with a moving body
-        for (ci = 0; ci < w.contact_count; ci++)
+        for (i32 ci; ci < w.contact_count; ci++)
         {
-            Contact* contact = @w.contacts[ci];
-            RigidBody* ra    = @w.bodies[contact.body_a];
-            RigidBody* rb    = @w.bodies[contact.body_b];
+            contact = @w.contacts[ci];
+            ra      = @w.bodies[contact.body_a];
+            rb      = @w.bodies[contact.body_b];
             if (ra.sleeping & rb.inv_mass > PHYS_EPSILON & !rb.sleeping)
             {
                 ra.sleeping    = false;
