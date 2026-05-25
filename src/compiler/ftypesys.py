@@ -5162,22 +5162,40 @@ class StructTypeHandler:
             return instance
     
     @staticmethod
+    def _zero_for_type(field_type: 'ir.Type') -> 'ir.Constant':
+        """Return a zero/null constant of the correct LLVM type for use as a struct field initializer."""
+        if isinstance(field_type, ir.IntType):
+            return ir.Constant(field_type, 0)
+        elif isinstance(field_type, ir.FloatType):
+            return ir.Constant(field_type, 0.0)
+        elif isinstance(field_type, ir.DoubleType):
+            return ir.Constant(field_type, 0.0)
+        elif isinstance(field_type, ir.PointerType):
+            # Null pointer of the correct pointee type (covers T*, T**, function pointers, etc.)
+            return ir.Constant(field_type, None)
+        elif isinstance(field_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            # Recursively zero-initialise nested structs
+            return ir.Constant(field_type,
+                               [StructTypeHandler._zero_for_type(e) for e in field_type.elements])
+        elif isinstance(field_type, ir.ArrayType):
+            # Zero every element of a fixed-size inline array
+            zero_elem = StructTypeHandler._zero_for_type(field_type.element)
+            return ir.Constant(field_type, [zero_elem] * field_type.count)
+        else:
+            # Safe fallback: use the type's own zero constant if supported,
+            # otherwise fall back to i32 0 and let llvmlite surface the mismatch.
+            try:
+                return ir.Constant(field_type, 0)
+            except Exception:
+                return ir.Constant(ir.IntType(32), 0)
+
+    @staticmethod
     def create_zeroed_instance(struct_type: 'ir.Type', vtable: 'StructVTable') -> 'ir.Constant':
         if isinstance(struct_type, ir.IntType):
             return ir.Constant(struct_type, 0)
         elif isinstance(struct_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
-            # For proper struct types, initialize each field to zero
-            zero_values = []
-            for field_type in struct_type.elements:
-                if isinstance(field_type, ir.IntType):
-                    zero_values.append(ir.Constant(field_type, 0))
-                elif isinstance(field_type, ir.FloatType):
-                    zero_values.append(ir.Constant(field_type, 0.0))
-                elif isinstance(field_type, ir.DoubleType):
-                    zero_values.append(ir.Constant(field_type, 0.0))
-                else:
-                    # Default to an integer constant for other types
-                    zero_values.append(ir.Constant(ir.IntType(32), 0))
+            # Build a zero constant whose every element matches the field's actual LLVM type.
+            zero_values = [StructTypeHandler._zero_for_type(ft) for ft in struct_type.elements]
             return ir.Constant(struct_type, zero_values)
         else:
             return ir.Constant(struct_type, [ir.Constant(ir.IntType(8), 0)] * vtable.total_bytes)
