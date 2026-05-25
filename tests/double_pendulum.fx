@@ -8,8 +8,9 @@
 #import "windows.fx";
 #import "opengl.fx";
 
-using standard::system::windows;
-using standard::math;
+using standard::system::windows,
+      standard::math,
+      OpenGL;
 
 // ============================================================================
 // CONSTANTS
@@ -20,15 +21,15 @@ using standard::math;
 #def WIN_W          1000;
 #def WIN_H          900;
 
-const float G          = 9.81;
-const float L1         = 0.38;     // arm 1 length  (world units)
-const float L2         = 0.32;     // arm 2 length
-const float M1         = 0.5;      // bob 1 mass
-const float M2         = 0.5;      // bob 2 mass
-const float DT         = 0.00001;    // timestep  (~60 fps physics)
-const float BASE_THETA1 = 2.1;     // starting angle arm 1  (radians)
-const float BASE_THETA2 = 1.8;     // starting angle arm 2
-const float DELTA       = 0.00001; // tiny per-pendulum offset to reveal chaos
+const float G          = 9.81,
+            L1         = 0.38,     // arm 1 length  (world units)
+            L2         = 0.32,     // arm 2 length
+            M1         = 0.5,      // bob 1 mass
+            M2         = 0.5,      // bob 2 mass
+            DT         = 0.00001,    // timestep  (~60 fps physics)
+            BASE_THETA1 = 2.1,     // starting angle arm 1  (radians)
+            BASE_THETA2 = 1.8,     // starting angle arm 2
+            DELTA       = 0.00001; // tiny per-pendulum offset to reveal chaos
 
 // ============================================================================
 // STRUCTS
@@ -53,8 +54,8 @@ struct TrailPoint
 
 heap PendulumState[NUM_PENDULUMS] g_states;
 heap TrailPoint[NUM_PENDULUMS][TRAIL_LEN] g_trail;
-heap int[NUM_PENDULUMS] g_trail_head;   // ring-buffer write head
-heap int[NUM_PENDULUMS] g_trail_count;  // how many points are valid
+heap int[NUM_PENDULUMS] g_trail_head,   // ring-buffer write head
+                        g_trail_count;  // how many points are valid
 
 // ============================================================================
 // DOUBLE PENDULUM EQUATIONS OF MOTION

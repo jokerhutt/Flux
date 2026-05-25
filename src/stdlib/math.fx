@@ -1,4 +1,5 @@
 // Author: Karac V. Thweatt
+// Updated: 2026-05-25
 
 // redmath.fx - Comprehensive mathematical functions with overloads
 #ifndef FLUX_STANDARD
@@ -16,859 +17,1698 @@ namespace standard
 {
     namespace math
     {
-        // Constants
+        // ==================== Constants ====================
         const i8 PI8 = 3;
         const i16 PI16 = 3;
         const i32 PI32 = 3;
         const i64 PI64 = 3;
-        const float PIF = 3.14159;
-        const float PID = 3.14159265358979323846;
-        
-        const i8 E8 = 2;
-        const i16 E16 = 2;
-        const i32 E32 = 2;
-        const i64 E64 = 2;
-        const float EF = 2.71828;
-        const float ED = 2.71828182845904523536;
 
-        struct Face  { int   a, b, c;    };
-        struct Edge  { int   a, b;       };
-        struct POINT { int   x, y;       };
+        const float PIF = 3.14159265358979f;
+        const float PI_2_F = 1.5707963267948966f;
+        const float PI_4_F = 0.7853981633974483f;
+        const float TAU_F = 6.283185307179586f;
+        const float SQRT2_F = 1.4142135623730951f;
+        const float SQRT1_2_F = 0.7071067811865475f;
+        const float LN2_F = 0.6931471805599453f;
+        const float LN10_F = 2.302585092994046f;
+        const float LOG2E_F = 1.4426950408889634f;
+        const float LOG10E_F = 0.4342944819032518f;
+        const float INFINITY_F = (float)0x7F800000u;
+        const float NAN_F = (float)0x7FC00000u;
 
-        // Complex number in rectangular form
+        const double PID = 3.14159265358979323846;
+        const double PI_2_D = 1.5707963267948966;
+        const double PI_4_D = 0.7853981633974483;
+        const double TAU_D = 6.283185307179586;
+        const double SQRT2_D = 1.4142135623730951;
+        const double SQRT1_2_D = 0.7071067811865475;
+        const double LN2_D = 0.6931471805599453;
+        const double LN10_D = 2.302585092994046;
+        const double LOG2E_D = 1.4426950408889634;
+        const double LOG10E_D = 0.4342944819032518;
+        const double INFINITY_D = (double)0x7FF0000000000000u;
+        const double NAN_D = (double)0x7FF8000000000000u;
+
+        struct Face  { int a, b, c; };
+        struct Edge  { int a, b; };
+        struct POINT { int x, y; };
         struct Complex
         {
-            double re,
-                   im;
-        };
-        
-        // Absolute value overloads
-        def abs(i8 x) -> i8
-        {
-            if (x < 0) {return -x;};
-            return x;
-        };
-        
-        def abs(i16 x) -> i16
-        {
-            if (x < 0) {return -x;};
-            return x;
-        };
-        
-        def abs(i32 x) -> i32
-        {
-            if (x < 0) {return -x;};
-            return x;
-        };
-        
-        def abs(i64 x) -> i64
-        {
-            if (x < 0) {return -x;};
-            return x;
+            double re, im;
         };
 
-        def abs(float x) -> float
+        // ==================== Absolute value ====================
+        def abs(i8 x) -> i8 { if (x < 0) { return -x; }; return x; };
+        def abs(i16 x) -> i16 { if (x < 0) { return -x; }; return x; };
+        def abs(i32 x) -> i32 { if (x < 0) { return -x; }; return x; };
+        def abs(i64 x) -> i64 { if (x < 0) { return -x; }; return x; };
+        def abs(float x) -> float { if (x < 0.0f) { return -x; }; return x; };
+        def abs(double x) -> double { if (x < 0.0) { return -x; }; return x; };
+
+        // ==================== Min/Max ====================
+        def min(i8 a, i8 b) -> i8 { if (a < b) { return a; }; return b; };
+        def min(i16 a, i16 b) -> i16 { if (a < b) { return a; }; return b; };
+        def min(i32 a, i32 b) -> i32 { if (a < b) { return a; }; return b; };
+        def min(i64 a, i64 b) -> i64 { if (a < b) { return a; }; return b; };
+        def min(float a, float b) -> float { if (a < b) { return a; }; return b; };
+        def min(double a, double b) -> double { if (a < b) { return a; }; return b; };
+
+        def max(i8 a, i8 b) -> i8 { if (a > b) { return a; }; return b; };
+        def max(i16 a, i16 b) -> i16 { if (a > b) { return a; }; return b; };
+        def max(i32 a, i32 b) -> i32 { if (a > b) { return a; }; return b; };
+        def max(i64 a, i64 b) -> i64 { if (a > b) { return a; }; return b; };
+        def max(float a, float b) -> float { if (a > b) { return a; }; return b; };
+        def max(double a, double b) -> double { if (a > b) { return a; }; return b; };
+
+        // ==================== Clamp ====================
+        def clamp(i8 v, i8 l, i8 h) -> i8
         {
-            if (x < 0.0) {return -x;};
-            return x;
+            if (v < l) { return l; };
+            if (v > h) { return h; };
+            return v;
+        };
+        def clamp(i16 v, i16 l, i16 h) -> i16
+        {
+            if (v < l) { return l; };
+            if (v > h) { return h; };
+            return v;
+        };
+        def clamp(i32 v, i32 l, i32 h) -> i32
+        {
+            if (v < l) { return l; };
+            if (v > h) { return h; };
+            return v;
+        };
+        def clamp(i64 v, i64 l, i64 h) -> i64
+        {
+            if (v < l) { return l; };
+            if (v > h) { return h; };
+            return v;
+        };
+        def clamp(float v, float l, float h) -> float
+        {
+            if (v < l) { return l; };
+            if (v > h) { return h; };
+            return v;
+        };
+        def clamp(double v, double l, double h) -> double
+        {
+            if (v < l) { return l; };
+            if (v > h) { return h; };
+            return v;
         };
 
-        def abs(double x) -> double
-        {
-            if (x < 0.0) {return 0.0 - x;};
-            return x;
-        };
-
-        // Minimum overloads
-        def min(i8 a, i8 b) -> i8
-        {
-            if (a < b) {return a;};
-            return b;
-        };
-        
-        def min(i16 a, i16 b) -> i16
-        {
-            if (a < b) {return a;};
-            return b;
-        };
-        
-        def min(i32 a, i32 b) -> i32
-        {
-            if (a < b) {return a;};
-            return b;
-        };
-        
-        def min(i64 a, i64 b) -> i64
-        {
-            if (a < b) {return a;};
-            return b;
-        };
-
-        def min(float a, float b) -> float
-        {
-            if (a < b) {return a;};
-            return b;
-        };
-
-        // Maximum overloads
-        def max(i8 a, i8 b) -> i8
-        {
-            if (a > b) {return a;};
-            return b;
-        };
-        
-        def max(i16 a, i16 b) -> i16
-        {
-            if (a > b) {return a;};
-            return b;
-        };
-        
-        def max(i32 a, i32 b) -> i32
-        {
-            if (a > b) {return a;};
-            return b;
-        };
-        
-        def max(i64 a, i64 b) -> i64
-        {
-            if (a > b) {return a;};
-            return b;
-        };
-
-        def max(float a, float b) -> float
-        {
-            if (a > b) {return a;};
-            return b;
-        };
-
-        // Clamp overloads
-        def clamp(i8 value, i8 low, i8 high) -> i8
-        {
-            if (value < low) {return low;};
-            if (value > high) {return high;};
-            return value;
-        };
-        
-        def clamp(i16 value, i16 low, i16 high) -> i16
-        {
-            if (value < low) {return low;};
-            if (value > high) {return high;};
-            return value;
-        };
-        
-        def clamp(i32 value, i32 low, i32 high) -> i32
-        {
-            if (value < low) {return low;};
-            if (value > high) {return high;};
-            return value;
-        };
-        
-        def clamp(i64 value, i64 low, i64 high) -> i64
-        {
-            if (value < low) {return low;};
-            if (value > high) {return high;};
-            return value;
-        };
-        
-        def clamp(float value, float low, float high) -> float
-        {
-            if (value < low) {return low;};
-            if (value > high) {return high;};
-            return value;
-        };
-        
-
-        ///
-        NOTE: These sqrt() functions reveal that type isn't auto-converted for literals
-        ///
-        // Square root overloads
+        // ==================== Square root ====================
         def sqrt(i8 x) -> i8
         {
-            if (x <= 0) {return 0;};
-            
-            i8 y = x / 2,
-               prev_y = 0;
-            
-            while (y != prev_y)
+            if (x <= 0) { return 0; };
+            i8 y = x / 2, prev_y = 0;
+            while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
                 y = (y + x / y) / 2;
             };
-            
             return y;
         };
-        
         def sqrt(i16 x) -> i16
         {
-            if (x <= 0) {return 0;};
-            
-            i16 y = x / 2,
-                prev_y = 0;
-            
-            while (y != prev_y)
+            if (x <= 0) { return 0; };
+            i16 y = x / 2, prev_y = 0;
+            while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
                 y = (y + x / y) / 2;
             };
-            
             return y;
         };
-        
         def sqrt(i32 x) -> i32
         {
-            if (x <= 0) {return 0;};
-            
-            i32 y = x / 2,
-                prev_y = 0;
-            
-            while (y != prev_y)
+            if (x <= 0) { return 0; };
+            i32 y = x / 2, prev_y = 0;
+            while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
                 y = (y + x / y) / 2;
             };
-            
             return y;
         };
-        
         def sqrt(i64 x) -> i64
         {
-            if (x <= 0) {return 0;};
-            
-            i64 y = x / 2,
-                prev_y = 0;
-            
-            while (y != prev_y)
+            if (x <= 0) { return 0; };
+            i64 y = x / 2, prev_y = 0;
+            while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
                 y = (y + x / y) / 2;
             };
-            
             return y;
         };
-        
         def sqrt(float x) -> float
         {
-            if (x <= 0.0) {return 0.0;};
-            
-            float y = x / 2.0,
-                  prev_y = 0.0;
-            
-            for (i32 i; i < 20; i++)  // Fixed iterations
+            if (x <= 0.0f) { return 0.0f; };
+            float y = x / 2.0f, prev_y = 0.0f;
+            for (i32 i = 0; i < 20; i++)
             {
                 prev_y = y;
-                y = (y + x / y) / 2.0;
-                if (abs(y - prev_y) < 0.000001)
-                {
-                    break;
-                };
+                y = (y + x / y) / 2.0f;
+                if (abs(y - prev_y) < 0.000001f) { break; };
             };
-            
             return y;
         };
-        
         def sqrt(double x) -> double
         {
-            if (x <= 0.0) {return 0.0;};
-            
-            double y = x / 2.0,
-                   prev_y = 0.0;
-            
-            for (i32 i; i < 40; i++)  // More iterations for double precision
+            if (x <= 0.0) { return 0.0; };
+            double y = x / 2.0, prev_y = 0.0;
+            for (i32 i = 0; i < 40; i++)
             {
                 prev_y = y;
                 y = (y + x / y) / 2.0;
-                if (abs(y - prev_y) < 0.000000000000001)
-                {
-                    break;
-                };
+                if (abs(y - prev_y) < 1e-15) { break; };
             };
-            
             return y;
         };
 
-
-        // Factorial overloads
+        // ==================== Factorial (overflow check) ====================
         def factorial(i8 n) -> i8
         {
-            if (n <= 1) {return 1;};
-            
+            if (n <= 1) { return 1; };
             i8 result = 1;
             for (i8 i = 2; i <= n; i++)
             {
+                if (result > 127 / i) { return 0; };
                 result *= i;
             };
             return result;
         };
-        
         def factorial(i16 n) -> i16
         {
-            if (n <= 1) {return 1;};
-            
+            if (n <= 1) { return 1; };
             i16 result = 1;
             for (i16 i = 2; i <= n; i++)
             {
+                if (result > 32767 / i) { return 0; };
                 result *= i;
             };
             return result;
         };
-        
         def factorial(i32 n) -> i32
         {
-            if (n <= 1) {return 1;};
-            
+            if (n <= 1) { return 1; };
             i32 result = 1;
             for (i32 i = 2; i <= n; i++)
             {
+                if (result > 2147483647 / i) { return 0; };
                 result *= i;
             };
             return result;
         };
-        
         def factorial(i64 n) -> i64
         {
-            if (n <= 1) {return 1;};
-            
+            if (n <= 1) { return 1; };
             i64 result = 1;
             for (i64 i = 2; i <= n; i++)
             {
+                if (result > 9223372036854775807 / i) { return 0; };
                 result *= i;
             };
             return result;
         };
 
-        // GCD overloads
+        // ==================== GCD ====================
         def gcd(i8 a, i8 b) -> i8
         {
-            i8 temp;
+            i8 t;
             while (b != 0)
             {
-                temp = b;
+                t = b;
                 b = a % b;
-                a = temp;
+                a = t;
             };
             return a;
         };
-        
         def gcd(i16 a, i16 b) -> i16
         {
-            i16 temp;
+            i16 t;
             while (b != 0)
             {
-                temp = b;
+                t = b;
                 b = a % b;
-                a = temp;
+                a = t;
             };
             return a;
         };
-        
         def gcd(i32 a, i32 b) -> i32
         {
-            i32 temp;
+            i32 t;
             while (b != 0)
             {
-                temp = b;
+                t = b;
                 b = a % b;
-                a = temp;
+                a = t;
             };
             return a;
         };
-        
         def gcd(i64 a, i64 b) -> i64
         {
-            i64 temp;
+            i64 t;
             while (b != 0)
             {
-                temp = b;
+                t = b;
                 b = a % b;
-                a = temp;
+                a = t;
             };
             return a;
         };
 
-        // LCM overloads
+        // ==================== LCM (overflow safe) ====================
         def lcm(i8 a, i8 b) -> i8
         {
-            if (a == 0 | b == 0) {return 0;};
-            return abs(a * b) / gcd(a, b);
+            if (a == 0 | b == 0) { return 0; };
+            i8 g = gcd(a, b);
+            return abs(a / g) * b;
         };
-        
         def lcm(i16 a, i16 b) -> i16
         {
-            if (a == 0 | b == 0) {return 0;};
-            return abs(a * b) / gcd(a, b);
+            if (a == 0 | b == 0) { return 0; };
+            i16 g = gcd(a, b);
+            return abs(a / g) * b;
         };
-        
         def lcm(i32 a, i32 b) -> i32
         {
-            if (a == 0 | b == 0) {return 0;};
-            return abs(a * b) / gcd(a, b);
+            if (a == 0 | b == 0) { return 0; };
+            i32 g = gcd(a, b);
+            return abs(a / g) * b;
         };
-        
         def lcm(i64 a, i64 b) -> i64
         {
-            if (a == 0 | b == 0) {return 0;};
-            return abs(a * b) / gcd(a, b);
+            if (a == 0 | b == 0) { return 0; };
+            i64 g = gcd(a, b);
+            return abs(a / g) * b;
         };
 
-        // Rounding functions overloads
+        // ==================== Rounding ====================
         def floor(float x) -> float
         {
-            i64 int_part = x;
-            if (x >= 0.0 | x == float(int_part))
-            {
-                return float(int_part);
-            };
-            return float(int_part - 1);
+            i64 int_part = (i64)x;
+            if (x >= 0.0f | x == (float)int_part) { return (float)int_part; };
+            return (float)(int_part - 1);
         };
-        
         def ceil(float x) -> float
         {
-            i64 int_part = x;
-            if (x <= 0.0 | x == float(int_part))
-            {
-                return float(int_part);
-            };
-            return float(int_part + 1);
+            i64 int_part = (i64)x;
+            if (x <= 0.0f | x == (float)int_part) { return (float)int_part; };
+            return (float)(int_part + 1);
         };
-        
         def round(float x) -> float
         {
-            if (x >= 0.0)
-            {
-                return floor(x + 0.5);
-            };
+            if (x >= 0.0f) { return floor(x + 0.5f); };
+            return ceil(x - 0.5f);
+        };
+        def floor(double x) -> double
+        {
+            i64 int_part = (i64)x;
+            if (x >= 0.0 | x == (double)int_part) { return (double)int_part; };
+            return (double)(int_part - 1);
+        };
+        def ceil(double x) -> double
+        {
+            i64 int_part = (i64)x;
+            if (x <= 0.0 | x == (double)int_part) { return (double)int_part; };
+            return (double)(int_part + 1);
+        };
+        def round(double x) -> double
+        {
+            if (x >= 0.0) { return floor(x + 0.5); };
             return ceil(x - 0.5);
         };
-
         def floor(i8 x) -> i8 { return x; };
         def floor(i16 x) -> i16 { return x; };
         def floor(i32 x) -> i32 { return x; };
         def floor(i64 x) -> i64 { return x; };
-        
         def ceil(i8 x) -> i8 { return x; };
         def ceil(i16 x) -> i16 { return x; };
         def ceil(i32 x) -> i32 { return x; };
         def ceil(i64 x) -> i64 { return x; };
-        
         def round(i8 x) -> i8 { return x; };
         def round(i16 x) -> i16 { return x; };
         def round(i32 x) -> i32 { return x; };
         def round(i64 x) -> i64 { return x; };
 
-        // Trigonometric functions (simplified approximations)
+        // ==================== Trigonometry ====================
         def sin(float x) -> float
         {
-            // Reduce to [-π, π]
-            while (x > PIF) { x -= 2.0 * PIF; };
-            while (x < -PIF) { x += 2.0 * PIF; };
-            
-            // Taylor series approximation
-            float result = x,
-                  term = x,
-                  x2 = x * x;
-            
+            while (x > PIF) { x -= 2.0f * PIF; };
+            while (x < -PIF) { x += 2.0f * PIF; };
+            float result = x, term = x, x2 = x * x;
             for (i32 i = 1; i <= 5; i++)
             {
-                term = -term * x2 / float((2 * i) * (2 * i + 1));
+                term = -term * x2 / (float)((2*i) * (2*i+1));
                 result += term;
             };
-            
             return result;
         };
-
-        def cos(float x) -> float
+        def sin(double x) -> double
         {
-            // cos(x) = sin(π/2 - x)
-            return sin(PIF / 2.0 - x);
+            while (x > PID) { x -= 2.0 * PID; };
+            while (x < -PID) { x += 2.0 * PID; };
+            double result = x, term = x, x2 = x * x;
+            for (i32 i = 1; i <= 10; i++)
+            {
+                term = -term * x2 / (double)((2*i) * (2*i+1));
+                result += term;
+            };
+            return result;
         };
- 
+        def cos(float x) -> float { return sin(PIF/2.0f - x); };
+        def cos(double x) -> double { return sin(PID/2.0 - x); };
         def tan(float x) -> float
         {
             float c = cos(x);
-            if (abs(c) < 0.000001) {return 0.0;};  // Avoid division by zero
+            if (abs(c) < 0.000001f) { return 0.0f; };
             return sin(x) / c;
         };
-
-        // Arctangent - returns angle in radians in [-PI/2, PI/2]
-        // Uses a polynomial minimax approximation, accurate to ~6 decimal places.
+        def tan(double x) -> double
+        {
+            double c = cos(x);
+            if (abs(c) < 1e-12) { return 0.0; };
+            return sin(x) / c;
+        };
         def atan(float x) -> float
         {
-            // Reduce |x| to [0, 1] using identities:
-            //   atan(x) = PI/2 - atan(1/x)       for x > 1
-            //   atan(x) = -atan(-x)               for x < 0
-            bool neg = x < 0.0,
-                 recip;
-            if (neg) { x = 0.0 - x; };
-
-            recip = x > 1.0;
-            if (recip) { x = 1.0 / x; };
-
-            // Polynomial approximation on [0, 1]
-            float x2 = x * x,
-
-                r = x * (1.0
-                - x2 * (0.3333333
-                - x2 * (0.2
-                - x2 * (0.142857
-                - x2 * (0.111111
-                - x2 *  0.090909)))));
-
-            if (recip) { r = PIF * 0.5 - r; };
-            if (neg)   { r = 0.0 - r; };
-
+            bool neg = x < 0.0f, recip;
+            if (neg) { x = -x; };
+            recip = x > 1.0f;
+            if (recip) { x = 1.0f / x; };
+            float x2 = x * x;
+            float r = x * (1.0f - x2 * (0.3333333f - x2 * (0.2f - x2 * (0.142857f - x2 * (0.111111f - x2 * 0.090909f)))));
+            if (recip) { r = PIF * 0.5f - r; };
+            if (neg)   { r = -r; };
             return r;
         };
-
-        // Two-argument arctangent - returns angle in radians in (-PI, PI].
-        // Matches the behaviour of the standard atan2(y, x).
+        def atan(double x) -> double
+        {
+            bool neg = x < 0.0, recip;
+            if (neg) { x = -x; };
+            recip = x > 1.0;
+            if (recip) { x = 1.0 / x; };
+            double x2 = x * x;
+            double r = x * (1.0 - x2 * (1.0/3.0 - x2 * (1.0/5.0 - x2 * (1.0/7.0 - x2 * (1.0/9.0 - x2 * 1.0/11.0)))));
+            if (recip) { r = PID * 0.5 - r; };
+            if (neg)   { r = -r; };
+            return r;
+        };
+        def asin(float x) -> float
+        {
+            if (x >= 1.0f)  { return PIF * 0.5f; };
+            if (x <= -1.0f) { return -PIF * 0.5f; };
+            return atan(x / sqrt(1.0f - x*x));
+        };
+        def asin(double x) -> double
+        {
+            if (x >= 1.0)  { return PID * 0.5; };
+            if (x <= -1.0) { return -PID * 0.5; };
+            return atan(x / sqrt(1.0 - x*x));
+        };
+        def acos(float x) -> float { return PIF*0.5f - asin(x); };
+        def acos(double x) -> double { return PID*0.5 - asin(x); };
         def atan2(float y, float x) -> float
         {
-            if (x > 0.0)
+            if (x > 0.0f) { return atan(y / x); };
+            if (x < 0.0f)
             {
-                return atan(y / x);
-            };
-
-            if (x < 0.0)
-            {
-                if (y >= 0.0)
-                {
-                    return atan(y / x) + PIF;
-                };
+                if (y >= 0.0f) { return atan(y / x) + PIF; };
                 return atan(y / x) - PIF;
             };
-
-            // x == 0
-            if (y > 0.0) { return  PIF * 0.5; };
-            if (y < 0.0) { return (0.0 - PIF) * 0.5; };
-
-            // Both zero - undefined, return 0
+            if (y > 0.0f) { return PIF * 0.5f; };
+            if (y < 0.0f) { return -PIF * 0.5f; };
+            return 0.0f;
+        };
+        def atan2(double y, double x) -> double
+        {
+            if (x > 0.0) { return atan(y / x); };
+            if (x < 0.0)
+            {
+                if (y >= 0.0) { return atan(y / x) + PID; };
+                return atan(y / x) - PID;
+            };
+            if (y > 0.0) { return PID * 0.5; };
+            if (y < 0.0) { return -PID * 0.5; };
             return 0.0;
         };
 
-        // Arcsine - returns angle in radians in [-PI/2, PI/2]
-        // asin(x) = atan(x / sqrt(1 - x*x))
-        def asin(float x) -> float
+        // ==================== Hyperbolic functions ====================
+        def exp(float) -> float,
+            exp(double) -> double,
+            log(float) -> float,
+            log(double) -> double;
+        def sinh(float x) -> float
         {
-            if (x >= 1.0)  { return  PIF * 0.5; };
-            if (x <= -1.0) { return (0.0 - PIF) * 0.5; };
-            return atan(x / sqrt(1.0 - x * x));
+            float ex = exp(x), emx = exp(-x);
+            return (ex - emx) * 0.5f;
+        };
+        def sinh(double x) -> double
+        {
+            double ex = exp(x), emx = exp(-x);
+            return (ex - emx) * 0.5;
+        };
+        def cosh(float x) -> float
+        {
+            float ex = exp(x), emx = exp(-x);
+            return (ex + emx) * 0.5f;
+        };
+        def cosh(double x) -> double
+        {
+            double ex = exp(x), emx = exp(-x);
+            return (ex + emx) * 0.5;
+        };
+        def tanh(float x) -> float
+        {
+            float ex = exp(2.0f*x);
+            return (ex - 1.0f) / (ex + 1.0f);
+        };
+        def tanh(double x) -> double
+        {
+            double ex = exp(2.0*x);
+            return (ex - 1.0) / (ex + 1.0);
+        };
+        def asinh(float x) -> float { return log(x + sqrt(x*x + 1.0f)); };
+        def asinh(double x) -> double { return log(x + sqrt(x*x + 1.0)); };
+        def acosh(float x) -> float
+        {
+            if (x < 1.0f) { return 0.0f; };
+            return log(x + sqrt(x*x - 1.0f));
+        };
+        def acosh(double x) -> double
+        {
+            if (x < 1.0) { return 0.0; };
+            return log(x + sqrt(x*x - 1.0));
+        };
+        def atanh(float x) -> float
+        {
+            if (abs(x) >= 1.0f) { return 0.0f; };
+            return 0.5f * log((1.0f + x) / (1.0f - x));
+        };
+        def atanh(double x) -> double
+        {
+            if (abs(x) >= 1.0) { return 0.0; };
+            return 0.5 * log((1.0 + x) / (1.0 - x));
         };
 
-        // Arccosine - returns angle in radians in [0, PI]
-        // acos(x) = PI/2 - asin(x)
-        def acos(float x) -> float
-        {
-            return PIF * 0.5 - asin(x);
-        };
-
-        // Exponential and logarithmic functions
+        // ==================== Exponential and Logarithmic ====================
         def exp(float x) -> float
         {
-            // Simple Taylor series for exp(x)
-            float result = 1.0,
-                  term = 1.0;
-            
-            for (i32 i = 1; i <= 10; i++)
+            float result = 1.0f, term = 1.0f;
+            for (i32 i = 1; i <= 12; i++)
             {
-                term = term * x / float(i);
+                term = term * x / (float)i;
                 result += term;
             };
-            
             return result;
         };
-        
+        def exp(double x) -> double
+        {
+            double result = 1.0, term = 1.0;
+            for (i32 i = 1; i <= 20; i++)
+            {
+                term = term * x / (double)i;
+                result += term;
+            };
+            return result;
+        };
         def log(float x) -> float
         {
-            if (x <= 0.0) {return 0.0;};
-            
-            // Simple approximation using series
-            float y = (x - 1.0) / (x + 1.0);
-            float y2 = y * y,
-                  result = 2.0 * y,
-                  term = y;
-            
+            if (x <= 0.0f) { return 0.0f; };
+            float y = (x - 1.0f) / (x + 1.0f);
+            float y2 = y*y, result = 2.0f*y, term = y;
             for (i32 i = 1; i <= 10; i += 2)
             {
                 term = term * y2;
-                result += (2.0 / float(2 * i + 1)) * term;
+                result += (2.0f / (float)(2*i+1)) * term;
             };
-            
             return result;
         };
-
         def log(double x) -> double
         {
-            if (x <= 0.0) {return 0.0;};
-            if (x == 1.0) {return 0.0;};
-
-            // Reduce x = m * 2^e so that m is in [1, 2)
-            // then ln(x) = ln(m) + e * ln(2)
-            double m = x,
-                   t, t2,
-                   term, result, contrib;
-            i32 e;
-
-            while (m >= 2.0)
-            {
-                m = m / 2.0;
-                e = e + 1;
-            };
-            while (m < 1.0)
-            {
-                m = m * 2.0;
-                e = e - 1;
-            };
-
-
-            // Now m in [1, 2); let t = (m-1)/(m+1), ln(m) via Artanh series:
-            // ln(m) = 2 * (t + t^3/3 + t^5/5 + ...)  converges fast for |t| < 0.18
-            t  = (m - 1.0) / (m + 1.0);
-            t2 = t * t;
-            term = t;
-            result = t;
-            
+            if (x <= 0.0) { return 0.0; };
+            double m = x;
+            i32 e = 0;
+            while (m >= 2.0) { m = m / 2.0; e = e + 1; };
+            while (m < 1.0)  { m = m * 2.0; e = e - 1; };
+            double t = (m - 1.0) / (m + 1.0);
+            double t2 = t*t, term = t, result = t, contrib;
             for (i32 i = 1; i < 40; i++)
             {
                 term = term * t2;
-                contrib = term / (double)(2 * i + 1);
+                contrib = term / (double)(2*i+1);
                 result = result + contrib;
-                if (contrib < 0.000000000000001 & contrib > (0.0 - 0.000000000000001))
-                {
-                    break;
-                };
+                if (abs(contrib) < 1e-15) { break; };
             };
-
             result = result * 2.0;
-
-            // ln(2) ~ 0.6931471805599453
-            result = result + (double)e * 0.6931471805599453;
-
+            result = result + (double)e * LN2_D;
             return result;
         };
-        
-        def log10(float x) -> float
+        def log10(float x) -> float { return log(x) * LOG10E_F; };
+        def log10(double x) -> double { return log(x) * LOG10E_D; };
+        def log2(float x) -> float { return log(x) * LOG2E_F; };
+        def log2(double x) -> double { return log(x) * LOG2E_D; };
+
+        // ==================== Power Functions ====================
+        def pow(i8 base, i8 exp) -> i8
         {
-            return log(x) / 2.30258;  // ln(10.7)
+            if (exp == 0) { return 1; };
+            if (exp < 0)  { return 0; };
+            i8 result = 1;
+            while (exp)
+            {
+                if (exp & 1) { result = result * base; };
+                base = base * base;
+                exp = exp >> 1;
+            };
+            return result;
+        };
+        def pow(i16 base, i16 exp) -> i16
+        {
+            if (exp == 0) { return 1; };
+            if (exp < 0)  { return 0; };
+            i16 result = 1;
+            while (exp)
+            {
+                if (exp & 1) { result = result * base; };
+                base = base * base;
+                exp = exp >> 1;
+            };
+            return result;
+        };
+        def pow(i32 base, i32 exp) -> i32
+        {
+            if (exp == 0) { return 1; };
+            if (exp < 0)  { return 0; };
+            i32 result = 1;
+            while (exp)
+            {
+                if (exp & 1) { result = result * base; };
+                base = base * base;
+                exp = exp >> 1;
+            };
+            return result;
+        };
+        def pow(i64 base, i64 exp) -> i64
+        {
+            if (exp == 0) { return 1; };
+            if (exp < 0)  { return 0; };
+            i64 result = 1;
+            while (exp)
+            {
+                if (exp & 1) { result = result * base; };
+                base = base * base;
+                exp = exp >> 1;
+            };
+            return result;
+        };
+        def pow(float base, float exp) -> float
+        {
+            if (base == 0.0f & exp == 0.0f) { return 1.0f; };
+            if (base <= 0.0f) { return 0.0f; };
+            return exp(exp * log(base));
+        };
+        def pow(double base, double exp) -> double
+        {
+            if (base == 0.0 & exp == 0.0) { return 1.0; };
+            if (base <= 0.0) { return 0.0; };
+            return exp(exp * log(base));
+        };
+        def cbrt(float x) -> float
+        {
+            if (x == 0.0f) { return 0.0f; };
+            return (x > 0.0f) ? exp(log(x) / 3.0f) : -exp(log(-x) / 3.0f);
+        };
+        def cbrt(double x) -> double
+        {
+            if (x == 0.0) { return 0.0; };
+            return (x > 0.0) ? exp(log(x) / 3.0) : -exp(log(-x) / 3.0);
+        };
+        def hypot(float x, float y) -> float { return sqrt(x*x + y*y); };
+        def hypot(double x, double y) -> double { return sqrt(x*x + y*y); };
+
+        // ==================== Special Functions ====================
+        def erf(float x) -> float
+        {
+            float a1 = 0.254829592f, a2 = -0.284496736f, a3 = 1.421413741f;
+            float a4 = -1.453152027f, a5 = 1.061405429f, p = 0.3275911f;
+            float sign = (x >= 0.0f) ? 1.0f : -1.0f;
+            x = abs(x);
+            float t = 1.0f / (1.0f + p*x);
+            float y = 1.0f - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t * exp(-x*x);
+            return sign * y;
+        };
+        def erf(double x) -> double
+        {
+            double a1 = 0.254829592, a2 = -0.284496736, a3 = 1.421413741;
+            double a4 = -1.453152027, a5 = 1.061405429, p = 0.3275911;
+            double sign = (x >= 0.0) ? 1.0 : -1.0;
+            x = abs(x);
+            double t = 1.0 / (1.0 + p*x);
+            double y = 1.0 - (((((a5*t + a4)*t) + a3)*t + a2)*t + a1)*t * exp(-x*x);
+            return sign * y;
+        };
+        def erfc(float x) -> float { return 1.0f - erf(x); };
+        def erfc(double x) -> double { return 1.0 - erf(x); };
+        def tgamma(float x) -> float
+        {
+            if (x <= 0.0f) { return 0.0f; };
+            float[6] p;
+            p[0] = 1.0f; p[1] = 0.0f; p[2] = 0.0f; p[3] = 0.0f; p[4] = 0.0f; p[5] = 0.0f;
+            float g = 4.7421875f;
+            float sum = 0.0f;
+            for (i32 i = 0; i < 6; i++) { sum = sum + p[i] / (x + (float)i); };
+            return sqrt(2.0f*PIF) * pow(x + g - 0.5f, x - 0.5f) * exp(-(x + g - 0.5f)) * sum;
+        };
+        def tgamma(double x) -> double
+        {
+            if (x <= 0.0) { return 0.0; };
+            double[6] p;
+            p[0] = 1.0; p[1] = 0.0; p[2] = 0.0; p[3] = 0.0; p[4] = 0.0; p[5] = 0.0;
+            double g = 4.7421875;
+            double sum = 0.0;
+            for (i32 i = 0; i < 6; i++) { sum = sum + p[i] / (x + (double)i); };
+            return sqrt(2.0*PID) * pow(x + g - 0.5, x - 0.5) * exp(-(x + g - 0.5)) * sum;
+        };
+        def lgamma(float x) -> float { return log(tgamma(x)); };
+        def lgamma(double x) -> double { return log(tgamma(x)); };
+
+        // ==================== Floating-point classification ====================
+        def isnan(float x) -> bool
+        {
+            u32 bits = (u32)x;
+            u32 exp = (bits >> 23) & 0xFF;
+            u32 frac = bits & 0x7FFFFF;
+            return (exp == 0xFF) & (frac != 0);
+        };
+        def isnan(double x) -> bool
+        {
+            u64 bits = (u64)x;
+            u64 exp = (bits >> 52) & 0x7FF;
+            u64 frac = bits & 0xFFFFFFFFFFFFFu;
+            return (exp == 0x7FF) & (frac != 0);
+        };
+        def isinf(float x) -> bool
+        {
+            u32 bits = (u32)x;
+            u32 exp = (bits >> 23) & 0xFF;
+            u32 frac = bits & 0x7FFFFF;
+            return (exp == 0xFF) & (frac == 0);
+        };
+        def isinf(double x) -> bool
+        {
+            u64 bits = (u64)x;
+            u64 exp = (bits >> 52) & 0x7FF;
+            u64 frac = bits & 0xFFFFFFFFFFFFFu;
+            return (exp == 0x7FF) & (frac == 0);
+        };
+        def isfinite(float x) -> bool { return !isnan(x) & !isinf(x); };
+        def isfinite(double x) -> bool { return !isnan(x) & !isinf(x); };
+        def isnormal(float x) -> bool
+        {
+            u32 bits = (u32)x;
+            u32 exp = (bits >> 23) & 0xFF;
+            return (exp != 0) & (exp != 0xFF);
+        };
+        def isnormal(double x) -> bool
+        {
+            u64 bits = (u64)x;
+            u64 exp = (bits >> 52) & 0x7FF;
+            return (exp != 0) & (exp != 0x7FF);
+        };
+        def fpclassify(float x) -> i32
+        {
+            if (isnan(x)) { return 0; };
+            if (isinf(x)) { return 1; };
+            if (x == 0.0f) { return 2; };
+            if (isnormal(x)) { return 3; };
+            return 4;
+        };
+        def fpclassify(double x) -> i32
+        {
+            if (isnan(x)) { return 0; };
+            if (isinf(x)) { return 1; };
+            if (x == 0.0) { return 2; };
+            if (isnormal(x)) { return 3; };
+            return 4;
         };
 
-        def log10(double x) -> double
+        // ==================== nextafter, copysign, fdim, fma, fmod ====================
+        def nextafter(float f, float to) -> float
         {
-            return log(x) / 2.30258509299404568402; // ln(3.0)
+            if (isnan(f) | isnan(to)) { return NAN_F; };
+            if (f == to) { return to; };
+            u32 bits = (u32)f;
+            if (f < to)
+            {
+                bits = (bits & 0x80000000) ? (bits - 1) : (bits + 1);
+            }
+            else
+            {
+                bits = (bits & 0x80000000) ? (bits + 1) : (bits - 1);
+            };
+            return (float)bits;
+        };
+        def nextafter(double f, double to) -> double
+        {
+            if (isnan(f) | isnan(to)) { return NAN_D; };
+            if (f == to) { return to; };
+            u64 bits = (u64)f;
+            if (f < to)
+            {
+                bits = (bits & 0x8000000000000000u) ? (bits - 1) : (bits + 1);
+            }
+            else
+            {
+                bits = (bits & 0x8000000000000000u) ? (bits + 1) : (bits - 1);
+            };
+            return (double)bits;
+        };
+        def copysign(float x, float y) -> float
+        {
+            u32 bx = (u32)x, by = (u32)y;
+            bx = (bx & 0x7FFFFFFF) | (by & 0x80000000);
+            return (float)bx;
+        };
+        def copysign(double x, double y) -> double
+        {
+            u64 bx = (u64)x, by = (u64)y;
+            bx = (bx & 0x7FFFFFFFFFFFFFFFu) | (by & 0x8000000000000000u);
+            return (double)bx;
+        };
+        def fdim(float x, float y) -> float
+        {
+            return (x > y) ? (x - y) : 0.0f;
+        };
+        def fdim(double x, double y) -> double
+        {
+            return (x > y) ? (x - y) : 0.0d;
+        };
+        def fma(float x, float y, float z) -> float
+        {
+            return (float)((double)x * (double)y + (double)z);
+        };
+        def fma(double x, double y, double z) -> double
+        {
+            return x*y + z;
+        };
+        def fmod(float x, float y) -> float
+        {
+            if (y == 0.0f) { return 0.0f; };
+            return x - (float)(i64)(x / y) * y;
+        };
+        def fmod(double x, double y) -> double
+        {
+            if (y == 0.0) { return 0.0; };
+            return x - (double)(i64)(x / y) * y;
         };
 
-        // Additional math utilities with overloads
+        // ==================== Bit manipulation ====================
+        def popcount(i8 x) -> i8
+        {
+            i8 count = 0;
+            while (x != 0)
+            {
+                if (count == 8) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(i16 x) -> i16
+        {
+            i16 count = 0;
+            while (x != 0)
+            {
+                if (count == 16) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(i32 x) -> i32
+        {
+            i32 count = 0;
+            while (x != 0)
+            {
+                if (count == 32) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(i64 x) -> i64
+        {
+            i64 count = 0;
+            while (x != 0)
+            {
+                if (count == 64) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(byte x) -> byte
+        {
+            byte count = 0;
+            while (x != 0)
+            {
+                if (count == 8) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(u16 x) -> u16
+        {
+            u16 count = 0;
+            while (x != 0)
+            {
+                if (count == 16) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(u32 x) -> u32
+        {
+            u32 count = 0;
+            while (x != 0)
+            {
+                if (count == 32) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def popcount(u64 x) -> u64
+        {
+            u64 count = 0;
+            while (x != 0)
+            {
+                if (count == 64) { break; };
+                count = count + (x & 1);
+                x = x >> 1;
+            };
+            return count;
+        };
+        def reverse_bits(byte x) -> byte
+        {
+            byte result = 0;
+            for (byte i = 0; i < 8; i++)
+            {
+                result = (result << 1) | (x & 1);
+                x = x >> 1;
+            };
+            return result;
+        };
+        def reverse_bits(i8 x) -> i8
+        {
+            i8 result = 0;
+            for (i8 i = 0; i < 8; i++)
+            {
+                result = (result << 1) | (x & 1);
+                x = x >> 1;
+            };
+            return result;
+        };
+        def reverse_bits(i16 x) -> i16
+        {
+            i16 result = 0;
+            for (i16 i = 0; i < 16; i++)
+            {
+                result = (result << 1) | (x & 1);
+                x = x >> 1;
+            };
+            return result;
+        };
+        def reverse_bits(i32 x) -> i32
+        {
+            i32 result = 0;
+            for (i32 i = 0; i < 32; i++)
+            {
+                result = (result << 1) | (x & 1);
+                x = x >> 1;
+            };
+            return result;
+        };
+        def reverse_bits(i64 x) -> i64
+        {
+            i64 result = 0;
+            for (i64 i = 0; i < 64; i++)
+            {
+                result = (result << 1) | (x & 1);
+                x = x >> 1;
+            };
+            return result;
+        };
+        def rotl(i8 x, i8 n) -> i8
+        {
+            n = n & 7;
+            return (x << n) | ((x & 0xFF) >> (8 - n));
+        };
+        def rotl(i16 x, i16 n) -> i16
+        {
+            n = n & 15;
+            return (x << n) | ((x & 0xFFFF) >> (16 - n));
+        };
+        def rotl(i32 x, i32 n) -> i32
+        {
+            n = n & 31;
+            return (x << n) | ((x & 0xFFFFFFFFu) >> (32 - n));
+        };
+        def rotl(i64 x, i64 n) -> i64
+        {
+            n = n & 63;
+            return (x << n) | ((x & 0xFFFFFFFFFFFFFFFFu) >> (64 - n));
+        };
+        def rotr(i8 x, i8 n) -> i8
+        {
+            n = n & 7;
+            return (x >> n) | (x << (8 - n));
+        };
+        def rotr(i16 x, i16 n) -> i16
+        {
+            n = n & 15;
+            return (x >> n) | (x << (16 - n));
+        };
+        def rotr(i32 x, i32 n) -> i32
+        {
+            n = n & 31;
+            return (x >> n) | (x << (32 - n));
+        };
+        def rotr(i64 x, i64 n) -> i64
+        {
+            n = n & 63;
+            return (x >> n) | (x << (64 - n));
+        };
+        def clz(i8 x) -> i8
+        {
+            if (x == 0) { return 8; };
+            i8 count = 0;
+            while ((x & 0x80) == 0)
+            {
+                count = count + 1;
+                x = x << 1;
+            };
+            return count;
+        };
+        def clz(i16 x) -> i16
+        {
+            if (x == 0) { return 16; };
+            i16 count = 0;
+            while ((x & 0x8000) == 0)
+            {
+                count = count + 1;
+                x = x << 1;
+            };
+            return count;
+        };
+        def clz(i32 x) -> i32
+        {
+            if (x == 0) { return 32; };
+            i32 count = 0;
+            while ((x & 0x80000000) == 0)
+            {
+                count = count + 1;
+                x = x << 1;
+            };
+            return count;
+        };
+        def clz(i64 x) -> i64
+        {
+            if (x == 0) { return 64; };
+            i64 count = 0;
+            while ((x & 0x8000000000000000u) == 0)
+            {
+                count = count + 1;
+                x = x << 1;
+            };
+            return count;
+        };
+        def ctz(i8 x) -> i8
+        {
+            if (x == 0) { return 8; };
+            i8 count = 0;
+            while ((x & 1) == 0)
+            {
+                count = count + 1;
+                x = x >> 1;
+            };
+            return count;
+        };
+        def ctz(i16 x) -> i16
+        {
+            if (x == 0) { return 16; };
+            i16 count = 0;
+            while ((x & 1) == 0)
+            {
+                count = count + 1;
+                x = x >> 1;
+            };
+            return count;
+        };
+        def ctz(i32 x) -> i32
+        {
+            if (x == 0) { return 32; };
+            i32 count = 0;
+            while ((x & 1) == 0)
+            {
+                count = count + 1;
+                x = x >> 1;
+            };
+            return count;
+        };
+        def ctz(i64 x) -> i64
+        {
+            if (x == 0) { return 64; };
+            i64 count = 0;
+            while ((x & 1) == 0)
+            {
+                count = count + 1;
+                x = x >> 1;
+            };
+            return count;
+        };
+        def bit_length(i8 x) -> i8
+        {
+            if (x < 0) { x = -x; };
+            i8 len = 0;
+            while (x != 0)
+            {
+                len = len + 1;
+                x = x >> 1;
+            };
+            return len;
+        };
+        def bit_length(i16 x) -> i16
+        {
+            if (x < 0) { x = -x; };
+            i16 len = 0;
+            while (x != 0)
+            {
+                len = len + 1;
+                x = x >> 1;
+            };
+            return len;
+        };
+        def bit_length(i32 x) -> i32
+        {
+            if (x < 0) { x = -x; };
+            i32 len = 0;
+            while (x != 0)
+            {
+                len = len + 1;
+                x = x >> 1;
+            };
+            return len;
+        };
+        def bit_length(i64 x) -> i64
+        {
+            if (x < 0) { x = -x; };
+            i64 len = 0;
+            while (x != 0)
+            {
+                len = len + 1;
+                x = x >> 1;
+            };
+            return len;
+        };
+        def parity(i8 x) -> i8
+        {
+            i8 count = popcount(x);
+            return count & 1;
+        };
+        def parity(i16 x) -> i16
+        {
+            i16 count = popcount(x);
+            return count & 1;
+        };
+        def parity(i32 x) -> i32
+        {
+            i32 count = popcount(x);
+            return count & 1;
+        };
+        def parity(i64 x) -> i64
+        {
+            i64 count = popcount(x);
+            return count & 1;
+        };
+        def byte_swap(i16 x) -> i16
+        {
+            return ((x >> 8) & 0xFF) | ((x & 0xFF) << 8);
+        };
+        def byte_swap(i32 x) -> i32
+        {
+            return ((x >> 24) & 0xFF) | ((x >> 8) & 0xFF00) | ((x & 0xFF00) << 8) | ((x & 0xFF) << 24);
+        };
+        def byte_swap(i64 x) -> i64
+        {
+            i64 result = (x & 0x00000000000000FFu) << 56;
+            result = result | ((x & 0x000000000000FF00u) << 40);
+            result = result | ((x & 0x0000000000FF0000u) << 24);
+            result = result | ((x & 0x00000000FF000000u) << 8);
+            result = result | ((x & 0x000000FF00000000u) >> 8);
+            result = result | ((x & 0x0000FF0000000000u) >> 24);
+            result = result | ((x & 0x00FF000000000000u) >> 40);
+            result = result | ((x & 0xFF00000000000000u) >> 56);
+            return result;
+        };
+        def byte_swap(u16 x) -> u16 { return (u16)byte_swap((i16)x); };
+        def byte_swap(u32 x) -> u32 { return (u32)byte_swap((i32)x); };
+        def byte_swap(u64 x) -> u64 { return (u64)byte_swap((i64)x); };
+
+        // ==================== Conversions and Utilities ====================
+        def radians(float deg) -> float { return deg * PIF / 180.0f; };
+        def radians(double deg) -> double { return deg * PID / 180.0; };
+        def degrees(float rad) -> float { return rad * 180.0f / PIF; };
+        def degrees(double rad) -> double { return rad * 180.0 / PID; };
+        def saturate(float x) -> float
+        {
+            if (x < 0.0f) { return 0.0f; };
+            if (x > 1.0f) { return 1.0f; };
+            return x;
+        };
+        def saturate(double x) -> double
+        {
+            if (x < 0.0) { return 0.0; };
+            if (x > 1.0) { return 1.0; };
+            return x;
+        };
+        def smoothstep(float edge0, float edge1, float x) -> float
+        {
+            float t = saturate((x - edge0) / (edge1 - edge0));
+            return t * t * (3.0f - 2.0f * t);
+        };
+        def smoothstep(double edge0, double edge1, double x) -> double
+        {
+            double t = saturate((x - edge0) / (edge1 - edge0));
+            return t * t * (3.0 - 2.0 * t);
+        };
+        def step(float edge, float x) -> float
+        {
+            return (x >= edge) ? 1.0f : 0.0f;
+        };
+        def step(double edge, double x) -> double
+        {
+            return (x >= edge) ? 1.0 : 0.0;
+        };
+
+        // ==================== Sign and lerp ====================
+        def sign(i8 x) -> i8
+        {
+            if (x > 0) { return 1; };
+            if (x < 0) { return -1; };
+            return 0;
+        };
+        def sign(i16 x) -> i16
+        {
+            if (x > 0) { return 1; };
+            if (x < 0) { return -1; };
+            return 0;
+        };
+        def sign(i32 x) -> i32
+        {
+            if (x > 0) { return 1; };
+            if (x < 0) { return -1; };
+            return 0;
+        };
+        def sign(i64 x) -> i64
+        {
+            if (x > 0) { return 1; };
+            if (x < 0) { return -1; };
+            return 0;
+        };
+        def sign(float x) -> float
+        {
+            if (x > 0.0f) { return 1.0f; };
+            if (x < 0.0f) { return -1.0f; };
+            return 0.0f;
+        };
+        def sign(double x) -> double
+        {
+            if (x > 0.0) { return 1.0; };
+            if (x < 0.0) { return -1.0; };
+            return 0.0;
+        };
         def lerp(i8 a, i8 b, float t) -> i8
         {
-            return (i8)(float(a) + float(b - a) * t);
+            return (i8)((float)a + (float)(b - a) * t);
         };
-        
         def lerp(i16 a, i16 b, float t) -> i16
         {
-            return (i16)(float(a) + float(b - a) * t);
+            return (i16)((float)a + (float)(b - a) * t);
         };
-        
         def lerp(i32 a, i32 b, float t) -> i32
         {
-            return (i32)(float(a) + float(b - a) * t);
+            return (i32)((float)a + (float)(b - a) * t);
         };
-
         def lerp(i64 a, i64 b, float t) -> i64
         {
-            return (i64)(float(a) + float(b - a) * t);
+            return (i64)((float)a + (float)(b - a) * t);
         };
-        
         def lerp(float a, float b, float t) -> float
         {
             return a + (b - a) * t;
         };
-
-        def sign(i8 x) -> i8
+        def lerp(double a, double b, double t) -> double
         {
-            if (x > 0) {return 1;};
-            if (x < 0) {return -1;};
-            return 0;
-        };
-        
-        def sign(i16 x) -> i16
-        {
-            if (x > 0) {return 1;};
-            if (x < 0) {return -1;};
-            return 0;
-        };
-        
-        def sign(i32 x) -> i32
-        {
-            if (x > 0) {return 1;};
-            if (x < 0) {return -1;};
-            return 0;
-        };
-        
-        def sign(i64 x) -> i64
-        {
-            if (x > 0) {return 1;};
-            if (x < 0) {return -1;};
-            return 0;
+            return a + (b - a) * t;
         };
 
-        def sign(float x) -> float
+        // ---------- Floating-point decomposition ----------
+        def frexp(float x, int* exp) -> float
         {
-            if (x > 0.0) {return 1.0;};
-            if (x < 0.0) {return -1.0;};
-            return 0.0;
+            if (x == 0.0f) { *exp = 0; return 0.0f; };
+            if (isinf(x) | isnan(x)) { *exp = 0; return x; };
+            u32 bits = (u32)x;
+            i32 e = ((bits >> 23) & 0xFF) - 127;
+            u32 mant = (bits & 0x7FFFFF) | 0x800000;
+            *exp = e + 1;
+            return (float)(((bits & 0x80000000) | (mant >> 1)) & 0xFFFFFFFFu);
+        };
+        def frexp(double x, int* exp) -> double
+        {
+            if (x == 0.0) { *exp = 0; return 0.0; };
+            if (isinf(x) | isnan(x)) { *exp = 0; return x; };
+            u64 bits = (u64)x;
+            i64 e = ((bits >> 52) & 0x7FF) - 1023;
+            u64 mant = (bits & 0xFFFFFFFFFFFFFu) | 0x10000000000000u;
+            *exp = (int)(e + 1);
+            return (double)(((bits & 0x8000000000000000u) | (mant >> 1)) & 0xFFFFFFFFFFFFFFFFu);
         };
 
-        // Bit manipulation utilities
-        // Signed
-        def popcount(i8 x) -> i8
+        def ldexp(float x, int exp) -> float
         {
-            i8 count;
-            while (x != 0)
-            {
-                if (count == 8) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
+            if (x == 0.0f | isinf(x) | isnan(x)) { return x; };
+            return (float)((u32)x + ((u32)exp << 23));
         };
-        
-        def popcount(i16 x) -> i16
+        def ldexp(double x, int exp) -> double
         {
-            i16 count;
-            while (x != 0)
-            {
-                if (count == 16) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
-        };
-        
-        def popcount(i32 x) -> i32
-        {
-            i32 count;
-            while (x != 0)
-            {
-                if (count == 32) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
-        };
-        
-        def popcount(i64 x) -> i64
-        {
-            i64 count;
-            while (x != 0)
-            {
-                if (count == 64) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
-        };
-        
-        // Unsigned
-        def popcount(byte x) -> byte
-        {
-            byte count;
-            while (x != 0)
-            {
-                if (count == 8) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
-        };
-        
-        def popcount(u16 x) -> u16
-        {
-            u16 count;
-            while (x != 0)
-            {
-                if (count == 16) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
-        };
-        
-        def popcount(u32 x) -> u32
-        {
-            u32 count;
-            while (x != 0)
-            {
-                if (count == 32) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
+            if (x == 0.0 | isinf(x) | isnan(x)) { return x; };
+            return (double)((u64)x + ((u64)exp << 52));
         };
 
-        def popcount(u64 x) -> u64
+        def modf(float x, float* intpart) -> float
         {
-            u64 count;
-            while (x != 0)
-            {
-                if (count == 64) { break; }; // Handle all 1s
-                count += x & 1;
-                x >>= 1;
-            };
-            return count;
+            *intpart = (float)(i64)x;
+            return x - *intpart;
+        };
+        def modf(double x, double* intpart) -> double
+        {
+            *intpart = (double)(i64)x;
+            return x - *intpart;
         };
 
-        def reverse_bits(byte x) -> byte
+        def ilogb(float x) -> int
         {
-            byte result;
-            for (byte i; i < 8; i++)
-            {
-                result = (result << 1) | (x & 1);
-                x >>= 1;
-            };
-            return result;
+            if (x == 0.0f) { return -2147483648; }; // FP_ILOGB0
+            if (isnan(x)) { return 2147483647; };  // FP_ILOGBNAN
+            if (isinf(x)) { return 2147483647; };
+            u32 bits = (u32)x;
+            return (int)((bits >> 23) & 0xFF) - 127;
+        };
+        def ilogb(double x) -> int
+        {
+            if (x == 0.0) { return -2147483648; };
+            if (isnan(x)) { return 2147483647; };
+            if (isinf(x)) { return 2147483647; };
+            u64 bits = (u64)x;
+            return (int)((bits >> 52) & 0x7FF) - 1023;
         };
 
-        def reverse_bits(i8 x) -> i8
+        def logb(float x) -> float { return (float)ilogb(x); };
+        def logb(double x) -> double { return (double)ilogb(x); };
+
+        def scalbn(float x, int n) -> float { return ldexp(x, n); };
+        def scalbn(double x, int n) -> double { return ldexp(x, n); };
+        def scalbln(float x, long n) -> float { return scalbn(x, (int)n); };
+        def scalbln(double x, long n) -> double { return scalbn(x, (int)n); };
+
+        // ---------- Additional rounding ----------
+        def trunc(float x) -> float { return (float)(i64)x; };
+        def trunc(double x) -> double { return (double)(i64)x; };
+
+        def nearbyint(float x) -> float { return round(x); };
+        def nearbyint(double x) -> double { return round(x); };
+
+        def roundeven(float x) -> float
         {
-            i8 result;
-            for (i8 i; i < 8; i++)
+            float r = round(x);
+            if (abs(x - r) == 0.5f)
             {
-                result = (result << 1) | (x & 1);
-                x >>= 1;
+                if ((i64)r & 1) { return r - ((x > 0.0f) ? 1.0f : -1.0f); };
             };
-            return result;
+            return r;
         };
-        
-        def reverse_bits(i16 x) -> i16
+        def roundeven(double x) -> double
         {
-            i16 result;
-            for (i16 i; i < 16; i++)
+            double r = round(x);
+            if (abs(x - r) == 0.5)
             {
-                result = (result << 1) | (x & 1);
-                x >>= 1;
+                if ((i64)r & 1) { return r - ((x > 0.0) ? 1.0 : -1.0); };
             };
-            return result;
+            return r;
         };
-        
-        def reverse_bits(i32 x) -> i32
+
+        def lrint(float x) -> long { return (long)round(x); };
+        def lrint(double x) -> long { return (long)round(x); };
+        def llrint(float x) -> i64 { return (i64)round(x); };
+        def llrint(double x) -> i64 { return (i64)round(x); };
+        def lround(float x) -> long { return (long)round(x); };
+        def lround(double x) -> long { return (long)round(x); };
+        def llround(float x) -> i64 { return (i64)round(x); };
+        def llround(double x) -> i64 { return (i64)round(x); };
+
+        // ---------- Accurate small argument ----------
+        def expm1(float x) -> float { return exp(x) - 1.0f; };
+        def expm1(double x) -> double { return exp(x) - 1.0; };
+        def log1p(float x) -> float { return log(1.0f + x); };
+        def log1p(double x) -> double { return log(1.0 + x); };
+
+        // ---------- Exponential base-2 and base-10 ----------
+        def exp2(float x) -> float { return pow(2.0f, x); };
+        def exp2(double x) -> double { return pow(2.0d, x); };
+        def exp10(float x) -> float { return pow(10.0f, x); };
+        def exp10(double x) -> double { return pow(10.0d, x); };
+
+        // ---------- π-scaled trig ----------
+        def sinpi(float x) -> float
         {
-            i32 result;
-            for (i32 i; i < 32; i++)
-            {
-                result = (result << 1) | (x & 1);
-                x >>= 1;
-            };
-            return result;
+            if (x == 0.0f) { return 0.0f; };
+            float r = fmod(x, 2.0f);
+            if (r > 1.0f) { r -= 2.0f; };
+            return sin(r * PIF);
         };
-        
-        def reverse_bits(i64 x) -> i64
+        def sinpi(double x) -> double
         {
-            i64 result;
-            for (i64 i; i < 64; i++)
+            if (x == 0.0) { return 0.0; };
+            double r = fmod(x, 2.0);
+            if (r > 1.0) { r -= 2.0; };
+            return sin(r * PID);
+        };
+        def cospi(float x) -> float
+        {
+            if (x == 0.5f) { return 0.0f; };
+            float r = fmod(x, 2.0f);
+            if (r > 1.0f) { r -= 2.0f; };
+            return cos(r * PIF);
+        };
+        def cospi(double x) -> double
+        {
+            if (x == 0.5) { return 0.0; };
+            double r = fmod(x, 2.0);
+            if (r > 1.0) { r -= 2.0; };
+            return cos(r * PID);
+        };
+        def tanpi(float x) -> float
+        {
+            float c = cospi(x);
+            if (abs(c) < 0.000001f) { return 0.0f; };
+            return sinpi(x) / c;
+        };
+        def tanpi(double x) -> double
+        {
+            double c = cospi(x);
+            if (abs(c) < 1e-12) { return 0.0; };
+            return sinpi(x) / c;
+        };
+
+        // ---------- Inverse error functions ----------
+        def erfinv(float x) -> float
+        {
+            if (x < -1.0f | x > 1.0f) { return NAN_F; };
+            float a = 0.147f, y = erf(x);
+            return y / sqrt(1.0f - exp(-y*y) * (a + 0.5f * log(1.0f - y*y)));
+        };
+        def erfinv(double x) -> double
+        {
+            if (x < -1.0 | x > 1.0) { return NAN_D; };
+            double a = 0.147, y = erf(x);
+            return y / sqrt(1.0 - exp(-y*y) * (a + 0.5 * log(1.0 - y*y)));
+        };
+        def erfcinv(float x) -> float { return erfinv(1.0f - x); };
+        def erfcinv(double x) -> double { return erfinv(1.0 - x); };
+
+        // ---------- IEEE remainder and quotient ----------
+        def remainder(float x, float y) -> float
+        {
+            if (y == 0.0f) { return 0.0f; };
+            float q = round(x / y);
+            return x - q * y;
+        };
+        def remainder(double x, double y) -> double
+        {
+            if (y == 0.0) { return 0.0; };
+            double q = round(x / y);
+            return x - q * y;
+        };
+        def remquo(float x, float y, int* quo) -> float
+        {
+            if (y == 0.0f) { *quo = 0; return 0.0f; };
+            float q = round(x / y);
+            *quo = (int)q;
+            return x - q * y;
+        };
+        def remquo(double x, double y, int* quo) -> double
+        {
+            if (y == 0.0) { *quo = 0; return 0.0; };
+            double q = round(x / y);
+            *quo = (int)q;
+            return x - q * y;
+        };
+
+        // ---------- Beta functions ----------
+        def beta(float a, float b) -> float { return tgamma(a) * tgamma(b) / tgamma(a + b); };
+        def beta(double a, double b) -> double { return tgamma(a) * tgamma(b) / tgamma(a + b); };
+        def lbeta(float a, float b) -> float { return lgamma(a) + lgamma(b) - lgamma(a + b); };
+        def lbeta(double a, double b) -> double { return lgamma(a) + lgamma(b) - lgamma(a + b); };
+
+        // ---------- Gamma with sign ----------
+        def lgamma_r(float x, int* signp) -> float
+        {
+            float g = lgamma(x);
+            *signp = (tgamma(x) > 0.0f) ? 1 : -1;
+            return g;
+        };
+        def lgamma_r(double x, int* signp) -> double
+        {
+            double g = lgamma(x);
+            *signp = (tgamma(x) > 0.0) ? 1 : -1;
+            return g;
+        };
+
+        // ---------- Bessel functions (first kind) ----------
+        def besselj0(float x) -> float
+        {
+            // Simplified series for small x, asymptotic for large
+            if (abs(x) < 8.0f)
             {
-                result = (result << 1) | (x & 1);
-                x >>= 1;
+                float x2 = x * x;
+                return 1.0f - x2/4.0f + x2*x2/64.0f - x2*x2*x2/2304.0f + x2*x2*x2*x2/147456.0f;
             };
-            return result;
+            return sqrt(2.0f/(PIF*abs(x))) * cos(x - PIF/4.0f);
+        };
+        def besselj0(double x) -> double
+        {
+            if (abs(x) < 8.0)
+            {
+                double x2 = x * x;
+                return 1.0 - x2/4.0 + x2*x2/64.0 - x2*x2*x2/2304.0 + x2*x2*x2*x2/147456.0;
+            };
+            return sqrt(2.0/(PID*abs(x))) * cos(x - PID/4.0);
+        };
+        def besselj1(float x) -> float
+        {
+            if (abs(x) < 8.0f)
+            {
+                float x2 = x * x;
+                return x/2.0f - x*x2/16.0f + x*x2*x2/384.0f - x*x2*x2*x2/18432.0f;
+            };
+            float s = (x > 0.0f) ? 1.0f : -1.0f;
+            return s * sqrt(2.0f/(PIF*abs(x))) * sin(x - PIF/4.0f);
+        };
+        def besselj1(double x) -> double
+        {
+            if (abs(x) < 8.0)
+            {
+                double x2 = x * x;
+                return x/2.0 - x*x2/16.0 + x*x2*x2/384.0 - x*x2*x2*x2/18432.0;
+            };
+            double s = (x > 0.0) ? 1.0 : -1.0;
+            return s * sqrt(2.0/(PID*abs(x))) * sin(x - PID/4.0);
+        };
+        def besseljn(int n, float x) -> float
+        {
+            if (n == 0) { return besselj0(x); };
+            if (n == 1) { return besselj1(x); };
+            float j0 = besselj0(x), j1 = besselj1(x), jn;
+            for (int i=1; i<n; i++)
+            {
+                jn = 2.0f * (float)i / x * j1 - j0;
+                j0 = j1;
+                j1 = jn;
+            };
+            return jn;
+        };
+        def besseljn(int n, double x) -> double
+        {
+            if (n == 0) { return besselj0(x); };
+            if (n == 1) { return besselj1(x); };
+            double j0 = besselj0(x), j1 = besselj1(x), jn;
+            for (int i=1; i<n; i++)
+            {
+                jn = 2.0 * (double)i / x * j1 - j0;
+                j0 = j1;
+                j1 = jn;
+            };
+            return jn;
+        };
+
+        // ---------- Bessel functions (second kind) ----------
+        def bessely0(float x) -> float
+        {
+            if (x <= 0.0f) { return NAN_F; };
+            if (x < 8.0f) { return (2.0f/PIF) * (log(x/2.0f) + 0.5772156649f) * besselj0(x) - (2.0f/PIF) * (besselj0(x) * log(x/2.0f)); };
+            return sqrt(2.0f/(PIF*x)) * sin(x - PIF/4.0f);
+        };
+        def bessely0(double x) -> double
+        {
+            if (x <= 0.0) { return NAN_D; };
+            if (x < 8.0) { return (2.0/PID) * (log(x/2.0) + 0.5772156649) * besselj0(x) - (2.0/PID) * (besselj0(x) * log(x/2.0)); };
+            return sqrt(2.0/(PID*x)) * sin(x - PID/4.0);
+        };
+        def bessely1(float x) -> float
+        {
+            if (x <= 0.0f) { return NAN_F; };
+            if (x < 8.0f) { return (2.0f/PIF) * (log(x/2.0f) + 0.5772156649f) * besselj1(x) - (2.0f/PIF) * (besselj1(x) * log(x/2.0f)); };
+            return sqrt(2.0f/(PIF*x)) * cos(x - PIF/4.0f);
+        };
+        def bessely1(double x) -> double
+        {
+            if (x <= 0.0) { return NAN_D; };
+            if (x < 8.0) { return (2.0/PID) * (log(x/2.0) + 0.5772156649) * besselj1(x) - (2.0/PID) * (besselj1(x) * log(x/2.0)); };
+            return sqrt(2.0/(PID*x)) * cos(x - PID/4.0);
+        };
+        def besselyn(int n, float x) -> float
+        {
+            if (n == 0) { return bessely0(x); };
+            if (n == 1) { return bessely1(x); };
+            float y0 = bessely0(x), y1 = bessely1(x), yn;
+            for (int i=1; i<n; i++)
+            {
+                yn = 2.0f * (float)i / x * y1 - y0;
+                y0 = y1;
+                y1 = yn;
+            };
+            return yn;
+        };
+        def besselyn(int n, double x) -> double
+        {
+            if (n == 0) { return bessely0(x); };
+            if (n == 1) { return bessely1(x); };
+            double y0 = bessely0(x), y1 = bessely1(x), yn;
+            for (int i=1; i<n; i++)
+            {
+                yn = 2.0 * (double)i / x * y1 - y0;
+                y0 = y1;
+                y1 = yn;
+            };
+            return yn;
+        };
+
+        // ---------- Integer overflow helpers ----------
+        def add_overflow(i64 a, i64 b, i64* result) -> bool
+        {
+            *result = a + b;
+            return ((a > 0) & (b > 0) & (*result < 0)) | ((a < 0) & (b < 0) & (*result > 0));
+        };
+        def mul_overflow(i64 a, i64 b, i64* result) -> bool
+        {
+            *result = a * b;
+            if (a == 0 | b == 0) { return false; };
+            return (*result / a != b);
+        };
+        def is_power_of_two(i64 x) -> bool
+        {
+            return (x > 0) & ((x & (x - 1)) == 0);
+        };
+        def next_power_of_two(i64 x) -> i64
+        {
+            if (x <= 0) { return 1; };
+            i64 v = x - 1;
+            v = v | (v >> 1);
+            v = v | (v >> 2);
+            v = v | (v >> 4);
+            v = v | (v >> 8);
+            v = v | (v >> 16);
+            v = v | (v >> 32);
+            return v + 1;
+        };
+
+        // ---------- Complex arithmetic ----------
+        def complex_add(Complex a, Complex b) -> Complex
+        {
+            Complex c;
+            c.re = a.re + b.re;
+            c.im = a.im + b.im;
+            return c;
+        };
+        def complex_sub(Complex a, Complex b) -> Complex
+        {
+            Complex c;
+            c.re = a.re - b.re;
+            c.im = a.im - b.im;
+            return c;
+        };
+        def complex_mul(Complex a, Complex b) -> Complex
+        {
+            Complex c;
+            c.re = a.re * b.re - a.im * b.im;
+            c.im = a.re * b.im + a.im * b.re;
+            return c;
+        };
+        def complex_div(Complex a, Complex b) -> Complex
+        {
+            double denom = b.re * b.re + b.im * b.im;
+            Complex c;
+            c.re = (a.re * b.re + a.im * b.im) / denom;
+            c.im = (a.im * b.re - a.re * b.im) / denom;
+            return c;
+        };
+        def complex_abs(Complex z) -> double { return sqrt(z.re * z.re + z.im * z.im); };
+        def complex_phase(Complex z) -> double { return atan2(z.im, z.re); };
+        def complex_conj(Complex z) -> Complex
+        {
+            Complex c;
+            c.re = z.re;
+            c.im = -z.im;
+            return c;
+        };
+        def complex_exp(Complex z) -> Complex
+        {
+            double r = exp(z.re);
+            Complex c;
+            c.re = r * cos(z.im);
+            c.im = r * sin(z.im);
+            return c;
+        };
+        def complex_log(Complex z) -> Complex
+        {
+            Complex c;
+            c.re = log(complex_abs(z));
+            c.im = complex_phase(z);
+            return c;
+        };
+        def complex_pow(Complex z, double p) -> Complex
+        {
+            Complex logz = complex_log(z);
+            logz.re = logz.re * p;
+            logz.im = logz.im * p;
+            return complex_exp(logz);
         };
     };
 };

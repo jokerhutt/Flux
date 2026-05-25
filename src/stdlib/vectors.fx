@@ -32,6 +32,12 @@ namespace standard
         {
             float x, y, z, w;
         };
+
+        // ===== 5D VECTOR =====
+        struct Vec5
+        {
+            float x, y, z, w, v;
+        };
         
         // ===== VEC3 CONSTRUCTORS =====
         def vec3(float x, float y, float z) -> Vec3

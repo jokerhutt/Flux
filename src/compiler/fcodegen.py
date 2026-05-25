@@ -2896,13 +2896,21 @@ class CodegenVisitor:
                                     obj_type_name = tname
                                     break
                         if obj_type_name is not None:
-                            raise TypeError(
-                                f"Object of type '{obj_type_name}' used in expression context "
-                                f"but has no __expr() method defined. "
-                                f"Define 'def __expr() -> <type> {{ return @this.<member>; }};' "
-                                f"inside the object to enable expression-context usage. "
-                                f"[{node.source_line}:{node.source_col}]"
-                            )
+                            # Only raise for object types, not plain structs.
+                            # Plain structs passed to mismatched parameters are a
+                            # type error handled downstream; they must not produce
+                            # a misleading "no __expr() defined" message.
+                            entry = module.symbol_table.lookup_any(obj_type_name)
+                            is_object = (entry is not None and
+                                         entry.kind == SymbolKind.OBJECT)
+                            if is_object:
+                                raise TypeError(
+                                    f"Object of type '{obj_type_name}' used in expression context "
+                                    f"but has no __expr() method defined. "
+                                    f"Define 'def __expr() -> <type> {{ return @this.<member>; }};' "
+                                    f"inside the object to enable expression-context usage. "
+                                    f"[{node.source_line}:{node.source_col}]"
+                                )
                 arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
                     builder, module, arg_val, expected, i)
             processed_args.append(arg_val)
@@ -5653,6 +5661,7 @@ class CodegenVisitor:
         self._run_in_namespace(namespace, enum_def, builder, module, 'codegen')
 
     def _ns_variable(self, namespace: str, var_def, module: ir.Module):
+        #print(var_def)
         original_name = var_def.name
         var_def.name = f"{namespace.replace('::', '__')}__{var_def.name}"
         orig_mod_ns = getattr(module, '_current_namespace', '')
