@@ -10,17 +10,14 @@
 //   - Rigid sphere rolling into the cloth from the side
 //
 
-#import "standard.fx";
-#import "timing.fx";
-#import "windows.fx";
-#import "opengl.fx";
-#import "physics.fx";
+#import "standard.fx", "timing.fx", "windows.fx", "opengl.fx", "physics.fx";
 
-using standard::io::console;
-using standard::system::windows;
-using standard::math;
-using standard::time;
-using physics;
+using standard::io::console,
+      standard::system::windows,
+      standard::math,
+      standard::time,
+      standard::physics,
+      OpenGL;
 
 #def DEMO_DT          0.008;
 #def DEMO_FRAME_NS    8000000;
@@ -208,6 +205,7 @@ def main() -> int
     Window win("Flux Soft Body Demo\0", 1280, 720, 80, 80);
     GLContext gl(win.device_context);
     gl.load_extensions();
+    gl.set_viewport(0, 0, 1280, 720);
 
     gl.set_clear_color(0.04, 0.04, 0.10, 1.0);
     glEnable(GL_DEPTH_TEST);
@@ -216,21 +214,53 @@ def main() -> int
     glPointSize(3.0);
     glLineWidth(1.0);
 
-    // Camera + projection
-    Matrix4 proj, view, combined;
+    // Projection — upload to GL_PROJECTION
+    Mat4 proj;
     mat4_perspective(1.0472, 1.7778, 0.1, 200.0, @proj);
-
-    GLVec3 eye, target, up;
-    eye.x    = 8.0; eye.y    = 10.0; eye.z = 18.0;
-    target.x = 0.0; target.y =  3.0; target.z = 0.0;
-    up.x     = 0.0; up.y     =  1.0; up.z    = 0.0;
-    mat4_lookat(@eye, @target, @up, @view);
-    mat4_mul(@proj, @view, @combined);
+    Mat4 proj_t = mat4_transpose(proj);
 
     glMatrixMode(GL_PROJECTION);
-    glLoadMatrixf(@combined.m[0]);
+    glLoadMatrixf(@proj_t.m00);
+
+    // View — build lookAt by hand, upload to GL_MODELVIEW
+    // eye=(8,10,18), target=(0,3,0), up=(0,1,0)
+    GLVec3 eye, target, up_v, f, s, u;
+    eye.x = 8.0;  eye.y = 10.0; eye.z = 18.0;
+    target.x = 0.0; target.y = 3.0; target.z = 0.0;
+    up_v.x = 0.0; up_v.y = 1.0; up_v.z = 0.0;
+
+    // forward = normalize(target - eye)
+    f.x = target.x - eye.x;
+    f.y = target.y - eye.y;
+    f.z = target.z - eye.z;
+    glvec3_normalize(@f);
+
+    // right = normalize(f × up)
+    glvec3_cross(@f, @up_v, @s);
+    glvec3_normalize(@s);
+
+    // up = s × f
+    glvec3_cross(@s, @f, @u);
+
+    // Build column-major view matrix for glLoadMatrixf
+    // OpenGL expects column-major: [col0 | col1 | col2 | col3]
+    // Col0=(s.x,u.x,-f.x,0), Col1=(s.y,u.y,-f.y,0), Col2=(s.z,u.z,-f.z,0), Col3=(tx,ty,tz,1)
+    float tx = -glvec3_dot(@s, @eye);
+    float ty = -glvec3_dot(@u, @eye);
+    float tz =  glvec3_dot(@f, @eye);   // = -dot(-f, eye)
+
+    // Mat4 is row-major mRC, so to get column-major on the wire, we fill transposed:
+    Mat4 view;
+    view.m00 = s.x;  view.m01 = s.y;  view.m02 = s.z;  view.m03 = tx;
+    view.m10 = u.x;  view.m11 = u.y;  view.m12 = u.z;  view.m13 = ty;
+    view.m20 = -f.x; view.m21 = -f.y; view.m22 = -f.z; view.m23 = tz;
+    view.m30 = 0.0;  view.m31 = 0.0;  view.m32 = 0.0;  view.m33 = 1.0;
+
+    // This is already in the form glLoadMatrixf needs (row-major stored,
+    // which reads as column-major to GL) — no extra transpose needed.
+    Mat4 view_t = mat4_transpose(view);
     glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    glLoadMatrixf(@view_t.m00);
 
     // ---- Main loop ----
     i32 sub;

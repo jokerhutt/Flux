@@ -12,7 +12,7 @@
       "path": "",
       "description": "Arbitrary precision integer arithmetic",
       "dependencies": {
-        "flux-math": ">=1.0.3"
+        "flux-math": ">=1.0.5"
       }
     },
     "flux-collections": {
@@ -88,7 +88,7 @@
       "path": "",
       "description": "Fast Fourier Transform",
       "dependencies": {
-        "flux-math": ">=1.0.3",
+        "flux-math": ">=1.0.5",
         "flux-memory": ">=1.0.2",
         "flux-types": ">=1.0.0"
       }
@@ -99,7 +99,7 @@
       "path": "",
       "description": "Graph data structures and algorithms",
       "dependencies": {
-        "flux-math": ">=1.0.3",
+        "flux-math": ">=1.0.5",
         "flux-windows": ">=1.0.1"
       }
     },
@@ -133,12 +133,22 @@
       }
     },
     "flux-math": {
-      "version": "1.0.3",
+      "version": "1.0.5",
       "entry": "math.fx",
       "path": "",
-      "description": "Math functions and constants",
+      "description": "Math functions and constants, including complex numbers",
       "dependencies": {
         "flux-types": ">=1.0.0"
+      }
+    },
+    "flux-matrices": {
+      "version": "1.0.0",
+      "entry": "matrices.fx",
+      "path": "",
+      "description": "3D, 4D, and 5D matrix library",
+      "dependencies": {
+        "flux-types": ">=1.0.0",
+        "flux-vectors": ">=1.0.1"
       }
     },
     "flux-net-linux": {
@@ -164,22 +174,23 @@
       }
     },
     "flux-opengl": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "opengl.fx",
       "path": "",
       "description": "OpenGL bindings",
       "dependencies": {
+        "flux-matrices": ">=1.0.0",
         "flux-windows": ">=1.0.1"
       }
     },
     "flux-physics": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "physics.fx",
       "path": "",
       "description": "Rigid and soft body physics simulation",
       "dependencies": {
-        "flux-math": ">=1.0.3",
-        "flux-memory": ">=1.0.2",
+        "flux-math": ">=1.0.5",
+        "flux-matrices": ">=1.0.0",
         "flux-types": ">=1.0.0",
         "flux-vectors": ">=1.0.1"
       }
@@ -200,7 +211,7 @@
       "description": "Ray tracing primitives and utilities",
       "dependencies": {
         "flux-allocators": ">=1.0.7",
-        "flux-math": ">=1.0.3",
+        "flux-math": ">=1.0.5",
         "flux-memory": ">=1.0.2",
         "flux-random": ">=1.0.0",
         "flux-types": ">=1.0.0",
@@ -267,7 +278,7 @@
       "path": "",
       "description": "Vector math (2D, 3D, 4D)",
       "dependencies": {
-        "flux-math": ">=1.0.3",
+        "flux-math": ">=1.0.5",
         "flux-types": ">=1.0.0"
       }
     },
@@ -287,7 +298,7 @@
       "path": "",
       "description": "Windows platform bindings",
       "dependencies": {
-        "flux-math": ">=1.0.3",
+        "flux-math": ">=1.0.5",
         "flux-types": ">=1.0.0"
       }
     },

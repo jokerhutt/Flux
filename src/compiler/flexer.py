@@ -811,7 +811,50 @@ class FluxLexer:
                 result += self.current_char()
                 self.advance()
         #print("DECIMAL COUNT:", dc)
-        
+
+        # Check for scientific notation: e/E followed by optional +/- and digits
+        # e.g. 1e-15, 2.5E+10, 3e6
+        if self.current_char() and self.current_char() in 'eE':
+            exp_char = self.current_char()
+            next1 = self.peek_char(1)
+            next2 = self.peek_char(2)
+
+            # Valid if next is a digit, or +/- followed by a digit
+            exp_valid = (next1 and next1.isdigit()) or \
+                        (next1 in '+-' and next2 and next2.isdigit())
+
+            if exp_valid:
+                # Consume 'e'/'E'
+                self.advance()
+                exp_str = ""
+                sign = 1
+                if self.current_char() in '+-':
+                    if self.current_char() == '-':
+                        sign = -1
+                    self.advance()
+                while self.current_char() and self.current_char().isdigit():
+                    exp_str += self.current_char()
+                    self.advance()
+
+                exponent = int(exp_str) * sign  # may be negative
+
+                # Expand into a plain decimal string (no scientific notation in value)
+                # Use Python's Decimal for exact string expansion without float drift
+                from decimal import Decimal
+                expanded_decimal = Decimal(result) * (Decimal(10) ** exponent)
+
+                # Format as plain fixed-point string (no 'E' notation)
+                expanded_str = format(expanded_decimal, 'f')
+                if '.' in expanded_str:
+                    expanded_str = expanded_str.rstrip('0').rstrip('.')
+
+                # Choose float vs double based on the absolute magnitude of the exponent
+                abs_exp = abs(exponent)
+                if abs_exp <= 5:
+                    return Token(TokenType.FLOAT, expanded_str, start_pos[0], start_pos[1])
+                else:
+                    return Token(TokenType.DOUBLE, expanded_str, start_pos[0], start_pos[1])
+
         # Determine token type based on suffixes
         token_type = TokenType.SINT_LITERAL
         
