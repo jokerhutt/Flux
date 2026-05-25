@@ -1699,6 +1699,14 @@ class CodegenVisitor:
                     # Stack/pointer var: null the alloca to invalidate -- cannot free stack memory
                     if isinstance(var_ptr.type.pointee, ir.PointerType):
                         null = ir.Constant(var_ptr.type.pointee, None)
+                    elif isinstance(var_ptr.type.pointee, (ir.LiteralStructType, ir.IdentifiedStructType, ir.ArrayType)):
+                        # `this` is a function argument of type T* (not an alloca of T*),
+                        # so var_ptr.type.pointee is the struct/array type itself.
+                        # ir.Constant(struct_type, 0) crashes because llvmlite expects a
+                        # list of per-field constants, not a scalar int.
+                        # Delegate to TypeSystem.get_default_initializer which handles
+                        # all aggregate types recursively (structs, arrays, nested structs).
+                        null = TypeSystem.get_default_initializer(var_ptr.type.pointee)
                     else:
                         null = ir.Constant(var_ptr.type.pointee, 0)
                     builder.store(null, var_ptr)
@@ -6464,22 +6472,30 @@ class CodegenVisitor:
                 # VLA: cannot store an aggregate initializer into an element pointer — skip init
                 return alloca
             else:
-                alloca = builder.alloca(llvm_type, name=node.name)
-        else:
-            # If inside a switch case body, hoist the alloca to the function entry
-            # block so it doesn't land mid-CFG (LLVM requires allocas in entry block)
-            alloca_block = getattr(builder, '_switch_case_alloca_block', None)
-            if alloca_block is not None:
                 current_block = builder.block
-                entry_term = alloca_block.terminator
+                entry_block = builder.block.function.entry_basic_block
+                entry_term = entry_block.terminator
                 if entry_term is not None:
                     builder.position_before(entry_term)
                 else:
-                    builder.position_at_end(alloca_block)
+                    builder.position_at_end(entry_block)
                 alloca = builder.alloca(llvm_type, name=node.name)
                 builder.position_at_end(current_block)
+        else:
+            # Always hoist alloca to the function entry block so that allocas
+            # inside loops (for/while/do-while) don't grow the stack on every
+            # iteration.  LLVM only reclaims alloca space when the function
+            # returns, so an alloca in a loop body that targets a back-edge
+            # permanently ratchets rsp downward, causing a stack overflow.
+            current_block = builder.block
+            entry_block = builder.block.function.entry_basic_block
+            entry_term = entry_block.terminator
+            if entry_term is not None:
+                builder.position_before(entry_term)
             else:
-                alloca = builder.alloca(llvm_type, name=node.name)
+                builder.position_at_end(entry_block)
+            alloca = builder.alloca(llvm_type, name=node.name)
+            builder.position_at_end(current_block)
 
         if resolved_type_spec:
             alloca._flux_type_spec = resolved_type_spec

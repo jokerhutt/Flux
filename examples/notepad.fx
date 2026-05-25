@@ -22,7 +22,7 @@ def update_title(HWND hwnd) -> void
             star = " *\0";
 
     strcpy(title, base);
-    strcat(title, (g_filename[0] != (byte)0) ? g_filename : untitled);
+    strcat(title, (g_filename[0] != 0) ? g_filename : untitled);
     if (g_modified) { strcat(title, star); };
     SetWindowTextA(hwnd, (LPCSTR)title);
     return;
@@ -44,10 +44,10 @@ def do_save(HWND hwnd, bool save_as) -> bool
             defext = "txt\0",
             cap    = "Save As\0";
 
-    if (g_filename[0] == (byte)0 | save_as)
+    if (g_filename[0] == 0 | save_as)
     {
-        path[0] = (byte)0;
-        if (g_filename[0] != (byte)0) { strcpy(path, g_filename); };
+        path[0] = 0;
+        if (g_filename[0] != 0) { strcpy(path, g_filename); };
 
         memset((void*)@ofn, 0, sizeof(OPENFILENAMEA) / 8);
         ofn.lStructSize = (DWORD)(sizeof(OPENFILENAMEA) / 8);
@@ -90,7 +90,7 @@ def do_open(HWND hwnd) -> void
     noopstr filter = "Text Files\0*.txt\0All Files\0*.*\0\0",
             cap    = "Open\0";
 
-    path[0] = (byte)0;
+    path[0] = 0;
     memset((void*)@ofn, 0, sizeof(OPENFILENAMEA) / 8);
     ofn.lStructSize = (DWORD)(sizeof(OPENFILENAMEA) / 8);
     ofn.hwndOwner   = hwnd;
@@ -112,7 +112,7 @@ def do_open(HWND hwnd) -> void
 
     ReadFile(hf, buf, (DWORD)fsize, @bread, STDLIB_GVP);
     CloseHandle(hf);
-    ((byte*)buf)[fsize] = (byte)0;
+    ((byte*)buf)[fsize] = 0;
 
     SetWindowTextA(g_hwnd_edit, (LPCSTR)buf);
     free(buf);
@@ -132,7 +132,7 @@ def do_new(HWND hwnd) -> void
         if (r == IDYES)    { do_save(hwnd, false); };
     };
     SetWindowTextA(g_hwnd_edit, (LPCSTR)"\0");
-    g_filename[0] = (byte)0;
+    g_filename[0] = 0;
     g_modified    = false;
     update_title(hwnd);
     return;

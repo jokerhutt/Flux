@@ -91,8 +91,9 @@ using standard::memory::allocators::stdheap;
 extern
 {
 #ifdef __WINDOWS__
+    stdcall !!
+        GetStdHandle(int nStdHandle) -> i64;
     def !!
-        GetStdHandle(int nStdHandle) -> i64,
         GetCommandLineW() -> wchar*,
         LocalFree(void* x) -> void*;
 #endif;
