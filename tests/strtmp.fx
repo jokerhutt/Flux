@@ -5,6 +5,37 @@ using standard::io::console;
 struct myStru<T>
 {
 	T a, b;
+    T* c;
+};
+
+namespace XYZ_TEST
+{
+    struct myStru2<T>
+    {
+        T a, b;
+        T* c;
+    };
+
+    def _testfunc<T>(myStru2<T>* t) -> void {};
+
+    def _testfunc2<T>(i32 a) -> int
+    {
+        myStru2<T> x;
+        return x;
+    };
+
+    def _testfunc3<T>(i32 a) -> myStru2<T>
+    {
+        myStru2<T> x = _testfunc2<T>(a);
+        return x;
+    };
+
+    def _testfunc4<T>(myStru2<T>* a, myStru2<T>* b) -> myStru2<T>
+    {
+        if (true) {return _testfunc2<T>(a.b);};
+        T x;
+        return _testfunc2<T>(a.b);
+    };
 };
 
 def foo<T, U>(T a, U b) -> U
@@ -15,6 +46,10 @@ def foo<T, U>(T a, U b) -> U
 def bar(myStru<int> a, int b) -> int
 {
     return foo(a, 3);
+};
+
+def baz<T>(myStru<T>* a) -> void
+{
 };
 
 macro macNZ(x)
