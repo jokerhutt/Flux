@@ -6472,22 +6472,30 @@ class CodegenVisitor:
                 # VLA: cannot store an aggregate initializer into an element pointer — skip init
                 return alloca
             else:
-                alloca = builder.alloca(llvm_type, name=node.name)
-        else:
-            # If inside a switch case body, hoist the alloca to the function entry
-            # block so it doesn't land mid-CFG (LLVM requires allocas in entry block)
-            alloca_block = getattr(builder, '_switch_case_alloca_block', None)
-            if alloca_block is not None:
                 current_block = builder.block
-                entry_term = alloca_block.terminator
+                entry_block = builder.block.function.entry_basic_block
+                entry_term = entry_block.terminator
                 if entry_term is not None:
                     builder.position_before(entry_term)
                 else:
-                    builder.position_at_end(alloca_block)
+                    builder.position_at_end(entry_block)
                 alloca = builder.alloca(llvm_type, name=node.name)
                 builder.position_at_end(current_block)
+        else:
+            # Always hoist alloca to the function entry block so that allocas
+            # inside loops (for/while/do-while) don't grow the stack on every
+            # iteration.  LLVM only reclaims alloca space when the function
+            # returns, so an alloca in a loop body that targets a back-edge
+            # permanently ratchets rsp downward, causing a stack overflow.
+            current_block = builder.block
+            entry_block = builder.block.function.entry_basic_block
+            entry_term = entry_block.terminator
+            if entry_term is not None:
+                builder.position_before(entry_term)
             else:
-                alloca = builder.alloca(llvm_type, name=node.name)
+                builder.position_at_end(entry_block)
+            alloca = builder.alloca(llvm_type, name=node.name)
+            builder.position_at_end(current_block)
 
         if resolved_type_spec:
             alloca._flux_type_spec = resolved_type_spec
