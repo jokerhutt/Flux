@@ -22,7 +22,7 @@
 
 #ifndef FLUX_STANDARD_MATRICES
 #def FLUX_STANDARD_MATRICES 1;
-using standard::vectors::Vec3;
+using standard::vectors;
 
 namespace standard
 {

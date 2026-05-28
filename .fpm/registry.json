@@ -1,1 +1,22 @@
-{}
+{
+  "flux-hotpatch-framework": {
+    "version": "1.0.0",
+    "description": "Runtime hotpatching and detouring, function hooking, network support.",
+    "path": "fhf",
+    "author": "Karac V. Thweatt",
+    "license": "https://github.com/kvthweatt/Flux/blob/main/LICENSE",
+    "entries": {
+      "entry": "fhf.fx",
+      "PatchBundleFormat": "fhf_bundle.fx",
+      "TrampolineManager": "fhf_tramp.fx",
+      "PatchEngine": "fhf_engine.fx",
+      "ThreadSuspensionLayer": "fhf_threads.fx",
+      "CLI-Tooling": "fhf_cli.fx",
+      "RemotePatchingLayer": "fhf_remote.fx",
+      "HotpatchRuntime": "fhf_runtime.fx",
+      "HotpatchCryptography": "fhf_crypto.fx",
+      "SymbolResolver": "fhf_sym.fx",
+      "HotpatchTypes": "fhf_types.fx"
+    }
+  }
+}

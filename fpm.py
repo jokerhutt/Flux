@@ -10,17 +10,22 @@ Usage:
     fpm install <package>       Install a specific package
     fpm install --stdlib        Install the full standard library
     fpm install --all           Install everything (stdlib + registered packages)
+    fpm search <term>           Search packages by name or description
     fpm list                    List installed packages
     fpm list --available        List all available packages
     fpm remove <package>        Remove an installed package
     fpm update <package>        Update a package to latest
     fpm update --all            Update all installed packages
+    fpm check                   Validate installed dependencies and file presence
     fpm info <package>          Show package details
+    fpm init                    Create a package.json for an existing project
     fpm create                  Interactively scaffold a new Flux package
+    fpm fixdeps <pack>          Auto-fix dependencies from source imports
+    fpm fixdeps <pack> --check  Dry-run: show what fixdeps would change
     fpm addsource <url>         Add a remote package source
     fpm removesource <url>      Remove a package source
     fpm sources                 List configured sources
-    fpm publish <package>       Publish a local package to the fpm server on port 8080
+    fpm publish <package>       Publish a local package to the fpm server
 """
 
 import os
@@ -46,6 +51,8 @@ PACKAGES_DIR    = FPM_DIR / "packages"
 REGISTRY_FILE   = FPM_DIR / "registry.json"
 INSTALLED_FILE  = FPM_DIR / "installed.json"
 SOURCES_FILE    = FPM_DIR / "sources.json"
+SOURCE_CACHE_FILE = FPM_DIR / "source-cache.json"
+SOURCE_CACHE_TTL  = 3600  # seconds before a cached index is considered stale
 STDLIB_BASE_URL = "https://raw.githubusercontent.com/kvthweatt/FluxLang/main/src/stdlib"
 FPM_USER_AGENT  = "FluxPackageManager-1.0.0"
 FPM_SERVER_PORT = 8080
@@ -139,14 +146,36 @@ def parse_version(version_str: str) -> tuple:
 def check_version_constraint(installed_version: str, constraint: str) -> bool:
     """
     Check if an installed version satisfies a constraint string.
-    Supports: '1.0.0' (exact), '>1.0.0', '<1.0.0', '>=1.0.0', '<=1.0.0',
-              '>1.0.0 <2.0.0' (range), '>=1.0.0 <2.0.0' (inclusive range)
+    Supports:
+      '1.0.0'            exact match
+      '>1.0.0'           strictly greater
+      '<1.0.0'           strictly less
+      '>=1.0.0'          greater or equal
+      '<=1.0.0'          less or equal
+      '>1.0.0 <2.0.0'   range (space-separated, all parts must pass)
+      '^1.2.3'           compatible: >=1.2.3 <2.0.0 (major locked)
+      '~=1.2.3'          compatible release: >=1.2.3 <1.3.0 (minor locked)
     """
     installed = parse_version(installed_version)
     parts = constraint.strip().split()
 
-    def evaluate(part):
-        if part.startswith(">="):
+    def evaluate(part: str) -> bool:
+        if part.startswith("~="):
+            # Compatible release: >= specified, < next minor
+            # ~=1.2.3 means >=1.2.3, <1.3.0  (minor is locked, patch can vary)
+            base = parse_version(part[2:])
+            # Upper bound: increment the second-to-last component, drop the last
+            if len(base) >= 2:
+                upper = base[:-1][:-1] + (base[-2] + 1,)
+            else:
+                upper = (base[0] + 1,)
+            return installed >= base and installed < upper
+        elif part.startswith("^"):
+            # Caret: >= specified, < next major
+            base = parse_version(part[1:])
+            upper = (base[0] + 1,)
+            return installed >= base and installed < upper
+        elif part.startswith(">="):
             return installed >= parse_version(part[2:])
         elif part.startswith("<="):
             return installed <= parse_version(part[2:])
@@ -426,17 +455,74 @@ def cmd_listsources(sources: dict):
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
 
-def load_registry() -> dict:
-    """Load stdlib + fpm_registry.json + all configured sources."""
+def load_source_cache() -> dict:
+    """Load the on-disk source cache, returning {} if missing or corrupt."""
+    if not SOURCE_CACHE_FILE.exists():
+        return {}
+    try:
+        with open(SOURCE_CACHE_FILE) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_source_cache(cache: dict):
+    FPM_DIR.mkdir(parents=True, exist_ok=True)
+    with open(SOURCE_CACHE_FILE, "w") as f:
+        json.dump(cache, f, indent=2)
+
+
+def load_registry(refresh: bool = False) -> dict:
+    """
+    Load stdlib + fpm_registry.json + all configured sources.
+
+    Source index data is cached in source-cache.json and only re-fetched when:
+      - refresh=True  (e.g. 'fpm update', 'fpm install', 'fpm addsource')
+      - the cache entry is older than SOURCE_CACHE_TTL seconds
+      - the cache entry is missing for a configured source
+    """
+    import time
     registry = dict(STDLIB_PACKAGES)
+
     # Local registry file
     if REGISTRY_FILE.exists():
         with open(REGISTRY_FILE) as f:
-            registry.update(json.load(f))
-    # All configured sources
-    for source_name, source_info in load_sources().items():
-        packages = fetch_source(source_name, source_info)
-        registry.update(packages)
+            local_reg = json.load(f)
+        registry.update(local_reg)
+
+    sources = load_sources()
+    if not sources:
+        return registry
+
+    cache     = load_source_cache()
+    now       = time.time()
+    cache_dirty = False
+
+    for source_name, source_info in sources.items():
+        entry     = cache.get(source_name, {})
+        cached_at = entry.get("cached_at", 0)
+        stale     = (now - cached_at) > SOURCE_CACHE_TTL
+
+        if refresh or stale or "packages" not in entry:
+            pkgs = fetch_source(source_name, source_info)
+            if pkgs:
+                cache[source_name] = {"cached_at": now, "packages": pkgs}
+                cache_dirty = True
+            else:
+                # Network failed — fall back to stale cache if available
+                if "packages" in entry:
+                    print(f"  WARNING: Could not reach source '{source_name}', using cached index.")
+                    pkgs = entry["packages"]
+                else:
+                    pkgs = {}
+        else:
+            pkgs = entry.get("packages", {})
+
+        registry.update(pkgs)
+
+    if cache_dirty:
+        save_source_cache(cache)
+
     return registry
 
 
@@ -658,7 +744,9 @@ def cmd_remove(args, registry: dict, installed: dict):
         if name not in installed:
             print(f"  Not installed: {name}")
             continue
-        pkg_dir = PACKAGES_DIR / name
+        # Use the "path" field (actual subdir) not the package name
+        pkg_subdir = installed[name].get("path") or name
+        pkg_dir = PACKAGES_DIR / pkg_subdir if pkg_subdir else PACKAGES_DIR / name
         if pkg_dir.exists():
             shutil.rmtree(pkg_dir)
         del installed[name]
@@ -673,17 +761,8 @@ def cmd_update(args, registry: dict, installed: dict):
     else:
         targets = args.package
 
-    # ── Fetch latest metadata from all sources ────────────────────────────────
-    sources = load_sources()
-    remote_registry: dict = {}
-    if sources:
-        print(f"  Fetching package index from {len(sources)} source(s)...")
-        for source_name, source_info in sources.items():
-            url = source_info.get("source-url", "")
-            print(f"    [{source_name}] {url}/packages.json")
-            pkgs = fetch_source(source_name, source_info)
-            remote_registry.update(pkgs)
-        print()
+    # registry was already loaded with refresh=True from main()
+    remote_registry = registry
 
     # ── Fetch remote stdlib if any stdlib targets ─────────────────────────────
     stdlib_targets = [n for n in targets if is_stdlib_package(n)]
@@ -749,6 +828,27 @@ def cmd_update(args, registry: dict, installed: dict):
     print(f"\nUpdate complete. {success} updated, {skipped} skipped, {failed} failed.")
 
 
+def cmd_search(args, registry: dict, installed: dict):
+    """Search available packages by name or description substring."""
+    term = args.term.lower()
+    matches = {
+        name: pkg for name, pkg in registry.items()
+        if term in name.lower() or term in pkg.get("description", "").lower()
+    }
+    if not matches:
+        print(f"  No packages found matching '{args.term}'.")
+        return
+    print(f"  Search results for '{args.term}' ({len(matches)} found):\n")
+    for name, pkg in sorted(matches.items()):
+        desc   = pkg.get("description", "")
+        marker = " [installed]" if name in installed else ""
+        src    = pkg.get("_source_name", "stdlib" if name in STDLIB_PACKAGES else "local")
+        print(f"  {name:<30} v{pkg['version']:<10} {desc}{marker}")
+        if pkg.get("dependencies"):
+            deps = ", ".join(pkg["dependencies"].keys())
+            print(f"  {'':30} deps: {deps}")
+
+
 def cmd_list(args, registry: dict, installed: dict):
     if args.available:
         print(f"Available packages ({len(registry)}):\n")
@@ -803,6 +903,53 @@ def cmd_info(args, registry: dict, installed: dict):
                     print(f"                -> {f}")
         else:
             print(f"  Status:       not installed")
+
+
+# ─── Dependency checker ──────────────────────────────────────────────────────
+
+def cmd_check(args, registry: dict, installed: dict):
+    """
+    Validate that every installed package's declared dependencies are satisfied.
+    Also warns about installed packages whose source files are missing on disk.
+    """
+    issues = 0
+    checked = 0
+
+    for name, rec in sorted(installed.items()):
+        if rec.get("source") == "stdlib":
+            continue  # stdlib is always present
+
+        checked += 1
+        pkg_deps = rec.get("dependencies", {})
+
+        # ── Dependency satisfaction ───────────────────────────────────────────
+        for dep_name, constraint in pkg_deps.items():
+            if dep_name not in installed:
+                print(f"  MISSING DEP  {name}: requires '{dep_name}' ({constraint}) — not installed")
+                print(f"               Run: fpm install {dep_name}")
+                issues += 1
+            elif not check_version_constraint(installed[dep_name]["version"], constraint):
+                have = installed[dep_name]["version"]
+                print(f"  BAD VERSION  {name}: requires '{dep_name}' {constraint}, "
+                      f"have v{have}")
+                print(f"               Run: fpm update {dep_name}")
+                issues += 1
+
+        # ── File presence ─────────────────────────────────────────────────────
+        files = rec.get("files", [])
+        if rec.get("file") and not files:
+            files = [rec["file"]]
+        missing_files = [f for f in files if not Path(f).exists()]
+        if missing_files:
+            for mf in missing_files:
+                print(f"  MISSING FILE {name}: {mf}")
+            print(f"               Run: fpm install --force {name}")
+            issues += 1
+
+    if issues == 0:
+        print(f"  ✔  All {checked} third-party package(s) look healthy.")
+    else:
+        print(f"\n  {issues} issue(s) found across {checked} package(s).")
 
 
 # ─── Package creation wizard ──────────────────────────────────────────────────
@@ -920,6 +1067,84 @@ def _generate_boilerplate(pkg_name: str, description: str,
             )
             files[filename] = header + label_body + footer
     return files
+
+
+def cmd_init(args, registry: dict):
+    """
+    Scaffold a package.json for an existing directory of .fx files.
+    Does not generate any source files — just the manifest.
+    """
+    print("\n╔════════════════════════════════════════════╗")
+    print("║        fpm init — Package Init Wizard         ║")
+    print("╚════════════════════════════════════════════╝")
+    print("  Creates a package.json for an existing project. Press Ctrl-C to abort.\n")
+
+    # Target directory
+    target_str = _ask("Package directory", str(Path.cwd()))
+    target     = Path(target_str).expanduser().resolve()
+    if not target.exists():
+        print(f"  ERROR: Directory does not exist: {target}")
+        return
+
+    # Discover .fx files
+    fx_files = sorted(target.glob("*.fx"))
+    if not fx_files:
+        print(f"  No .fx files found in {target}. Are you in the right directory?")
+        if not _ask_yn("  Continue anyway?", default=False):
+            return
+
+    print(f"  Found {len(fx_files)} .fx file(s):")
+    for f in fx_files:
+        print(f"    {f.name}")
+
+    _divider("Metadata")
+    name        = _ask("Package name", target.name.lower().replace(" ", "-"))
+    version     = _ask("Version", "1.0.0")
+    description = _ask("Short description", f"A Flux package called {name}")
+    author      = _ask("Author name / email", "")
+    license_    = _ask("License", "MIT")
+
+    _divider("Entries")
+    is_multi, entry_info = _collect_entries(registry)
+
+    _divider("Dependencies")
+    deps = _collect_dependencies(registry)
+
+    # Build and write package.json
+    pkg_entry: dict = {
+        "version":     version,
+        "description": description,
+        "path":        "",
+    }
+    if author:
+        pkg_entry["author"] = author
+    pkg_entry["license"] = license_
+    if is_multi:
+        pkg_entry["entries"] = entry_info["entries"]
+    else:
+        pkg_entry["entry"] = entry_info["entry"]
+    if deps:
+        pkg_entry["dependencies"] = deps
+
+    out = target / "package.json"
+    if out.exists() and not _ask_yn(f"  {out} already exists. Overwrite?", default=False):
+        print("  Cancelled.")
+        return
+
+    with open(out, "w") as f:
+        json.dump({"packages": {name: pkg_entry}}, f, indent=2)
+    print(f"\n✔  Created {out}")
+
+    if _ask_yn("Register in local fpm registry?", default=True):
+        FPM_DIR.mkdir(parents=True, exist_ok=True)
+        local_reg: dict = {}
+        if REGISTRY_FILE.exists():
+            with open(REGISTRY_FILE) as f:
+                local_reg = json.load(f)
+        local_reg[name] = pkg_entry
+        with open(REGISTRY_FILE, "w") as f:
+            json.dump(local_reg, f, indent=2)
+        print(f"  Registered '{name}' in {REGISTRY_FILE}")
 
 
 def cmd_create(args, registry: dict):
@@ -1057,14 +1282,17 @@ def cmd_create(args, registry: dict):
             json.dump(local_reg, f, indent=2)
         print(f"  Registered '{name}' in {REGISTRY_FILE}")
 
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or (
+        "notepad" if sys.platform == "win32" else "vi"
+    )
     print(f"\n✔  Package '{name}' created at {out_dir}")
     print(f"   Next steps:")
     print(f"     cd {out_dir}")
     if is_multi:
         for fn in entry_info["entries"].values():
-            print(f"     $EDITOR {fn}")
+            print(f"     {editor} {fn}")
     else:
-        print(f"     $EDITOR {entry_info['entry']}")
+        print(f"     {editor} {entry_info['entry']}")
     print(f"   When ready, share package.json so others can add it via:")
     print(f"     fpm addsource <url-to-your-package.json>")
 
@@ -1088,7 +1316,9 @@ def cmd_publish(args):
 
     base_url = sources[source_name].get("source-url", "").rstrip("/")
     parsed   = urllib.parse.urlparse(base_url)
-    server   = f"{parsed.scheme}://{parsed.hostname}:{FPM_SERVER_PORT}"
+    # Preserve the path prefix so sources hosted under a sub-path still work.
+    # e.g. https://example.com/flux/fpm  ->  https://example.com:8080/flux/fpm
+    server   = f"{parsed.scheme}://{parsed.hostname}:{FPM_SERVER_PORT}{parsed.path.rstrip('/')}"
 
     pkg_dir  = PACKAGES_DIR / name
     manifest = pkg_dir / "package.json"
@@ -1154,30 +1384,46 @@ def _scan_imports(fx_path: Path) -> list[str]:
     Handles both single and multi-import forms:
         #import "math.fx";
         #import "math.fx", "vectors.fx";
-    Ignores lines inside block comments and skips #import inside #ifndef guards
-    that aren't terminated (best-effort; handles the common stdlib pattern).
+    Correctly skips // line comments and /* ... */ block comments so that
+    commented-out imports are not registered as real dependencies.
     """
     import re
     filenames = []
-    # Match one or more quoted filenames after #import
     pattern = re.compile(r'#import\s+((?:"[^"]+"\s*,\s*)*"[^"]+")')
     try:
         text = fx_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return filenames
+
+    in_block_comment = False
     for line in text.splitlines():
+        if in_block_comment:
+            if "*/" in line:
+                line = line[line.index("*/") + 2:]
+                in_block_comment = False
+            else:
+                continue
+
+        if "/*" in line:
+            before = line[:line.index("/*")]
+            rest   = line[line.index("/*") + 2:]
+            if "*/" in rest:
+                line = before + rest[rest.index("*/") + 2:]
+            else:
+                in_block_comment = True
+                line = before
+
+        if "//" in line:
+            line = line[:line.index("//")]
+
         stripped = line.strip()
-        # Skip blank lines and pure comments
-        if not stripped or stripped.startswith("//"):
+        if not stripped:
             continue
         m = pattern.search(stripped)
         if m:
-            # Extract every quoted token from the matched group
             for fn in re.findall(r'"([^"]+)"', m.group(1)):
                 filenames.append(fn)
     return filenames
-
-
 def _build_filename_to_package_map(packages: dict) -> dict[str, str]:
     """
     Build a reverse map: entry filename -> package name.
@@ -1194,49 +1440,117 @@ def _build_filename_to_package_map(packages: dict) -> dict[str, str]:
     return mapping
 
 
-def cmd_fixdeps(args):
+def cmd_fixdeps(args, registry: dict, installed: dict):
     """
     Scan each package's .fx source file(s) for #import directives and
     rewrite the 'dependencies' field in package.json to match what is
     actually imported, using the versions already listed in the registry.
+
+    Resolution order for pack_name:
+      1. stdlib package.json  (top-level "pack" field or a packages key)
+      2. Locally installed third-party package  (PACKAGES_DIR/<name>/package.json)
+      3. Local fpm registry file  (REGISTRY_FILE)
     """
-    pack_name = args.pack_name  # e.g. "flux-stdlib"
+    pack_name = args.pack_name  # e.g. "flux-stdlib" or "flux-hotpatch-framework"
 
     # ── Locate package.json ───────────────────────────────────────────────────
-    # Prefer the local stdlib package.json; fall back to the fpm registry file.
+
     stdlib_json_path = STDLIB_DIR / "package.json"
+    json_path = None
+    root = None
+    packages = None
+    wrap_key = None
+
+    # 1. Check stdlib package.json
     if stdlib_json_path.exists():
-        json_path = stdlib_json_path
-    elif REGISTRY_FILE.exists():
-        json_path = REGISTRY_FILE
-    else:
-        print(f"  ERROR: No package.json found. "
-              f"Expected at {stdlib_json_path} or {REGISTRY_FILE}")
+        with open(stdlib_json_path) as f:
+            candidate = json.load(f)
+        top_pack = candidate.get("pack", "")
+        pkgs = candidate.get("packages", candidate)
+        if pack_name == top_pack or pack_name in pkgs:
+            json_path = stdlib_json_path
+            root = candidate
+            if "packages" in candidate:
+                packages = candidate["packages"]
+                wrap_key = "packages"
+            else:
+                packages = candidate
+                wrap_key = None
+
+    # 2. Check locally installed third-party packages
+    if json_path is None:
+        # The "path" field in the package metadata is the actual subdirectory
+        # name under PACKAGES_DIR (e.g. "fhf"), which may differ from pack_name.
+        # Peek at the registry and installed records to find it; fall back to pack_name.
+        _pkg_meta = registry.get(pack_name) or installed.get(pack_name) or {}
+        _pkg_subdir = _pkg_meta.get("path") or pack_name
+        installed_pkg_json = PACKAGES_DIR / _pkg_subdir / "package.json"
+        if installed_pkg_json.exists():
+            with open(installed_pkg_json) as f:
+                candidate = json.load(f)
+            # A per-package package.json may be a bare metadata dict or wrapped
+            # in {"packages": {pack_name: {...}}}.
+            if "packages" in candidate and pack_name in candidate["packages"]:
+                json_path = installed_pkg_json
+                root = candidate
+                packages = candidate["packages"]
+                wrap_key = "packages"
+            else:
+                # Treat the whole file as a single-package bare dict; wrap it
+                # so the rest of the function can work uniformly.
+                json_path = installed_pkg_json
+                root = {pack_name: candidate}
+                packages = root
+                wrap_key = None
+
+    # 3. Fall back to the fpm registry file
+    if json_path is None and REGISTRY_FILE.exists():
+        with open(REGISTRY_FILE) as f:
+            candidate = json.load(f)
+        pkgs = candidate.get("packages", candidate)
+        if pack_name in pkgs:
+            json_path = REGISTRY_FILE
+            root = candidate
+            if "packages" in candidate:
+                packages = candidate["packages"]
+                wrap_key = "packages"
+            else:
+                packages = candidate
+                wrap_key = None
+
+    if json_path is None:
+        # Build a helpful list of places we looked
+        _pkg_meta2 = registry.get(pack_name) or installed.get(pack_name) or {}
+        _pkg_subdir2 = _pkg_meta2.get("path") or pack_name
+        installed_pkg_json = PACKAGES_DIR / _pkg_subdir2 / "package.json"
+        print(f"  ERROR: '{pack_name}' was not found in any known package source.")
+        print(f"  Checked:")
+        print(f"    stdlib  : {stdlib_json_path}")
+        print(f"    installed: {installed_pkg_json}")
+        print(f"    registry: {REGISTRY_FILE}")
+        print(f"  If the package is installed, try 'fpm list' to verify.")
         return
 
-    with open(json_path) as f:
-        root = json.load(f)
-
-    # Support both flat {packages: {...}} and bare {pkg: {...}} layouts
-    if "packages" in root:
-        packages = root["packages"]
-        wrap_key = "packages"
-    else:
-        packages = root
-        wrap_key = None
-
-    # Verify the requested pack name is actually a key inside the JSON
-    # (for flux-stdlib this is the top-level "pack" field, not a package name;
-    # we use it only as a label — the command always operates on all packages
-    # in the file).
-    top_pack = root.get("pack", "")
-    if pack_name != top_pack and pack_name not in packages:
-        print(f"  ERROR: '{pack_name}' is not a known pack or package in {json_path}")
-        print(f"  Top-level pack name in that file: '{top_pack}'")
-        return
+    # ── Determine source root for .fx files ────────────────────────────────────────
+    # stdlib packages live under STDLIB_DIR.
+    # Third-party packages: .fpm/packages/<name>/ only holds the downloaded
+    # manifest, not the source files. The actual .fx sources live in the
+    # project root (FLUXC_SRCDIR), optionally under a sub_path.
+    try:
+        json_path.relative_to(STDLIB_DIR)
+        is_stdlib = True
+        src_root = STDLIB_DIR
+    except ValueError:
+        is_stdlib = False
+        src_root = json_path.parent  # PACKAGES_DIR/<path-subdir>
 
     # ── Build filename → package-name reverse map ─────────────────────────────
+    # Build reverse map from all known packages so cross-package imports resolve
     fn_to_pkg = _build_filename_to_package_map(packages)
+    fn_to_pkg.update(_build_filename_to_package_map(registry))
+    fn_to_pkg.update(_build_filename_to_package_map(installed))
+    # Let local packages dict win (override registry/installed for same filenames)
+    fn_to_pkg.update(_build_filename_to_package_map(packages))
 
     # ── Scan each package ─────────────────────────────────────────────────────
     print(f"\n  fixdeps — scanning packages in '{json_path}'\n")
@@ -1249,13 +1563,13 @@ def cmd_fixdeps(args):
 
         # Collect the .fx file(s) to scan
         if "entries" in pkg:
-            base = STDLIB_DIR / sub_path if sub_path else STDLIB_DIR
+            base = src_root / sub_path if sub_path else src_root
             fx_files = [base / fn for fn in pkg["entries"].values()]
         else:
             entry = pkg.get("entry", "")
             if not entry:
                 continue
-            base = STDLIB_DIR / sub_path if sub_path else STDLIB_DIR
+            base = src_root / sub_path if sub_path else src_root
             fx_files = [base / entry]
 
         # Gather all imports across all files for this package
@@ -1288,7 +1602,16 @@ def cmd_fixdeps(args):
                 continue
             if dep_pkg_name == pkg_name:
                 continue  # self-import, ignore
-            dep_version = packages[dep_pkg_name]["version"]
+            # Look up version: local packages dict first, then registry, then installed
+            if dep_pkg_name in packages:
+                dep_version = packages[dep_pkg_name]["version"]
+            elif dep_pkg_name in registry:
+                dep_version = registry[dep_pkg_name]["version"]
+            elif dep_pkg_name in installed:
+                dep_version = installed[dep_pkg_name]["version"]
+            else:
+                unknown_imports.append(fn)
+                continue
             new_deps[dep_pkg_name] = f">={dep_version}"
 
         old_deps = pkg.get("dependencies", {})
@@ -1318,9 +1641,14 @@ def cmd_fixdeps(args):
         pkg["dependencies"] = new_deps
         changed_count += 1
 
-    # ── Write back ────────────────────────────────────────────────────────────
+    # ── Write back (or dry-run report) ───────────────────────────────────────
     if changed_count == 0:
         print(f"  All {skipped_count} package(s) already up-to-date. Nothing to write.")
+        return
+
+    if getattr(args, "check", False):
+        print(f"\n  --check mode: {changed_count} package(s) would be updated, "
+              f"{skipped_count} unchanged. Nothing written.")
         return
 
     if wrap_key:
@@ -1331,6 +1659,12 @@ def cmd_fixdeps(args):
     with open(json_path, "w") as f:
         json.dump(root, f, indent=2)
         f.write("\n")
+
+    # Sync installed.json so fpm list / dependency resolution see fresh deps
+    for pkg_name, pkg in packages.items():
+        if pkg_name in installed:
+            installed[pkg_name]["dependencies"] = pkg.get("dependencies", {})
+    save_installed(installed)
 
     print(f"\n✔  Updated {changed_count} package(s), "
           f"{skipped_count} unchanged.")
@@ -1362,6 +1696,12 @@ def main():
     p_update.add_argument("package", nargs="*", help="Package name(s) to update")
     p_update.add_argument("--all", action="store_true", help="Update all installed packages")
 
+    # check
+    subparsers.add_parser("check", help="Validate installed package dependencies and files")
+
+    # init
+    subparsers.add_parser("init", help="Create a package.json for an existing project")
+
     # create
     subparsers.add_parser("create", help="Interactively scaffold a new Flux package")
 
@@ -1389,6 +1729,14 @@ def main():
         "pack_name",
         help="Pack name to fix (e.g. flux-stdlib)"
     )
+    p_fixdeps.add_argument(
+        "--check", action="store_true",
+        help="Dry run: report what would change without writing anything"
+    )
+
+    # search
+    p_search = subparsers.add_parser("search", help="Search packages by name or description")
+    p_search.add_argument("term", help="Search term")
 
     # list
     p_list = subparsers.add_parser("list", help="List packages")
@@ -1411,17 +1759,23 @@ def main():
     STDLIB_PACKAGES.update(load_stdlib_json())
 
     sources   = load_sources()
-    registry  = load_registry()
+    registry  = load_registry(refresh=args.command in ("install", "update", "addsource"))
     installed = load_installed()
 
     if args.command == "install":
         cmd_install(args, registry, installed)
+    elif args.command == "check":
+        cmd_check(args, registry, installed)
+    elif args.command == "init":
+        cmd_init(args, registry)
     elif args.command == "create":
         cmd_create(args, registry)
     elif args.command == "remove":
         cmd_remove(args, registry, installed)
     elif args.command == "update":
         cmd_update(args, registry, installed)
+    elif args.command == "search":
+        cmd_search(args, registry, installed)
     elif args.command == "list":
         cmd_list(args, registry, installed)
     elif args.command == "info":
@@ -1435,7 +1789,7 @@ def main():
     elif args.command == "publish":
         cmd_publish(args)
     elif args.command == "fixdeps":
-        cmd_fixdeps(args)
+        cmd_fixdeps(args, registry, installed)
 
 
 if __name__ == "__main__":

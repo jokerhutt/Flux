@@ -499,6 +499,11 @@ namespace standard
                 return this.type == socket_type.UDP;
             };
 
+            def __expr() -> socket*
+            {
+                return this;
+            };
+
             def __exit() -> void
             {
                 this.close();
@@ -761,12 +766,13 @@ namespace standard
         // Returns total bytes sent on success, -1 on error
         def tcp_send_all(int sockfd, byte[] xdata, int length) -> int
         {
-            int total_sent = 0;
-            int remaining = length;
+            int total_sent = 0,
+                remaining = length,
+                sent;
             
             while (total_sent < length)
             {
-                int sent = send(sockfd, xdata + total_sent, remaining, 0);
+                sent = send(sockfd, xdata + total_sent, remaining, 0);
                 if (sent <= 0)
                 {
                     return -1;
@@ -783,12 +789,13 @@ namespace standard
         // Returns total bytes received on success, -1 on error
         def tcp_recv_all(int sockfd, byte[] buffer, int length) -> int
         {
-            int total_recv = 0;
-            int remaining = length;
+            int total_recv = 0,
+                remaining = length,
+                received;
             
             while (total_recv < length)
             {
-                int received = recv(sockfd, buffer + total_recv, remaining, 0);
+                received = recv(sockfd, buffer + total_recv, remaining, 0);
                 if (received <= 0)
                 {
                     return -1;

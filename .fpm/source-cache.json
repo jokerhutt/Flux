@@ -1,0 +1,17 @@
+{
+  "UTTCex": {
+    "cached_at": 1779998979.3843281,
+    "packages": {
+      "test-pack": {
+        "version": "0.0.1",
+        "description": "A Flux package called test-pack",
+        "path": "",
+        "author": "Karac Thweatt",
+        "license": "MIT",
+        "entry": "test_pack.fx",
+        "_source_url": "https://www.uttcex.net/flux/fpm/public/packages/test-pack/package.json",
+        "_source_name": "UTTCex"
+      }
+    }
+  }
+}

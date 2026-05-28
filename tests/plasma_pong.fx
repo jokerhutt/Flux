@@ -19,7 +19,8 @@ using standard::math,
       standard::vectors,
       standard::system::windows,
       standard::threading,
-      standard::atomic;
+      standard::atomic,
+      OpenGL;
 
 // ============================================================================
 // SIMULATION CONSTANTS

@@ -1,8 +1,44 @@
+import io
 import os
+import sys
 from pathlib import Path
 from typing import Set, Dict, Optional, List
 
+# Reconfigure stdout/stderr to UTF-8 so Unicode characters in diagnostics
+# (arrows, checkmarks, box-drawing, etc.) don't crash on Windows consoles
+# that default to a narrow codepage like CP1252.
+for _stream_name in ('stdout', 'stderr'):
+    _stream = getattr(sys, _stream_name)
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    elif hasattr(_stream, 'buffer'):
+        setattr(sys, _stream_name,
+                io.TextIOWrapper(_stream.buffer, encoding='utf-8', errors='replace'))
+
 FLUXC_SRCDIR = Path(os.environ.get("FLUXC_SRCDIR", Path(__file__).parent)).resolve()
+
+UTF8_BOM = '\ufeff'
+
+def _read_source_file(path) -> str:
+    """Read a source file as UTF-8, stripping any BOM and warning on
+    invalid byte sequences rather than crashing hard."""
+    try:
+        with open(path, 'r', encoding='utf-8-sig') as f:   # utf-8-sig auto-strips BOM
+            return f.read()
+    except UnicodeDecodeError:
+        # Fall back: replace undecodable bytes with the replacement char and warn.
+        with open(path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        # Strip BOM manually in case utf-8-sig path wasn't reached
+        if content.startswith(UTF8_BOM):
+            content = content[1:]
+        print(
+            f"[PREPROCESSOR] WARNING: '{path}' contains invalid UTF-8 sequences. "
+            "Replacement characters (\ufffd) have been substituted. "
+            "Save the file as UTF-8 to silence this warning.",
+            file=sys.stderr,
+        )
+        return content
 
 class FXPreprocessor:
     def __init__(self, source_file, compiler_constants=None):
@@ -170,8 +206,7 @@ class FXPreprocessor:
         print(f"[PREPROCESSOR] Processing: {filepath}")
         
         # Read the file and strip comments immediately
-        with open(resolved_path, 'r', encoding='utf-8') as f:
-            content = f.read()
+        content = _read_source_file(resolved_path)
         
         # Strip all comments before processing
         content = self._strip_comments(content)

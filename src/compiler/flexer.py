@@ -17,9 +17,21 @@ Usage:
 """
 
 import re
+import io
+import sys
 from enum import Enum, auto
 from dataclasses import dataclass
 from typing import List, Optional, Iterator
+
+# Reconfigure stdout/stderr to UTF-8 so Unicode characters in diagnostics
+# don't crash on Windows consoles that default to a narrow codepage (e.g. CP1252).
+for _stream_name in ('stdout', 'stderr'):
+    _stream = getattr(sys, _stream_name)
+    if hasattr(_stream, 'reconfigure'):
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    elif hasattr(_stream, 'buffer'):
+        setattr(sys, _stream_name,
+                io.TextIOWrapper(_stream.buffer, encoding='utf-8', errors='replace'))
 
 class TokenType(Enum):
     # Literals
@@ -477,6 +489,9 @@ class Token:
 
 class FluxLexer:
     def __init__(self, source_code: str):
+        # Strip UTF-8 BOM if present (can appear when source is read without utf-8-sig)
+        if source_code.startswith('\ufeff'):
+            source_code = source_code[1:]
         self.source = source_code
         self.position = 0
         self.line = 1
@@ -593,8 +608,11 @@ class FluxLexer:
         self.position += count
     
     def skip_whitespace(self) -> bool:
-        while self.current_char() and self.current_char() in ' \t\r\n':
+        skipped = False
+        while self.current_char() and (self.current_char() in ' \t\r\n' or self.current_char().isspace()):
             self.advance()
+            skipped = True
+        return skipped
     
     def read_asm_block(self) -> Token:
         """Read an inline assembly block"""
@@ -885,7 +903,8 @@ class FluxLexer:
         result = ""
         
         while (self.current_char() and 
-               (self.current_char().isalnum() or self.current_char() == '_')):
+               (self.current_char().isascii() and
+                (self.current_char().isalnum() or self.current_char() == '_'))):
             result += self.current_char()
             self.advance()
         
@@ -986,7 +1005,7 @@ class FluxLexer:
                 continue
             
             # Identifiers and keywords
-            if char.isalpha() or char == '_':
+            if char.isascii() and (char.isalpha() or char == '_'):
                 token = self.read_identifier()
                 tokens.append(token)
                 
@@ -1070,7 +1089,13 @@ class FluxLexer:
                 self.advance()
                 continue
             
-            # Unknown character - skip it or raise error (depending on preference)
+            # Unknown character - warn if non-ASCII (UTF-8 is only valid inside strings)
+            if not char.isascii():
+                print(
+                    f"[LEXER] WARNING: non-ASCII character {char!r} (U+{ord(char):04X}) "
+                    f"at line {start_pos[0]}, col {start_pos[1]} is only valid inside string literals — skipped.",
+                    file=sys.stderr,
+                )
             self.advance()
         
         # Add EOF token
@@ -1093,8 +1118,18 @@ if __name__ == "__main__":
         args = parser.parse_args()
         
         try:
-            with open(args.file, 'r', encoding='utf-8') as f:
-                source_code = f.read()
+            try:
+                with open(args.file, 'r', encoding='utf-8-sig') as f:
+                    source_code = f.read()
+            except UnicodeDecodeError:
+                import sys as _sys
+                with open(args.file, 'r', encoding='utf-8', errors='replace') as f:
+                    source_code = f.read()
+                print(
+                    f"Warning: '{args.file}' contains invalid UTF-8 sequences; "
+                    "replacement characters have been substituted.",
+                    file=_sys.stderr,
+                )
         except FileNotFoundError:
             print(f"Error: File '{args.file}' not found.", file=sys.stderr)
             sys.exit(1)

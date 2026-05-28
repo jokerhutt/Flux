@@ -1265,6 +1265,7 @@ class ObjectDef(ASTNode):
     virtual_instances: List[Tuple[str, str, List[Expression]]] = field(default_factory=list)
     is_prototype: bool = False
     traits: List[str] = field(default_factory=list)
+    template_params: List[str] = field(default_factory=list)
 
     def codegen_type_only(self, module: ir.Module) -> ir.Type:
         """Register the struct type and symbol table entry for this object without emitting method bodies.

@@ -1092,6 +1092,34 @@ class CodegenVisitor:
                 return builder.call(_ptr_overload_func, [_lhs_ptr, _rhs_ptr],
                                     name="op_overload_result")
 
+        # Assignment: BinaryOp(ASSIGN) is emitted by the parser when an
+        # assignment expression appears in a context that yields a value
+        # (e.g. as an ExpressionStatement).  Dispatch to the same handler
+        # used by visit_Assignment so the store is typed correctly.
+        if node.operator is Operator.ASSIGN:
+            from fast import Identifier, MemberAccess, ArrayAccess, PointerDeref
+            if isinstance(node.left, Identifier):
+                rhs = self.visit(node.right, builder, module)
+                return AssignmentTypeHandler.handle_identifier_assignment(
+                    builder, module, node.left.name, rhs, node.right)
+            elif isinstance(node.left, MemberAccess):
+                rhs = self.visit(node.right, builder, module)
+                return AssignmentTypeHandler.handle_member_assignment(
+                    builder, module, node.left.object, node.left.member, rhs,
+                    value_expr=node.right)
+            elif isinstance(node.left, ArrayAccess):
+                rhs = self.visit(node.right, builder, module)
+                return AssignmentTypeHandler.handle_array_element_assignment(
+                    builder, module, node.left.array, node.left.index, node.right, rhs)
+            elif isinstance(node.left, PointerDeref):
+                ptr = self.visit(node.left.pointer, builder, module)
+                rhs = self.visit(node.right, builder, module)
+                return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, rhs)
+            else:
+                raise ValueError(
+                    f"BinaryOp ASSIGN: unsupported LHS type {type(node.left).__name__} "
+                    f"[{node.source_line}:{node.source_col}]")
+
         lhs = self.visit(node.left, builder, module)
         rhs = self.visit(node.right, builder, module)
 
@@ -5128,9 +5156,23 @@ class CodegenVisitor:
             builder._flux_va_end_fn = va_end_fn
 
         try:
+            # Template function instances are emitted at the top level (outside any
+            # namespace visit), so _current_namespace is empty when their bodies run.
+            # If the concrete FunctionDef was tagged with _source_namespace by the parser,
+            # restore that namespace context so calls to sibling functions resolve correctly.
+            _body_ns_orig_mod = getattr(module, '_current_namespace', '')
+            _body_ns_orig_st  = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ''
+            _src_ns = getattr(node, '_source_namespace', '')
+            if _src_ns and not _body_ns_orig_mod:
+                module._current_namespace = _src_ns
+                if hasattr(module, 'symbol_table'):
+                    module.symbol_table.set_namespace(_src_ns)
             self.visit(node.body, builder, module)
         finally:
             module.symbol_table.exit_scope()
+            module._current_namespace = _body_ns_orig_mod
+            if hasattr(module, 'symbol_table'):
+                module.symbol_table.set_namespace(_body_ns_orig_st)
 
         if not builder.block.is_terminated:
             if isinstance(ret_type, ir.VoidType):
@@ -7006,10 +7048,31 @@ class CodegenVisitor:
 
         # Pass 3: Process all other statements
         print("[AST] Pass 3: Processing all other statements...")
-        from fast import ContractDef as _ContractDef
-        for stmt in node.statements:
-            if not isinstance(stmt, (UsingStatement, NotUsingStatement, ExternBlock, StructDef, StructDefStatement, ObjectDef, ObjectDefStatement, _ContractDef)):
-                self.visit(stmt, builder, module)
+        from fast import ContractDef as _ContractDef, FunctionDef as _FunctionDef
+        _skip_types = (UsingStatement, NotUsingStatement, ExternBlock, StructDef,
+                       StructDefStatement, ObjectDef, ObjectDefStatement, _ContractDef)
+        _tmpl_instances = [s for s in node.statements
+                           if isinstance(s, _FunctionDef) and hasattr(s, '_source_namespace')]
+        _tmpl_emitted = set()
+        # Find the index of the last NamespaceDef in node.statements so we know
+        # when it is safe to flush template instantiations (all namespace functions
+        # registered) without disrupting the original interleaved source order.
+        _last_ns_idx = -1
+        for _i, _s in enumerate(node.statements):
+            if isinstance(_s, (NamespaceDef, NamespaceDefStatement)):
+                _last_ns_idx = _i
+        for _stmt_idx, stmt in enumerate(node.statements):
+            if isinstance(stmt, _skip_types):
+                continue
+            if isinstance(stmt, _FunctionDef) and hasattr(stmt, '_source_namespace'):
+                continue  # template instantiation — emitted after last namespace
+            self.visit(stmt, builder, module)
+            # After processing the last namespace, flush all template instantiations.
+            if _stmt_idx == _last_ns_idx:
+                for _t in _tmpl_instances:
+                    if id(_t) not in _tmpl_emitted:
+                        _tmpl_emitted.add(id(_t))
+                        self.visit(_t, builder, module)
 
         # Pass 3.5: Verify trait compliance now that all TraitDefs are registered.
         from fast import ObjectDef as _ObjectDef, ObjectDefStatement as _ObjectDefStatement
@@ -7021,6 +7084,10 @@ class CodegenVisitor:
                 obj_def = stmt.object_def
             if obj_def is None or not obj_def.traits:
                 continue
+            # Skip template object definitions that have not been instantiated —
+            # they still carry template_params and are never used directly.
+            if getattr(obj_def, 'template_params', None):
+                continue
             implemented_names = {m.name for m in obj_def.methods}
             for trait_name in obj_def.traits:
                 required = module.symbol_table._trait_registry.get(trait_name)
@@ -7029,6 +7096,11 @@ class CodegenVisitor:
                         f"Trait '{trait_name}' used by object '{obj_def.name}' is not defined "
                         f"[{obj_def.source_line}:{obj_def.source_col}]")
                 for proto in required:
+                    # Templated prototypes (e.g. def get<T>(...)) cannot be matched by
+                    # name alone — the concrete object implements them via its own template
+                    # parameter.  Skip enforcement for these.
+                    if getattr(proto, '_is_trait_template_proto', False):
+                        continue
                     if proto.name not in implemented_names:
                         raise ValueError(
                             f"Object '{obj_def.name}' does not implement required function "

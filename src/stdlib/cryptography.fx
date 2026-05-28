@@ -885,12 +885,12 @@ namespace standard
                 def mix_columns(byte* state) -> void
                 {
                     byte[4] temp;
-                    u32 col;
+                    u32 base;
                     
                     // Mix each column
-                    for (col = 0; col < 4; col++)
+                    for (u32 col; col < 4; col++)
                     {
-                        u32 base = col * 4;
+                        base = col * 4;
                         temp[0..3] = [state[base + 0], state[base + 1], state[base + 2], state[base + 3]];
                         
                         state[base + 0] = gmul2(temp[0]) ^^ gmul3(temp[1]) ^^ temp[2] ^^ temp[3];
@@ -905,12 +905,12 @@ namespace standard
                 def inv_mix_columns(byte* state) -> void
                 {
                     byte[4] temp;
-                    u32 col;
+                    u32 base;
                     
                     // Mix each column
-                    for (col = 0; col < 4; col++)
+                    for (u32 col; col < 4; col++)
                     {
-                        u32 base = col * 4;
+                        base = col * 4;
                         temp[0..3] = [state[base + 0], state[base + 1], state[base + 2], state[base + 3]];
 
                         // Multiply by inverse matrix in GF(2^8)
@@ -949,11 +949,11 @@ namespace standard
                 // AddRoundKey transformation
                 def add_round_key(byte* state, u32* round_key) -> void
                 {
-                    u32 col;
+                    u32 base;
                     // Each round_key word corresponds to a column
-                    for (col = 0; col < 4; col++)
+                    for (u32 col; col < 4; col++)
                     {
-                        u32 base = col * 4;
+                        base = col * 4;
                         state[base + 0] = state[base + 0] ^^ (byte)((round_key[col] >> 24) & 0xFF);
                         state[base + 1] = state[base + 1] ^^ (byte)((round_key[col] >> 16) & 0xFF);
                         state[base + 2] = state[base + 2] ^^ (byte)((round_key[col] >> 8) & 0xFF);
@@ -980,8 +980,7 @@ namespace standard
                 // Key expansion for AES-128
                 def aes_key_expansion(AES_CTX* ctx, byte* key) -> void
                 {
-                    u32 i;
-                    u32 temp;
+                    u32 i, temp;
                     
                     // First 4 words are the key itself
                     for (i = 0; i < 4; i++)
@@ -1647,11 +1646,12 @@ namespace standard
                     // Binary exponentiation: iterate over bits of exp from LSB
                     // exp has 8 uint limbs
                     uint* expd = @exp.digits[0];
-                    uint exp_len = exp.length;
+                    uint exp_len = exp.length,
+                         word;
 
                     for (i = 0; i < exp_len; i++)
                     {
-                        uint word = expd[i];
+                        word = expd[i];
                         for (j = 0; j < 32; j++)
                         {
                             if ((word & 1) != 0)

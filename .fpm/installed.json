@@ -7,5 +7,13 @@
       "C:\\Users\\kvthw\\Flux\\.fpm\\packages\\test-pack\\test_pack.fx"
     ],
     "source": "remote"
+  },
+  "flux-hotpatch-framework": {
+    "version": "1.0.0",
+    "entry": "fhf.fx",
+    "files": [
+      "C:\\Users\\kvthw\\Flux\\.fpm\\packages\\fhf\\fhf.fx"
+    ],
+    "source": "local"
   }
 }

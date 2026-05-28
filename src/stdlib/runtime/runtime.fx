@@ -85,7 +85,7 @@ using standard::memory::allocators::stdheap;
 //
 
 //#ifndef FLUX_STANDARD_COLLECTIONS
-//#import "redcollections.fx";
+//#import "collections.fx";
 //#endif;
 
 extern

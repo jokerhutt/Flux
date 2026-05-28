@@ -35,7 +35,7 @@
       }
     },
     "flux-cryptography": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "cryptography.fx",
       "path": "",
       "description": "Cryptographic algorithms",
@@ -151,6 +151,17 @@
         "flux-vectors": ">=1.0.1"
       }
     },
+    "flux-tensors": {
+      "version": "1.0.0",
+      "entry": "tensors.fx",
+      "path": "",
+      "description": "N order tensor library",
+      "dependencies": {
+        "flux-math": ">=1.0.5",
+        "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
+    },
     "flux-net-linux": {
       "version": "1.0.0",
       "entry": "net_linux.fx",
@@ -249,7 +260,7 @@
       "path": "",
       "description": "TLS 1.3",
       "dependencies": {
-        "flux-cryptography": ">=1.0.0",
+        "flux-cryptography": ">=1.0.1",
         "flux-net-linux": ">=1.0.0",
         "flux-net-windows": ">=1.0.1",
         "flux-types": ">=1.0.0"

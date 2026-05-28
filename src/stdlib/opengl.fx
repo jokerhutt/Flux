@@ -31,55 +31,280 @@ def{}* glCreateShader_fp(int)                 -> int,
        glDeleteShader_fp(int)                 -> void,
        glDeleteProgram_fp(int)                -> void;
 
+// ============================================================================
+// PIXELFORMATDESCRIPTOR - required for OpenGL context creation
+// ============================================================================
+
+// PIXELFORMATDESCRIPTOR for OpenGL
+struct PIXELFORMATDESCRIPTOR
+{
+    WORD nSize,
+         nVersion;
+    DWORD dwFlags;
+    BYTE iPixelType,
+         cColorBits,
+         cRedBits,
+         cRedShift,
+         cGreenBits,
+         cGreenShift,
+         cBlueBits,
+         cBlueShift,
+         cAlphaBits,
+         cAlphaShift,
+         cAccumBits,
+         cAccumRedBits,
+         cAccumGreenBits,
+         cAccumBlueBits,
+         cAccumAlphaBits,
+         cDepthBits,
+         cStencilBits,
+         cAuxBuffers,
+         iLayerType,
+         bReserved;
+    DWORD dwLayerMask,
+          dwVisibleMask,
+          dwDamageMask;
+};
+
+// ============================================================================
+// OPENGL / PFD CONSTANTS
+// ============================================================================
+
+// Pixel Format Descriptor flags
+global DWORD PFD_DRAW_TO_WINDOW = 0x00000004,
+             PFD_SUPPORT_OPENGL = 0x00000020,
+             PFD_DOUBLEBUFFER   = 0x00000001;
+global BYTE PFD_TYPE_RGBA  = 0,
+            PFD_MAIN_PLANE = 0;
+
+// ============================================================================
+// OPENGL TYPES
+// ============================================================================
+
+// OpenGL base types
+byte              as GLenum;     // Enumeration values (GL_*)
+byte              as GLboolean;  // Boolean (GL_TRUE / GL_FALSE)
+uint              as GLbitfield; // Bitfield for glClear etc.
+signed byte       as GLbyte;     // Signed 8-bit
+byte              as GLubyte;    // Unsigned 8-bit
+i16               as GLshort;    // Signed 16-bit
+u16               as GLushort;   // Unsigned 16-bit
+int               as GLint;      // Signed 32-bit
+uint              as GLuint;     // Unsigned 32-bit (handles: textures, VBOs, VAOs, shaders, programs)
+int               as GLsizei;    // Size parameter (non-negative)
+float             as GLfloat;     // 32-bit float (mapped via u64 placeholder like redtypes.fx)
+u64               as GLdouble;    // 64-bit double
+u64               as GLclampf;    // float clamped [0,1]
+
+// ============================================================================
+// OPENGL CONSTANTS
+// ============================================================================
+
+// Boolean
+GLboolean GL_FALSE = 0,
+                 GL_TRUE  = 1;
+
+// Error codes
+GLenum GL_NO_ERROR          = 0x00,
+              GL_INVALID_ENUM      = 0x00,
+              GL_INVALID_VALUE     = 0x00,
+              GL_INVALID_OPERATION = 0x00,
+              GL_OUT_OF_MEMORY     = 0x00;
+
+int GL_NO_ERROR_INT          = 0x0000,
+           GL_INVALID_ENUM_INT      = 0x0500,
+           GL_INVALID_VALUE_INT     = 0x0501,
+           GL_INVALID_OPERATION_INT = 0x0502,
+           GL_STACK_OVERFLOW_INT    = 0x0503,
+           GL_STACK_UNDERFLOW_INT   = 0x0504,
+           GL_OUT_OF_MEMORY_INT     = 0x0505;
+
+// Clear buffer bits
+int GL_COLOR_BUFFER_BIT   = 0x00004000,
+           GL_DEPTH_BUFFER_BIT   = 0x00000100,
+           GL_STENCIL_BUFFER_BIT = 0x00000400,
+           GL_ACCUM_BUFFER_BIT   = 0x00000200;
+
+// Primitives
+int GL_POINTS         = 0x0000,
+           GL_LINES          = 0x0001,
+           GL_LINE_LOOP      = 0x0002,
+           GL_LINE_STRIP     = 0x0003,
+           GL_TRIANGLES      = 0x0004,
+           GL_TRIANGLE_STRIP = 0x0005,
+           GL_TRIANGLE_FAN   = 0x0006,
+           GL_QUADS          = 0x0007,
+           GL_QUAD_STRIP     = 0x0008,
+           GL_POLYGON        = 0x0009;
+
+// Data types
+int GL_BYTE           = 0x1400,
+           GL_UNSIGNED_BYTE  = 0x1401,
+           GL_SHORT          = 0x1402,
+           GL_UNSIGNED_SHORT = 0x1403,
+           GL_INT            = 0x1404,
+           GL_UNSIGNED_INT   = 0x1405,
+           GL_FLOAT          = 0x1406,
+           GL_DOUBLE         = 0x140A;
+
+// Matrix modes
+int GL_MODELVIEW  = 0x1700,
+           GL_PROJECTION = 0x1701,
+           GL_TEXTURE    = 0x1702;
+
+// Depth / comparison functions
+int GL_NEVER    = 0x0200,
+           GL_LESS      = 0x0201,
+           GL_EQUAL     = 0x0202,
+           GL_LEQUAL    = 0x0203,
+           GL_GREATER   = 0x0204,
+           GL_NOTEQUAL  = 0x0205,
+           GL_GEQUAL    = 0x0206,
+           GL_ALWAYS    = 0x0207;
+
+// Blend factors
+int GL_ZERO                 = 0x0000,
+           GL_ONE                  = 0x0001,
+           GL_SRC_COLOR            = 0x0300,
+           GL_ONE_MINUS_SRC_COLOR  = 0x0301,
+           GL_SRC_ALPHA            = 0x0302,
+           GL_ONE_MINUS_SRC_ALPHA  = 0x0303,
+           GL_DST_ALPHA            = 0x0304,
+           GL_ONE_MINUS_DST_ALPHA  = 0x0305,
+           GL_DST_COLOR            = 0x0306,
+           GL_ONE_MINUS_DST_COLOR  = 0x0307;
+
+// Capability flags (for glEnable / glDisable)
+int GL_DEPTH_TEST           = 0x0B71,
+           GL_BLEND                = 0x0BE2,
+           GL_CULL_FACE            = 0x0B44,
+           GL_LIGHTING             = 0x0B50,
+           GL_TEXTURE_2D           = 0x0DE1,
+           GL_SCISSOR_TEST         = 0x0C11,
+           GL_LINE_SMOOTH          = 0x0B20,
+           GL_POINT_SMOOTH         = 0x0B10,
+           GL_NORMALIZE            = 0x0BA1,
+           GL_FOG                  = 0x0B60,
+           GL_STENCIL_TEST         = 0x0B90,
+           GL_ALPHA_TEST           = 0x0BC0,
+           GL_COLOR_LOGIC_OP       = 0x0BF2,
+           GL_POLYGON_OFFSET_FILL  = 0x8037,
+           GL_MULTISAMPLE          = 0x809D;
+
+// Cull face / winding
+int GL_FRONT          = 0x0404,
+           GL_BACK           = 0x0405,
+           GL_FRONT_AND_BACK = 0x0408,
+           GL_CW             = 0x0900,
+           GL_CCW            = 0x0901;
+
+// Polygon fill mode
+int GL_POINT = 0x1B00,
+           GL_LINE  = 0x1B01,
+           GL_FILL  = 0x1B02;
+
+// Shade model
+int GL_FLAT   = 0x1D00,
+           GL_SMOOTH = 0x1D01;
+
+// Texture parameters
+int GL_TEXTURE_MAG_FILTER      = 0x2800,
+           GL_TEXTURE_MIN_FILTER      = 0x2801,
+           GL_TEXTURE_WRAP_S          = 0x2802,
+           GL_TEXTURE_WRAP_T          = 0x2803,
+           GL_NEAREST                 = 0x2600,
+           GL_LINEAR                  = 0x2601,
+           GL_NEAREST_MIPMAP_NEAREST  = 0x2700,
+           GL_LINEAR_MIPMAP_NEAREST   = 0x2701,
+           GL_NEAREST_MIPMAP_LINEAR   = 0x2702,
+           GL_LINEAR_MIPMAP_LINEAR    = 0x2703,
+           GL_CLAMP                   = 0x2900,
+           GL_REPEAT                  = 0x2901,
+           GL_CLAMP_TO_EDGE           = 0x812F;
+
+// Texture formats / internal formats
+int GL_RGB             = 0x1907,
+           GL_RGBA            = 0x1908,
+           GL_LUMINANCE       = 0x1909,
+           GL_LUMINANCE_ALPHA = 0x190A,
+           GL_DEPTH_COMPONENT = 0x1902,
+           GL_ALPHA           = 0x1906,
+           GL_RGB8            = 0x8051,
+           GL_RGBA8           = 0x8058,
+           GL_DEPTH_COMPONENT16 = 0x81A5,
+           GL_DEPTH_COMPONENT24 = 0x81A6;
+
+// Buffer object targets
+int GL_ARRAY_BUFFER         = 0x8892,
+           GL_ELEMENT_ARRAY_BUFFER = 0x8893,
+           GL_UNIFORM_BUFFER       = 0x8A11;
+
+// Buffer usage hints
+int GL_STREAM_DRAW  = 0x88E0,
+           GL_STREAM_READ  = 0x88E1,
+           GL_STATIC_DRAW  = 0x88E4,
+           GL_STATIC_READ  = 0x88E5,
+           GL_DYNAMIC_DRAW = 0x88E8,
+           GL_DYNAMIC_READ = 0x88E9;
+
+// Shader types
+int GL_FRAGMENT_SHADER = 0x8B30,
+           GL_VERTEX_SHADER   = 0x8B31,
+           GL_GEOMETRY_SHADER = 0x8DD9;
+
+// Shader / program status query tokens
+int GL_COMPILE_STATUS  = 0x8B81,
+           GL_LINK_STATUS     = 0x8B82,
+           GL_INFO_LOG_LENGTH = 0x8B84,
+           GL_SHADER_TYPE     = 0x8B4F,
+           GL_DELETE_STATUS   = 0x8B80;
+
+// Framebuffer targets and attachment points
+int GL_FRAMEBUFFER              = 0x8D40,
+           GL_RENDERBUFFER             = 0x8D41,
+           GL_COLOR_ATTACHMENT0        = 0x8CE0,
+           GL_DEPTH_ATTACHMENT         = 0x8D00,
+           GL_STENCIL_ATTACHMENT       = 0x8D20,
+           GL_FRAMEBUFFER_COMPLETE     = 0x8CD5,
+           GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT       = 0x8CD6,
+           GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT = 0x8CD7,
+           GL_FRAMEBUFFER_UNSUPPORTED  = 0x8CDD;
+
+// String query tokens
+int GL_VENDOR     = 0x1F00,
+           GL_RENDERER   = 0x1F01,
+           GL_VERSION    = 0x1F02,
+           GL_EXTENSIONS = 0x1F03;
+
+// Active texture units
+int GL_TEXTURE0  = 0x84C0,
+           GL_TEXTURE1  = 0x84C1,
+           GL_TEXTURE2  = 0x84C2,
+           GL_TEXTURE3  = 0x84C3,
+           GL_TEXTURE4  = 0x84C4,
+           GL_TEXTURE5  = 0x84C5,
+           GL_TEXTURE6  = 0x84C6,
+           GL_TEXTURE7  = 0x84C7;
+
+// Fixed-function lighting constants
+int GL_LIGHT0     = 0x4000,
+           GL_LIGHT1     = 0x4001,
+           GL_LIGHT2     = 0x4002,
+           GL_LIGHT3     = 0x4003,
+           GL_AMBIENT    = 0x1200,
+           GL_DIFFUSE    = 0x1201,
+           GL_SPECULAR   = 0x1202,
+           GL_POSITION   = 0x1203,
+           GL_SHININESS  = 0x1601,
+           GL_EMISSION   = 0x1600;
+
+// Misc get tokens
+int GL_VIEWPORT          = 0x0BA2,
+           GL_MAX_TEXTURE_SIZE  = 0x0D33,
+           GL_MAX_VIEWPORT_DIMS = 0x0D3A;
 
 namespace OpenGL
-{
-    // ============================================================================
-    // PIXELFORMATDESCRIPTOR - required for OpenGL context creation
-    // ============================================================================
-
-    // PIXELFORMATDESCRIPTOR for OpenGL
-    struct PIXELFORMATDESCRIPTOR
-    {
-        WORD nSize,
-             nVersion;
-        DWORD dwFlags;
-        BYTE iPixelType,
-             cColorBits,
-             cRedBits,
-             cRedShift,
-             cGreenBits,
-             cGreenShift,
-             cBlueBits,
-             cBlueShift,
-             cAlphaBits,
-             cAlphaShift,
-             cAccumBits,
-             cAccumRedBits,
-             cAccumGreenBits,
-             cAccumBlueBits,
-             cAccumAlphaBits,
-             cDepthBits,
-             cStencilBits,
-             cAuxBuffers,
-             iLayerType,
-             bReserved;
-        DWORD dwLayerMask,
-              dwVisibleMask,
-              dwDamageMask;
-    };
-
-    // ============================================================================
-    // OPENGL / PFD CONSTANTS
-    // ============================================================================
-
-    // Pixel Format Descriptor flags
-    global DWORD PFD_DRAW_TO_WINDOW = 0x00000004,
-                 PFD_SUPPORT_OPENGL = 0x00000020,
-                 PFD_DOUBLEBUFFER   = 0x00000001;
-    global BYTE PFD_TYPE_RGBA  = 0,
-                PFD_MAIN_PLANE = 0;
-
+{         
     // ============================================================================
     // OPENGL EXTERN FUNCTION DECLARATIONS
     // ============================================================================
@@ -148,231 +373,6 @@ namespace OpenGL
         return prog;
     };
 
-    // ============================================================================
-    // OPENGL TYPES
-    // ============================================================================
-
-    // OpenGL base types
-    byte              as GLenum;     // Enumeration values (GL_*)
-    byte              as GLboolean;  // Boolean (GL_TRUE / GL_FALSE)
-    uint              as GLbitfield; // Bitfield for glClear etc.
-    signed byte       as GLbyte;     // Signed 8-bit
-    byte              as GLubyte;    // Unsigned 8-bit
-    i16               as GLshort;    // Signed 16-bit
-    u16               as GLushort;   // Unsigned 16-bit
-    int               as GLint;      // Signed 32-bit
-    uint              as GLuint;     // Unsigned 32-bit (handles: textures, VBOs, VAOs, shaders, programs)
-    int               as GLsizei;    // Size parameter (non-negative)
-    float             as GLfloat;     // 32-bit float (mapped via u64 placeholder like redtypes.fx)
-    u64               as GLdouble;    // 64-bit double
-    u64               as GLclampf;    // float clamped [0,1]
-
-    // ============================================================================
-    // OPENGL CONSTANTS
-    // ============================================================================
-
-    // Boolean
-    GLboolean GL_FALSE = 0,
-                     GL_TRUE  = 1;
-
-    // Error codes
-    GLenum GL_NO_ERROR          = 0x00,
-                  GL_INVALID_ENUM      = 0x00,
-                  GL_INVALID_VALUE     = 0x00,
-                  GL_INVALID_OPERATION = 0x00,
-                  GL_OUT_OF_MEMORY     = 0x00;
-
-    int GL_NO_ERROR_INT          = 0x0000,
-               GL_INVALID_ENUM_INT      = 0x0500,
-               GL_INVALID_VALUE_INT     = 0x0501,
-               GL_INVALID_OPERATION_INT = 0x0502,
-               GL_STACK_OVERFLOW_INT    = 0x0503,
-               GL_STACK_UNDERFLOW_INT   = 0x0504,
-               GL_OUT_OF_MEMORY_INT     = 0x0505;
-
-    // Clear buffer bits
-    int GL_COLOR_BUFFER_BIT   = 0x00004000,
-               GL_DEPTH_BUFFER_BIT   = 0x00000100,
-               GL_STENCIL_BUFFER_BIT = 0x00000400,
-               GL_ACCUM_BUFFER_BIT   = 0x00000200;
-
-    // Primitives
-    int GL_POINTS         = 0x0000,
-               GL_LINES          = 0x0001,
-               GL_LINE_LOOP      = 0x0002,
-               GL_LINE_STRIP     = 0x0003,
-               GL_TRIANGLES      = 0x0004,
-               GL_TRIANGLE_STRIP = 0x0005,
-               GL_TRIANGLE_FAN   = 0x0006,
-               GL_QUADS          = 0x0007,
-               GL_QUAD_STRIP     = 0x0008,
-               GL_POLYGON        = 0x0009;
-
-    // Data types
-    int GL_BYTE           = 0x1400,
-               GL_UNSIGNED_BYTE  = 0x1401,
-               GL_SHORT          = 0x1402,
-               GL_UNSIGNED_SHORT = 0x1403,
-               GL_INT            = 0x1404,
-               GL_UNSIGNED_INT   = 0x1405,
-               GL_FLOAT          = 0x1406,
-               GL_DOUBLE         = 0x140A;
-
-    // Matrix modes
-    int GL_MODELVIEW  = 0x1700,
-               GL_PROJECTION = 0x1701,
-               GL_TEXTURE    = 0x1702;
-
-    // Depth / comparison functions
-    int GL_NEVER    = 0x0200,
-               GL_LESS      = 0x0201,
-               GL_EQUAL     = 0x0202,
-               GL_LEQUAL    = 0x0203,
-               GL_GREATER   = 0x0204,
-               GL_NOTEQUAL  = 0x0205,
-               GL_GEQUAL    = 0x0206,
-               GL_ALWAYS    = 0x0207;
-
-    // Blend factors
-    int GL_ZERO                 = 0x0000,
-               GL_ONE                  = 0x0001,
-               GL_SRC_COLOR            = 0x0300,
-               GL_ONE_MINUS_SRC_COLOR  = 0x0301,
-               GL_SRC_ALPHA            = 0x0302,
-               GL_ONE_MINUS_SRC_ALPHA  = 0x0303,
-               GL_DST_ALPHA            = 0x0304,
-               GL_ONE_MINUS_DST_ALPHA  = 0x0305,
-               GL_DST_COLOR            = 0x0306,
-               GL_ONE_MINUS_DST_COLOR  = 0x0307;
-
-    // Capability flags (for glEnable / glDisable)
-    int GL_DEPTH_TEST           = 0x0B71,
-               GL_BLEND                = 0x0BE2,
-               GL_CULL_FACE            = 0x0B44,
-               GL_LIGHTING             = 0x0B50,
-               GL_TEXTURE_2D           = 0x0DE1,
-               GL_SCISSOR_TEST         = 0x0C11,
-               GL_LINE_SMOOTH          = 0x0B20,
-               GL_POINT_SMOOTH         = 0x0B10,
-               GL_NORMALIZE            = 0x0BA1,
-               GL_FOG                  = 0x0B60,
-               GL_STENCIL_TEST         = 0x0B90,
-               GL_ALPHA_TEST           = 0x0BC0,
-               GL_COLOR_LOGIC_OP       = 0x0BF2,
-               GL_POLYGON_OFFSET_FILL  = 0x8037,
-               GL_MULTISAMPLE          = 0x809D;
-
-    // Cull face / winding
-    int GL_FRONT          = 0x0404,
-               GL_BACK           = 0x0405,
-               GL_FRONT_AND_BACK = 0x0408,
-               GL_CW             = 0x0900,
-               GL_CCW            = 0x0901;
-
-    // Polygon fill mode
-    int GL_POINT = 0x1B00,
-               GL_LINE  = 0x1B01,
-               GL_FILL  = 0x1B02;
-
-    // Shade model
-    int GL_FLAT   = 0x1D00,
-               GL_SMOOTH = 0x1D01;
-
-    // Texture parameters
-    int GL_TEXTURE_MAG_FILTER      = 0x2800,
-               GL_TEXTURE_MIN_FILTER      = 0x2801,
-               GL_TEXTURE_WRAP_S          = 0x2802,
-               GL_TEXTURE_WRAP_T          = 0x2803,
-               GL_NEAREST                 = 0x2600,
-               GL_LINEAR                  = 0x2601,
-               GL_NEAREST_MIPMAP_NEAREST  = 0x2700,
-               GL_LINEAR_MIPMAP_NEAREST   = 0x2701,
-               GL_NEAREST_MIPMAP_LINEAR   = 0x2702,
-               GL_LINEAR_MIPMAP_LINEAR    = 0x2703,
-               GL_CLAMP                   = 0x2900,
-               GL_REPEAT                  = 0x2901,
-               GL_CLAMP_TO_EDGE           = 0x812F;
-
-    // Texture formats / internal formats
-    int GL_RGB             = 0x1907,
-               GL_RGBA            = 0x1908,
-               GL_LUMINANCE       = 0x1909,
-               GL_LUMINANCE_ALPHA = 0x190A,
-               GL_DEPTH_COMPONENT = 0x1902,
-               GL_ALPHA           = 0x1906,
-               GL_RGB8            = 0x8051,
-               GL_RGBA8           = 0x8058,
-               GL_DEPTH_COMPONENT16 = 0x81A5,
-               GL_DEPTH_COMPONENT24 = 0x81A6;
-
-    // Buffer object targets
-    int GL_ARRAY_BUFFER         = 0x8892,
-               GL_ELEMENT_ARRAY_BUFFER = 0x8893,
-               GL_UNIFORM_BUFFER       = 0x8A11;
-
-    // Buffer usage hints
-    int GL_STREAM_DRAW  = 0x88E0,
-               GL_STREAM_READ  = 0x88E1,
-               GL_STATIC_DRAW  = 0x88E4,
-               GL_STATIC_READ  = 0x88E5,
-               GL_DYNAMIC_DRAW = 0x88E8,
-               GL_DYNAMIC_READ = 0x88E9;
-
-    // Shader types
-    int GL_FRAGMENT_SHADER = 0x8B30,
-               GL_VERTEX_SHADER   = 0x8B31,
-               GL_GEOMETRY_SHADER = 0x8DD9;
-
-    // Shader / program status query tokens
-    int GL_COMPILE_STATUS  = 0x8B81,
-               GL_LINK_STATUS     = 0x8B82,
-               GL_INFO_LOG_LENGTH = 0x8B84,
-               GL_SHADER_TYPE     = 0x8B4F,
-               GL_DELETE_STATUS   = 0x8B80;
-
-    // Framebuffer targets and attachment points
-    int GL_FRAMEBUFFER              = 0x8D40,
-               GL_RENDERBUFFER             = 0x8D41,
-               GL_COLOR_ATTACHMENT0        = 0x8CE0,
-               GL_DEPTH_ATTACHMENT         = 0x8D00,
-               GL_STENCIL_ATTACHMENT       = 0x8D20,
-               GL_FRAMEBUFFER_COMPLETE     = 0x8CD5,
-               GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT       = 0x8CD6,
-               GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT = 0x8CD7,
-               GL_FRAMEBUFFER_UNSUPPORTED  = 0x8CDD;
-
-    // String query tokens
-    int GL_VENDOR     = 0x1F00,
-               GL_RENDERER   = 0x1F01,
-               GL_VERSION    = 0x1F02,
-               GL_EXTENSIONS = 0x1F03;
-
-    // Active texture units
-    int GL_TEXTURE0  = 0x84C0,
-               GL_TEXTURE1  = 0x84C1,
-               GL_TEXTURE2  = 0x84C2,
-               GL_TEXTURE3  = 0x84C3,
-               GL_TEXTURE4  = 0x84C4,
-               GL_TEXTURE5  = 0x84C5,
-               GL_TEXTURE6  = 0x84C6,
-               GL_TEXTURE7  = 0x84C7;
-
-    // Fixed-function lighting constants
-    int GL_LIGHT0     = 0x4000,
-               GL_LIGHT1     = 0x4001,
-               GL_LIGHT2     = 0x4002,
-               GL_LIGHT3     = 0x4003,
-               GL_AMBIENT    = 0x1200,
-               GL_DIFFUSE    = 0x1201,
-               GL_SPECULAR   = 0x1202,
-               GL_POSITION   = 0x1203,
-               GL_SHININESS  = 0x1601,
-               GL_EMISSION   = 0x1600;
-
-    // Misc get tokens
-    int GL_VIEWPORT          = 0x0BA2,
-               GL_MAX_TEXTURE_SIZE  = 0x0D33,
-               GL_MAX_VIEWPORT_DIMS = 0x0D3A;
 
     // ============================================================================
     // OPENGL CORE FUNCTION DECLARATIONS (opengl32.dll - always available)

@@ -1,591 +1,1132 @@
-// tensors.fx – Multi‑dimensional array (Tensor) library.
-// Conforms to Flux language specification and style guide.
-// No variable declarations inside loops – all at function top.
-// Loop counters declared inside for parentheses.
-// Zero initialization is automatic.
-
-#ifndef FLUX_STANDARD_TENSORS
-#def FLUX_STANDARD_TENSORS 1;
+// Author: Karac V. Thweatt
+//
+// tensors.fx - Generic N-dimensional tensor library for Flux.
+//
+// Provides:
+//   Tensor<T> object  - heap-allocated N-dimensional array of element type T
+//   TensorView<T>     - non-owning window into a Tensor (slice/reshape)
+//   TensorShape       - shape descriptor (rank + per-axis sizes + strides)
+//
+// Construction:
+//   tensor_make<T>(shape, rank)               - zero-filled tensor
+//   tensor_from_data<T>(data*, shape, rank)   - copy existing flat data
+//   tensor_scalar<T>(value)                   - rank-0 scalar tensor
+//   tensor_vector<T>(data*, n)                - rank-1 vector
+//   tensor_matrix<T>(data*, rows, cols)       - rank-2 matrix (row-major)
+//
+// Element access:
+//   tensor_get<T>(t, idx*)    - read element at multi-index
+//   tensor_set<T>(t, idx*, v) - write element at multi-index
+//   tensor_at<T>(t, flat)     - read by flat offset
+//   tensor_put<T>(t, flat, v) - write by flat offset
+//
+// Arithmetic (element-wise, broadcast-safe):
+//   tensor_add<T>, tensor_sub<T>, tensor_mul<T>, tensor_div<T>
+//   tensor_add_scalar<T>, tensor_mul_scalar<T>
+//   tensor_neg<T>
+//
+// Reductions:
+//   tensor_sum<T>, tensor_product<T>, tensor_min<T>, tensor_max<T>
+//   tensor_mean_f  (float output), tensor_mean_d (double output)
+//
+// Shape manipulation:
+//   tensor_reshape<T>        - reinterpret shape (same total elements)
+//   tensor_transpose<T>      - reverse all axes (generalised transpose)
+//   tensor_permute<T>        - arbitrary axis permutation
+//   tensor_slice<T>          - extract a sub-tensor along one axis
+//   tensor_squeeze<T>        - remove size-1 axes
+//   tensor_expand_dims<T>    - insert a size-1 axis
+//
+// Linear algebra (float/double tensors, rank-2):
+//   tensor_matmul_f          - matrix multiply (float)
+//   tensor_matmul_d          - matrix multiply (double)
+//   tensor_dot_f             - generalised dot product (float vectors)
+//   tensor_dot_d             - generalised dot product (double vectors)
+//   tensor_outer_f           - outer product (float)
+//   tensor_outer_d           - outer product (double)
+//
+// Utilities:
+//   tensor_copy<T>           - deep copy
+//   tensor_fill<T>           - fill every element with a value
+//   tensor_equal<T>          - element-wise equality check
+//   tensor_numel             - total number of elements
+//   tensor_rank              - rank (number of axes)
+//   tensor_shape_dim         - size along one axis
+//   tensor_print_shape       - print shape to console
+//
+// Dependencies: standard::types, standard::memory, standard::math
 
 #ifndef FLUX_STANDARD_TYPES
 #import "types.fx";
+#endif;
+
+#ifndef FLUX_STANDARD_MEMORY
+#import "memory.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
 #import "math.fx";
 #endif;
 
-using standard::math;
+#ifndef FLUX_STANDARD_TENSORS
+#def FLUX_STANDARD_TENSORS 1;
+
+// Maximum rank supported without heap allocating the shape arrays.
+// Raise if you need higher-order tensors at the cost of larger structs.
+#def TENSOR_MAX_RANK 8;
 
 namespace standard
 {
     namespace tensors
     {
-        ///  ---------------------------------------------------------------
-             DYNAMIC INTEGER ARRAY (SHAPE AND STRIDES)
-        ///
 
-        struct I32Array
+        // ====================================================================
+        // TensorShape
+        // Holds rank, per-axis sizes, and row-major strides.
+        // Strides are in element units (not bytes).
+        // ====================================================================
+
+        struct TensorShape
         {
-            i32* adata;
-            i32  len, cap;
+            size_t rank;
+            size_t[TENSOR_MAX_RANK] dims,
+                                    strides;
         };
 
-        def i32array_new(i32 capacity) -> I32Array
+        // Compute row-major strides for a shape whose dims are already set.
+        def shape_compute_strides(TensorShape* s) -> void
         {
-            I32Array a;
-            size_t bytes = (size_t)(capacity * (i32)sizeof(i32));
-            a.len = 0;
-            a.cap = capacity;
-            a.adata = (@)fmalloc(bytes);
-            return a;
-        };
-
-        def i32array_free(I32Array* a) -> void
-        {
-            if (a.adata != (i32*)0)
+            size_t stride = 1,
+                   i      = s.rank;
+            while (i > 0)
             {
-                ffree((u64)a.adata);
-                a.adata = (i32*)0;
+                i--;
+                s.strides[i] = stride;
+                stride = stride * s.dims[i];
             };
-            a.len = 0;
-            a.cap = 0;
         };
 
-        def i32array_push(I32Array* a, i32 value) -> void
+        // Total number of elements described by a shape.
+        def shape_numel(TensorShape* s) -> size_t
         {
-            if (a.len >= a.cap)
+            size_t n = 1,
+                   i;
+            while (i < s.rank)
             {
-                i32 new_cap = (a.cap == 0) ? 4 : a.cap * 2;
-                size_t new_bytes = (size_t)(new_cap * (i32)sizeof(i32));
-                i32* new_data = (@)fmalloc(new_bytes);
-                for (i32 i; i < a.len; i = i + 1)
+                n = n * s.dims[i];
+                i++;
+            };
+            return n;
+        };
+
+        // Flat offset for a multi-index.
+        def shape_flat(TensorShape* s, size_t* idx) -> size_t
+        {
+            size_t off, i;
+            while (i < s.rank)
+            {
+                off = off + idx[i] * s.strides[i];
+                i++;
+            };
+            return off;
+        };
+
+        // True if two shapes are identical (same rank and dims).
+        def shape_equal(TensorShape* a, TensorShape* b) -> bool
+        {
+            size_t i;
+            if (a.rank != b.rank) { return false; };
+            while (i < a.rank)
+            {
+                if (a.dims[i] != b.dims[i]) { return false; };
+                i++;
+            };
+            return true;
+        };
+
+        // Copy shape src into dst.
+        def shape_copy(TensorShape* dst, TensorShape* src) -> void
+        {
+            size_t i;
+            dst.rank = src.rank;
+            while (i < src.rank)
+            {
+                dst.dims[i]    = src.dims[i];
+                dst.strides[i] = src.strides[i];
+                i++;
+            };
+        };
+
+        // ====================================================================
+        // Tensor<T>
+        // Heap-allocated N-dimensional array.
+        // ====================================================================
+
+        trait BaseTensorTraits
+        {
+            def get<T>(size_t* idx) -> T,
+                set<T>(size_t* idx, T val) -> void,
+                at<T>(size_t flat) -> T,
+                put<T>(size_t flat, T val) -> void,
+                numel() -> size_t,
+                rank() -> size_t,
+                dim(size_t axis) -> size_t,
+                fill<T>(T val) -> void;
+        };
+
+        BaseTensorTraits
+        object Tensor<T>
+        {
+            void*       buf;
+            TensorShape shape;
+            size_t      elem_size;
+
+            def __init(TensorShape* s, size_t esz) -> this
+            {
+                size_t n = shape_numel(s);
+                this.elem_size = esz;
+                shape_copy(@this.shape, s);
+                this.buf = malloc(n * esz);
+                memset(this.buf, 0, n * esz);
+                return this;
+            };
+
+            def __exit() -> void
+            {
+                if (this.buf != STDLIB_GVP)
                 {
-                    new_data[i] = a.adata[i];
+                    free(this.buf);
+                    this.buf = STDLIB_GVP;
                 };
-                ffree((u64)a.adata);
-                a.adata = new_data;
-                a.cap = new_cap;
+                return;
             };
-            a.adata[a.len] = value;
-            a.len = a.len + 1;
-        };
 
-        ///  ---------------------------------------------------------------
-             TENSOR<T> STRUCT
-        ///
-
-        struct Tensor<T>
-        {
-            T*       tdata;
-            i32      ndim;
-            I32Array shape, strides;
-            i64      total_size;
-        };
-
-        // -----------------------------------------------------------------
-        //  Internal helpers
-        // -----------------------------------------------------------------
-
-        def _tensor_compute_size(I32Array* shape) -> i64
-        {
-            i64 sz = 1;
-            for (i32 i; i < shape.len; i = i + 1)
+            def __expr() -> Tensor<T>*
             {
-                sz = sz * (i64)shape.adata[i];
+                return this;
             };
-            return sz;
-        };
 
-        def _tensor_default_strides(I32Array* shape) -> I32Array
-        {
-            I32Array strides = i32array_new(shape.len);
-            i32 stride = 1;
-            for (i32 i = shape.len - 1; i >= 0; i = i - 1)
+            // Read element at multi-index.
+            def get(size_t* idx) -> T
             {
-                i32array_push(@strides, stride);
-                stride = stride * shape.adata[i];
+                T* base = (T*)this.buf;
+                return base[shape_flat(@this.shape, idx)];
             };
-            i32 tmp;
-            for (i32 i; i < strides.len / 2; i = i + 1)
+
+            // Write element at multi-index.
+            def set(size_t* idx, T val) -> void
             {
-                tmp = strides.adata[i];
-                strides.adata[i] = strides.adata[strides.len - 1 - i];
-                strides.adata[strides.len - 1 - i] = tmp;
+                T* base = (T*)this.buf;
+                base[shape_flat(@this.shape, idx)] = val;
             };
-            return strides;
-        };
 
-        def _tensor_index<T>(Tensor<T>* t, i32* coords) -> i64
-        {
-            i64 idx;
-            for (i32 i; i < t.ndim; i = i + 1)
+            // Read element at flat index.
+            def at(size_t flat) -> T
             {
-                idx = idx + (i64)coords[i] * (i64)t.strides.adata[i];
+                T* base = (T*)this.buf;
+                return base[flat];
             };
-            return idx;
-        };
 
-        ///  ---------------------------------------------------------------
-             MEMORY MANAGEMENT
-        ///
-
-        def tensor_free<T>(Tensor<T>* t) -> void
-        {
-            if (t.tdata != (T*)0)
+            // Write element at flat index.
+            def put(size_t flat, T val) -> void
             {
-                ffree((u64)t.tdata);
-                t.tdata = (T*)0;
+                T* base = (T*)this.buf;
+                base[flat] = val;
             };
-            i32array_free(@t.shape);
-            i32array_free(@t.strides);
-            t.ndim = 0;
-            t.total_size = 0;
-        };
 
-        ///  ---------------------------------------------------------------
-             CONSTRUCTION
-        ///
-
-        def tensor_zeros<T>(I32Array shape) -> Tensor<T>
-        {
-            Tensor<T> t;
-            t.ndim = shape.len;
-            t.shape = shape;
-            t.strides = _tensor_default_strides(@shape);
-            t.total_size = _tensor_compute_size(@shape);
-            size_t bytes = (size_t)(t.total_size * (i64)sizeof(T));
-            t.tdata = (T*)fmalloc(@bytes);
-            for (i64 i; i < t.total_size; i = i + 1)
+            // Total number of elements.
+            def numel() -> size_t
             {
-                t.tdata[i] = (T)0;
+                return shape_numel(@this.shape);
             };
-            return t;
-        };
 
-        def tensor_ones<T>(I32Array shape) -> Tensor<T>
-        {
-            Tensor<T> t = tensor_zeros<T>(shape);
-            for (i64 i; i < t.total_size; i = i + 1)
+            // Rank (number of axes).
+            def rank() -> size_t
             {
-                t.tdata[i] = (T)1;
+                return this.shape.rank;
             };
-            return t;
-        };
 
-        def tensor_full<T>(I32Array shape, T value) -> Tensor<T>
-        {
-            Tensor<T> t = tensor_zeros<T>(shape);
-            for (i64 i; i < t.total_size; i = i + 1)
+            // Size of one axis.
+            def dim(size_t axis) -> size_t
             {
-                t.tdata[i] = value;
+                return this.shape.dims[axis];
             };
-            return t;
-        };
 
-        def tensor_arange<T>(T start, T end, T step) -> Tensor<T>
-        {
-            i64 n = (i64)((end - start) / step);
-            if (n < 0) {n = 0;};
-            I32Array shape = i32array_new(1);
-            i32array_push(@shape, (i32)n);
-            Tensor<T> t = tensor_zeros<T>(shape);
-            for (i64 i; i < n; i = i + 1)
+            // Fill every element with val.
+            def fill(T val) -> void
             {
-                t.tdata[i] = start + (T)i * step;
-            };
-            i32array_free(@shape);
-            return t;
-        };
-
-        def tensor_from_array<T, N>(T[N] array) -> Tensor<T>
-        {
-            I32Array shape = i32array_new(1);
-            i32array_push(@shape, N);
-            Tensor<T> t = tensor_zeros<T>(shape);
-            for (i32 i; i < N; i = i + 1)
-            {
-                t.tdata[i] = array[i];
-            };
-            i32array_free(@shape);
-            return t;
-        };
-
-        ///  ---------------------------------------------------------------
-             INDEXING
-        ///
-
-        def tensor_at<T>(Tensor<T>* t, i32* coords) -> T
-        {
-            i64 idx = _tensor_index(t, coords);
-            return t.tdata[idx];
-        };
-
-        def tensor_set_at<T>(Tensor<T>* t, i32* coords, T value) -> void
-        {
-            i64 idx = _tensor_index(t, coords);
-            t.tdata[idx] = value;
-        };
-
-        ///  ---------------------------------------------------------------
-             COPY & FILL
-        ///
-
-        def tensor_copy<T>(Tensor<T>* src) -> Tensor<T>
-        {
-            Tensor<T> dst = tensor_zeros<T>(src.shape);
-            for (i64 i; i < src.total_size; i = i + 1)
-            {
-                dst.tdata[i] = src.tdata[i];
-            };
-            return dst;
-        };
-
-        def tensor_fill<T>(Tensor<T>* t, T value) -> void
-        {
-            for (i64 i; i < t.total_size; i = i + 1)
-            {
-                t.tdata[i] = value;
-            };
-        };
-
-        ///  ---------------------------------------------------------------
-             RESHAPE
-        ///
-
-        def tensor_reshape<T>(Tensor<T>* t, I32Array new_shape) -> Tensor<T>
-        {
-            i64 new_size = _tensor_compute_size(@new_shape);
-            if (new_size != t.total_size)
-            {
-                Tensor<T> empty;
-                empty.tdata = (T*)0;
-                empty.ndim = 0;
-                return empty;
-            };
-            Tensor<T> out;
-            out.ndim = new_shape.len;
-            out.shape = new_shape;
-            out.strides = _tensor_default_strides(@new_shape);
-            out.total_size = t.total_size;
-            size_t bytes = (size_t)(out.total_size * (i64)sizeof(T));
-            out.tdata = (T*)fmalloc(@bytes);
-            for (i64 i; i < out.total_size; i = i + 1)
-            {
-                out.tdata[i] = t.tdata[i];
-            };
-            return out;
-        };
-
-        ///  ---------------------------------------------------------------
-             TRANSPOSE
-        ///
-
-        def tensor_transpose<T>(Tensor<T>* t, I32Array axes) -> Tensor<T>
-        {
-            if (axes.len != t.ndim) { return tensor_zeros<T>(t.shape); };
-            I32Array new_shape = i32array_new(t.ndim);
-            for (i32 i; i < axes.len; i = i + 1)
-            {
-                i32array_push(@new_shape, t.shape.adata[axes.adata[i]]);
-            };
-            Tensor<T> out = tensor_zeros<T>(new_shape);
-            I32Array new_strides = i32array_new(t.ndim);
-            i32 stride = 1;
-            for (i32 i = t.ndim - 1; i >= 0; i = i - 1)
-            {
-                i32array_push(@new_strides, stride);
-                stride = stride * new_shape.adata[i];
-            };
-            i32 tmp;
-            for (i32 i; i < new_strides.len / 2; i = i + 1)
-            {
-                tmp = new_strides.adata[i];
-                new_strides.adata[i] = new_strides.adata[new_strides.len - 1 - i];
-                new_strides.adata[new_strides.len - 1 - i] = tmp;
-            };
-            i32array_free(@out.strides);
-            out.strides = new_strides;
-            i32[8] coords_out, coords_src;
-            i64 rem;
-            for (i64 flat; flat < out.total_size; flat = flat + 1)
-            {
-                rem = flat;
-                for (i32 i; i < out.ndim; i = i + 1)
+                size_t n = shape_numel(@this.shape),
+                       i;
+                T* base = (T*)this.buf;
+                while (i < n)
                 {
-                    coords_out[i] = (i32)(rem % (i64)out.shape.adata[i]);
-                    rem = rem / (i64)out.shape.adata[i];
+                    base[i] = val;
+                    i++;
                 };
-                for (i32 i; i < axes.len; i = i + 1)
-                {
-                    coords_src[axes.adata[i]] = coords_out[i];
-                };
-                out.tdata[flat] = tensor_at(t, coords_src);
             };
-            i32array_free(@new_shape);
-            return out;
         };
 
-        ///  ---------------------------------------------------------------
-             BROADCASTING SHAPE
-        ///
+        // ====================================================================
+        // TensorView<T>
+        // Non-owning view into a Tensor's data buffer.
+        // Allows slicing / reshaping without copying.
+        // ====================================================================
 
-        def _broadcast_shape(I32Array* a, I32Array* b) -> I32Array
+        trait BaseTensorViewTraits
         {
-            i32 nd = (a.len > b.len) ? a.len : b.len;
-            I32Array out_shape = i32array_new(nd);
-            i32 ai, bi;
-            for (i32 i; i < nd; i = i + 1)
-            {
-                ai = (i < a.len) ? a.adata[a.len - 1 - i] : 1;
-                bi = (i < b.len) ? b.adata[b.len - 1 - i] : 1;
-                if (ai != bi & ai != 1 & bi != 1)
-                {
-                    i32array_free(@out_shape);
-                    out_shape.adata = (i32*)0;
-                    out_shape.len = 0;
-                    return out_shape;
-                };
-                i32array_push(@out_shape, (ai > bi) ? ai : bi);
-            };
-            i32 tmp;
-            for (i32 i; i < out_shape.len / 2; i = i + 1)
-            {
-                tmp = out_shape.adata[i];
-                out_shape.adata[i] = out_shape.adata[out_shape.len - 1 - i];
-                out_shape.adata[out_shape.len - 1 - i] = tmp;
-            };
-            return out_shape;
+            def get<T>(size_t* idx) -> T,
+                set<T>(size_t* idx, T val) -> void,
+                at<T>(size_t flat) -> T,
+                put<T>(size_t flat, T val) -> void,
+                numel() -> size_t,
+                rank() -> size_t,
+                dim(size_t axis) -> size_t;
         };
 
-        ///  ---------------------------------------------------------------
-             ELEMENT‑WISE ADD (with broadcasting)
-        ///
-
-        def tensor_add<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>
+        BaseTensorViewTraits
+        object TensorView<T>
         {
-            I32Array out_shape = _broadcast_shape(@a.shape, @b.shape);
-            if (out_shape.adata == (i32*)0)
+            void*       buf;
+            TensorShape shape;
+            size_t      offset;
+
+            def __init(void* src_buf, TensorShape* s, size_t base_offset) -> this
             {
-                Tensor<T> empty;
-                empty.tdata = (T*)0;
-                empty.ndim = 0;
-                return empty;
+                this.buf    = src_buf;
+                this.offset = base_offset;
+                shape_copy(@this.shape, s);
+                return this;
             };
-            Tensor<T> out = tensor_zeros<T>(out_shape);
-            i32[8] coords;
-            i64 idx_a, idx_b;
-            i32 dim_a, dim_b, coord;
-            i64 rem;
-            for (i64 flat; flat < out.total_size; flat = flat + 1)
+
+            def __exit() -> void
             {
-                rem = flat;
-                for (i32 i; i < out.ndim; i = i + 1)
-                {
-                    coords[i] = (i32)(rem % (i64)out.shape.adata[i]);
-                    rem = rem / (i64)out.shape.adata[i];
-                };
-                idx_a = 0;
-                for (i32 i; i < a.ndim; i = i + 1)
-                {
-                    dim_a = a.shape.adata[i];
-                    coord = (i < out.ndim) ? coords[out.ndim - a.ndim + i] : 0;
-                    if (dim_a == 1) {coord = 0;};
-                    idx_a = idx_a + (i64)coord * (i64)a.strides.adata[i];
-                };
-                idx_b = 0;
-                for (i32 i; i < b.ndim; i = i + 1)
-                {
-                    dim_b = b.shape.adata[i];
-                    coord = (i < out.ndim) ? coords[out.ndim - b.ndim + i] : 0;
-                    if (dim_b == 1) {coord = 0;};
-                    idx_b = idx_b + (i64)coord * (i64)b.strides.adata[i];
-                };
-                out.tdata[flat] = a.tdata[idx_a] + b.tdata[idx_b];
+                // Views do not own data.
+                this.buf = STDLIB_GVP;
+                return;
             };
-            i32array_free(@out_shape);
-            return out;
+
+            def __expr() -> TensorView<T>*
+            {
+                return this;
+            };
+
+            def get(size_t* idx) -> T
+            {
+                T* base = (T*)this.buf;
+                return base[this.offset + shape_flat(@this.shape, idx)];
+            };
+
+            def set(size_t* idx, T val) -> void
+            {
+                T* base = (T*)this.buf;
+                base[this.offset + shape_flat(@this.shape, idx)] = val;
+            };
+
+            def at(size_t flat) -> T
+            {
+                T* base = (T*)this.buf;
+                return base[this.offset + flat];
+            };
+
+            def put(size_t flat, T val) -> void
+            {
+                T* base = (T*)this.buf;
+                base[this.offset + flat] = val;
+            };
+
+            def numel() -> size_t
+            {
+                return shape_numel(@this.shape);
+            };
+
+            def rank() -> size_t
+            {
+                return this.shape.rank;
+            };
+
+            def dim(size_t axis) -> size_t
+            {
+                return this.shape.dims[axis];
+            };
         };
 
-        ///  ---------------------------------------------------------------
-             REDUCTIONS
-        ///
+        // ====================================================================
+        // Construction helpers
+        // ====================================================================
 
-        def tensor_sum_all<T>(Tensor<T>* t) -> T
+        // Build a 1-D shape from a single size.
+        def make_shape1(size_t d0) -> TensorShape
         {
-            T s;
-            for (i64 i; i < t.total_size; i = i + 1)
-            {
-                s = s + t.tdata[i];
-            };
+            TensorShape s;
+            s.rank    = 1;
+            s.dims[0] = d0;
+            shape_compute_strides(@s);
             return s;
         };
 
-        def tensor_sum_axis<T>(Tensor<T>* t, i32 axis) -> Tensor<T>
+        // Build a 2-D shape.
+        def make_shape2(size_t d0, size_t d1) -> TensorShape
         {
-            if (axis < 0 | axis >= t.ndim) { return tensor_zeros<T>(t.shape); };
-            I32Array out_shape = i32array_new(t.ndim - 1);
-            for (i32 i; i < axis; i = i + 1)
+            TensorShape s;
+            s.rank    = 2;
+            s.dims[0] = d0;
+            s.dims[1] = d1;
+            shape_compute_strides(@s);
+            return s;
+        };
+
+        // Build a 3-D shape.
+        def make_shape3(size_t d0, size_t d1, size_t d2) -> TensorShape
+        {
+            TensorShape s;
+            s.rank    = 3;
+            s.dims[0] = d0;
+            s.dims[1] = d1;
+            s.dims[2] = d2;
+            shape_compute_strides(@s);
+            return s;
+        };
+
+        // Build an N-D shape from a dims array.
+        def make_shapeN(size_t* dims, size_t rank) -> TensorShape
+        {
+            TensorShape s;
+            size_t i;
+            s.rank = rank;
+            while (i < rank)
             {
-                i32array_push(@out_shape, t.shape.adata[i]);
+                s.dims[i] = dims[i];
+                i++;
             };
-            for (i32 i = axis + 1; i < t.ndim; i = i + 1)
+            shape_compute_strides(@s);
+            return s;
+        };
+
+        // Zero-filled tensor of given shape.
+        def tensor_make<T>(size_t* dims, size_t rank) -> Tensor<T>
+        {
+            TensorShape s = make_shapeN(dims, rank);
+            Tensor<T> t(@s, sizeof(T));
+            return t;
+        };
+
+        // Tensor copied from a flat data buffer.
+        def tensor_from_data<T>(T* src, size_t* dims, size_t rank) -> Tensor<T>
+        {
+            TensorShape s = make_shapeN(dims, rank);
+            Tensor<T> t(@s, sizeof(T));
+            memcpy(t.buf, (void*)src, shape_numel(@s) * sizeof(T));
+            return t;
+        };
+
+        // Rank-0 scalar tensor.
+        def tensor_scalar<T>(T value) -> Tensor<T>
+        {
+            TensorShape s;
+            s.rank       = 0;
+            s.dims[0]    = 1;
+            s.strides[0] = 1;
+            Tensor<T> t(@s, sizeof(T));
+            T* base = (T*)t.buf;
+            base[0] = value;
+            return t;
+        };
+
+        // Rank-1 vector tensor.
+        def tensor_vector<T>(T* src, size_t n) -> Tensor<T>
+        {
+            TensorShape s = make_shape1(n);
+            Tensor<T> t(@s, sizeof(T));
+            memcpy(t.buf, (void*)src, n * sizeof(T));
+            return t;
+        };
+
+        // Rank-2 matrix tensor (row-major).
+        def tensor_matrix<T>(T* src, size_t rows, size_t cols) -> Tensor<T>
+        {
+            TensorShape s = make_shape2(rows, cols);
+            Tensor<T> t(@s, sizeof(T));
+            memcpy(t.buf, (void*)src, rows * cols * sizeof(T));
+            return t;
+        };
+
+        // Deep copy.
+        def tensor_copy<T>(Tensor<T>* src) -> Tensor<T>
+        {
+            Tensor<T> dst(@src.shape, sizeof(T));
+            memcpy(dst.buf, src.buf, shape_numel(@src.shape) * sizeof(T));
+            return dst;
+        };
+
+        // ====================================================================
+        // Element access convenience wrappers
+        // ====================================================================
+
+        // Get flat element.
+        def tensor_at<T>(Tensor<T>* t, size_t flat) -> T
+        {
+            T* base = (T*)t.buf;
+            return base[flat];
+        };
+
+        // Put flat element.
+        def tensor_put<T>(Tensor<T>* t, size_t flat, T val) -> void
+        {
+            T* base = (T*)t.buf;
+            base[flat] = val;
+        };
+
+        // Get element at multi-index.
+        def tensor_get<T>(Tensor<T>* t, size_t* idx) -> T
+        {
+            T* base = (T*)t.buf;
+            return base[shape_flat(@t.shape, idx)];
+        };
+
+        // Set element at multi-index.
+        def tensor_set<T>(Tensor<T>* t, size_t* idx, T val) -> void
+        {
+            T* base = (T*)t.buf;
+            base[shape_flat(@t.shape, idx)] = val;
+        };
+
+        // ====================================================================
+        // Shape queries
+        // ====================================================================
+
+        def tensor_numel<T>(Tensor<T>* t) -> size_t
+        {
+            return shape_numel(@t.shape);
+        };
+
+        def tensor_rank<T>(Tensor<T>* t) -> size_t
+        {
+            return t.shape.rank;
+        };
+
+        def tensor_shape_dim<T>(Tensor<T>* t, size_t axis) -> size_t
+        {
+            return t.shape.dims[axis];
+        };
+
+        // ====================================================================
+        // Fill
+        // ====================================================================
+
+        def tensor_fill<T>(Tensor<T>* t, T val) -> void
+        {
+            size_t n = shape_numel(@t.shape),
+                   i;
+            T* base = (T*)t.buf;
+            while (i < n)
             {
-                i32array_push(@out_shape, t.shape.adata[i]);
+                base[i] = val;
+                i++;
             };
-            Tensor<T> out = tensor_zeros<T>(out_shape);
-            i32[8] coords;
-            i64 idx, flat, rem;
-            i32 dim = t.shape.adata[axis],
-                stride_axis = t.strides.adata[axis],
-                out_idx;
-            T sum;
-            for (flat = 0; flat < out.total_size; flat = flat + 1)
+        };
+
+        // ====================================================================
+        // Element-wise arithmetic
+        // ====================================================================
+
+        // Add two same-shape tensors.
+        def tensor_add<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>
+        {
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               pb = (T*)b.buf,
+               po = (T*)out.buf;
+            while (i < n)
             {
-                rem = flat;
-                for (i32 i; i < out.ndim; i = i + 1)
-                {
-                    out_idx = (i < axis) ? i : i + 1;
-                    coords[out_idx] = (i32)(rem % (i64)out.shape.adata[i]);
-                    rem = rem / (i64)out.shape.adata[i];
-                };
-                sum = 0;
-                for (i32 k; k < dim; k = k + 1)
-                {
-                    coords[axis] = k;
-                    idx = _tensor_index(t, coords);
-                    sum = sum + t.tdata[idx];
-                };
-                out.tdata[flat] = sum;
+                po[i] = pa[i] + pb[i];
+                i++;
             };
-            i32array_free(@out_shape);
             return out;
         };
 
-        def tensor_mean<T>(Tensor<T>* t) -> T
+        // Subtract two same-shape tensors.
+        def tensor_sub<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>
         {
-            T s = tensor_sum_all(t);
-            return s / (T)t.total_size;
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               pb = (T*)b.buf,
+               po = (T*)out.buf;
+            while (i < n)
+            {
+                po[i] = pa[i] - pb[i];
+                i++;
+            };
+            return out;
         };
 
-        def tensor_min_all<T>(Tensor<T>* t) -> T
+        // Element-wise multiply (Hadamard product).
+        def tensor_mul<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>
         {
-            if (t.total_size == 0) { return (T)0; };
-            T m = t.tdata[0];
-            for (i64 i = 1; i < t.total_size; i = i + 1)
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               pb = (T*)b.buf,
+               po = (T*)out.buf;
+            while (i < n)
             {
-                if (t.tdata[i] < m) {m = t.tdata[i];};
+                po[i] = pa[i] * pb[i];
+                i++;
+            };
+            return out;
+        };
+
+        // Element-wise divide.
+        def tensor_div<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>
+        {
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               pb = (T*)b.buf,
+               po = (T*)out.buf;
+            while (i < n)
+            {
+                po[i] = pa[i] / pb[i];
+                i++;
+            };
+            return out;
+        };
+
+        // Add a scalar to every element.
+        def tensor_add_scalar<T>(Tensor<T>* a, T scalar) -> Tensor<T>
+        {
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               po = (T*)out.buf;
+            while (i < n)
+            {
+                po[i] = pa[i] + scalar;
+                i++;
+            };
+            return out;
+        };
+
+        // Multiply every element by a scalar.
+        def tensor_mul_scalar<T>(Tensor<T>* a, T scalar) -> Tensor<T>
+        {
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               po = (T*)out.buf;
+            while (i < n)
+            {
+                po[i] = pa[i] * scalar;
+                i++;
+            };
+            return out;
+        };
+
+        // Negate every element.
+        def tensor_neg<T>(Tensor<T>* a) -> Tensor<T>
+        {
+            Tensor<T> out(@a.shape, sizeof(T));
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               po = (T*)out.buf;
+            while (i < n)
+            {
+                po[i] = -pa[i];
+                i++;
+            };
+            return out;
+        };
+
+        // ====================================================================
+        // Reductions
+        // ====================================================================
+
+        def tensor_sum<T>(Tensor<T>* t) -> T
+        {
+            size_t n = shape_numel(@t.shape),
+                   i;
+            T* base = (T*)t.buf;
+            T  acc  = (T)0;
+            while (i < n)
+            {
+                acc = acc + base[i];
+                i++;
+            };
+            return acc;
+        };
+
+        def tensor_product<T>(Tensor<T>* t) -> T
+        {
+            size_t n = shape_numel(@t.shape),
+                   i;
+            T* base = (T*)t.buf;
+            T  acc  = (T)1;
+            while (i < n)
+            {
+                acc = acc * base[i];
+                i++;
+            };
+            return acc;
+        };
+
+        def tensor_min<T>(Tensor<T>* t) -> T
+        {
+            size_t n = shape_numel(@t.shape),
+                   i = 1;
+            T* base = (T*)t.buf;
+            T  m    = base[0];
+            while (i < n)
+            {
+                if (base[i] < m) { m = base[i]; };
+                i++;
             };
             return m;
         };
 
-        def tensor_max_all<T>(Tensor<T>* t) -> T
+        def tensor_max<T>(Tensor<T>* t) -> T
         {
-            if (t.total_size == 0) { return (T)0; };
-            T m = t.tdata[0];
-            for (i64 i = 1; i < t.total_size; i = i + 1)
+            size_t n = shape_numel(@t.shape),
+                   i = 1;
+            T* base = (T*)t.buf;
+            T  m    = base[0];
+            while (i < n)
             {
-                if (t.tdata[i] > m) {m = t.tdata[i];};
+                if (base[i] > m) { m = base[i]; };
+                i++;
             };
             return m;
         };
 
-        ///  ---------------------------------------------------------------
-             MATRIX MULTIPLICATION (2‑D ONLY)
-        ///
-
-        def tensor_matmul<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>
+        // Mean as float.
+        def tensor_mean_f<T>(Tensor<T>* t) -> float
         {
-            if (a.ndim != 2 | b.ndim != 2) { return tensor_zeros<T>(a.shape); };
-            i32 a_rows = a.shape.adata[0];
-            i32 a_cols = a.shape.adata[1];
-            i32 b_rows = b.shape.adata[0];
-            i32 b_cols = b.shape.adata[1];
-            if (a_cols != b_rows) {return tensor_zeros<T>(a.shape);};
-            I32Array out_shape = i32array_new(2);
-            i32array_push(@out_shape, a_rows);
-            i32array_push(@out_shape, b_cols);
-            Tensor<T> out = tensor_zeros<T>(out_shape);
-            i32[2] coords_a, coords_b, coords_out;
-            T sum;
-            for (i32 i; i < a_rows; i = i + 1)
+            size_t n = shape_numel(@t.shape),
+                   i;
+            T*    base = (T*)t.buf;
+            float acc;
+            while (i < n)
             {
-                for (i32 j; j < b_cols; j = j + 1)
+                acc = acc + (float)base[i];
+                i++;
+            };
+            return acc / (float)n;
+        };
+
+        // Mean as double.
+        def tensor_mean_d<T>(Tensor<T>* t) -> double
+        {
+            size_t n = shape_numel(@t.shape),
+                   i;
+            T*     base = (T*)t.buf;
+            double acc;
+            while (i < n)
+            {
+                acc = acc + (double)base[i];
+                i++;
+            };
+            return acc / (double)n;
+        };
+
+        // ====================================================================
+        // Shape manipulation
+        // ====================================================================
+
+        // Reinterpret shape. Total element count must be unchanged.
+        def tensor_reshape<T>(Tensor<T>* src, size_t* new_dims, size_t new_rank) -> Tensor<T>
+        {
+            TensorShape ns = make_shapeN(new_dims, new_rank);
+            Tensor<T> out(@ns, sizeof(T));
+            memcpy(out.buf, src.buf, shape_numel(@src.shape) * sizeof(T));
+            return out;
+        };
+
+        // Generalised transpose: reverses the order of all axes.
+        def tensor_transpose<T>(Tensor<T>* src) -> Tensor<T>
+        {
+            size_t rank = src.shape.rank,
+                   i;
+            TensorShape ns;
+            ns.rank = rank;
+            while (i < rank)
+            {
+                ns.dims[i] = src.shape.dims[rank - (size_t)1 - i];
+                i++;
+            };
+            shape_compute_strides(@ns);
+            Tensor<T> out(@ns, sizeof(T));
+
+            size_t n    = shape_numel(@ns),
+                   flat,
+                   rem;
+            T* dst  = (T*)out.buf,
+               psrc = (T*)src.buf;
+            size_t[TENSOR_MAX_RANK] didx,
+                                    sidx;
+            while (flat < n)
+            {
+                rem = flat;
+                i = 0;
+                while (i < rank)
                 {
-                    sum = 0;
-                    for (i32 k; k < a_cols; k = k + 1)
+                    didx[i] = rem / ns.strides[i];
+                    rem      = rem % ns.strides[i];
+                    i++;
+                };
+                i = 0;
+                while (i < rank)
+                {
+                    sidx[i] = didx[rank - 1 - i];
+                    i++;
+                };
+                dst[flat] = psrc[shape_flat(@src.shape, @sidx[0])];
+                flat++;
+            };
+            return out;
+        };
+
+        // Permute axes. perm[i] is the source axis that maps to destination axis i.
+        def tensor_permute<T>(Tensor<T>* src, size_t* perm) -> Tensor<T>
+        {
+            size_t rank = src.shape.rank,
+                   i;
+            TensorShape ns;
+            ns.rank = rank;
+            while (i < rank)
+            {
+                ns.dims[i] = src.shape.dims[perm[i]];
+                i++;
+            };
+            shape_compute_strides(@ns);
+            Tensor<T> out(@ns, sizeof(T));
+
+            size_t n    = shape_numel(@ns),
+                   flat,
+                   rem;
+            T* dst  = (T*)out.buf,
+               psrc = (T*)src.buf;
+            size_t[TENSOR_MAX_RANK] didx,
+                                    sidx;
+            while (flat < n)
+            {
+                rem = flat;
+                i = 0;
+                while (i < rank)
+                {
+                    didx[i] = rem / ns.strides[i];
+                    rem      = rem % ns.strides[i];
+                    i++;
+                };
+                i = (size_t)0;
+                while (i < rank)
+                {
+                    sidx[perm[i]] = didx[i];
+                    i++;
+                };
+                dst[flat] = psrc[shape_flat(@src.shape, @sidx[0])];
+                flat++;
+            };
+            return out;
+        };
+
+        // Extract a sub-tensor along one axis at a given index.
+        // The selected axis is removed from the output shape (rank - 1).
+        def tensor_slice<T>(Tensor<T>* src, size_t axis, size_t idx) -> Tensor<T>
+        {
+            size_t rank = src.shape.rank,
+                   i,
+                   j;
+            TensorShape ns;
+            ns.rank = rank - 1;
+            while (i < rank)
+            {
+                if (i != axis)
+                {
+                    ns.dims[j] = src.shape.dims[i];
+                    j++;
+                };
+                i++;
+            };
+            shape_compute_strides(@ns);
+            Tensor<T> out(@ns, sizeof(T));
+
+            size_t n    = shape_numel(@ns),
+                   flat,
+                   rem;
+            T* dst  = (T*)out.buf,
+               psrc = (T*)src.buf;
+            size_t[TENSOR_MAX_RANK] didx,
+                                    sidx;
+            while (flat < n)
+            {
+                rem = flat;
+                i = 0;
+                while (i < ns.rank)
+                {
+                    didx[i] = rem / ns.strides[i];
+                    rem      = rem % ns.strides[i];
+                    i++;
+                };
+                i = 0;
+                j = 0;
+                while (i < rank)
+                {
+                    if (i == axis)
                     {
-                        coords_a[0] = i; coords_a[1] = k;
-                        coords_b[0] = k; coords_b[1] = j;
-                        sum = sum + tensor_at(a, coords_a) * tensor_at(b, coords_b);
+                        sidx[i] = idx;
+                    }
+                    else
+                    {
+                        sidx[i] = didx[j];
+                        j++;
                     };
-                    coords_out[0] = i; coords_out[1] = j;
-                    tensor_set_at(@out, coords_out, sum);
+                    i++;
                 };
+                dst[flat] = psrc[shape_flat(@src.shape, @sidx[0])];
+                flat++;
             };
-            i32array_free(@out_shape);
             return out;
         };
 
-        ///  ---------------------------------------------------------------
-             TENSOR CONTRACTION (tensordot) – one axis pair
-        ///
-
-        def tensor_tensordot<T>(Tensor<T>* a, Tensor<T>* b, i32 axis_a, i32 axis_b) -> Tensor<T>
+        // Remove all size-1 axes.
+        def tensor_squeeze<T>(Tensor<T>* src) -> Tensor<T>
         {
-            if (axis_a < 0 | axis_a >= a.ndim | axis_b < 0 | axis_b >= b.ndim) { return tensor_zeros<T>(a.shape); };
-            i32 dim = a.shape.adata[axis_a];
-            if (dim != b.shape.adata[axis_b]) {return tensor_zeros<T>(a.shape);};
-            I32Array out_shape = i32array_new(a.ndim + b.ndim - 2);
-            for (i32 i; i < a.ndim; i = i + 1)
+            size_t rank = src.shape.rank,
+                   i,
+                   nr;
+            size_t[TENSOR_MAX_RANK] new_dims;
+            while (i < rank)
             {
-                if (i != axis_a) {i32array_push(@out_shape, a.shape.adata[i]);};
+                if (src.shape.dims[i] != (size_t)1)
+                {
+                    new_dims[nr] = src.shape.dims[i];
+                    nr++;
+                };
+                i++;
             };
-            for (i32 i; i < b.ndim; i = i + 1)
+            if (nr == (size_t)0) { nr = (size_t)1; new_dims[0] = (size_t)1; };
+            return tensor_reshape<T>(src, @new_dims[0], nr);
+        };
+
+        // Insert a size-1 axis at the given position.
+        def tensor_expand_dims<T>(Tensor<T>* src, size_t axis) -> Tensor<T>
+        {
+            size_t rank = src.shape.rank,
+                   i,
+                   j;
+            size_t[TENSOR_MAX_RANK] new_dims;
+            while (i < rank + (size_t)1)
             {
-                if (i != axis_b) {i32array_push(@out_shape, b.shape.adata[i]);};
+                if (i == axis)
+                {
+                    new_dims[i] = (size_t)1;
+                }
+                else
+                {
+                    new_dims[i] = src.shape.dims[j];
+                    j++;
+                };
+                i++;
             };
-            Tensor<T> out = tensor_zeros<T>(out_shape);
-            i32[8] coords_a, coords_b, coords_out;
-            i32 out_pos;
-            i64 idx_a, idx_b, rem;
-            T sum;
-            for (i64 flat; flat < out.total_size; flat = flat + 1)
+            return tensor_reshape<T>(src, @new_dims[0], rank + (size_t)1);
+        };
+
+        // ====================================================================
+        // Equality check
+        // ====================================================================
+
+        def tensor_equal<T>(Tensor<T>* a, Tensor<T>* b) -> bool
+        {
+            if (!shape_equal(@a.shape, @b.shape)) { return false; };
+            size_t n = shape_numel(@a.shape),
+                   i;
+            T* pa = (T*)a.buf,
+               pb = (T*)b.buf;
+            while (i < n)
             {
-                rem = flat;
-                for (i32 i; i < out.ndim; i = i + 1)
-                {
-                    coords_out[i] = (i32)(rem % (i64)out.shape.adata[i]);
-                    rem = rem / (i64)out.shape.adata[i];
-                };
-                // Map output coordinates to input coordinates
-                out_pos = 0;
-                for (i32 i; i < a.ndim; i = i + 1)
-                {
-                    if (i == axis_a) {continue;};
-                    coords_a[i] = coords_out[out_pos];
-                    out_pos = out_pos + 1;
-                };
-                for (i32 i; i < b.ndim; i = i + 1)
-                {
-                    if (i == axis_b) {continue;};
-                    coords_b[i] = coords_out[out_pos];
-                    out_pos = out_pos + 1;
-                };
-                sum = 0;
-                for (i32 k; k < dim; k = k + 1)
-                {
-                    coords_a[axis_a] = k;
-                    coords_b[axis_b] = k;
-                    idx_a = _tensor_index(a, coords_a);
-                    idx_b = _tensor_index(b, coords_b);
-                    sum = sum + a.tdata[idx_a] * b.tdata[idx_b];
-                };
-                out.tdata[flat] = sum;
+                if (pa[i] != pb[i]) { return false; };
+                i++;
             };
-            i32array_free(@out_shape);
+            return true;
+        };
+
+        // ====================================================================
+        // Linear algebra  (float specialisations)
+        // ====================================================================
+
+        // Matrix multiply for float rank-2 tensors.
+        // a: [M x K],  b: [K x N]  ->  out: [M x N]
+        def tensor_matmul_f(Tensor<float>* a, Tensor<float>* b) -> Tensor<float>
+        {
+            size_t M = a.shape.dims[0],
+                   K = a.shape.dims[1],
+                   N = b.shape.dims[1],
+                   i, j, k;
+            TensorShape os = make_shape2(M, N);
+            Tensor<float> out(@os, sizeof(float));
+            float* pa = (float*)a.buf,
+                   pb = (float*)b.buf,
+                   po = (float*)out.buf;
+            float acc;
+            while (i < M)
+            {
+                j = 0;
+                while (j < N)
+                {
+                    acc = 0f;
+                    k = 0;
+                    while (k < K)
+                    {
+                        acc = acc + pa[i * K + k] * pb[k * N + j];
+                        k++;
+                    };
+                    po[i * N + j] = acc;
+                    j++;
+                };
+                i++;
+            };
             return out;
         };
+
+        // Matrix multiply for double rank-2 tensors.
+        def tensor_matmul_d(Tensor<double>* a, Tensor<double>* b) -> Tensor<double>
+        {
+            size_t M = a.shape.dims[0],
+                   K = a.shape.dims[1],
+                   N = b.shape.dims[1],
+                   i, j, k;
+            TensorShape os = make_shape2(M, N);
+            Tensor<double> out(@os, sizeof(double));
+            double* pa = (double*)a.buf,
+                    pb = (double*)b.buf,
+                    po = (double*)out.buf;
+            double acc;
+            while (i < M)
+            {
+                j = 0;
+                while (j < N)
+                {
+                    acc = 0.0d;
+                    k = 0;
+                    while (k < K)
+                    {
+                        acc = acc + pa[i * K + k] * pb[k * N + j];
+                        k++;
+                    };
+                    po[i * N + j] = acc;
+                    j++;
+                };
+                i++;
+            };
+            return out;
+        };
+
+        // Dot product of two float rank-1 tensors.
+        def tensor_dot_f(Tensor<float>* a, Tensor<float>* b) -> float
+        {
+            size_t n = shape_numel(@a.shape),
+                   i;
+            float* pa  = (float*)a.buf,
+                   pb  = (float*)b.buf;
+            float  acc;
+            while (i < n)
+            {
+                acc = acc + pa[i] * pb[i];
+                i++;
+            };
+            return acc;
+        };
+
+        // Dot product of two double rank-1 tensors.
+        def tensor_dot_d(Tensor<double>* a, Tensor<double>* b) -> double
+        {
+            size_t n = shape_numel(@a.shape),
+                   i;
+            double* pa  = (double*)a.buf,
+                    pb  = (double*)b.buf;
+            double  acc;
+            while (i < n)
+            {
+                acc = acc + pa[i] * pb[i];
+                i++;
+            };
+            return acc;
+        };
+
+        // Outer product of two float rank-1 tensors -> rank-2 tensor.
+        def tensor_outer_f(Tensor<float>* a, Tensor<float>* b) -> Tensor<float>
+        {
+            size_t M = shape_numel(@a.shape),
+                   N = shape_numel(@b.shape),
+                   i, j;
+            TensorShape os = make_shape2(M, N);
+            Tensor<float> out(@os, sizeof(float));
+            float* pa = (float*)a.buf,
+                   pb = (float*)b.buf,
+                   po = (float*)out.buf;
+            while (i < M)
+            {
+                j = 0;
+                while (j < N)
+                {
+                    po[i * N + j] = pa[i] * pb[j];
+                    j++;
+                };
+                i++;
+            };
+            return out;
+        };
+
+        // Outer product of two double rank-1 tensors -> rank-2 tensor.
+        def tensor_outer_d(Tensor<double>* a, Tensor<double>* b) -> Tensor<double>
+        {
+            size_t M = shape_numel(@a.shape),
+                   N = shape_numel(@b.shape),
+                   i, j;
+            TensorShape os = make_shape2(M, N);
+            Tensor<double> out(@os, sizeof(double));
+            double* pa = (double*)a.buf,
+                    pb = (double*)b.buf,
+                    po = (double*)out.buf;
+            while (i < M)
+            {
+                j = 0;
+                while (j < N)
+                {
+                    po[i * N + j] = pa[i] * pb[j];
+                    j++;
+                };
+                i++;
+            };
+            return out;
+        };
+
+        // ====================================================================
+        // Debug utility
+        // ====================================================================
+
+        // Print the shape of a tensor to stdout.
+        def tensor_print_shape<T>(Tensor<T>* t) -> void
+        {
+            size_t i;
+            standard::io::console::print("Tensor(");
+            while (i < t.shape.rank)
+            {
+                standard::io::console::print(t.shape.dims[i]);
+                if (i + (size_t)1 < t.shape.rank) { standard::io::console::print(", "); };
+                i++;
+            };
+            standard::io::console::print(")\n");
+        };
+
     };
 };
+
 #endif;

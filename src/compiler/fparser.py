@@ -246,6 +246,9 @@ class FluxParser:
         self._template_structs = {}               # name -> (param_names, StructDef AST)
         self._emitted_template_struct_instances = set()
         self._template_struct_instances = []      # concrete StructDefs to inject
+        self._template_objects = {}               # name -> (param_names, ObjectDef AST)
+        self._emitted_template_object_instances = set()
+        self._template_object_instances = []      # concrete ObjectDefs to inject
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
         self._template_operators: Dict[str, tuple] = {}  # op_symbol -> (template_param_names, FunctionDef AST)
@@ -678,11 +681,14 @@ class FluxParser:
             except ParseError as e:
                 error_msg = f"\nParse error: {e}"
                 raise ValueError(error_msg) from e
-        # Prepend template instantiations so they are emitted before any call site
+        # Append template instantiations after all other statements so that
+        # namespace functions they depend on are registered before their bodies run.
         if self._template_struct_instances:
-            statements = self._template_struct_instances + statements
+            statements = statements + self._template_struct_instances
+        if self._template_object_instances:
+            statements = statements + self._template_object_instances
         if self._template_instantiations:
-            statements = self._template_instantiations + statements
+            statements = statements + self._template_instantiations
         return Program(self.symbol_table, statements=statements)
     
     def has_errors(self) -> bool:
@@ -1506,7 +1512,7 @@ class FluxParser:
         # Expose template param names so type_spec() can detect and defer
         # myStru<T>-style type arguments that are still unresolved template params.
         _prev_active = self._active_template_params
-        self._active_template_params = set(template_params) if template_params else set()
+        self._active_template_params = set(template_params) if template_params else _prev_active
 
         self.consume(TokenType.LEFT_PAREN)
         parameters = []
@@ -1571,6 +1577,32 @@ class FluxParser:
                     proto_name = self.consume(TokenType.IDENTIFIER).value
                 else:
                     self.error("Expected function name (identifier or string literal)")
+
+                # Optional template params for this prototype: name<T, U>(...)
+                proto_template_params = []
+                if self.expect(TokenType.LESS_THAN):
+                    with self._lookahead():
+                        _is_tmpl = False
+                        self.advance()
+                        if self.expect(TokenType.IDENTIFIER):
+                            self.advance()
+                            while self.expect(TokenType.COMMA):
+                                self.advance()
+                                if not self.expect(TokenType.IDENTIFIER):
+                                    break
+                                self.advance()
+                            if self.expect(TokenType.GREATER_THAN):
+                                _is_tmpl = True
+                    if _is_tmpl:
+                        self.advance()  # consume '<'
+                        proto_template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                        while self.expect(TokenType.COMMA):
+                            self.advance()
+                            proto_template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                        self.consume(TokenType.GREATER_THAN)
+                _prev_proto_active = self._active_template_params
+                if proto_template_params:
+                    self._active_template_params = set(proto_template_params)
                 
                 self.consume(TokenType.LEFT_PAREN)
                 proto_parameters = []
@@ -1583,13 +1615,20 @@ class FluxParser:
 
                 _proto_is_var = any(getattr(p, '_is_variadic_sentinel', False) for p in proto_parameters)
                 _proto_real = [p for p in proto_parameters if not getattr(p, '_is_variadic_sentinel', False)]
-                
+
+                self._active_template_params = _prev_proto_active
+
                 # no_mangle applies to ALL functions in this comma-separated list
-                prototypes.append(FunctionDef(proto_name, _proto_real, proto_return_type, 
-                                            Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var, calling_conv))
+                _proto_fd = FunctionDef(proto_name, _proto_real, proto_return_type,
+                                        Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var, calling_conv)
+                if proto_template_params:
+                    _proto_fd._is_trait_template_proto = True
+                prototypes.append(_proto_fd)
             
             self.consume(TokenType.SEMICOLON)
             
+            # Restore active template params — this early return bypasses the normal restore at end of function_def.
+            self._active_template_params = _prev_active
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
         # Resolve contract(s): def foo(int x) -> int : NonZero, LessThan(y,x) { ... }
@@ -2246,7 +2285,15 @@ class FluxParser:
         while not self.expect(TokenType.RIGHT_BRACE):
             if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 proto = self.function_def()
-                if isinstance(proto, list):
+                if proto is None:
+                    # Templated prototype: function_def() stored it in _template_functions
+                    # and returned None.  Recover the FunctionDef so the trait registry
+                    # can record it; the compliance checker will skip it.
+                    bare_name = next(reversed(self._template_functions))
+                    _, recovered = self._template_functions[bare_name]
+                    recovered._is_trait_template_proto = True
+                    prototypes.append(recovered)
+                elif isinstance(proto, list):
                     prototypes.extend(proto)
                 else:
                     prototypes.append(proto)
@@ -2266,6 +2313,32 @@ class FluxParser:
         self.consume(TokenType.OBJECT)
         name = self.consume(TokenType.IDENTIFIER).value
         traits = trait_names if trait_names is not None else []
+
+        # Parse optional template parameter list: object Name<T, U, ...>
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
+
+        _prev_active = self._active_template_params
+        self._active_template_params = set(template_params) if template_params else self._active_template_params
 
         # Check for comma-separated prototypes
         names = [name]
@@ -2291,6 +2364,7 @@ class FluxParser:
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
+            self._active_template_params = _prev_active
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
                 return [ObjectDef(n, [], [], [], [], traits=traits).set_location(tok.line, tok.column) for n in names]
@@ -2299,6 +2373,14 @@ class FluxParser:
         # Full definition - only allowed for single name
         if len(names) > 1:
             self.error("Comma-separated names are only allowed for prototypes (forward declarations)")
+
+        # Pre-register in _template_objects before parsing the body so that
+        # type_spec() can resolve self-referential return types like Tensor<T>*
+        # inside method signatures (e.g. def __expr() -> Tensor<T>*).
+        # We store a sentinel now and overwrite with the real ObjectDef after.
+        if template_params:
+            _sentinel = ObjectDef(name, [], [], [], [], traits=traits, template_params=template_params)
+            self._template_objects[name] = (template_params, _sentinel)
 
         self.consume(TokenType.LEFT_BRACE)
         
@@ -2310,13 +2392,24 @@ class FluxParser:
                 
                 while not self.expect(TokenType.RIGHT_BRACE):
                     if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                        _obj_tmpl_keys_before = set(self._template_functions.keys())
                         method = self.function_def()
                         if method is None:
                             # Template method: re-register under qualified ObjectName.methodname key
-                            for bare_name, tmpl in list(self._template_functions.items()):
+                            # and record a stub in methods so trait compliance can see the name.
+                            _new_method_names = [k for k in self._template_functions
+                                                 if k not in _obj_tmpl_keys_before]
+                            for bare_name in _new_method_names:
                                 qualified = f"{name}.{bare_name}"
                                 if qualified not in self._template_functions:
-                                    self._template_functions[qualified] = tmpl
+                                    self._template_functions[qualified] = self._template_functions[bare_name]
+                            bare_name = _new_method_names[-1] if _new_method_names else next(reversed(self._template_functions))
+                            _, recovered = self._template_functions[bare_name]
+                            stub = FunctionDef(recovered.name, [], recovered.return_type,
+                                               Block([]), is_prototype=True)
+                            stub._is_template_method = True
+                            stub.is_private = is_private
+                            methods.append(stub)
                         elif isinstance(method, list):
                             for m in method:
                                 m.is_private = is_private
@@ -2363,13 +2456,23 @@ class FluxParser:
             else:
                 # Regular member (defaults to public)
                 if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                    _obj_tmpl_keys_before = set(self._template_functions.keys())
                     method = self.function_def()
                     if method is None:
                         # Template method: re-register under qualified ObjectName.methodname key
-                        for bare_name, tmpl in list(self._template_functions.items()):
+                        # and record a stub in methods so trait compliance can see the name.
+                        _new_method_names = [k for k in self._template_functions
+                                             if k not in _obj_tmpl_keys_before]
+                        for bare_name in _new_method_names:
                             qualified = f"{name}.{bare_name}"
                             if qualified not in self._template_functions:
-                                self._template_functions[qualified] = tmpl
+                                self._template_functions[qualified] = self._template_functions[bare_name]
+                        bare_name = _new_method_names[-1] if _new_method_names else next(reversed(self._template_functions))
+                        _, recovered = self._template_functions[bare_name]
+                        stub = FunctionDef(recovered.name, [], recovered.return_type,
+                                           Block([]), is_prototype=True)
+                        stub._is_template_method = True
+                        methods.append(stub)
                     elif isinstance(method, list):
                         methods.extend(method)
                     else:
@@ -2434,7 +2537,11 @@ class FluxParser:
                     f"Object '{name}': __expr() must have a non-void return type"
                 )
 
-        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits).set_location(tok.line, tok.column)
+        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits, template_params=template_params).set_location(tok.line, tok.column)
+        self._active_template_params = _prev_active
+        if template_params:
+            self._template_objects[name] = (template_params, obj_def)
+            return None
         self._parsed_objects[name] = obj_def
         return obj_def
     
@@ -2496,13 +2603,15 @@ class FluxParser:
                     func_ptr = self.function_pointer_declaration(calling_conv=cc_str)
                     variables.append(func_ptr)
                 else:
+                    _ns_tmpl_keys_before = set(self._template_functions.keys())
                     func = self.function_def()
                     # function_def() returns None for template functions (deferred instantiation).
                     if func is None:
                         # Register the template under its namespace-qualified names so that
                         # call-site lookup resolves correctly.
-                        if self._template_functions:
-                            bare_name = next(reversed(self._template_functions))
+                        _new_bare_names = [k for k in self._template_functions
+                                           if k not in _ns_tmpl_keys_before]
+                        for bare_name in _new_bare_names:
                             tmpl_entry = self._template_functions[bare_name]
                             ns_mangled = f"{current_namespace}__{bare_name}"
                             ns_scoped  = f"{current_namespace}::{bare_name}"
@@ -2558,8 +2667,20 @@ class FluxParser:
                     self.symbol_table.define(struct_result.name, SymbolKind.TYPE)
             elif self.expect(TokenType.OBJECT):
                 obj_result = self.object_def()
+                # object_def() returns None for template objects (deferred instantiation).
+                if obj_result is None:
+                    # Register under namespace-qualified names so type_spec() can find it.
+                    if self._template_objects:
+                        bare_name = next(reversed(self._template_objects))
+                        tmpl_entry = self._template_objects[bare_name]
+                        ns_mangled = f"{current_namespace}__{bare_name}"
+                        ns_scoped  = f"{current_namespace}::{bare_name}"
+                        if ns_mangled not in self._template_objects:
+                            self._template_objects[ns_mangled] = tmpl_entry
+                        if ns_scoped not in self._template_objects:
+                            self._template_objects[ns_scoped] = tmpl_entry
                 # Handle both single object and list of objects (comma-separated prototypes)
-                if isinstance(obj_result, list):
+                elif isinstance(obj_result, list):
                     objects.extend(obj_result)
                 else:
                     objects.append(obj_result)
@@ -2569,7 +2690,17 @@ class FluxParser:
                 objects.append(trait_result)
             elif self._is_trait_prefixed_object():
                 obj_result = self._parse_trait_prefixed_object()
-                if isinstance(obj_result, list):
+                if obj_result is None:
+                    if self._template_objects:
+                        bare_name = next(reversed(self._template_objects))
+                        tmpl_entry = self._template_objects[bare_name]
+                        ns_mangled = f"{current_namespace}__{bare_name}"
+                        ns_scoped  = f"{current_namespace}::{bare_name}"
+                        if ns_mangled not in self._template_objects:
+                            self._template_objects[ns_mangled] = tmpl_entry
+                        if ns_scoped not in self._template_objects:
+                            self._template_objects[ns_scoped] = tmpl_entry
+                elif isinstance(obj_result, list):
                     objects.extend(obj_result)
                 else:
                     objects.append(obj_result)
@@ -2748,19 +2879,26 @@ class FluxParser:
         else:
             base_type = base_type_result
 
-        # Template struct instantiation: MyStruct<int> or MyStruct<T, U>
-        # After parsing a custom typename, check if '<' follows and it names a template struct.
+        # Template struct/object instantiation: MyStruct<int> or MyObj<T, U>
+        # After parsing a custom typename, check if '<' follows and it names a template struct or object.
         if custom_typename is not None and self.expect(TokenType.LESS_THAN):
             # Resolve the struct name: try the raw token (bare or "NS::bare"), then
             # the __ mangled form ("NS__bare"), so namespace-qualified references work.
             _tmpl_key = None
+            _is_object_tmpl = False
             if custom_typename in self._template_structs:
                 _tmpl_key = custom_typename
+            elif custom_typename in self._template_objects:
+                _tmpl_key = custom_typename
+                _is_object_tmpl = True
             else:
                 # "XYZ_TEST::myStru2" -> try "XYZ_TEST__myStru2"
                 _mangled_attempt = custom_typename.replace("::", "__")
                 if _mangled_attempt in self._template_structs:
                     _tmpl_key = _mangled_attempt
+                elif _mangled_attempt in self._template_objects:
+                    _tmpl_key = _mangled_attempt
+                    _is_object_tmpl = True
             if _tmpl_key is not None:
                 self.advance()  # consume '<'
                 type_names = []
@@ -2777,6 +2915,8 @@ class FluxParser:
                 # If any type argument is still an active template param, defer resolution.
                 if any(n in self._active_template_params for n in type_names):
                     custom_typename = f"{_tmpl_key}<{','.join(type_names)}>"
+                elif _is_object_tmpl:
+                    custom_typename = self._resolve_template_object(_tmpl_key, type_names, type_specs_list)
                 else:
                     custom_typename = self._resolve_template_struct(_tmpl_key, type_names, type_specs_list)
 
@@ -3263,7 +3403,7 @@ class FluxParser:
                         else:
                             break
             elif self.expect(TokenType.COMMA):
-                # Mode: int x = 1, y = 2, z = 3; Ã¢â‚¬â€ each name has its own initializer
+                # Mode: int x = 1, y = 2, z = 3; each name has its own initializer
                 # Also handles: int* px @= x, px2 @= x; (address-assign sugar)
                 while self.expect(TokenType.COMMA):
                     self.advance()
@@ -4421,7 +4561,7 @@ class FluxParser:
                 if ts.is_volatile:
                     result.is_volatile = True
                 return result
-            # Deferred template struct application: "StructName<T,U>" where T/U may now
+            # Deferred template struct/object application: "Name<T,U>" where T/U may now
             # be in the mapping.  Resolve it to the concrete mangled name.
             if name and '<' in name and '>' in name:
                 bracket = name.index('<')
@@ -4445,6 +4585,23 @@ class FluxParser:
                     result.custom_typename = mangled
                     result.base_type = DataType.DATA
                     return result
+                if struct_base in self._template_objects and any(a in mapping for a in raw_args):
+                    concrete_type_names = []
+                    concrete_type_specs = []
+                    for arg in raw_args:
+                        arg = arg.strip()
+                        if arg in mapping:
+                            concrete_ts = mapping[arg]
+                            concrete_type_names.append(self._type_system_to_mangle_str(concrete_ts))
+                            concrete_type_specs.append(concrete_ts)
+                        else:
+                            concrete_type_names.append(arg)
+                            concrete_type_specs.append(TypeSystem(base_type=DataType.DATA, custom_typename=arg))
+                    mangled = self._resolve_template_object(struct_base, concrete_type_names, concrete_type_specs)
+                    result = copy.copy(ts)
+                    result.custom_typename = mangled
+                    result.base_type = DataType.DATA
+                    return result
             return copy.copy(ts)
 
         def walk(obj):
@@ -4458,9 +4615,37 @@ class FluxParser:
                 return {k: walk(v) for k, v in obj.items()}
             if not hasattr(obj, '__dataclass_fields__'):
                 return obj
-            # Deferred template function call: FunctionCall whose name is "func<T,U>".
-            # Resolve it now that the concrete types are in the mapping.
+            # Identifier used as expression whose name is a template param
+            # (e.g. sizeof(T) parses T as Identifier, not TypeSystem).
+            if isinstance(obj, Identifier) and obj.name in mapping:
+                return copy.copy(mapping[obj.name])
+            # Deferred template call: FunctionCall whose name is "func<T,U>"
+            # or "ObjName<T>.method" constructor/method call patterns.
             if isinstance(obj, FunctionCall) and isinstance(obj.name, str) and '<' in obj.name and '>' in obj.name:
+                # Handle "ObjName<T>.method" — substitute the type arg in the object name.
+                _gt_pos = obj.name.index('>')
+                if _gt_pos + 1 < len(obj.name) and obj.name[_gt_pos + 1] == '.':
+                    _lt = obj.name.index('<')
+                    _obj_base = obj.name[:_lt]
+                    _raw_args = obj.name[_lt + 1:_gt_pos].split(',')
+                    _method = obj.name[_gt_pos + 1:]  # e.g. '.__init'
+                    if _obj_base in self._template_objects and any(a.strip() in mapping for a in _raw_args):
+                        _concrete_names = []
+                        _concrete_specs = []
+                        for _a in _raw_args:
+                            _a = _a.strip()
+                            if _a in mapping:
+                                _cts = mapping[_a]
+                                _concrete_names.append(self._type_system_to_mangle_str(_cts))
+                                _concrete_specs.append(_cts)
+                            else:
+                                _concrete_names.append(_a)
+                                _concrete_specs.append(TypeSystem(base_type=DataType.DATA, custom_typename=_a))
+                        _mangled_obj = self._resolve_template_object(_obj_base, _concrete_names, _concrete_specs)
+                        _new_obj = copy.copy(obj)
+                        _new_obj.name = _mangled_obj + _method
+                        _new_obj.arguments = [walk(a) for a in obj.arguments]
+                        return _new_obj
                 bracket = obj.name.index('<')
                 fn_base = obj.name[:bracket]
                 raw_args = obj.name[bracket + 1:-1].split(',')
@@ -4477,6 +4662,23 @@ class FluxParser:
                             concrete_type_names.append(arg)
                             concrete_type_specs.append(TypeSystem(base_type=DataType.DATA, custom_typename=arg))
                     resolved_name = self._resolve_template_call(fn_base, concrete_type_names, concrete_type_specs)
+                    new_obj = copy.copy(obj)
+                    new_obj.name = resolved_name
+                    new_obj.arguments = [walk(a) for a in obj.arguments]
+                    return new_obj
+                if fn_base in self._template_objects and any(a.strip() in mapping for a in raw_args):
+                    concrete_type_names = []
+                    concrete_type_specs = []
+                    for arg in raw_args:
+                        arg = arg.strip()
+                        if arg in mapping:
+                            cts = mapping[arg]
+                            concrete_type_names.append(self._type_system_to_mangle_str(cts))
+                            concrete_type_specs.append(cts)
+                        else:
+                            concrete_type_names.append(arg)
+                            concrete_type_specs.append(TypeSystem(base_type=DataType.DATA, custom_typename=arg))
+                    resolved_name = self._resolve_template_object(fn_base, concrete_type_names, concrete_type_specs)
                     new_obj = copy.copy(obj)
                     new_obj.name = resolved_name
                     new_obj.arguments = [walk(a) for a in obj.arguments]
@@ -4543,6 +4745,39 @@ class FluxParser:
             self._template_struct_instances.append(concrete)
         return mangled
 
+    def _resolve_template_object(self, object_name, type_names, type_specs=None):
+        """
+        Instantiate a template object with concrete type arguments.
+        Returns the mangled concrete object name.
+        """
+        if object_name not in self._template_objects:
+            self.error(f"Unknown template object '{object_name}'")
+        template_params, template_od = self._template_objects[object_name]
+        if len(type_names) != len(template_params):
+            self.error(
+                f"Template object '{object_name}' expects {len(template_params)} "
+                f"type argument(s), got {len(type_names)}"
+            )
+        mangled = object_name + "__" + "_".join(type_names)
+        if mangled not in self._emitted_template_object_instances:
+            self._emitted_template_object_instances.add(mangled)
+            mapping = {}
+            for param, tname, tspec in zip(
+                    template_params, type_names,
+                    type_specs or [None] * len(type_names)):
+                if tspec is not None:
+                    mapping[param] = tspec
+                else:
+                    mapping[param] = TypeSystem(
+                        base_type=DataType.DATA, custom_typename=tname)
+            concrete = self._substitute_template(template_od, mapping)
+            concrete.name = mangled
+            concrete.template_params = []
+            self._parsed_objects[mangled] = concrete
+            self._object_init_params[mangled] = self._object_init_params.get(template_od.name, 0)
+            self._template_object_instances.append(concrete)
+        return mangled
+
     def _resolve_template_call(self, func_name, arg_type_names, arg_type_specs=None):
         """
         Given a template function name and a list of concrete type-name strings
@@ -4602,6 +4837,19 @@ class FluxParser:
             concrete_func = self._substitute_template(template_func, mapping)
             concrete_func.name = func_name  # Keep original name; normal mangling handles uniqueness
             concrete_func.no_mangle = False
+            # Tag with the originating namespace so the codegen can restore context
+            # when emitting the body (template instances are emitted at top level,
+            # outside any namespace visit, so _current_namespace would otherwise be empty).
+            # Find the most-qualified key for this function in _template_functions —
+            # that encodes the namespace the template was defined in.
+            _src_ns = ''
+            for _key in self._template_functions:
+                if _key.endswith('__' + func_name) and '__' in _key:
+                    # e.g. "standard__tensors__tensor_make" ends with "__tensor_make"
+                    _candidate_ns = _key[:-(len(func_name) + 2)]
+                    if len(_candidate_ns) > len(_src_ns):
+                        _src_ns = _candidate_ns
+            concrete_func._source_namespace = _src_ns
 
             # If this is a method template (qualified name), inject directly into the
             # object's method list so it is compiled via emit_method_body, which
@@ -4817,37 +5065,50 @@ class FluxParser:
                 arg = args[i]
                 inferred_ts = None
 
+                # Unwrap address-of (@x) to get the underlying identifier for type lookup.
+                _arg_for_lookup = arg
+                if (isinstance(arg, AddressOf)
+                        and isinstance(getattr(arg, 'expression', None), Identifier)):
+                    _arg_for_lookup = arg.expression
+                if isinstance(_arg_for_lookup, Identifier):
+                    arg = _arg_for_lookup
                 if isinstance(arg, Identifier):
                     # Look up the variable\'s declared type in the symbol table.
                     arg_ts = self.symbol_table.get_type_spec(arg.name)
                     if arg_ts is not None:
                         if struct_param_map and arg_ts.custom_typename:
-                            # The argument is a template struct instance: e.g. Tensor__int*.
+                            # The argument is a template struct/object instance: e.g. Tensor__float*.
                             # Recover which concrete type was substituted for each inner
-                            # template param by looking up the mangled struct name's template
-                            # instantiation record.
+                            # template param by looking up the mangled name's template record.
                             arg_ctn = arg_ts.custom_typename
-                            # Find the template struct that produced this mangled name.
-                            for tmpl_name, (tmpl_params, _) in self._template_structs.items():
-                                sep = tmpl_name + "__"
-                                if arg_ctn.startswith(sep) or arg_ctn == tmpl_name:
-                                    # Extract the concrete type args from the mangled suffix.
-                                    suffix = arg_ctn[len(sep):]
-                                    concrete_args = suffix.split("__") if suffix else []
-                                    for tparam, pos in struct_param_map.items():
-                                        if pos < len(concrete_args):
-                                            carg = concrete_args[pos]
-                                            # Resolve the concrete arg name to a TypeSystem.
-                                            resolved = self.symbol_table.get_type_spec(carg)
-                                            if resolved is None:
-                                                _dtbv = {dt.value: dt for dt in DataType}
-                                                if carg in _dtbv:
-                                                    resolved = TypeSystem(base_type=_dtbv[carg],
-                                                        is_signed=_dtbv[carg] in (DataType.SINT, DataType.CHAR))
-                                                else:
-                                                    resolved = TypeSystem(base_type=DataType.DATA,
-                                                                          custom_typename=carg)
-                                            inferred[tparam] = resolved
+                            # Search both template structs and template objects.
+                            _tmpl_registries = [
+                                self._template_structs,
+                                {k: v for k, v in self._template_objects.items()},
+                            ]
+                            for _registry in _tmpl_registries:
+                                _found = False
+                                for tmpl_name, (tmpl_params, _) in _registry.items():
+                                    sep = tmpl_name + "__"
+                                    if arg_ctn.startswith(sep) or arg_ctn == tmpl_name:
+                                        suffix = arg_ctn[len(sep):]
+                                        concrete_args = suffix.split("__") if suffix else []
+                                        for tparam, pos in struct_param_map.items():
+                                            if pos < len(concrete_args):
+                                                carg = concrete_args[pos]
+                                                resolved = self.symbol_table.get_type_spec(carg)
+                                                if resolved is None:
+                                                    _dtbv = {dt.value: dt for dt in DataType}
+                                                    if carg in _dtbv:
+                                                        resolved = TypeSystem(base_type=_dtbv[carg],
+                                                            is_signed=_dtbv[carg] in (DataType.SINT, DataType.CHAR))
+                                                    else:
+                                                        resolved = TypeSystem(base_type=DataType.DATA,
+                                                                              custom_typename=carg)
+                                                inferred[tparam] = resolved
+                                        _found = True
+                                        break
+                                if _found:
                                     break
                         elif param_tname is not None:
                             inferred_ts = arg_ts

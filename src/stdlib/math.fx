@@ -1,7 +1,7 @@
 // Author: Karac V. Thweatt
 // Updated: 2026-05-25
 
-// redmath.fx - Comprehensive mathematical functions with overloads
+// math.fx - Comprehensive mathematical functions with overloads
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;
 #endif;
