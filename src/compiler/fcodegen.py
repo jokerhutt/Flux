@@ -5367,6 +5367,16 @@ class CodegenVisitor:
             if not node.members:
                 return existing_struct
             if existing_struct.elements:
+                # Body already set — but still (re)compute the vtable so TLD is correct.
+                node.vtable = node.calculate_vtable(module)
+                vtable_name = f"{node.name}.TLD"
+                if vtable_name not in module.globals:
+                    vtable_constant = node.vtable.to_llvm_constant(module)
+                    vtable_global = ir.GlobalVariable(module, vtable_constant.type, name=vtable_name)
+                    vtable_global.initializer = vtable_constant
+                    vtable_global.linkage = 'internal'
+                    vtable_global.global_constant = True
+                module._struct_vtables[node.name] = node.vtable
                 return existing_struct
             opaque_struct = existing_struct
         else:
@@ -6438,7 +6448,7 @@ class CodegenVisitor:
             return
         init_val = self.visit(node.initial_value, builder, module)
         if hasattr(init_val, 'type') and init_val.type != llvm_type:
-            init_val = TypeSystem.cast_value(builder, module, init_val, llvm_type, resolved_type_spec)
+            init_val = CoercionContext.coerce_return_value(builder, init_val, llvm_type)
         builder.store(init_val, gvar)
 
     def _vardecl_local(self, node, builder, module, llvm_type, resolved_type_spec):
@@ -6701,7 +6711,7 @@ class CodegenVisitor:
             init_val = self.visit(node.initial_value, builder, module)
             if init_val is not None:
                 if hasattr(init_val, 'type') and init_val.type != llvm_type:
-                    init_val = TypeSystem.cast_value(builder, module, init_val, llvm_type, resolved_type_spec)
+                    init_val = CoercionContext.coerce_return_value(builder, init_val, llvm_type)
                 builder.store(init_val, typed_ptr)
         else:
             # Zero-initialise the heap allocation (mirrors stack zero-init)

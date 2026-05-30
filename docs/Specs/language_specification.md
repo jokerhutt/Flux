@@ -2152,7 +2152,7 @@ signed data{17} as weird17 = -1000;
 unsigned data{7:8} as aligned7 = 127;
 
 // Array of 5-bit values
-unsigned data{5}[10] as nibble_array arr;
+unsigned data{5}[10] as 5b_array arr;
 arr[0] = 0x1F;  // Max value for 5 bits
 
 // Casting between weird widths

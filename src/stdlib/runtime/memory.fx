@@ -89,6 +89,57 @@ def !!memcmp(void* a, void* b, size_t n) -> int
     return 0;
 };
 
+def mem_fill(void* ptr, byte value, size_t size) -> void
+{
+    // Replicate fill byte across all 8 bytes of a u64 word
+    u64  word, v64;
+    byte* p;
+    u64*  wp;
+    size_t i, head, tail, words;
+
+    v64  = (u64)value;
+    word = v64 | (v64 << 8) | (v64 << 16) | (v64 << 24)
+              | (v64 << 32) | (v64 << 40) | (v64 << 48) | (v64 << 56);
+
+    p = (byte*)ptr;
+
+    // Fill unaligned head bytes until 8-byte aligned
+    head = (u64)ptr & 7;
+    if (head != 0)
+    {
+        head = 8 - head;
+        if (head > size) { head = size; };
+        i = 0;
+        while (i < head)
+        {
+            p[i] = value;
+            i++;
+        };
+        p    = (byte*)((u64)p + head);
+        size -= head;
+    };
+
+    // Fill 8 bytes at a time through the aligned body
+    words = size / 8;
+    wp    = (u64*)p;
+    i     = 0;
+    while (i < words)
+    {
+        wp[i] = word;
+        i++;
+    };
+    p    = (byte*)((u64)p + words * 8);
+    size -= words * 8;
+
+    // Fill remaining tail bytes
+    tail = size;
+    i    = 0;
+    while (i < tail)
+    {
+        p[i] = value;
+        i++;
+    };
+};
 
 #ifdef __LINUX__
 

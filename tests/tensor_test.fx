@@ -314,11 +314,11 @@ def main() -> int
     float[3] eqdata = [1.0f, 2.0f, 3.0f],
              nedata = [1.0f, 2.0f, 9.0f];
     size_t[1] eqdims = [3];
-    Tensor<float> eq1 = tensor_from_data<float>(@eqdata[0], @eqdims[0], 1),
-                  eq2 = tensor_from_data<float>(@eqdata[0], @eqdims[0], 1),
-                  neq = tensor_from_data<float>(@nedata[0], @eqdims[0], 1);
-    check( tensor_equal<float>(@eq1, @eq2), "tensor_equal identical\0");
-    check(!tensor_equal<float>(@eq1, @neq), "tensor_equal differs\0");
+    Tensor<float> eq1 = tensor_from_data(@eqdata[0], @eqdims[0], 1),
+                  eq2 = tensor_from_data(@eqdata[0], @eqdims[0], 1),
+                  neq = tensor_from_data(@nedata[0], @eqdims[0], 1);
+    check( tensor_equal(@eq1, @eq2), "tensor_equal identical\0");
+    check(!tensor_equal(@eq1, @neq), "tensor_equal differs\0");
     defer eq1.__exit();
     defer eq2.__exit();
     defer neq.__exit();

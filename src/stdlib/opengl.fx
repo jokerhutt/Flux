@@ -437,7 +437,7 @@ namespace OpenGL
             glTranslatef(float, float, float) -> void,
             glRotatef(float, float, float, float) -> void,
             glScalef(float, float, float) -> void,
-            glOrtho(float, float, float, float, float, float) -> void,
+            glOrtho(double, double, double, double, double, double) -> void,
             glFrustum(float, float, float, float, float, float) -> void,
 
             // Immediate mode geometry

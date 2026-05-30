@@ -1,7 +1,7 @@
 # Flux Standard Library Documentation
 
-Version: 1.1
-Date: March 2026
+Version: 2.1
+Date: May 2026
 
 ---
 
@@ -33,18 +33,31 @@ Date: March 2026
    - [timing.fx](#timingfx)
    - [random.fx](#randomfx)
    - [cryptography.fx](#cryptographyfx)
+   - [crc32.fx](#crc32fx)
    - [bigint.fx](#bigintfx)
    - [decimal.fx](#decimalfx)
-   - [net_windows.fx](#net_windowsfx)
+   - [net_windows.fx / socket_object_raw.fx](#net_windowsfx--socket_object_rawfx)
    - [uuid.fx](#uuidfx)
    - [sharedmemory.fx](#sharedmemoryfx)
    - [format.fx](#formatfx)
    - [console.fx](#consolefx)
    - [graphing.fx](#graphingfx)
+   - [oglgraphing.fx](#oglgraphingfx)
    - [opengl.fx](#openglfx)
    - [windows.fx](#windowsfx)
+   - [wasapi.fx](#wasapifx)
    - [detour.fx](#detourfx)
    - [operators.fx](#operatorsfx)
+   - [dotenv.fx](#dotenvfx)
+   - [json.fx](#jsonfx)
+   - [matrices.fx](#matricesfx)
+   - [fourier.fx](#fourierfx)
+   - [physics.fx](#physicsfx)
+   - [tensors.fx](#tensorsfx)
+   - [autograd.fx](#autogradfx)
+   - [raytracing.fx](#raytracingfx)
+   - [raycasting.fx](#raycastingfx)
+   - [datautils.fx](#datautilsfx)
 9. [Import Guidelines](#import-guidelines)
 10. [Platform Support](#platform-support)
 
@@ -75,31 +88,46 @@ stdlib/
   `----/ io.fx                    # Input/output operations
   `----/ math.fx                  # Mathematical functions
   `----/runtime/memory.fx         # Memory management
-  `----/runtime/allocators.fx     # Custom heap allocator (fmalloc/ffree)
+  `----/runtime/allocators.fx     # stdheap/stdstack/stdpool/stdarena/stdring allocators
   `----/runtime/ffifio.fx         # FFI-based file I/O (C runtime)
   `----/ string_utilities.fx      # String manipulation functions
   `----/ string_object_raw.fx     # String object implementation
   `----/ file_object_raw.fx       # File object implementation
-  `----/ socket_object_raw.fx     # Socket object implementation
-  `----/ collections.fx           # Dynamic data structures
+  `----/ socket_object_raw.fx     # Socket object + Winsock FFI (standard::sockets)
+  `----/ collections.fx           # Dynamic data structures (Array, HashMap, HashMapInt,
+  `----/                          #   LinkedList, Stack, Queue, Deque, RingBuffer,
+  `----/                          #   HashSet, HashSetInt, BinarySearchTree, MinHeap)
   `----/ vectors.fx               # 3D/4D vector mathematics
   `----/runtime/atomics.fx        # Atomic operations
   `----/runtime/threading.fx      # Threads, mutexes, condition variables
   `----/runtime/timing.fx         # High-resolution timers
   `----/ random.fx                # Random number generation
   `----/ cryptography.fx          # SHA-256, MD5, AES
+  `----/ crc32.fx                 # CRC32 (IEEE 802.3, reflected poly)
   `----/ bigint.fx                # Arbitrary-precision integers
   `----/ decimal.fx               # Arbitrary-precision decimals
-  `----/ net_windows.fx           # TCP/UDP networking (Windows)
+  `----/ net_windows.fx           # Winsock2 glue; full networking in socket_object_raw.fx
   `----/ uuid.fx                  # UUID generation (v1, v4, v7)
   `----/runtime/sharedmemory.fx   # Named shared memory regions
   `----/ format.fx                # ANSI color and text formatting
   `----/ console.fx               # TUI cursor and color control
   `----/ graphing.fx              # 2D/3D ASCII graphing
+  `----/ oglgraphing.fx           # OpenGL-backed 2D/3D graphing
   `----/ opengl.fx                # OpenGL context and rendering helpers
   `----/ windows.fx               # Win32 window and GDI wrapper
+  `----/ wasapi.fx                # WASAPI loopback audio capture
   `----/ detour.fx                # x86-64 inline hook / detour
   `----/ operators.fx             # Extended operator utilities
+  `----/ dotenv.fx                # .env file loader (cross-platform)
+  `----/ json.fx                  # JSON parse, build, and serialize library
+  `----/ matrices.fx              # Mat3/Mat4/Mat5 matrix math
+  `----/ fourier.fx               # DFT and FFT (Cooley-Tukey)
+  `----/ physics.fx               # Rigid body + soft body physics engine
+  `----/ tensors.fx               # N-dimensional tensor library
+  `----/ autograd.fx              # Tape-based reverse-mode automatic differentiation
+  `----/ raytracing.fx            # Physically-based path tracer
+  `----/ raycasting.fx            # 2.5D tile raycaster (Wolfenstein-style)
+  `----/ datautils.fx             # Low-level byte writer utilities
 ```
 
 ---
@@ -734,14 +762,18 @@ free(buffer);
 
 ### allocators.fx
 
-**Purpose**: Flux custom heap allocator (`fmalloc`/`ffree`/`frealloc`)
+**Purpose**: Flux custom allocators — heap, stack, pool, arena, and ring
 
-**Namespace**: `standard::memory::allocators::stdheap`
+**Namespace**: `standard::memory::allocators`
 
 **Guard macro**: `FLUX_STANDARD_ALLOCATORS`
 
 **Description**:  
-Implements the Flux standard heap allocator, used internally by the runtime. Automatically initialized by `FRTStartup()` via `stdheap::table_init()`. Provides `fmalloc`/`ffree`/`frealloc` as the recommended allocation API for Flux programs.
+Provides five allocators under the `standard::memory::allocators` namespace. The primary heap allocator (`stdheap`) is automatically initialized by `FRTStartup()`. All others must be constructed manually.
+
+#### stdheap — Standard Heap Allocator
+
+**Namespace**: `standard::memory::allocators::stdheap`
 
 **Design**:
 - Segregated free lists by size class for O(1) small alloc/free
@@ -753,7 +785,7 @@ Implements the Flux standard heap allocator, used internally by the runtime. Aut
 - Slabs acquired from OS: 4MB → 8MB → 16MB → 32MB → 64MB cap
 - Zero OS memory consumed until the first `fmalloc` call
 
-#### Public API
+**Public API**:
 
 ```flux
 def fmalloc(size_t size) -> u64     // Allocate; returns integer address
@@ -770,10 +802,106 @@ byte* buf = (byte*)fmalloc(256);
 ffree((u64)buf);
 ```
 
-#### Internal API (do not call directly)
+**Internal API** (do not call directly):
 
 ```flux
 def stdheap::table_init() -> bool   // Called by FRTStartup()
+```
+
+---
+
+#### stdstack — Stack Allocator
+
+**Namespace**: `standard::memory::allocators::stdstack`
+
+**Description**: Bump-pointer allocator backed by a single `stdheap` allocation. All allocations happen in order; only a bulk reset is supported (no individual frees).
+
+```flux
+object StackAllocator
+{
+    def __init(size_t size) -> this,
+        allocate(size_t size) -> void_ptr,
+        reset() -> void,
+        get_used() -> size_t,
+        get_available() -> size_t,
+        get_capacity() -> size_t;
+};
+```
+
+---
+
+#### stdpool — Pool Allocator
+
+**Namespace**: `standard::memory::allocators::stdpool`
+
+**Description**: Fixed-size block pool. All blocks are the same size. O(1) alloc and free via an in-place free list. Returns `null` when exhausted.
+
+```flux
+object PoolAllocator
+{
+    def __init(size_t block_size, size_t block_count) -> this,
+        allocate() -> void_ptr,
+        deallocate(void_ptr ptr) -> void,
+        get_block_size() -> size_t,
+        get_block_count() -> size_t,
+        get_free_count() -> size_t;
+};
+```
+
+---
+
+#### stdarena — Arena Allocator
+
+**Namespace**: `standard::memory::allocators::stdarena`
+
+**Description**: Bump-pointer allocator over a linked chain of OS-backed chunks. Individual frees are unsupported by design — free everything at once with `arena_reset` or `arena_destroy`. Supports scope-level rewind via `arena_mark`/`arena_rewind`. All allocations are 8-byte aligned. Zero OS memory consumed until first `alloc` call.
+
+**Chunk growth**: 1 MB initial → doubles each chunk → 64 MB cap.
+
+```flux
+struct Arena     { /* head chunk, next_chunk_size, chunk_size_cap */ };
+struct ArenaMark { /* chunk pointer + offset snapshot */ };
+
+def arena_init(Arena* a) -> void
+def arena_init_sized(Arena* a, size_t first_chunk) -> void
+def alloc(Arena* a, size_t sz) -> void*          // 8-byte aligned, returns null on OOM
+def alloc_zero(Arena* a, size_t sz) -> void*     // Zeroes before returning
+def alloc_copy(Arena* a, void* src, size_t sz) -> void*
+def alloc_str(Arena* a, byte* src) -> byte*      // Copy null-terminated string into arena
+def arena_mark(Arena* a) -> ArenaMark            // Snapshot current position
+def arena_rewind(Arena* a, ArenaMark* m) -> void // Restore to mark (bulk frees newer chunks)
+def arena_reset(Arena* a) -> void                // Reset all offsets; keep chunks allocated
+def arena_destroy(Arena* a) -> void              // Free all chunks back to stdheap
+def arena_used(Arena* a) -> size_t               // Bytes in use across all chunks
+def arena_committed(Arena* a) -> size_t          // Total bytes committed from OS
+```
+
+**Example**:
+
+```flux
+#import "allocators.fx";
+using standard::memory::allocators::stdarena;
+
+Arena a;
+arena_init(@a);
+byte* buf = (byte*)alloc(@a, 1024);
+// ... use buf (no individual free needed) ...
+arena_destroy(@a);
+```
+
+---
+
+#### stdring — Ring Allocator
+
+**Namespace**: `standard::memory::allocators::stdring`
+
+**Description**: Fixed-capacity circular buffer allocator. Returns a `RingAllocResult*` on success or `null` when the buffer has wrapped around to occupied space.
+
+```flux
+struct RingAllocResult { /* user data follows header */ };
+
+// Constructed via object syntax; capacity set at init.
+def allocate(size_t size) -> RingAllocResult*
 ```
 
 ---
@@ -1291,7 +1419,106 @@ Maintains sorted order. Not self-balancing.
 
 ---
 
-## Vectors Library
+#### Integer Hash Map (HashMapInt)
+
+String-keyed variant of `HashMap`. Key type is `byte*` (null-terminated string) instead of `i64`.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Number of pairs |
+| `is_empty()` | `bool` | Check if empty |
+| `put(byte* key, void* value)` | `bool` | Insert or update |
+| `get(byte* key)` | `void*` | Get value (NULL if absent) |
+| `contains(byte* key)` | `bool` | Check key exists |
+| `remove(byte* key)` | `bool` | Remove pair |
+| `clear()` | `void` | Remove all entries |
+
+---
+
+#### Deque
+
+Double-ended queue backed by `LinkedList`. Supports O(1) push/pop at both ends.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Number of items |
+| `is_empty()` | `bool` | Check if empty |
+| `push_front(void*)` | `bool` | Add to front |
+| `push_back(void*)` | `bool` | Add to back |
+| `pop_front()` | `void*` | Remove and return front |
+| `pop_back()` | `void*` | Remove and return back |
+| `peek_front()` | `void*` | Get front without removing |
+| `peek_back()` | `void*` | Get back without removing |
+| `clear()` | `void` | Remove all items |
+
+---
+
+#### RingBuffer
+
+Fixed-capacity circular buffer. Overwrites oldest entries when full.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Number of items currently stored |
+| `get_capacity()` | `size_t` | Maximum capacity |
+| `is_empty()` | `bool` | Check if empty |
+| `is_full()` | `bool` | Check if at capacity |
+| `push(void*)` | `bool` | Add item (returns false if full) |
+| `pop()` | `void*` | Remove and return oldest item |
+| `peek()` | `void*` | Get oldest item without removing |
+| `clear()` | `void` | Remove all items |
+
+---
+
+#### Hash Set (HashSet)
+
+Set of unique `void*` values keyed by `i64`. No duplicate keys.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Number of entries |
+| `is_empty()` | `bool` | Check if empty |
+| `add(i64 key, void* value)` | `bool` | Add entry |
+| `contains(i64 key)` | `bool` | Check membership |
+| `get(i64 key)` | `void*` | Retrieve value |
+| `remove(i64 key)` | `bool` | Remove entry |
+| `clear()` | `void` | Remove all entries |
+
+---
+
+#### Integer Hash Set (HashSetInt)
+
+String-keyed variant of `HashSet`. Key type is `byte*` (null-terminated string).
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Number of entries |
+| `is_empty()` | `bool` | Check if empty |
+| `add(byte* key, void* value)` | `bool` | Add entry |
+| `contains(byte* key)` | `bool` | Check membership |
+| `get(byte* key)` | `void*` | Retrieve value |
+| `remove(byte* key)` | `bool` | Remove entry |
+| `clear()` | `void` | Remove all entries |
+
+---
+
+#### Min Heap (MinHeap)
+
+Binary min-heap keyed by `i64`. Always returns the lowest-keyed item from `peek`/`pop`.
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `get_size()` | `size_t` | Number of items |
+| `is_empty()` | `bool` | Check if empty |
+| `push(i64 key, void* item)` | `bool` | Insert item with priority key |
+| `pop()` | `void*` | Remove and return lowest-key item |
+| `peek()` | `void*` | Get lowest-key item without removing |
+| `peek_key()` | `i64` | Get lowest key without removing |
+| `clear()` | `void` | Remove all items |
+
+---
+
+
 
 ### vectors.fx
 
@@ -1913,29 +2140,84 @@ def decimal_print_sci(Decimal* d) -> void  // Scientific notation
 
 ---
 
-### net_windows.fx
+### net_windows.fx / socket_object_raw.fx
 
-**Purpose**: TCP/UDP networking (Windows Sockets API)
+**Purpose**: TCP/UDP networking (Windows Sockets API — Winsock2)
 
-**Namespace**: `standard::net`
+**Namespace**: `standard::sockets`
 
 **Platform**: Windows only
+
+**Description**:  
+`net_windows.fx` is the thin glue file that sets up the guard macro and imports `socket_object_raw.fx`. All actual networking functionality lives in `socket_object_raw.fx` under the `standard::sockets` namespace. Importing either file makes the full API available. A `using standard::sockets;` directive is emitted automatically at the bottom of `socket_object_raw.fx`.
 
 #### Structures
 
 ```flux
-struct sockaddr_in { /* family, port, addr */ };
-struct sockaddr    { /* generic socket address */ };
-struct timeval     { /* seconds, microseconds */ };
-struct WSAData     { /* Winsock version info */ };
+struct sockaddr_in
+{
+    u16 sin_family, sin_port;
+    u32 sin_addr;
+    byte[8] sin_zero;
+};
+
+struct sockaddr  { u16 sa_family; byte[14] sa_data; };
+
+struct WSAData
+{
+    u16 wVersion, wHighVersion;
+    byte[257] szDescription;
+    byte[129] szSystemStatus;
+    u16 iMaxSockets, iMaxUdpDg;
+    u64* lpVendorInfo;
+};
+
+struct timeval { i32 tv_sec, tv_usec; };
+
+enum socket_type  { TCP, UDP };
+enum socket_error { OK, NOT_OPEN, BIND_FAILED, CONNECT_FAILED,
+                    LISTEN_FAILED, SEND_FAILED, RECV_FAILED, INVALID_TYPE };
+```
+
+#### Constants
+
+```flux
+// Address families
+AF_INET = 2, AF_INET6 = 23
+
+// Socket types
+SOCK_STREAM = 1, SOCK_DGRAM = 2, SOCK_RAW = 3
+
+// Protocols
+IPPROTO_TCP = 6, IPPROTO_UDP = 17
+
+// Socket option level
+SOL_SOCKET = 0xFFFF
+
+// Common socket options
+SO_REUSEADDR = 0x0004, SO_KEEPALIVE = 0x0008, SO_BROADCAST = 0x0020
+SO_RCVBUF = 0x1002, SO_SNDBUF = 0x1001
+SO_RCVTIMEO = 0x1006, SO_SNDTIMEO = 0x1005
+
+// Special addresses
+INADDR_ANY = 0x00000000
+INADDR_LOOPBACK = 0x7F000001
+INADDR_BROADCAST = 0xFFFFFFFF
+
+// WSA errors
+WSAEWOULDBLOCK = 10035, WSAECONNRESET = 10054, WSAETIMEDOUT = 10060
+
+// ioctlsocket
+FIONBIO = 0x8004667E, FIONREAD = 0x4004667F
+WINSOCK_VERSION = 0x0202
 ```
 
 #### Initialization
 
 ```flux
-def init() -> int      // Initialize Winsock (call before any socket ops)
-def cleanup() -> int   // Cleanup Winsock
-def get_last_error() -> int
+def init() -> int           // WSAStartup (call before any socket ops)
+def cleanup() -> int        // WSACleanup
+def get_last_error() -> int // WSAGetLastError
 ```
 
 #### Socket Creation
@@ -1967,16 +2249,11 @@ def set_send_timeout(int sockfd, int milliseconds) -> int
 def is_valid_socket(int sockfd) -> bool
 ```
 
-#### TCP Server
+#### TCP Helpers
 
 ```flux
 def tcp_server_create(u16 port, int backlog) -> int
 def tcp_server_accept(int server_sockfd, sockaddr_in* client_addr) -> int
-```
-
-#### TCP Client
-
-```flux
 def tcp_client_connect(byte* ip_addr, u16 port) -> int
 def tcp_send(int sockfd, byte[] data, int length) -> int
 def tcp_recv(int sockfd, byte[] buffer, int buffer_size) -> int
@@ -1985,13 +2262,84 @@ def tcp_recv_all(int sockfd, byte[] buffer, int length) -> int
 def tcp_close(int sockfd) -> int
 ```
 
-#### UDP
+#### UDP Helpers
 
 ```flux
 def udp_socket_bind(u16 port) -> int
 def udp_send(int sockfd, byte[] data, int length, byte* dest_ip, u16 dest_port) -> int
 def udp_recv(int sockfd, byte[] buffer, int buffer_size, sockaddr_in* src_addr) -> int
 def udp_close(int sockfd) -> int
+```
+
+#### socket Object (OOP Interface)
+
+The `socket` object wraps a file descriptor and provides a method-based interface:
+
+```flux
+object socket
+{
+    int fd, type, error_state;
+    bool is_server, connected;
+    sockaddr_in local_addr, remote_addr;
+
+    def __init(int sock_type) -> this,   // sock_type: socket_type.TCP or socket_type.UDP
+
+        // Status
+        is_open() -> bool,
+        close() -> bool,
+        get_error() -> int,
+
+        // TCP server
+        bind(u16 port) -> bool,
+        listen(int backlog) -> bool,
+        accept() -> socket,
+
+        // TCP client
+        connect(byte* ip_addr, u16 port) -> bool,
+
+        // Send / receive (TCP or UDP)
+        send(byte* data, int length) -> int,
+        recv(byte* buffer, int buffer_size) -> int,
+        send_all(byte* data, int length) -> int,
+        recv_all(byte* buffer, int length) -> int,
+
+        // UDP specific
+        sendto(byte* data, int length, byte* dest_ip, u16 dest_port) -> int,
+        recvfrom(byte* buffer, int buffer_size, sockaddr_in* src_addr) -> int,
+
+        // Options
+        set_nonblocking(bool enable) -> bool,
+        set_reuseaddr(bool enable) -> bool,
+        set_recv_timeout(int ms) -> bool,
+        set_send_timeout(int ms) -> bool,
+
+        // Info
+        get_local_port() -> u16,
+        get_remote_ip() -> byte*,
+        get_remote_port() -> u16,
+        is_tcp() -> bool,
+        is_udp() -> bool;
+};
+```
+
+**Example**:
+
+```flux
+#import "net_windows.fx";
+
+def main() -> int
+{
+    init();
+    socket server(socket_type.TCP);
+    server.fd = tcp_socket();
+    server.bind(8080);
+    server.listen(5);
+    socket client = server.accept();
+    byte[1024] buf;
+    int n = client.recv(@buf[0], 1024);
+    cleanup();
+    return 0;
+};
 ```
 
 ---
@@ -2344,6 +2692,8 @@ object Detour
 
 ---
 
+---
+
 ### operators.fx
 
 **Purpose**: Extended operator utilities
@@ -2354,7 +2704,1054 @@ object Detour
 
 ---
 
-## Import Guidelines
+### crc32.fx
+
+**Purpose**: CRC32 checksum computation (IEEE 802.3, reflected polynomial 0xEDB88320)
+
+**Namespace**: `crc32`
+
+**Guard macro**: `FLUX_STANDARD_STRINGS` (imports `string_utilities.fx`)
+
+#### Functions
+
+```flux
+def crc32::compute(byte* buf, uint length) -> uint
+def crc32::of_string(byte* str) -> uint
+```
+
+`compute` builds the lookup table internally and processes `length` bytes from `buf`. `of_string` is a convenience wrapper that calls `strlen` first.
+
+**Example**:
+```flux
+#import "crc32.fx";
+
+uint checksum = crc32::compute(@data[0], data_len);
+uint hash     = crc32::of_string("hello\0");
+```
+
+---
+
+### dotenv.fx
+
+**Purpose**: `.env` file parser and environment variable loader
+
+**Author**: reinitd
+
+**Namespace**: `dotenv`
+
+**Platform**: Windows and Linux/macOS (conditional compilation)
+
+**Guard macro**: `FLUX_DOTENV`
+
+**Description**:  
+Loads `key=value` pairs from a `.env` file into the process environment via `_putenv_s` (Windows) or `setenv` (POSIX). Supports `${VAR}` substitution within values. Lines beginning with `#` or `;` are treated as comments.
+
+#### Error Codes (`dotenv::err`)
+
+```flux
+dotenv::err::OK                  =  0   // Success
+dotenv::err::ERR_FILE_NOT_FOUND  = -1   // fopen returned 0
+dotenv::err::ERR_ALLOC_FAILED    = -2   // fmalloc or frealloc returned 0
+dotenv::err::ERR_SETENV_FAILED   = -3   // _putenv_s or setenv failed
+dotenv::err::ERR_INVALID_FORMAT  = -4   // Malformed line in .env file
+dotenv::err::ERR_NULL_POINTER    = -5   // Null pointer passed for path or buffer
+dotenv::err::ERR_READ_FAILED     = -6   // File exists but could not be read
+```
+
+#### Functions
+
+```flux
+def dotenv::loadenv(byte* path, bool overwrite, bool verbose) -> int
+def dotenv::setenv(byte* name, byte* value, bool overwrite) -> int
+```
+
+`loadenv` opens the file at `path`, parses every non-comment line as `KEY=value`, optionally replaces existing variables (`overwrite`), and optionally logs parsing details (`verbose`). Returns a `dotenv::err` code.
+
+**Example**:
+```flux
+#import "standard.fx";
+#import "dotenv.fx";
+
+extern { def !!getenv(byte* name) -> byte*; };
+
+int result = dotenv::loadenv(".env\0", true, false);
+if (result != dotenv::err::OK) { return 1; };
+
+byte* host = getenv("DB_HOST\0");
+if ((u64)host != 0) { print(host); };
+```
+
+---
+
+### json.fx
+
+**Purpose**: JSON parse, build, and serialize library
+
+**Namespace**: `json`
+
+**Guard macro**: `FLUX_JSON`
+
+**Dependencies**: `standard.fx`, `allocators.fx` (uses `stdarena` for zero-copy parsing)
+
+**Description**:  
+Provides four main types: `JSONArray`, `JSONObject`, `JSONNode`, and `JSONParser`. An arena-backed serializer (`serialize_arena`) supports zero-allocation output. Zero-copy string support: parsed string values are views into the source text buffer; call `as_string_view()` for these, and `as_string()` only for strings set via `set_string()`.
+
+#### Type Codes
+
+```flux
+json::JSON_NULL   = 0
+json::JSON_BOOL   = 1
+json::JSON_INT    = 2
+json::JSON_FLOAT  = 3
+json::JSON_STRING = 4
+json::JSON_ARRAY  = 5
+json::JSON_OBJECT = 6
+```
+
+#### JSONNode
+
+```flux
+object JSONNode
+{
+    def __init() -> this,
+        __exit() -> void,
+
+        // Type queries
+        is_null() -> bool,   is_bool() -> bool,
+        is_int() -> bool,    is_float() -> bool,
+        is_string() -> bool, is_array() -> bool,
+        is_object() -> bool,
+
+        // Setters
+        set_null() -> void,
+        set_bool(bool v) -> void,
+        set_int(i64 v) -> void,
+        set_float(double v) -> void,
+        set_string(byte* src) -> bool,
+        set_string_arena(byte* src, Arena* a) -> bool,
+        set_array() -> void,
+        set_object() -> void,
+        set_array_arena(Arena* a) -> void,
+        set_object_arena(Arena* a) -> void,
+
+        // Value getters
+        as_bool() -> bool,
+        as_int() -> i64,
+        as_float() -> double,
+        as_string() -> byte*,       // For set_string'd values only
+        as_string_view() -> byte*,  // Zero-copy; valid only while source buffer lives
+
+        // Array operations
+        array_push_new() -> void*,                   // Appends a new JSONNode; returns it
+        array_push_new_arena(Arena* a) -> void*,
+        array_len() -> size_t,
+        array_get(size_t i) -> void*,                // Cast result to JSONNode*
+
+        // Object operations
+        object_set_new(byte* key) -> void*,          // Inserts new node for key; returns it
+        object_set_new_arena(byte* key, Arena* a) -> void*,
+        object_get(byte* key) -> void*,              // Cast result to JSONNode*
+        object_has(byte* key) -> bool,
+        object_len() -> size_t,
+        object_key_at(size_t i) -> byte*,
+        object_val_at(size_t i) -> void*;            // Cast to JSONNode*
+};
+```
+
+#### JSONParser
+
+```flux
+object JSONParser
+{
+    def __init(byte* text, int text_len, Arena* a) -> this,
+        ok() -> bool,
+        parse(JSONNode* node) -> bool;  // Returns true on success
+};
+```
+
+#### Serialization
+
+```flux
+// Stack-allocated buffer serializer (caller supplies buffer)
+def json::serialize(JSONNode* node, byte* buf, int pos, int cap) -> int  // Returns end position
+
+// Arena-backed serializer (allocates dynamically)
+def json::serialize_arena(JSONNode* node, Arena* a, int init_cap) -> byte*  // Returns heap string
+```
+
+#### node_free
+
+```flux
+def json::node_free(void* p) -> void  // Free a heap-allocated JSONNode (avoids __exit self-ref)
+```
+
+**Example**:
+```flux
+#import "json.fx";
+using json;
+
+Arena a;
+arena_init(@a);
+JSONNode root;
+root.set_object_arena(@a);
+JSONNode* name = (JSONNode*)root.object_set_new_arena("name\0", @a);
+name.set_string_arena("Flux\0", @a);
+byte* out = serialize_arena(@root, @a, 128);
+print(out);
+arena_destroy(@a);
+```
+
+---
+
+### matrices.fx
+
+**Purpose**: 3×3, 4×4, and 5×5 matrix mathematics
+
+**Namespace**: `standard::matrices`
+
+**Guard macro**: `FLUX_STANDARD_MATRICES`
+
+**Dependencies**: `types.fx`, `vectors.fx`
+
+#### Structures
+
+```flux
+struct Mat3 { float m00..m22; };   // Row-major 3×3
+struct Mat4 { float m00..m33; };   // Row-major 4×4
+struct Mat5 { float m00..m44; };   // Row-major 5×5
+```
+
+#### Mat3 API
+
+**Construction**:
+```flux
+def mat3_zero() -> Mat3
+def mat3_identity() -> Mat3
+def mat3_from_rows(Vec3 r0, Vec3 r1, Vec3 r2) -> Mat3
+def mat3_from_columns(Vec3 c0, Vec3 c1, Vec3 c2) -> Mat3
+def mat3_diagonal(Vec3 d) -> Mat3
+```
+
+**Arithmetic**:
+```flux
+def mat3_add(Mat3 a, Mat3 b) -> Mat3
+def mat3_sub(Mat3 a, Mat3 b) -> Mat3
+def mat3_mul(Mat3 a, Mat3 b) -> Mat3
+def mat3_mul_scalar(Mat3 m, float s) -> Mat3
+def mat3_mul_vec3(Mat3 m, Vec3 v) -> Vec3
+```
+
+**Properties**:
+```flux
+def mat3_trace(Mat3 m) -> float
+def mat3_determinant(Mat3 m) -> float
+def mat3_transpose(Mat3 m) -> Mat3
+def mat3_cofactor(Mat3 m) -> Mat3
+def mat3_adjugate(Mat3 m) -> Mat3
+def mat3_inverse(Mat3 m) -> Mat3
+def mat3_is_invertible(Mat3 m) -> bool
+def mat3_frobenius_norm(Mat3 m) -> float
+```
+
+**Transforms**:
+```flux
+def mat3_scale_uniform(float s) -> Mat3
+def mat3_scale(Vec3 s) -> Mat3
+def mat3_rotation_x(float angle) -> Mat3
+def mat3_rotation_y(float angle) -> Mat3
+def mat3_rotation_z(float angle) -> Mat3
+def mat3_rotation_axis_angle(Vec3 axis, float angle) -> Mat3
+```
+
+#### Mat4 API
+
+Mirrors the Mat3 API with Vec4 variants, plus:
+
+```flux
+def mat4_submatrix(Mat4 m, i32 i, i32 j) -> Mat3
+def mat4_rotation_plane(i32 axis1, i32 axis2, float angle) -> Mat4
+def mat4_perspective(float fovy_rad, float aspect, float near_z, float far_z, Mat4* out) -> void
+def mat4_lookat(Vec3* eye, Vec3* target, Vec3* up, Mat4* out) -> void
+```
+
+#### Mat5 API
+
+Mirrors Mat3/Mat4 for 5×5 matrices. Construction, arithmetic, trace, determinant, transpose, and cofactor are available. Full inverse not provided; use Mat4 for graphics transforms.
+
+---
+
+### fourier.fx
+
+**Purpose**: Discrete and Fast Fourier Transforms
+
+**Namespace**: `standard::math::fourier`
+
+**Guard macro**: `FLUX_FOURIER`
+
+**Dependencies**: `types.fx`, `math.fx`, `memory.fx`
+
+**Note**: Requires a `Complex` struct (re/im double fields) to be defined before use — typically provided by `math.fx` or the calling module.
+
+#### Complex Number Helpers
+
+```flux
+def complex_add(Complex* result, Complex* a, Complex* b) -> void
+def complex_sub(Complex* result, Complex* a, Complex* b) -> void
+def complex_mul(Complex* result, Complex* a, Complex* b) -> void
+def complex_mag(Complex* c) -> double
+def complex_phase(Complex* c) -> double
+def complex_from_polar(Complex* result, double mag, double phase) -> void
+```
+
+#### Transform Functions
+
+```flux
+// Naive O(N²) DFT
+def dft(Complex* out, Complex* xin, i32 n) -> void
+def idft(Complex* out, Complex* xin, i32 n) -> void   // Inverse DFT (unnormalized)
+
+// O(N log N) Cooley-Tukey FFT (N must be a power of two)
+def fft(Complex* buf, i32 n) -> void    // In-place, forward
+def ifft(Complex* buf, i32 n) -> void   // In-place, inverse (unnormalized)
+```
+
+#### Utilities
+
+```flux
+def is_power_of_two(i32 n) -> bool
+def next_power_of_two(i32 n) -> i32
+def fft_alloc(i32 n) -> Complex*         // fmalloc n Complex structs
+def fft_load_real(Complex* buf, double* samples, i32 n) -> void
+def fft_magnitude(double* mag, Complex* buf, i32 n) -> void
+```
+
+**Example**:
+```flux
+#import "fourier.fx";
+using standard::math::fourier;
+
+i32 n = 512;
+Complex* buf = fft_alloc(n);
+fft_load_real(buf, @samples[0], n);
+fft(buf, n);
+double[256] mag;
+fft_magnitude(@mag[0], buf, n);
+ffree((u64)buf);
+```
+
+---
+
+### physics.fx
+
+**Purpose**: Rigid body and soft body physics engine
+
+**Namespace**: `standard::physics`
+
+**Guard macro**: `FLUX_PHYSICS`
+
+**Dependencies**: `types.fx`, `math.fx`, `vectors.fx`, `matrices.fx`
+
+#### Rigid Body
+
+##### Structures
+
+```flux
+struct SphereCollider { Vec3 center; float radius; };
+struct AABBCollider   { Vec3 half_extents; };
+struct PlaneCollider  { Vec3 normal; float dist; };
+struct Collider       { /* union of sphere/aabb/plane */ };
+
+struct RigidBody      { Vec3 pos, vel, force, ang_vel, torque;
+                        Quat orientation; Mat3 inertia_inv_local;
+                        float mass, inv_mass, restitution, friction;
+                        i32 collider_type; Collider collider;
+                        bool sleeping; i32 sleep_frames; };
+
+struct Contact        { Vec3 point, normal; float penetration;
+                        RigidBody* a; RigidBody* b; };
+
+struct PhysWorld      { RigidBody* bodies; Contact* contacts;
+                        i32 body_count, body_cap, contact_cap;
+                        Vec3 gravity; };
+
+struct Quat           { float x, y, z, w; };
+```
+
+##### Quaternion Math
+
+```flux
+def quat_identity() -> Quat
+def quat_mul(Quat a, Quat b) -> Quat
+def quat_integrate(Quat* q, Vec3 omega, float dt) -> void
+def quat_rotate(Quat q, Vec3 v) -> Vec3
+def quat_to_mat3(Quat q) -> Mat3
+```
+
+##### Body Construction
+
+```flux
+def body_init_sphere(RigidBody* b, Vec3 pos, float radius, float mass) -> void
+def body_init_aabb(RigidBody* b, Vec3 pos, Vec3 half_extents, float mass) -> void
+def body_init_plane(RigidBody* b, Vec3 normal, float dist) -> void
+```
+
+##### World API
+
+```flux
+def world_init(PhysWorld* w, i32 body_cap, i32 contact_cap) -> void
+def world_destroy(PhysWorld* w) -> void
+def world_set_gravity(PhysWorld* w, Vec3 g) -> void
+def world_add_sphere(PhysWorld* w, Vec3 pos, float radius, float mass) -> i32
+def world_add_aabb(PhysWorld* w, Vec3 pos, Vec3 half_extents, float mass) -> i32
+def world_add_plane(PhysWorld* w, Vec3 normal, float dist) -> i32
+def world_get_body(PhysWorld* w, i32 idx) -> RigidBody*
+def world_apply_force(PhysWorld* w, i32 idx, Vec3 force) -> void
+def world_apply_torque(PhysWorld* w, i32 idx, Vec3 torque) -> void
+def world_apply_impulse_at(PhysWorld* w, i32 idx, Vec3 impulse, Vec3 point) -> void
+def world_set_material(PhysWorld* w, i32 idx, float restitution, float friction) -> void
+def world_step(PhysWorld* w, float dt, i32 iteration_count) -> void
+```
+
+#### Soft Body
+
+##### Structures
+
+```flux
+struct SoftParticle { Vec3 pos, vel, force; float mass, inv_mass, damping; bool pinned; };
+struct SoftSpring   { i32 a, b, kind; float rest_len, stiffness, damping; };
+struct SoftBody     { SoftParticle* particles; SoftSpring* springs; i32 pcap, scap, pcount, scount; };
+struct SoftWorld    { SoftBody* bodies; i32 body_cap, body_count;
+                      Vec3 gravity; bool has_ground;
+                      Vec3 ground_normal; float ground_dist; };
+```
+
+Spring kinds: `SOFT_SPRING_STRUCTURAL = 0`, `SOFT_SPRING_SHEAR = 1`, `SOFT_SPRING_BEND = 2`
+
+##### SoftBody API
+
+```flux
+def softbody_alloc(SoftBody* sb, i32 pcap, i32 scap) -> void
+def softbody_free(SoftBody* sb) -> void
+def sb_add_particle(SoftBody* sb, Vec3 pos, float mass, float damping) -> i32
+def sb_add_spring(SoftBody* sb, i32 a, i32 b, float stiffness, float damping, i32 kind) -> i32
+def sb_apply_springs(SoftBody* sb) -> void
+def sb_integrate(SoftBody* sb, Vec3 gravity, float dt) -> void
+def sb_resolve_ground(SoftBody* sb, Vec3 normal, float dist, float restitution, float friction) -> void
+def sb_resolve_sphere(SoftBody* sb, Vec3 sphere_pos, float radius, float restitution) -> void
+```
+
+##### SoftWorld API
+
+```flux
+def softworld_init(SoftWorld* sw, i32 body_cap) -> void
+def softworld_destroy(SoftWorld* sw) -> void
+def softworld_set_gravity(SoftWorld* sw, Vec3 g) -> void
+def softworld_set_ground(SoftWorld* sw, Vec3 normal, float dist) -> void
+def softworld_get_body(SoftWorld* sw, i32 id) -> SoftBody*
+def softworld_pin(SoftWorld* sw, i32 body_id, i32 particle_idx) -> void
+def softworld_unpin(SoftWorld* sw, i32 body_id, i32 particle_idx, float mass) -> void
+def softworld_apply_force(SoftWorld* sw, i32 body_id, i32 particle_idx, Vec3 force) -> void
+def softworld_apply_impulse(SoftWorld* sw, i32 body_id, i32 particle_idx, Vec3 impulse) -> void
+def softworld_collide_rigid(SoftWorld* sw, PhysWorld* pw) -> void
+def softworld_step(SoftWorld* sw, float dt) -> void
+
+// Constructors for common soft body shapes
+def softworld_add_rope(SoftWorld* sw, ...) -> i32
+def softworld_add_cloth(SoftWorld* sw, Vec3 origin, i32 rows, i32 cols, float spacing,
+                        float particle_mass, float damping, float stiffness, float bend_factor) -> i32
+def softworld_add_blob(SoftWorld* sw, ...) -> i32
+```
+
+**Example**:
+```flux
+#import "physics.fx";
+using standard::physics;
+
+PhysWorld pw;
+world_init(@pw, 64, 512);
+world_set_gravity(@pw, vec3(0.0, -9.81, 0.0));
+i32 ball = world_add_sphere(@pw, vec3(0.0, 5.0, 0.0), 0.5, 1.0);
+i32 floor = world_add_plane(@pw, vec3(0.0, 1.0, 0.0), 0.0);
+world_step(@pw, 0.016, 6);
+world_destroy(@pw);
+```
+
+---
+
+### tensors.fx
+
+**Purpose**: Generic N-dimensional tensor library
+
+**Namespace**: `standard::tensors`
+
+**Guard macro**: `FLUX_STANDARD_TENSORS`
+
+**Dependencies**: `types.fx`, `memory.fx`, `math.fx`
+
+**Maximum rank**: 8 (configurable via `TENSOR_MAX_RANK`)
+
+#### Structures
+
+```flux
+struct TensorShape { size_t dims[TENSOR_MAX_RANK]; size_t strides[TENSOR_MAX_RANK]; size_t rank; };
+
+object Tensor<T>     { /* owns heap-allocated element buffer */ };
+object TensorView<T> { /* non-owning window into a Tensor */ };
+```
+
+#### Construction
+
+```flux
+def tensor_make<T>(size_t* shape, size_t rank) -> Tensor<T>*          // Zero-filled
+def tensor_from_data<T>(T* data, size_t* shape, size_t rank) -> Tensor<T>*
+def tensor_scalar<T>(T value) -> Tensor<T>*                            // Rank-0
+def tensor_vector<T>(T* data, size_t n) -> Tensor<T>*                 // Rank-1
+def tensor_matrix<T>(T* data, size_t rows, size_t cols) -> Tensor<T>* // Rank-2, row-major
+```
+
+#### Element Access
+
+```flux
+def tensor_get<T>(Tensor<T>* t, size_t* idx) -> T
+def tensor_set<T>(Tensor<T>* t, size_t* idx, T v) -> void
+def tensor_at<T>(Tensor<T>* t, size_t flat) -> T
+def tensor_put<T>(Tensor<T>* t, size_t flat, T v) -> void
+```
+
+#### Arithmetic (element-wise, broadcast-safe)
+
+```flux
+def tensor_add<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>*
+def tensor_sub<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>*
+def tensor_mul<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>*
+def tensor_div<T>(Tensor<T>* a, Tensor<T>* b) -> Tensor<T>*
+def tensor_add_scalar<T>(Tensor<T>* a, T s) -> Tensor<T>*
+def tensor_mul_scalar<T>(Tensor<T>* a, T s) -> Tensor<T>*
+def tensor_neg<T>(Tensor<T>* a) -> Tensor<T>*
+```
+
+#### Reductions
+
+```flux
+def tensor_sum<T>(Tensor<T>* t) -> T
+def tensor_product<T>(Tensor<T>* t) -> T
+def tensor_min<T>(Tensor<T>* t) -> T
+def tensor_max<T>(Tensor<T>* t) -> T
+def tensor_mean_f(Tensor<float>* t) -> float
+def tensor_mean_d(Tensor<double>* t) -> double
+```
+
+#### Shape Manipulation
+
+```flux
+def tensor_reshape<T>(Tensor<T>* t, size_t* new_shape, size_t new_rank) -> Tensor<T>*
+def tensor_transpose<T>(Tensor<T>* t) -> Tensor<T>*
+def tensor_permute<T>(Tensor<T>* t, size_t* axes) -> Tensor<T>*
+def tensor_slice<T>(Tensor<T>* t, size_t axis, size_t start, size_t end) -> Tensor<T>*
+def tensor_squeeze<T>(Tensor<T>* t) -> Tensor<T>*
+def tensor_expand_dims<T>(Tensor<T>* t, size_t axis) -> Tensor<T>*
+```
+
+#### Linear Algebra
+
+```flux
+def tensor_matmul_f(Tensor<float>* a, Tensor<float>* b) -> Tensor<float>*
+def tensor_matmul_d(Tensor<double>* a, Tensor<double>* b) -> Tensor<double>*
+def tensor_dot_f(Tensor<float>* a, Tensor<float>* b) -> float
+def tensor_dot_d(Tensor<double>* a, Tensor<double>* b) -> double
+def tensor_outer_f(Tensor<float>* a, Tensor<float>* b) -> Tensor<float>*
+def tensor_outer_d(Tensor<double>* a, Tensor<double>* b) -> Tensor<double>*
+```
+
+#### Utilities
+
+```flux
+def tensor_copy<T>(Tensor<T>* t) -> Tensor<T>*
+def tensor_fill<T>(Tensor<T>* t, T value) -> void
+def tensor_equal<T>(Tensor<T>* a, Tensor<T>* b) -> bool
+def tensor_numel(Tensor<void>* t) -> size_t
+def tensor_rank(Tensor<void>* t) -> size_t
+def tensor_shape_dim(Tensor<void>* t, size_t axis) -> size_t
+def tensor_print_shape(Tensor<void>* t) -> void
+```
+
+---
+
+### autograd.fx
+
+**Purpose**: Tape-based reverse-mode automatic differentiation
+
+**Namespace**: `standard` (operates on `Tensor<float>`)
+
+**Guard macro**: `FLUX_STANDARD_AUTOGRAD`
+
+**Dependencies**: `types.fx`, `memory.fx`, `math.fx`
+
+**Description**:  
+Records every differentiable operation onto a `Tape` during the forward pass. Calling `backward(@tape, @loss)` walks the tape in reverse and accumulates gradients into each `GradTensor.grad` buffer. One `fmalloc` at `Tape` initialization; no per-op heap allocation.
+
+#### Key Constants
+
+```flux
+AG_MAX_INPUTS  = 2    // Max inputs per op node
+AG_NO_PRODUCER = -1   // Sentinel for leaf tensors
+
+// Op kinds (stored in GradNode)
+AG_OP_NONE=0, AG_OP_ADD=1, AG_OP_SUB=2, AG_OP_MUL=3, AG_OP_MATMUL=4
+AG_OP_RELU=5, AG_OP_SIGMOID=6, AG_OP_TANH_ACT=7, AG_OP_SUM=8
+AG_OP_SCALE=9, AG_OP_NEG=10
+```
+
+#### Structures
+
+```flux
+struct GradTensor
+{
+    float* vals;   // Forward values (owned)
+    float* grad;   // Gradient buffer (owned)
+    size_t numel;
+    i32    tape_slot;   // Index in Tape; -1 if leaf
+};
+
+struct GradNode
+{
+    i32    op_kind;
+    i32    input_slots[AG_MAX_INPUTS];
+    i32    n_inputs;
+    float  scalar;      // For AG_OP_SCALE
+};
+
+object Tape
+{
+    def __init(size_t capacity) -> this,  // capacity = max ops
+        __exit() -> void;
+};
+```
+
+#### Forward Operations
+
+Each function records an op on the tape and returns a new `GradTensor`:
+
+```flux
+def gt_init(GradTensor* gt, Tape* tape, float* data, size_t rows, size_t cols) -> void
+def grad_add(Tape* tape, GradTensor* a, GradTensor* b) -> GradTensor
+def grad_sub(Tape* tape, GradTensor* a, GradTensor* b) -> GradTensor
+def grad_mul(Tape* tape, GradTensor* a, GradTensor* b) -> GradTensor
+def grad_matmul(Tape* tape, GradTensor* a, GradTensor* b) -> GradTensor
+def grad_relu(Tape* tape, GradTensor* x) -> GradTensor
+def grad_sigmoid(Tape* tape, GradTensor* x) -> GradTensor
+def grad_tanh_act(Tape* tape, GradTensor* x) -> GradTensor
+def grad_sum(Tape* tape, GradTensor* x) -> GradTensor    // Reduce to scalar
+def grad_scale(Tape* tape, GradTensor* x, float s) -> GradTensor
+def grad_neg(Tape* tape, GradTensor* x) -> GradTensor
+```
+
+#### Backward Pass
+
+```flux
+def backward(Tape* tape, GradTensor* loss) -> void
+```
+
+Walks the tape in reverse, calling each op's backward function to accumulate gradients. After `backward`, `a.grad` and `b.grad` contain `dL/dA` and `dL/dB` respectively.
+
+**Example**:
+```flux
+#import "autograd.fx";
+
+Tape tape((size_t)512);
+GradTensor a, b, c;
+gt_init(@a, @tape, w_data, rows, cols);
+gt_init(@b, @tape, x_data, rows, cols);
+c = grad_matmul(@tape, @a, @b);
+c = grad_relu(@tape, @c);
+backward(@tape, @c);
+// a.grad and b.grad now hold dL/dA, dL/dB
+```
+
+---
+
+### raytracing.fx
+
+**Purpose**: Physically-based path tracer
+
+**Namespace**: `raytracer`
+
+**Guard macro**: `FLUX_RAYTRACING`
+
+**Dependencies**: `types.fx`, `math.fx`, `vectors.fx`, `memory.fx`, `allocators.fx`, `random.fx`
+
+#### Material Types
+
+```flux
+RT_MAT_LAMBERTIAN = 0   // Diffuse
+RT_MAT_METAL      = 1   // Specular with fuzz
+RT_MAT_DIELECTRIC = 2   // Glass/refraction
+RT_MAT_EMISSIVE   = 3   // Light source
+```
+
+#### Primitive Types
+
+```flux
+RT_PRIM_SPHERE   = 0
+RT_PRIM_TRIANGLE = 1
+RT_PRIM_PLANE    = 2
+```
+
+#### Key Structures
+
+```flux
+struct RTMaterial { i32 kind; Vec3 albedo; float fuzz, ior, emission_strength; };
+struct RTRay      { Vec3 origin, direction; };
+struct RTHit      { Vec3 point, normal; float t; bool front_face; RTMaterial mat; };
+struct RTSphere   { Vec3 center; float radius; RTMaterial mat; };
+struct RTTriangle { Vec3 a, b, c; Vec3 normal; RTMaterial mat; };
+struct RTPlane    { Vec3 normal; float d; RTMaterial mat; };
+struct RTScene    { /* primitives, BVH nodes, materials */ };
+struct RTCamera   { /* origin, lower_left, horizontal, vertical, lens */ };
+```
+
+#### Material Constructors
+
+```flux
+def mat_lambertian(Vec3 albedo) -> RTMaterial
+def mat_metal(Vec3 albedo, float fuzz) -> RTMaterial
+def mat_dielectric(float ior) -> RTMaterial
+def mat_emissive(Vec3 colour, float strength) -> RTMaterial
+```
+
+#### Scene Building
+
+```flux
+def rt_scene_init(RTScene* s, i32 initial_cap) -> void
+def rt_scene_free(RTScene* s) -> void
+def rt_scene_add_sphere(RTScene* s, Vec3 center, float radius, RTMaterial mat) -> i32
+def rt_scene_add_triangle(RTScene* s, Vec3 a, Vec3 b, Vec3 c, RTMaterial mat) -> i32
+def rt_scene_add_plane(RTScene* s, Vec3 normal, float d, RTMaterial mat) -> i32
+def bvh_build(RTScene* s) -> void    // Build BVH after adding all geometry
+```
+
+#### Camera
+
+```flux
+def rt_camera_init(RTCamera* cam, Vec3 lookfrom, Vec3 lookat, Vec3 up,
+                   float vfov, float aspect, float aperture, float focus_dist) -> void
+def rt_camera_get_ray(RTCamera* cam, float s, float t, PCG32* rng) -> RTRay
+```
+
+#### Rendering
+
+```flux
+// Render full image into caller-supplied u32 (0xAARRGGBB) pixel buffer
+def rt_render(RTScene* s, RTCamera* cam, u32* buf,
+              i32 width, i32 height, i32 samples_per_pixel, i32 max_depth) -> void
+
+// Single tile (for threading integration)
+def rt_render_tile(RTScene* s, RTCamera* cam, u32* buf,
+                   i32 width, i32 height, i32 samples_per_pixel, i32 max_depth,
+                   i32 tile_x, i32 tile_y, i32 tile_w, i32 tile_h) -> void
+
+// Write PPM image file
+def rt_write_ppm(u32* buf, i32 width, i32 height, byte* path) -> bool
+```
+
+**Example**:
+```flux
+#import "raytracing.fx";
+using raytracer;
+
+RTScene scene;
+rt_scene_init(@scene, 64);
+rt_scene_add_sphere(@scene, vec3(0.0, 0.0, -1.0), 0.5, mat_lambertian(vec3(0.8, 0.3, 0.3)));
+rt_scene_add_sphere(@scene, vec3(0.0, -100.5, -1.0), 100.0, mat_lambertian(vec3(0.8, 0.8, 0.0)));
+bvh_build(@scene);
+RTCamera cam;
+rt_camera_init(@cam, vec3(0.0,0.0,0.0), vec3(0.0,0.0,-1.0), vec3(0.0,1.0,0.0), 90.0, 1.333, 0.0, 1.0);
+u32* buf = (u32*)fmalloc((size_t)(800 * 600 * (sizeof(u32) / 8)));
+rt_render(@scene, @cam, buf, 800, 600, 64, 8);
+rt_write_ppm(buf, 800, 600, "out.ppm\0");
+rt_scene_free(@scene);
+ffree((u64)buf);
+```
+
+---
+
+### raycasting.fx
+
+**Purpose**: 2.5D tile-based raycaster (Wolfenstein / DOOM style)
+
+**Namespace**: `raycaster`
+
+**Guard macro**: `FLUX_RAYCASTING`
+
+**Dependencies**: `types.fx`, `math.fx`, `vectors.fx`, `memory.fx`, `allocators.fx`
+
+**Coordinate system**: +X = East, +Y = North. Angle 0 = facing East, increases counter-clockwise.
+
+#### Tile Flags
+
+```flux
+RC_TILE_EMPTY = 0, RC_TILE_SOLID = 1, RC_TILE_DOOR = 2, RC_TILE_TRANS = 4
+```
+
+#### Wall Face IDs
+
+```flux
+RC_FACE_NONE=0, RC_FACE_X_POS=1, RC_FACE_X_NEG=2, RC_FACE_Y_POS=3, RC_FACE_Y_NEG=4
+```
+
+#### Render Pass Flags
+
+```flux
+RC_PASS_SKY=1, RC_PASS_WALLS=2, RC_PASS_FLOOR=4, RC_PASS_SPRITES=8, RC_PASS_ALL=15
+```
+
+#### Key Structures
+
+```flux
+struct RCTile          { i32 type, tex_id; u32 tint; float alpha; };
+struct RCMap           { RCTile* cells; i32 width, height; RCTexturePalette* palette; };
+struct RCTexture       { u32* pixels; i32 width, height; };
+struct RCTexturePalette{ RCTexture* entries; i32 count, cap; };
+struct RCPlayer        { float x, y, angle, move_speed, turn_speed; };
+struct RCCamera        { float fov_rad, view_dist; i32 screen_w, screen_h;
+                         float dir_x, dir_y, plane_x, plane_y; };
+struct RCWallHit       { float dist; i32 face; float u; i32 tex_id; u32 tint; };
+struct RCSprite        { float x, y; float dist; i32 tex_id; u32 tint; };
+struct RCSky           { u32 top_color, horizon_color; };
+struct RCScene         { RCMap* map; RCPlayer* player; RCCamera* cam;
+                         RCSky* sky; RCSprite* sprites; i32 sprite_count; };
+```
+
+#### Map Management
+
+```flux
+def rc_map_init(RCMap* m, i32 width, i32 height) -> void
+def rc_map_free(RCMap* m) -> void
+def rc_map_get(RCMap* m, i32 x, i32 y) -> RCTile
+def rc_map_set(RCMap* m, i32 x, i32 y, RCTile tile) -> void
+def rc_map_set_solid(RCMap* m, i32 x, i32 y, i32 tex, u32 tint) -> void
+```
+
+#### Player and Camera
+
+```flux
+def rc_player_init(RCPlayer* p, float x, float y, float angle) -> void
+def rc_camera_init(RCCamera* cam, float fov_deg, i32 sw, i32 sh, float view_dist) -> void
+def rc_camera_sync(RCCamera* cam, RCPlayer* p) -> void
+def rc_player_move(RCPlayer* p, RCMap* m, float forward, float strafe) -> void
+def rc_player_turn(RCPlayer* p, float delta_rad) -> void
+```
+
+#### Texture Palette
+
+```flux
+def rc_palette_init(RCTexturePalette* pal, i32 initial_cap) -> void
+def rc_palette_free(RCTexturePalette* pal) -> void
+def rc_palette_add(RCTexturePalette* pal, u32* pixels, i32 w, i32 h) -> i32
+def rc_tex_sample(RCTexture* tex, float u, float v) -> u32
+```
+
+#### Rendering
+
+```flux
+// Low-level passes (return depth buffer / fill buffer)
+def rc_cast_walls(RCMap* m, RCCamera* cam, float* depth_buf, RCWallHit* hit_buf) -> void
+def rc_cast_floor(RCMap* m, RCCamera* cam, float* depth_buf, u32* buf) -> void
+def rc_draw_sky(RCSky* sky, RCCamera* cam, u32* buf) -> void
+def rc_draw_walls(RCCamera* cam, RCWallHit* hit_buf, float* depth_buf, u32* buf) -> void
+def rc_sprite_distances(RCSprite* sprites, i32 count, RCPlayer* p) -> void
+def rc_sprite_sort(RCSprite* sprites, i32 count) -> void
+def rc_draw_sprites(RCCamera* cam, RCSprite* sprites, i32 count,
+                    float* depth_buf, u32* buf) -> void
+
+// High-level composite render (combines all passes per RC_PASS_* flags)
+def rc_render(RCScene* scene, u32* buf) -> void
+
+// Scene convenience init
+def rc_scene_init(RCScene* scene, RCMap* map, RCPlayer* player, RCCamera* cam,
+                  RCSky* sky) -> void
+def rc_scene_set_sprites(RCScene* scene, RCSprite* sprites, i32 count) -> void
+```
+
+#### Color Utilities
+
+```flux
+def color_pack(float r, float g, float b) -> u32      // Pack [0,1] to 0xAARRGGBB
+def color_unpack(u32 argb, float* r, float* g, float* b) -> void
+def color_scale(u32 argb, float factor) -> u32
+def color_lerp(u32 a, u32 b, float t) -> u32
+def color_tint(u32 base, u32 tint) -> u32
+def fog_factor(float dist, float view_dist) -> float  // Linear fog [0,1]
+```
+
+**Example**:
+```flux
+#import "raycasting.fx";
+using raycaster;
+
+RCMap   map;    rc_map_init(@map, 24, 24);
+RCPlayer player; rc_player_init(@player, 2.5, 2.5, 0.0);
+RCCamera cam;   rc_camera_init(@cam, 66.0, 320, 240, 16.0);
+rc_camera_sync(@cam, @player);
+u32* buf = (u32*)fmalloc((size_t)(320 * 240 * (sizeof(u32) / 8)));
+RCScene scene;
+rc_scene_init(@scene, @map, @player, @cam, NULL);
+rc_render(@scene, buf);
+rc_map_free(@map);
+ffree((u64)buf);
+```
+
+---
+
+### wasapi.fx
+
+**Purpose**: WASAPI loopback audio capture (Windows)
+
+**Platform**: Windows only
+
+**Guard macro**: `FLUX_WASAPI`
+
+**Dependencies**: `types.fx`, `windows.fx`
+
+**Description**:  
+Captures system audio output as PCM float32 samples by calling COM vtable methods directly. No C++ headers required — vtable slot offsets are fixed by the Windows ABI. Supports both `WAVE_FORMAT_IEEE_FLOAT` and `WAVE_FORMAT_PCM` mix formats.
+
+#### Constants
+
+```flux
+AUDCLNT_SHAREMODE_SHARED    = 0u
+AUDCLNT_SHAREMODE_EXCLUSIVE = 1u
+AUDCLNT_STREAMFLAGS_LOOPBACK     = 0x00020000u
+AUDCLNT_STREAMFLAGS_EVENTCALLBACK = 0x00040000u
+WAVE_FORMAT_PCM        = 1
+WAVE_FORMAT_IEEE_FLOAT = 3
+WAVE_FORMAT_EXTENSIBLE = 0xFFFE
+eRender = 0u, eCapture = 1u, eConsole = 0u
+```
+
+#### Structures
+
+```flux
+struct GUID                 { u32 data1; u16 data2, data3; byte[8] data4; };
+struct WAVEFORMATEX         { u16 wFormatTag, nChannels; u32 nSamplesPerSec, nAvgBytesPerSec;
+                              u16 nBlockAlign, wBitsPerSample, cbSize; };
+struct WAVEFORMATEXTENSIBLE { /* WAVEFORMATEX + SubFormat GUID */ };
+struct WasapiCapture        { /* COM interface pointers, format, state */ };
+```
+
+#### Public API
+
+```flux
+def wasapi_init_guids() -> void     // Must be called before wasapi_open
+def wasapi_open(WasapiCapture* ctx) -> bool
+def wasapi_close(WasapiCapture* ctx) -> void
+def wasapi_read_samples(WasapiCapture* ctx, float* out_buf, u32 max_frames) -> u32
+```
+
+`wasapi_open` initializes COM, creates the `MMDeviceEnumerator`, activates the default render endpoint for loopback, and starts the stream. `wasapi_read_samples` drains available packet buffers and converts PCM to float32 if necessary. Returns the number of frames written to `out_buf`.
+
+**Example**:
+```flux
+#import "wasapi.fx";
+
+WasapiCapture cap;
+wasapi_init_guids();
+if (!wasapi_open(@cap)) { return 1; };
+float[4096] samples;
+u32 n = wasapi_read_samples(@cap, @samples[0], 4096);
+wasapi_close(@cap);
+```
+
+---
+
+### oglgraphing.fx
+
+**Purpose**: OpenGL-backed 2D and 3D graphing
+
+**Namespace**: `standard::oglgraphing`
+
+**Dependencies**: `opengl.fx`, `math.fx`
+
+**Description**:  
+Mirrors the API of `graphing.fx` exactly, replacing `Canvas*` with implicit global GL state and DWORD colors with float RGB. Coordinates are mapped to NDC via an `OGLGraph` viewport descriptor.
+
+#### Structures
+
+```flux
+struct OGLGraph
+{
+    i32   vp_x, vp_y, vp_w, vp_h;   // Viewport in pixels
+    float x_min, x_max, y_min, y_max;
+};
+
+struct OGLGraph3D { /* 3D axes + parametric data generators */ };
+```
+
+#### 2D API
+
+```flux
+def ogl_begin_frame(OGLGraph* g) -> void
+def ogl_end_frame() -> void
+def draw_axes(OGLGraph* g, float r, float gv, float b, float line_width) -> void
+def draw_grid(OGLGraph* g, i32 nx, i32 ny, float r, float gv, float b) -> void
+def plot_line(OGLGraph* g, float* xs, float* ys, i32 n,
+              float r, float gv, float b, float line_width) -> void
+def plot_scatter(OGLGraph* g, float* xs, float* ys, i32 n,
+                 float r, float gv, float b, i32 point_size) -> void
+def plot_bar(OGLGraph* g, float* xs, float* ys, i32 n,
+             float r, float gv, float b) -> void
+```
+
+**Example**:
+```flux
+#import "standard.fx";
+#import "opengl.fx";
+#import "oglgraphing.fx";
+using standard::oglgraphing;
+
+// Inside render loop:
+OGLGraph g;
+g.vp_x = 0;  g.vp_y = 0;  g.vp_w = 800;  g.vp_h = 600;
+g.x_min = 0.0;  g.x_max = 6.0;  g.y_min = 0.0;  g.y_max = 6.0;
+ogl_begin_frame(@g);
+draw_axes(@g, 0.8, 0.8, 0.8, 1.0);
+draw_grid(@g, 5, 5, 0.2, 0.2, 0.2);
+plot_line(@g, @xs[0], @ys[0], 5, 0.0, 0.8, 1.0, 1.5);
+ogl_end_frame();
+```
+
+---
+
+### datautils.fx
+
+**Purpose**: Low-level byte writer utilities (used internally by `detour.fx`)
+
+**Description**:  
+Free functions for writing x86-64 JMP stubs and comparing/copying raw byte buffers. Not namespaced; intended for direct use by patching and instrumentation code.
+
+#### Functions
+
+```flux
+def write_jmp_indirect(ulong dst) -> void
+    // Write a 6-byte RIP-relative indirect JMP (FF 25 00 00 00 00) at dst.
+    // Caller must write the 8-byte absolute target at dst+6.
+
+def write_addr64(ulong dst, ulong addr) -> void
+    // Write an 8-byte little-endian absolute address at dst.
+
+def copy_bytes(ulong dst, ulong src, int n) -> void
+    // Copy n bytes from src to dst.
+
+def bytes_eq(byte* a, byte* b, int len) -> int
+    // Returns 1 if the first len bytes are equal, 0 otherwise.
+
+def fill_buf(byte* buf, int len, byte val) -> void
+    // Fill buf with the repeating byte value val.
+```
+
+---
+
+
 
 ### Basic Import
 
@@ -2397,10 +3794,13 @@ Extended libraries must be imported explicitly:
 #import "timing.fx";
 
 // Networking (Windows)
-#import "net_windows.fx";
+#import "net_windows.fx";   // or: #import "socket_object_raw.fx";
 
 // Cryptography
 #import "cryptography.fx";
+
+// CRC32
+#import "crc32.fx";
 
 // Arbitrary precision
 #import "decimal.fx";  // also pulls in bigint.fx
@@ -2414,11 +3814,44 @@ Extended libraries must be imported explicitly:
 // OpenGL (Windows)
 #import "opengl.fx";
 
+// OpenGL graphing
+#import "oglgraphing.fx";
+
 // Win32 GUI
 #import "windows.fx";
 
+// WASAPI audio capture (Windows)
+#import "wasapi.fx";
+
 // Inline hooking (Windows x86-64)
 #import "detour.fx";
+
+// .env file loader
+#import "dotenv.fx";
+
+// JSON
+#import "json.fx";
+
+// Matrix math (Mat3/Mat4/Mat5)
+#import "matrices.fx";
+
+// Fourier (DFT/FFT)
+#import "fourier.fx";
+
+// Physics engine
+#import "physics.fx";
+
+// Tensors
+#import "tensors.fx";
+
+// Automatic differentiation
+#import "autograd.fx";
+
+// Path tracer
+#import "raytracing.fx";
+
+// 2.5D raycaster
+#import "raycasting.fx";
 ```
 
 ### Namespace Usage
@@ -2617,6 +4050,13 @@ Preprocessor definitions set automatically at compile time:
 
 ## Version History
 
+**Version 2.1** (May 2026)
+- Documentation updated to better reflect library contents
+- `net_windows.fx` clarified: full networking now lives in `socket_object_raw.fx` under `standard::sockets`; `net_windows.fx` is a thin glue file
+- `allocators.fx` expanded: now documents `stdstack`, `stdpool`, `stdarena`, and `stdring` in addition to `stdheap`
+- `collections.fx` expanded: `HashMapInt`, `Deque`, `RingBuffer`, `HashSet`, `HashSetInt`, and `MinHeap` added
+- New library sections added: `crc32.fx`, `dotenv.fx`, `json.fx`, `matrices.fx`, `fourier.fx`, `physics.fx`, `tensors.fx`, `autograd.fx`, `raytracing.fx`, `raycasting.fx`, `wasapi.fx`, `oglgraphing.fx`, `datautils.fx`
+
 **Version 2.0** (March 2026)
 - `red` prefix removed from all library filenames
 - `redstandard.fx` retired; `standard.fx` now directly imports `runtime.fx`
@@ -2649,4 +4089,4 @@ This documentation describes the Flux Standard Library as part of the Flux progr
 
 ---
 
-*This documentation reflects the Flux standard library as of v2.0, March 2026. For the most up-to-date information, refer to the official Flux language repository and Discord community.*
+*This documentation reflects the Flux standard library as of v2.1, May 2026. For the most up-to-date information, refer to the official Flux language repository and Discord community.*

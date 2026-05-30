@@ -654,7 +654,7 @@ namespace standard
             size_t n = shape_numel(@t.shape),
                    i;
             T* base = (T*)t.buf;
-            T  acc  = (T)0;
+            T  acc;
             while (i < n)
             {
                 acc = acc + base[i];
@@ -757,7 +757,7 @@ namespace standard
             ns.rank = rank;
             while (i < rank)
             {
-                ns.dims[i] = src.shape.dims[rank - (size_t)1 - i];
+                ns.dims[i] = src.shape.dims[rank - 1 - i];
                 i++;
             };
             shape_compute_strides(@ns);
@@ -824,7 +824,7 @@ namespace standard
                     rem      = rem % ns.strides[i];
                     i++;
                 };
-                i = (size_t)0;
+                i = 0;
                 while (i < rank)
                 {
                     sidx[perm[i]] = didx[i];
@@ -904,14 +904,14 @@ namespace standard
             size_t[TENSOR_MAX_RANK] new_dims;
             while (i < rank)
             {
-                if (src.shape.dims[i] != (size_t)1)
+                if (src.shape.dims[i] != 1)
                 {
                     new_dims[nr] = src.shape.dims[i];
                     nr++;
                 };
                 i++;
             };
-            if (nr == (size_t)0) { nr = (size_t)1; new_dims[0] = (size_t)1; };
+            if (nr == 0) { nr = 1; new_dims[0] = 1; };
             return tensor_reshape<T>(src, @new_dims[0], nr);
         };
 
@@ -922,11 +922,11 @@ namespace standard
                    i,
                    j;
             size_t[TENSOR_MAX_RANK] new_dims;
-            while (i < rank + (size_t)1)
+            while (i < rank + 1)
             {
                 if (i == axis)
                 {
-                    new_dims[i] = (size_t)1;
+                    new_dims[i] = 1;
                 }
                 else
                 {
@@ -935,7 +935,7 @@ namespace standard
                 };
                 i++;
             };
-            return tensor_reshape<T>(src, @new_dims[0], rank + (size_t)1);
+            return tensor_reshape<T>(src, @new_dims[0], rank + 1);
         };
 
         // ====================================================================
@@ -1120,7 +1120,7 @@ namespace standard
             while (i < t.shape.rank)
             {
                 standard::io::console::print(t.shape.dims[i]);
-                if (i + (size_t)1 < t.shape.rank) { standard::io::console::print(", "); };
+                if (i + 1 < t.shape.rank) { standard::io::console::print(", "); };
                 i++;
             };
             standard::io::console::print(")\n");

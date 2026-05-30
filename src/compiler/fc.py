@@ -652,6 +652,8 @@ class FluxCompiler:
                                 "-llegacy_stdio_definitions "  # For stdio functions in UCRT
                                 # Alternatively for older MSVCRT:
                                 # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
+                                "-ld3d11 -ld3dcompiler -ldxgi ",
+                                shell=True
                             )
                         except Exception as e:
                             print("EXCEPTION:",e)

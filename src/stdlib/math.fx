@@ -369,18 +369,47 @@ namespace standard
         };
         def sin(double x) -> double
         {
-            while (x > PID) { x -= 2.0 * PID; };
-            while (x < -PID) { x += 2.0 * PID; };
-            double result = x, term = x, x2 = x * x;
-            for (i32 i = 1; i <= 10; i++)
+            // Cody-Waite reduction: represent 2π as two parts to avoid
+            // catastrophic cancellation when subtracting large multiples.
+            // 2π ≈ TWO_PI_HI + TWO_PI_LO
+            double TWO_PI_HI, TWO_PI_LO, n_d, r, x2, result, term;
+            i32    n, i;
+            TWO_PI_HI = 6.283185307179586d;
+            TWO_PI_LO = 0.00000000000000024492935982947064d;
+
+            // Round to nearest multiple of 2π
+            n_d = x / TWO_PI_HI;
+            n   = (i32)n_d;
+            if (n_d < 0.0d) { n = n - 1; };
+            r = (x - (double)n * TWO_PI_HI) - (double)n * TWO_PI_LO;
+
+            // Reduce into [-π, π]
+            if (r >  3.141592653589793d) { r -= TWO_PI_HI; };
+            if (r < -3.141592653589793d) { r += TWO_PI_HI; };
+
+            // Reduce into [-π/2, π/2] using sin(π - x) = sin(x)
+            if (r >  1.5707963267948966d) { r = 3.141592653589793d - r; };
+            if (r < -1.5707963267948966d) { r = -3.141592653589793d - r; };
+
+            // Taylor series for sin(r), 14 terms — r in [-π/2, π/2]
+            x2     = r * r;
+            result = r;
+            term   = r;
+            i = 1;
+            while (i <= 14)
             {
-                term = -term * x2 / (double)((2*i) * (2*i+1));
+                term   = -term * x2 / (double)((2*i) * (2*i+1));
                 result += term;
+                i++;
             };
             return result;
         };
+        def cos(double x) -> double
+        {
+            // cos(x) = sin(x + π/2)
+            return sin(x + 1.5707963267948966d);
+        };
         def cos(float x) -> float { return sin(PIF/2.0f - x); };
-        def cos(double x) -> double { return sin(PID/2.0 - x); };
         def tan(float x) -> float
         {
             float c = cos(x);

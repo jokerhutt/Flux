@@ -1349,12 +1349,10 @@ class TypeSystem:
                     # Only handle compile-time constant dimensions
                     if isinstance(dim, int):
                         current_type = ir.ArrayType(current_type, dim)
-                    elif hasattr(dim, 'value') and isinstance(dim.value, int):
-                        # Literal AST node wrapping a plain integer - treat as compile-time constant
-                        current_type = ir.ArrayType(current_type, dim.value)
+                    elif hasattr(dim, 'value'):
+                        current_type = ir.ArrayType(current_type, int(dim.value))
                     else:
                         # Runtime size - return pointer to element type
-                        # The actual allocation will be handled in _codegen_local
                         return ir.PointerType(element_type)
                 else:
                     current_type = ir.PointerType(current_type)
@@ -1363,12 +1361,9 @@ class TypeSystem:
             if type_spec.array_size is not None:
                 # Check if it's a compile-time constant
                 if isinstance(type_spec.array_size, int):
-                    # Return array of element_type
-                    # For noopstr[3], this returns [3 x i8*]
                     return ir.ArrayType(element_type, type_spec.array_size)
-                elif hasattr(type_spec.array_size, 'value') and isinstance(type_spec.array_size.value, int):
-                    # Literal AST node wrapping a plain integer - treat as compile-time constant
-                    return ir.ArrayType(element_type, type_spec.array_size.value)
+                elif hasattr(type_spec.array_size, 'value'):
+                    return ir.ArrayType(element_type, int(type_spec.array_size.value))
                 else:
                     # May be an Identifier or other AST expression referencing a
                     # compile-time constant (e.g. `byte[FHF_SYM_NAME_MAX]`).
@@ -3723,8 +3718,30 @@ class ObjectTypeHandler:
             elif isinstance(member_type, ir.FloatType):
                 bit_width = 32
                 alignment = 32
+            elif isinstance(member_type, ir.DoubleType):
+                bit_width = 64
+                alignment = 64
+            elif isinstance(member_type, ir.ArrayType):
+                element_type = member_type.element
+                if isinstance(element_type, ir.IntType):
+                    bit_width = element_type.width * member_type.count
+                    alignment = element_type.width
+                elif isinstance(element_type, ir.FloatType):
+                    bit_width = 32 * member_type.count
+                    alignment = 32
+                elif isinstance(element_type, ir.DoubleType):
+                    bit_width = 64 * member_type.count
+                    alignment = 64
+                else:
+                    # pointers, structs — each element is 64 bits
+                    bit_width = 64 * member_type.count
+                    alignment = 64
+            elif isinstance(member_type, (ir.IdentifiedStructType, ir.LiteralStructType)):
+                bit_width = StructTypeHandler._struct_bits(member_type)
+                alignment = 64
             else:
-                bit_width = 64  # pointer or other
+                # pointer or unknown
+                bit_width = 64
                 alignment = 64
             
             fields.append((member.name, bit_offset, bit_width, alignment))
@@ -5001,71 +5018,30 @@ class StructTypeHandler:
             if member_type.bit_width is not None:
                 has_data_types = True
             
-            # Get the LLVM type for this field - use get_llvm_type with include_array to handle arrays
+            # Get the LLVM type for this field
             llvm_field_type = TypeSystem.get_llvm_type(member_type, module, include_array=True)
             field_types[member.name] = llvm_field_type
-            
-            if member_type.bit_width is not None:
+
+            if member_type.bit_width is not None and not member_type.is_array:
+                # Packed data{} scalar field — use declared width directly.
                 bit_width = member_type.bit_width
                 alignment = member_type.alignment if member_type.alignment is not None else bit_width
-            elif member_type.custom_typename:
-                # Use TypeSystem.get_llvm_type() which handles all type lookups properly
-                llvm_type = llvm_field_type
-                
-                # Calculate bit width and alignment from the LLVM type
-                if isinstance(llvm_type, ir.IntType):
-                    bit_width = llvm_type.width
-                    alignment = llvm_type.width
-                elif isinstance(llvm_type, ir.FloatType):
-                    bit_width = 32
-                    alignment = 32
-                elif isinstance(llvm_type, ir.DoubleType):
-                    bit_width = 64
-                    alignment = 64
-                elif isinstance(llvm_type, ir.ArrayType):
-                    # For arrays, calculate total bit width
-                    element_type = llvm_type.element
-                    if isinstance(element_type, ir.IntType):
-                        bit_width = element_type.width * llvm_type.count
-                        alignment = element_type.width
-                    else:
-                        # Default fallback
-                        bit_width = 8 * llvm_type.count
-                elif isinstance(llvm_type, (ir.IdentifiedStructType, ir.LiteralStructType)):
-                    # Nested struct — recursively sum element sizes
-                    bit_width = StructTypeHandler._struct_bits(llvm_type)
-                    alignment = 32  # struct fields align to at least 32-bit
-                elif isinstance(llvm_type, ir.PointerType):
-                    bit_width = 64
-                    alignment = 64
-                else:
-                    # Unknown fallback
-                    bit_width = 32
-                    alignment = 32
             else:
-                bit_width = get_builtin_bit_width(member_type.base_type)
-                alignment = bit_width
-            
-            # Only apply alignment padding for non-packed structs
-            if alignment > 1 and not has_data_types:
-                misalignment = current_offset % alignment
-                if misalignment != 0:
-                    current_offset += alignment - misalignment
-            
+                # Derive width from the LLVM type — this is always authoritative.
+                bit_width = SizeOfTypeHandler.bits_from_llvm_type(llvm_field_type, module)
+                alignment = bit_width if bit_width <= 64 else 64
+
+            import sys
+            #print(f"[VTB] {member.name}: llvm={llvm_field_type} bits={bit_width}", file=sys.stderr)
+
+            # Flux structs are tightly packed — no alignment padding between fields.
             fields.append((member.name, current_offset, bit_width, alignment))
             member.offset = current_offset
-            
+
             current_offset += bit_width
             max_alignment = max(max_alignment, alignment)
         
         total_bits = current_offset
-        
-        # Only add trailing padding for regular structs, NOT for packed data{} structs
-        if max_alignment > 1 and not has_data_types:
-            misalignment = total_bits % max_alignment
-            if misalignment != 0:
-                total_bits += max_alignment - misalignment
-        
         total_bytes = (total_bits + 7) // 8
         
         return StructVTable(
@@ -5565,12 +5541,12 @@ class SizeOfTypeHandler:
 
         # Arrays
         if isinstance(llvm_type, ir.ArrayType):
-            elem_bits = SizeOfTypeHandler.bits_from_llvm_type(
-                llvm_type.element, module
-            )
+            elem_bits = SizeOfTypeHandler.bits_from_llvm_type(llvm_type.element, module)
             if elem_bits is None:
-                return module.data_layout.get_type_size(llvm_type) * 8
-            return elem_bits * llvm_type.count
+                return None
+            n = llvm_type.count
+            #import sys; print(f"[ARR] {llvm_type} elem={llvm_type.element} count={n} elem_bits={elem_bits} total={elem_bits*n}", file=sys.stderr)
+            return elem_bits * n
 
         # Pointers (Flux assumption)
         if isinstance(llvm_type, ir.PointerType):
@@ -5614,6 +5590,8 @@ class SizeOfTypeHandler:
         if isinstance(target, Identifier):
             # Struct type name
             if hasattr(module, "_struct_vtables") and target.name in module._struct_vtables:
+                if hasattr(module, "_struct_types") and target.name in module._struct_types:
+                    return SizeOfTypeHandler.bits_from_llvm_type(module._struct_types[target.name], module)
                 return module._struct_vtables[target.name].total_bits
 
             # Look up as a type (struct/union/enum/typedef) in symbol table

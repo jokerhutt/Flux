@@ -524,7 +524,7 @@ namespace standard
                     WNDCLASSEXA wc;
                     wc.cbSize        = (UINT)(sizeof(WNDCLASSEXA) / 8); // sizeof returns bits, cbSize needs bytes
                     wc.style         = CS_HREDRAW | CS_VREDRAW | CS_OWNDC;
-                    wc.lpfnWndProc   = (WNDPROC)@DefaultWindowProc;
+                    wc.lpfnWndProc   = (WNDPROC)@DefWindowProcA;
                     wc.cbClsExtra    = 0;
                     wc.cbWndExtra    = 0;
                     wc.hInstance     = this.instance;
