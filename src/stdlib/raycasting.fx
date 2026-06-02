@@ -105,12 +105,22 @@
 #import "allocators.fx";
 #endif;
 
+#ifndef FLUX_STANDARD_THREADING
+#import "threading.fx";
+#endif;
+
+#ifndef FLUX_STANDARD_SYSTEM
+#import "sys.fx";
+#endif;
+
 #ifndef FLUX_RAYCASTING
 #def FLUX_RAYCASTING 1;
 
 using standard::vectors;
 using standard::math;
 using standard::memory::allocators::stdheap;
+using standard::memory::allocators::stdarena;
+using standard::threading;
 
 // ============================================================================
 // SHARED CONSTANTS
@@ -149,7 +159,8 @@ using standard::memory::allocators::stdheap;
 #def R3D_PASS_MESHES     16;
 #def R3D_PASS_SPRITES    32;
 #def R3D_PASS_LIGHTS     64;
-#def R3D_PASS_ALL        112;
+#def R3D_PASS_FXAA       128;  // Optional screen-space AA pass (expensive)
+#def R3D_PASS_ALL        112;  // Meshes + sprites + lights; FXAA opt-in only
 
 // Lighting model
 #def R3D_LIGHT_DIR       0;   // Directional (infinite distance)
@@ -161,6 +172,7 @@ using standard::memory::allocators::stdheap;
 
 #def R3D_MAX_LIGHTS      8;
 #def R3D_MAX_CLIP_VERTS  9;   // Max verts after full 6-plane frustum clip of one triangle (3+6)
+#def R3D_MAX_THREADS     64;  // Maximum worker threads for parallel rasterization
 
 // ============================================================================
 // PIXEL FORMAT  (u64 = 0xAAAARRRRGGGGBBBB, 16 bits per channel)
@@ -206,10 +218,18 @@ struct RCMap
 };
 
 // 64-bit ARGB texture surface (16 bits per channel)
+// mip_pixels[k] is the k-th half-resolution mip level (k=0 is full res == pixels).
+// mip_count == 1 means no mips built yet.
+// mip_w[k] / mip_h[k] are the pixel dimensions of level k.
+#def RC_MAX_MIP_LEVELS 12;
 struct RCTexture
 {
     u64* pixels;
     i32  width, height;
+    u64*[12] mip_pixels;
+    i32[12]  mip_w;
+    i32[12]  mip_h;
+    i32  mip_count;
 };
 
 struct RCTexturePalette
@@ -300,6 +320,8 @@ struct R3DMesh
     R3DTriangle* tris;
     i32          tri_count,
                  tex_idx;    // Texture palette index (0 = untextured)
+    double       bound_cx, bound_cy, bound_cz,  // Object-space bounding sphere centre
+                 bound_r;                        // Object-space bounding sphere radius
 };
 
 // World-space instance of a mesh
@@ -387,6 +409,36 @@ struct R3DScene
     RCTexturePalette* palette;  // Shared with 2.5D scene (may be null)
     RCSky*        sky;
     i32           passes;       // R3D_PASS_* flags
+    // Fog
+    double        fog_start,   // View-space depth where fog begins
+                  fog_end,     // View-space depth of full fog (0 = disabled)
+                  fog_r, fog_g, fog_b;  // Fog color
+    // Volumetric (height) fog
+    double        vol_density,       // Overall fog density (0 = disabled)
+                  vol_falloff,       // Exponential height falloff rate
+                  vol_base_y,        // World Y below which fog is densest
+                  vol_r, vol_g, vol_b; // Volumetric fog color
+    Arena         frame_arena;  // Per-frame scratch; reset at top of r3d_render
+    // Threading
+    i32                  num_threads;
+    Thread[64]           threads;
+    R3DMeshWorkSlice[64] work_slices;
+    Arena[64]            thread_arenas; // Per-thread scratch arenas; reset each frame
+};
+
+// Internal: per-thread work descriptor for parallel mesh rasterization.
+// Each thread owns one of these; filled by r3d_render before dispatch.
+struct R3DMeshWorkSlice
+{
+    R3DScene*  scene;
+    double*    zbuf;
+    u64*       buf;
+    Arena*     arena;      // Per-thread scratch arena (thread owns this slot)
+    i32        thread_id;  // Row ownership: render rows where y % num_threads == thread_id
+    i32        num_threads;
+    Semaphore  wake;       // Main thread posts to wake the worker
+    Semaphore  done;       // Worker posts when frame work is complete
+    i32        running;    // Set to 0 to signal the worker to exit
 };
 
 // Internal: a clipped vertex with perspective-correct interpolation data
@@ -396,6 +448,14 @@ struct R3DClipVert
            nx, ny, nz,   // Interpolated normal
            u, v,         // Texture coords
            inv_w;        // 1/w, carried for p-correct interp
+};
+
+// Internal: pre-transformed vertex cache entry (world pos, world normal, clip pos)
+struct R3DXVert
+{
+    double wx, wy, wz;       // World-space position
+    double nx, ny, nz;       // World-space normal (unit)
+    double cx, cy, cz, cw;  // Clip-space position
 };
 
 namespace raycaster
@@ -423,64 +483,81 @@ namespace raycaster
 
     def color64_scale(u64 argb, double factor) -> u64
     {
-        double r, g, b;
-        color64_unpack(argb, @r, @g, @b);
-        return color64_pack(r * factor, g * factor, b * factor);
+        u64 f16, r, g, b;
+        f16 = (u64)(factor * 65536.0d);
+        if (f16 > (u64)65536) { f16 = (u64)65536; };
+        r = (((argb >> 32) & (u64)0xFFFF) * f16) >> 16;
+        g = (((argb >> 16) & (u64)0xFFFF) * f16) >> 16;
+        b = (((argb      ) & (u64)0xFFFF) * f16) >> 16;
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | b;
     };
 
-    def color64_lerp(u64 a, u64 b, double t) -> u64
+    inline def color64_lerp(u64 a, u64 b, double t) -> u64
     {
-        double ar, ag, ab, br, bg, bb;
-        color64_unpack(a, @ar, @ag, @ab);
-        color64_unpack(b, @br, @bg, @bb);
-        return color64_pack(ar + (br - ar) * t,
-                            ag + (bg - ag) * t,
-                            ab + (bb - ab) * t);
+        u64 t16, it16, r, g, bl;
+        t16  = (u64)(t * 65536.0d);
+        if (t16 > (u64)65536) { t16 = (u64)65536; };
+        it16 = (u64)65536 - t16;
+        r  = (((a >> 32) & (u64)0xFFFF) * it16 + ((b >> 32) & (u64)0xFFFF) * t16) >> 16;
+        g  = (((a >> 16) & (u64)0xFFFF) * it16 + ((b >> 16) & (u64)0xFFFF) * t16) >> 16;
+        bl = (((a      ) & (u64)0xFFFF) * it16 + ((b      ) & (u64)0xFFFF) * t16) >> 16;
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | bl;
     };
 
     def color64_tint(u64 base, u64 tint) -> u64
     {
-        double alpha, br, bg, bb, tr, tg, tb;
-        alpha = (double)((tint >> 48) & (u64)0xFFFF) / 65535.0;
-        if (alpha < RC_EPSILON) { return base; };
-        color64_unpack(base, @br, @bg, @bb);
-        color64_unpack(tint, @tr, @tg, @tb);
-        return color64_pack(br + (tr - br) * alpha,
-                            bg + (tg - bg) * alpha,
-                            bb + (tb - bb) * alpha);
+        u64 alpha, ialpha, r, g, bl;
+        alpha = (tint >> 48) & (u64)0xFFFF;
+        if (alpha == (u64)0) { return base; };
+        ialpha = (u64)65535 - alpha;
+        r  = (((base >> 32) & (u64)0xFFFF) * ialpha + ((tint >> 32) & (u64)0xFFFF) * alpha) >> 16;
+        g  = (((base >> 16) & (u64)0xFFFF) * ialpha + ((tint >> 16) & (u64)0xFFFF) * alpha) >> 16;
+        bl = (((base      ) & (u64)0xFFFF) * ialpha + ((tint      ) & (u64)0xFFFF) * alpha) >> 16;
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | bl;
     };
 
     def color64_mul(u64 a, u64 b) -> u64
     {
-        double ar, ag, ab, br, bg, bb;
-        color64_unpack(a, @ar, @ag, @ab);
-        color64_unpack(b, @br, @bg, @bb);
-        return color64_pack(ar * br, ag * bg, ab * bb);
+        u64 r, g, bl;
+        r  = (((a >> 32) & (u64)0xFFFF) * ((b >> 32) & (u64)0xFFFF)) >> 16;
+        g  = (((a >> 16) & (u64)0xFFFF) * ((b >> 16) & (u64)0xFFFF)) >> 16;
+        bl = (((a      ) & (u64)0xFFFF) * ((b      ) & (u64)0xFFFF)) >> 16;
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | bl;
     };
 
-    // Modulate base color by an RGB triple (e.g. light contribution)
-    def color64_light(u64 base, double lr, double lg, double lb) -> u64
+    // Modulate base color by an RGB light triple in [0, inf). Clamps to 0xFFFF.
+    inline def color64_light(u64 base, double lr, double lg, double lb) -> u64
     {
-        double r, g, b;
-        color64_unpack(base, @r, @g, @b);
-        return color64_pack(r * lr, g * lg, b * lb);
+        u64 r, g, b;
+        r = (u64)(((double)((base >> 32) & (u64)0xFFFF)) * lr);
+        g = (u64)(((double)((base >> 16) & (u64)0xFFFF)) * lg);
+        b = (u64)(((double)( base        & (u64)0xFFFF)) * lb);
+        if (r > (u64)0xFFFF) { r = (u64)0xFFFF; };
+        if (g > (u64)0xFFFF) { g = (u64)0xFFFF; };
+        if (b > (u64)0xFFFF) { b = (u64)0xFFFF; };
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | b;
     };
 
-    // Pre-multiply a u64 color by fixed light RGB into a ready-to-write u64.
-    // Used to bake flat lighting once per triangle instead of per pixel.
+    // Bake flat lighting once per triangle. Same as color64_light.
     def color64_light_bake(u64 base, double lr, double lg, double lb) -> u64
     {
-        double r, g, b;
-        u64 ri, gi, bi;
-        color64_unpack(base, @r, @g, @b);
-        r *= lr; g *= lg; b *= lb;
-        if (r > 1.0d) { r = 1.0d; }; if (r < 0.0d) { r = 0.0d; };
-        if (g > 1.0d) { g = 1.0d; }; if (g < 0.0d) { g = 0.0d; };
-        if (b > 1.0d) { b = 1.0d; }; if (b < 0.0d) { b = 0.0d; };
-        ri = (u64)(r * 65535.0d);
-        gi = (u64)(g * 65535.0d);
-        bi = (u64)(b * 65535.0d);
-        return (u64)0xFFFF000000000000 | (ri << 32) | (gi << 16) | bi;
+        u64 r, g, b;
+        r = (u64)(((double)((base >> 32) & (u64)0xFFFF)) * lr);
+        g = (u64)(((double)((base >> 16) & (u64)0xFFFF)) * lg);
+        b = (u64)(((double)( base        & (u64)0xFFFF)) * lb);
+        if (r > (u64)0xFFFF) { r = (u64)0xFFFF; };
+        if (g > (u64)0xFFFF) { g = (u64)0xFFFF; };
+        if (b > (u64)0xFFFF) { b = (u64)0xFFFF; };
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | b;
+    };
+
+    // Integer BT.601 luma — no division, no double. Result in [0, 65535].
+    // Coefficients: R*19595 + G*38470 + B*7471, then >> 16.
+    def color64_luma(u64 c) -> u64
+    {
+        return (((c >> 32) & (u64)0xFFFF) * (u64)19595 +
+                ((c >> 16) & (u64)0xFFFF) * (u64)38470 +
+                ( c        & (u64)0xFFFF) * (u64)7471) >> 16;
     };
 
     def fog_factor(double dist, double view_dist) -> double
@@ -647,47 +724,86 @@ namespace raycaster
         return m;
     };
 
-    // TRS (translate * rotateY * rotateX * rotateZ * scale) model matrix
+    // Internal: compute sin and cos of x simultaneously from a single
+    // range reduction.  Roughly halves trig cost vs separate sin/cos calls.
+    def _sincos(double x, double* s, double* c) -> void
+    {
+        bool neg_s;
+        double r;
+        i32    q;
+        neg_s = x < 0.0;
+        if (neg_s) { x = -x; };
+        if (x <= 7.85398163397448278999e-01)
+        {
+            *s = _sin_kernel(x);
+            *c = _cos_kernel(x);
+            if (neg_s) { *s = -*s; };
+            return;
+        };
+        r = _trig_reduce(x, @q);
+        switch (q & 3)
+        {
+            case (0) { *s =  _sin_kernel(r); *c =  _cos_kernel(r); }
+            case (1) { *s =  _cos_kernel(r); *c = -_sin_kernel(r); }
+            case (2) { *s = -_sin_kernel(r); *c = -_cos_kernel(r); }
+            default  { *s = -_cos_kernel(r); *c =  _sin_kernel(r); };
+        };
+        if (neg_s) { *s = -*s; };
+        return;
+    };
+
+    // TRS (translate * rotateY * rotateX * rotateZ * scale) model matrix.
+    //
+    // Closed-form: expands T*(Ry*Rx*Rz)*S directly without building
+    // intermediate matrices or calling dmat4_mul.  Uses _sincos to compute
+    // sin and cos of each angle in one range-reduction pass, halving trig cost.
+    //
+    // R = Ry*Rx*Rz expanded:
+    //   m00 = cy*cz + sy*sx*sz    m01 = -cy*sz + sy*sx*cz    m02 = sy*cx
+    //   m10 = cx*sz               m11 =  cx*cz               m12 = -sx
+    //   m20 = -sy*cz + cy*sx*sz   m21 =  sy*sz + cy*sx*cz    m22 = cy*cx
+    // Each column then multiplied by sx/sy/sz (scale), translation in col 3.
     def dmat4_trs(double tx, double ty, double tz,
                   double rx, double ry, double rz,
                   double sx, double sy, double sz) -> DMat4
     {
-        double cx, sx2, cy, sy2, cz, sz2;
-        DMat4  s, r, t, tmp;
+        double cx, sxr, cy, sy2, cz, sz2;
+        _sincos(rx, @sxr, @cx);
+        _sincos(ry, @sy2, @cy);
+        _sincos(rz, @sz2, @cz);
 
-        cx  = cos(rx); sx2 = sin(rx);
-        cy  = cos(ry); sy2 = sin(ry);
-        cz  = cos(rz); sz2 = sin(rz);
+        // Intermediate products reused across multiple cells
+        double sy_sx, cy_sx;
+        sy_sx = sy2 * sxr;
+        cy_sx = cy  * sxr;
 
-        // Scale
-        s = dmat4_identity();
-        s.m00 = sx; s.m11 = sy; s.m22 = sz;
+        DMat4 m;
 
-        // Rotation: R = Ry * Rx * Rz
-        DMat4 rx_mat, ry_mat, rz_mat;
+        // Column 0 * scale_x
+        m.m00 = (cy*cz  + sy_sx*sz2) * sx;
+        m.m10 = (cx*sz2)              * sx;
+        m.m20 = (-sy2*cz + cy_sx*sz2) * sx;
+        m.m30 = 0.0;
 
-        rx_mat = dmat4_identity();
-        rx_mat.m11 =  cx; rx_mat.m12 = -sx2;
-        rx_mat.m21 =  sx2; rx_mat.m22 =  cx;
+        // Column 1 * scale_y
+        m.m01 = (-cy*sz2 + sy_sx*cz)  * sy;
+        m.m11 = (cx*cz)                * sy;
+        m.m21 = (sy2*sz2 + cy_sx*cz)  * sy;
+        m.m31 = 0.0;
 
-        ry_mat = dmat4_identity();
-        ry_mat.m00 =  cy; ry_mat.m02 =  sy2;
-        ry_mat.m20 = -sy2; ry_mat.m22 =  cy;
+        // Column 2 * scale_z
+        m.m02 = (sy2*cx) * sz;
+        m.m12 = (-sxr)   * sz;
+        m.m22 = (cy*cx)  * sz;
+        m.m32 = 0.0;
 
-        rz_mat = dmat4_identity();
-        rz_mat.m00 =  cz; rz_mat.m01 = -sz2;
-        rz_mat.m10 =  sz2; rz_mat.m11 =  cz;
+        // Column 3: translation
+        m.m03 = tx;
+        m.m13 = ty;
+        m.m23 = tz;
+        m.m33 = 1.0;
 
-        tmp = dmat4_mul(ry_mat, rx_mat);
-        r   = dmat4_mul(tmp, rz_mat);
-
-        // Translation
-        t = dmat4_identity();
-        t.m03 = tx; t.m13 = ty; t.m23 = tz;
-
-        // Result: T * R * S
-        tmp = dmat4_mul(r, s);
-        return dmat4_mul(t, tmp);
+        return m;
     };
 
     // Normal matrix: transpose of inverse of upper-left 3x3 of model matrix
@@ -753,49 +869,249 @@ namespace raycaster
         return tex.pixels[ty * tex.width + tx];
     };
 
+
+    // =========================================================================
+    // MIP-MAP BUILD & TRILINEAR SAMPLER
+    //
+    // rc_tex_build_mips(tex)
+    //   Builds a complete mip chain for tex using a 2x2 box filter.
+    //   Call once after rc_palette_add / loading the texture.
+    //   Each level is heap-allocated; rc_tex_free_mips frees them.
+    //
+    // rc_tex_sample_mip(tex, u, v, duv)
+    //   duv  = max(|du/dx|, |dv/dx|) * tex.width  (texels per screen pixel)
+    //   Selects a mip level so one screen pixel ≈ one texel, then bilinear
+    //   samples that level.  This is what GPUs call "trilinear" when they also
+    //   lerp between adjacent levels — we do that too.
+    //
+    // Why this fixes the blurriness
+    //   When a surface is far away, many texels map to one pixel: bilinear on
+    //   the full-res texture aliases badly (shimmer) and looks soft because it
+    //   averages widely-spaced samples.  A mip level pre-averages the right
+    //   neighbourhood, giving a sharp, stable result at every distance.
+    //   When the surface is close, level 0 (full res) is used — no blurring.
+    // =========================================================================
+
+    def rc_tex_build_mips(RCTexture* tex) -> void
+    {
+        i32    lvl, pw, ph, cw, ch, x, y;
+        u64*   src;
+        u64*   dst;
+        double r0, g0, b0, r1, g1, b1, r2, g2, b2, r3, g3, b3;
+        size_t bytes;
+
+        // Level 0 is the base texture
+        tex.mip_pixels[0] = tex.pixels;
+        tex.mip_w[0]      = tex.width;
+        tex.mip_h[0]      = tex.height;
+        tex.mip_count     = 1;
+
+        lvl = 1;
+        pw  = tex.width;
+        ph  = tex.height;
+
+        while (lvl < RC_MAX_MIP_LEVELS)
+        {
+            cw = pw / 2;
+            ch = ph / 2;
+            if (cw < 1 | ch < 1) { break; };
+
+            bytes = (size_t)((u64)(cw * ch) * 8u);
+            dst   = (u64*)fmalloc(bytes);
+            src   = tex.mip_pixels[lvl - 1];
+
+            y = 0;
+            while (y < ch)
+            {
+                x = 0;
+                while (x < cw)
+                {
+                    // 2x2 box filter from the previous level
+                    color64_unpack(src[(y*2    ) * pw + (x*2    )], @r0, @g0, @b0);
+                    color64_unpack(src[(y*2    ) * pw + (x*2 + 1)], @r1, @g1, @b1);
+                    color64_unpack(src[(y*2 + 1) * pw + (x*2    )], @r2, @g2, @b2);
+                    color64_unpack(src[(y*2 + 1) * pw + (x*2 + 1)], @r3, @g3, @b3);
+                    dst[y * cw + x] = color64_pack(
+                        (r0 + r1 + r2 + r3) * 0.25d,
+                        (g0 + g1 + g2 + g3) * 0.25d,
+                        (b0 + b1 + b2 + b3) * 0.25d
+                    );
+                    x++;
+                };
+                y++;
+            };
+
+            tex.mip_pixels[lvl] = dst;
+            tex.mip_w[lvl]      = cw;
+            tex.mip_h[lvl]      = ch;
+            tex.mip_count       = lvl + 1;
+
+            pw = cw;
+            ph = ch;
+            lvl++;
+        };
+    };
+
+    // Free mip levels 1+ (level 0 is owned by the caller)
+    def rc_tex_free_mips(RCTexture* tex) -> void
+    {
+        i32 lvl;
+        lvl = 1;
+        while (lvl < tex.mip_count)
+        {
+            if ((u64)tex.mip_pixels[lvl] != (u64)0)
+            {
+                ffree((u64)tex.mip_pixels[lvl]);
+                tex.mip_pixels[lvl] = (u64*)0;
+            };
+            lvl++;
+        };
+        tex.mip_count = 1;
+    };
+
+    // Bilinear sample from a single mip level (internal helper)
+    // Operates entirely in u16 fixed-point — no double round-trip.
+    def rc_tex_bilinear_level(u64* px, i32 w, i32 h,
+                               double fu, double fv) -> u64
+    {
+        double tx_d, ty_d;
+        i32    x0, y0, x1, y1;
+
+        tx_d = fu * (double)(w - 1);
+        ty_d = fv * (double)(h - 1);
+        x0 = (i32)tx_d; y0 = (i32)ty_d;
+        x1 = x0 + 1;   y1 = y0 + 1;
+        if (x1 >= w) { x1 = w - 1; };
+        if (y1 >= h) { y1 = h - 1; };
+
+        // Fixed-point weights: 16 bits, [0, 65536]
+        u64 fx16, fy16, ifx16, ify16;
+        fx16  = (u64)((tx_d - (double)x0) * 65536.0d);
+        fy16  = (u64)((ty_d - (double)y0) * 65536.0d);
+        if (fx16 > (u64)65536) { fx16 = (u64)65536; };
+        if (fy16 > (u64)65536) { fy16 = (u64)65536; };
+        ifx16 = (u64)65536 - fx16;
+        ify16 = (u64)65536 - fy16;
+
+        u64 c00, c10, c01, c11;
+        c00 = px[y0*w + x0];
+        c10 = px[y0*w + x1];
+        c01 = px[y1*w + x0];
+        c11 = px[y1*w + x1];
+
+        // Interpolate each 16-bit channel independently.
+        // Channel extraction: R=(c>>32)&0xFFFF, G=(c>>16)&0xFFFF, B=c&0xFFFF
+        // Weight product max: 65536*65536 = 2^32 — fits in u64 before >>32 shift.
+        u64 r, g, b;
+        r = (((c00 >> 32) & (u64)0xFFFF) * ifx16 * ify16 +
+             ((c10 >> 32) & (u64)0xFFFF) *  fx16 * ify16 +
+             ((c01 >> 32) & (u64)0xFFFF) * ifx16 *  fy16 +
+             ((c11 >> 32) & (u64)0xFFFF) *  fx16 *  fy16) >> 32;
+        g = (((c00 >> 16) & (u64)0xFFFF) * ifx16 * ify16 +
+             ((c10 >> 16) & (u64)0xFFFF) *  fx16 * ify16 +
+             ((c01 >> 16) & (u64)0xFFFF) * ifx16 *  fy16 +
+             ((c11 >> 16) & (u64)0xFFFF) *  fx16 *  fy16) >> 32;
+        b = (((c00      ) & (u64)0xFFFF) * ifx16 * ify16 +
+             ((c10      ) & (u64)0xFFFF) *  fx16 * ify16 +
+             ((c01      ) & (u64)0xFFFF) * ifx16 *  fy16 +
+             ((c11      ) & (u64)0xFFFF) *  fx16 *  fy16) >> 32;
+
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | b;
+    };
+
+    // Select mip LOD from duv — returns lod0, lod1, and blend frac.
+    // Call once per scanline; then use rc_tex_sample_lod per pixel.
+    def rc_tex_select_lod(RCTexture* tex, double duv,
+                          i32* lod0, i32* lod1, double* frac) -> void
+    {
+        if (duv < 2.0d)
+        {
+            *lod0 = 0; *lod1 = 0; *frac = 0.0d;
+            return;
+        };
+        double lod_f, d;
+        lod_f = 0.0d;
+        d     = duv;
+        while (d > 2.0d & lod_f < (double)(tex.mip_count - 2))
+        {
+            d     *= 0.5d;
+            lod_f += 1.0d;
+        };
+        *frac = d - 1.0d;
+        if (*frac < 0.0d) { *frac = 0.0d; };
+        if (*frac > 1.0d) { *frac = 1.0d; };
+        *lod0 = (i32)lod_f;
+        *lod1 = *lod0 + 1;
+        if (*lod0 >= tex.mip_count) { *lod0 = tex.mip_count - 1; };
+        if (*lod1 >= tex.mip_count) { *lod1 = tex.mip_count - 1; };
+    };
+
+    // Sample at a pre-selected LOD pair — call per pixel after rc_tex_select_lod.
+    def rc_tex_sample_lod(RCTexture* tex, double fu, double fv,
+                          i32 lod0, i32 lod1, double frac) -> u64
+    {
+        u64 c0, c1;
+        u64 r0, g0, b0, r1, g1, b1, fr16;
+        c0 = rc_tex_bilinear_level(tex.mip_pixels[lod0], tex.mip_w[lod0], tex.mip_h[lod0], fu, fv);
+        if (lod1 == lod0 | frac < 0.001d) { return c0; };
+        c1 = rc_tex_bilinear_level(tex.mip_pixels[lod1], tex.mip_w[lod1], tex.mip_h[lod1], fu, fv);
+        // Integer lerp between c0 and c1
+        fr16 = (u64)(frac * 65536.0d);
+        if (fr16 > (u64)65536) { fr16 = (u64)65536; };
+        u64 ifr16;
+        ifr16 = (u64)65536 - fr16;
+        u64 r, g, b;
+        r0 = (c0 >> 32) & (u64)0xFFFF; r1 = (c1 >> 32) & (u64)0xFFFF;
+        g0 = (c0 >> 16) & (u64)0xFFFF; g1 = (c1 >> 16) & (u64)0xFFFF;
+        b0 =  c0        & (u64)0xFFFF; b1 =  c1        & (u64)0xFFFF;
+        r = (r0 * ifr16 + r1 * fr16) >> 16;
+        g = (g0 * ifr16 + g1 * fr16) >> 16;
+        b = (b0 * ifr16 + b1 * fr16) >> 16;
+        return (u64)0xFFFF000000000000 | (r << 32) | (g << 16) | b;
+    };
+
+    // Trilinear mip sample.
+    def rc_tex_sample_mip(RCTexture* tex, double u, double v, double duv) -> u64
+    {
+        double fu, fv;
+        i32    lod0, lod1;
+        double frac;
+
+        fu = u - (double)(i32)u;
+        fv = v - (double)(i32)v;
+        if (fu < 0.0d) { fu += 1.0d; };
+        if (fv < 0.0d) { fv += 1.0d; };
+
+        // No mips: base bilinear
+        if (tex.mip_count <= 1)
+        {
+            return rc_tex_bilinear_level(tex.pixels, tex.width, tex.height, fu, fv);
+        };
+
+        // Magnification: nearest-neighbor
+        if (duv < 1.0d)
+        {
+            i32 tx, ty;
+            tx = (i32)(fu * (double)tex.mip_w[0]);
+            ty = (i32)(fv * (double)tex.mip_h[0]);
+            if (tx >= tex.mip_w[0]) { tx = tex.mip_w[0] - 1; };
+            if (ty >= tex.mip_h[0]) { ty = tex.mip_h[0] - 1; };
+            return tex.mip_pixels[0][ty * tex.mip_w[0] + tx];
+        };
+
+        rc_tex_select_lod(tex, duv, @lod0, @lod1, @frac);
+        return rc_tex_sample_lod(tex, fu, fv, lod0, lod1, frac);
+    };
+
     // Bilinear texture sample (higher quality for mesh surfaces)
     def rc_tex_sample_bilinear(RCTexture* tex, double u, double v) -> u64
     {
-        double fu, fv, fx, fy, tx_d, ty_d;
-        i32    x0, y0, x1, y1;
-        double r00, g00, b00, r10, g10, b10, r01, g01, b01, r11, g11, b11;
-        double r, g, b;
-        u64    p00, p10, p01, p11;
-
+        double fu, fv;
         fu = u - (double)(i32)u;
         fv = v - (double)(i32)v;
         if (fu < 0.0) { fu += 1.0; };
         if (fv < 0.0) { fv += 1.0; };
-
-        tx_d = fu * (double)(tex.width  - 1);
-        ty_d = fv * (double)(tex.height - 1);
-
-        x0 = (i32)tx_d;
-        y0 = (i32)ty_d;
-        x1 = x0 + 1;
-        y1 = y0 + 1;
-
-        if (x1 >= tex.width)  { x1 = tex.width  - 1; };
-        if (y1 >= tex.height) { y1 = tex.height - 1; };
-
-        fx = tx_d - (double)x0;
-        fy = ty_d - (double)y0;
-
-        p00 = tex.pixels[y0 * tex.width + x0];
-        p10 = tex.pixels[y0 * tex.width + x1];
-        p01 = tex.pixels[y1 * tex.width + x0];
-        p11 = tex.pixels[y1 * tex.width + x1];
-
-        color64_unpack(p00, @r00, @g00, @b00);
-        color64_unpack(p10, @r10, @g10, @b10);
-        color64_unpack(p01, @r01, @g01, @b01);
-        color64_unpack(p11, @r11, @g11, @b11);
-
-        r = r00*(1.0-fx)*(1.0-fy) + r10*fx*(1.0-fy) + r01*(1.0-fx)*fy + r11*fx*fy;
-        g = g00*(1.0-fx)*(1.0-fy) + g10*fx*(1.0-fy) + g01*(1.0-fx)*fy + g11*fx*fy;
-        b = b00*(1.0-fx)*(1.0-fy) + b10*fx*(1.0-fy) + b01*(1.0-fx)*fy + b11*fx*fy;
-
-        return color64_pack(r, g, b);
+        return rc_tex_bilinear_level(tex.pixels, tex.width, tex.height, fu, fv);
     };
 
     // =========================================================================
@@ -955,6 +1271,7 @@ namespace raycaster
 
         while (i < pal.count)
         {
+            rc_tex_free_mips(@pal.slots[i]);
             if ((u64)pal.slots[i].pixels != (u64)0)
             {
                 ffree((u64)pal.slots[i].pixels);
@@ -984,9 +1301,11 @@ namespace raycaster
         };
 
         idx = pal.count;
-        pal.slots[idx].pixels = pixels;
-        pal.slots[idx].width  = w;
-        pal.slots[idx].height = h;
+        pal.slots[idx].pixels    = pixels;
+        pal.slots[idx].width     = w;
+        pal.slots[idx].height    = h;
+        pal.slots[idx].mip_count = 1;
+        rc_tex_build_mips(@pal.slots[idx]);
         pal.count++;
         return idx;
     };
@@ -1165,6 +1484,7 @@ namespace raycaster
         i32    row, col, cell_x, cell_y;
         double row_dist, floor_x, floor_y, step_x, step_y;
         double tex_u, tex_v, shade;
+        double c_duv, f_duv;
         u64    floor_col, ceil_col;
         RCTile tile;
         double left_ray_x, left_ray_y, right_ray_x, right_ray_y;
@@ -1201,9 +1521,10 @@ namespace raycaster
                     if (palette != (RCTexturePalette*)0 & tile.tex_ceil > 0 &
                         tile.tex_ceil <= palette.count)
                     {
-                        tex_u    = floor_x - (double)cell_x;
-                        tex_v    = floor_y - (double)cell_y;
-                        ceil_col = rc_tex_sample64(@palette.slots[tile.tex_ceil - 1], tex_u, tex_v);
+                        tex_u = floor_x - (double)cell_x;
+                        tex_v = floor_y - (double)cell_y;
+                        c_duv = row_dist * (double)palette.slots[tile.tex_ceil - 1].width / cam.proj_dist;
+                        ceil_col = rc_tex_sample_mip(@palette.slots[tile.tex_ceil - 1], tex_u, tex_v, c_duv);
                     }
                     else
                     {
@@ -1246,9 +1567,10 @@ namespace raycaster
                     if (palette != (RCTexturePalette*)0 & tile.tex_floor > 0 &
                         tile.tex_floor <= palette.count)
                     {
-                        tex_u     = floor_x - (double)cell_x;
-                        tex_v     = floor_y - (double)cell_y;
-                        floor_col = rc_tex_sample64(@palette.slots[tile.tex_floor - 1], tex_u, tex_v);
+                        tex_u = floor_x - (double)cell_x;
+                        tex_v = floor_y - (double)cell_y;
+                        f_duv = row_dist * (double)palette.slots[tile.tex_floor - 1].width / cam.proj_dist;
+                        floor_col = rc_tex_sample_mip(@palette.slots[tile.tex_floor - 1], tex_u, tex_v, f_duv);
                     }
                     else
                     {
@@ -1309,7 +1631,7 @@ namespace raycaster
                       u64*              buf) -> void
     {
         i32    col, y, tex_h;
-        double shade, v_step, v_pos, tex_v, tex_u;
+        double shade, v_step, v_pos, tex_v, tex_u, w_duv;
         u64    wall_col;
         RCTexture* tex;
 
@@ -1347,8 +1669,10 @@ namespace raycaster
 
                 if (tex != (RCTexture*)0)
                 {
-                    tex_v    = v_pos / (double)tex_h;
-                    wall_col = rc_tex_sample64(tex, tex_u, tex_v);
+                    tex_v = v_pos / (double)tex_h;
+                    // duv: each screen pixel covers ~(dist/proj_dist)*tex.width texels
+                    w_duv = hits[col].dist * (double)tex.width / cam.proj_dist;
+                    wall_col = rc_tex_sample_mip(tex, tex_u, tex_v, w_duv);
                 }
                 else
                 {
@@ -1389,23 +1713,31 @@ namespace raycaster
         };
     };
 
-    def rc_sprite_sort(RCSprite* sprites, i32 count) -> void
+    def rc_sprite_sort(RCSprite* sprites, i32 count) -> i32*
     {
-        i32      i, j;
-        RCSprite tmp;
+        i32    i, j, tmp_idx;
+
+        // Allocate and fill index array
+        i32* idx = (i32*)fmalloc((size_t)(count * 4));
+        i = 0;
+        while (i < count) { idx[i] = i; i++; };
+
+        // Insertion sort indices descending by dist_sq — only i32 swaps, no RCSprite copies
         i = 1;
         while (i < count)
         {
-            tmp = sprites[i];
-            j   = i - 1;
-            while (j >= 0 & sprites[j].dist_sq < tmp.dist_sq)
+            tmp_idx = idx[i];
+            j = i - 1;
+            while (j >= 0 & sprites[idx[j]].dist_sq < sprites[tmp_idx].dist_sq)
             {
-                sprites[j + 1] = sprites[j];
+                idx[j + 1] = idx[j];
                 j--;
             };
-            sprites[j + 1] = tmp;
+            idx[j + 1] = tmp_idx;
             i++;
         };
+
+        return idx;
     };
 
     def rc_draw_sprites(RCCamera*         cam,
@@ -1424,21 +1756,26 @@ namespace raycaster
                tex_x, tex_y;
         double sprite_x, sprite_y,
                inv_det, transform_x, transform_y,
-               tex_u, tex_v, shade, det;
+               tex_u, tex_v, shade, det, sp_duv;
         u64    sprite_col;
         RCTexture* tex;
+        RCSprite* cs;
 
         det     = cam.plane_x * cam.dir_y - cam.dir_x * cam.plane_y;
         inv_det = 1.0 / (det + RC_EPSILON);
 
         rc_sprite_distances(sprites, sprite_count, p);
-        rc_sprite_sort(sprites, sprite_count);
+        i32* idx = rc_sprite_sort(sprites, sprite_count);
+        defer ffree((u64)idx);
 
         s = 0;
         while (s < sprite_count)
         {
-            sprite_x = sprites[s].world_x - p.pos_x;
-            sprite_y = sprites[s].world_y - p.pos_y;
+            // Zero-copy: alias directly into the sprite at sorted index
+            cs = @sprites[idx[s]];
+
+            sprite_x = cs.world_x - p.pos_x;
+            sprite_y = cs.world_y - p.pos_y;
 
             transform_x = inv_det * (cam.dir_y * sprite_x - cam.dir_x * sprite_y);
             transform_y = inv_det * (-cam.plane_y * sprite_x + cam.plane_x * sprite_y);
@@ -1448,7 +1785,7 @@ namespace raycaster
             sprite_screen_x = (i32)(((double)cam.screen_w * 0.5) *
                               (1.0 + transform_x / transform_y));
 
-            sprite_height = (i32)(abs(cam.proj_dist / transform_y) * sprites[s].scale);
+            sprite_height = (i32)(abs(cam.proj_dist / transform_y) * cs.scale);
             sprite_width  = sprite_height;
 
             draw_start_y = (i32)(cam.half_h - (double)sprite_height * 0.5);
@@ -1462,13 +1799,13 @@ namespace raycaster
             if (draw_end_x   >= cam.screen_w)  { draw_end_x = cam.screen_w - 1; };
 
             tex = (RCTexture*)0;
-            if (palette != (RCTexturePalette*)0 & sprites[s].tex_idx > 0 &
-                sprites[s].tex_idx <= palette.count)
+            if (palette != (RCTexturePalette*)0 & cs.tex_idx > 0 &
+                cs.tex_idx <= palette.count)
             {
-                tex = @palette.slots[sprites[s].tex_idx - 1];
+                tex = @palette.slots[cs.tex_idx - 1];
             };
 
-            shade = fog_factor(sqrt(sprites[s].dist_sq), cam.view_dist);
+            shade = fog_factor(sqrt(cs.dist_sq), cam.view_dist);
 
             x = draw_start_x;
             while (x <= draw_end_x)
@@ -1485,7 +1822,8 @@ namespace raycaster
 
                     if (tex != (RCTexture*)0)
                     {
-                        sprite_col = rc_tex_sample64(tex, tex_u, tex_v);
+                        sp_duv = transform_y * (double)tex.width / cam.proj_dist;
+                        sprite_col = rc_tex_sample_mip(tex, tex_u, tex_v, sp_duv);
                         // Magenta keyed transparency (top 16-bit channel: 0xFFFF)
                         if ((sprite_col & (u64)0x0000FFFFFFFFFFFF) == (u64)0x0000FFFF0000FFFF)
                         {
@@ -1495,12 +1833,12 @@ namespace raycaster
                     }
                     else
                     {
-                        sprite_col = sprites[s].tint != 0 ? sprites[s].tint : (u64)0xFFFFFFFFFFFFFFFF;
+                        sprite_col = cs.tint != 0 ? cs.tint : (u64)0xFFFFFFFFFFFFFFFF;
                     };
 
-                    if (sprites[s].tint != 0 & tex != (RCTexture*)0)
+                    if (cs.tint != 0 & tex != (RCTexture*)0)
                     {
-                        sprite_col = color64_tint(sprite_col, sprites[s].tint);
+                        sprite_col = color64_tint(sprite_col, cs.tint);
                     };
 
                     sprite_col = color64_scale(sprite_col, shade);
@@ -1758,9 +2096,8 @@ namespace raycaster
         i = 0;
         while (i < mesh.vert_count)
         {
-            mesh.verts[i].nx = 0.0;
-            mesh.verts[i].ny = 0.0;
-            mesh.verts[i].nz = 0.0;
+            va = @mesh.verts[i];
+            va.nx = 0.0; va.ny = 0.0; va.nz = 0.0;
             i++;
         };
 
@@ -1790,16 +2127,50 @@ namespace raycaster
         i = 0;
         while (i < mesh.vert_count)
         {
-            len = sqrt(mesh.verts[i].nx * mesh.verts[i].nx +
-                       mesh.verts[i].ny * mesh.verts[i].ny +
-                       mesh.verts[i].nz * mesh.verts[i].nz);
+            va = @mesh.verts[i];
+            len = sqrt(va.nx * va.nx + va.ny * va.ny + va.nz * va.nz);
             if (len > RC_EPSILON)
             {
-                mesh.verts[i].nx /= len;
-                mesh.verts[i].ny /= len;
-                mesh.verts[i].nz /= len;
+                va.nx /= len;
+                va.ny /= len;
+                va.nz /= len;
             };
             i++;
+        };
+
+        // Compute object-space bounding sphere (centroid + max radius)
+        {
+            double cx, cy, cz, dx, dy, dz, r2, max_r2;
+            cx = 0.0; cy = 0.0; cz = 0.0;
+            i = 0;
+            while (i < mesh.vert_count)
+            {
+                cx += mesh.verts[i].x;
+                cy += mesh.verts[i].y;
+                cz += mesh.verts[i].z;
+                i++;
+            };
+            if (mesh.vert_count > 0)
+            {
+                double inv_n;
+                inv_n = 1.0d / (double)mesh.vert_count;
+                cx *= inv_n; cy *= inv_n; cz *= inv_n;
+            };
+            max_r2 = 0.0;
+            i = 0;
+            while (i < mesh.vert_count)
+            {
+                dx = mesh.verts[i].x - cx;
+                dy = mesh.verts[i].y - cy;
+                dz = mesh.verts[i].z - cz;
+                r2 = dx*dx + dy*dy + dz*dz;
+                if (r2 > max_r2) { max_r2 = r2; };
+                i++;
+            };
+            mesh.bound_cx = cx;
+            mesh.bound_cy = cy;
+            mesh.bound_cz = cz;
+            mesh.bound_r  = sqrt(max_r2);
         };
     };
 
@@ -1864,7 +2235,11 @@ namespace raycaster
     };
 
     // Compute combined RGB light contribution for a surface point + normal.
-    // Returns (lr, lg, lb) in [0, inf); caller multiplies into pixel color.
+    // Returns (lr, lg, lb) in [0, 1]; caller multiplies into pixel color.
+    // Uses half-Lambert wrapping: ndotl remapped from [-1,1] -> [0,1] via
+    // ndotl*0.5+0.5, then squared. This prevents hard terminator lines and
+    // blown-out bright faces while keeping the dark side visible — the
+    // standard solution for matte/diffuse surfaces.
     def r3d_eval_lighting(R3DLight*  lights,
                           i32        light_count,
                           double     amb_r, double amb_g, double amb_b,
@@ -1874,6 +2249,8 @@ namespace raycaster
     {
         i32    i;
         double lr, lg, lb, ndotl, d, atten, ldx, ldy, ldz, llen;
+        double contrib, lum, sr, sg, sb;
+        float  flen;
 
         *out_r = amb_r;
         *out_g = amb_g;
@@ -1886,38 +2263,41 @@ namespace raycaster
             {
                 case (R3D_LIGHT_DIR)
                 {
-                    // Negate direction: light_dir points TOWARD the surface,
-                    // we want the direction from surface to light.
                     ndotl = -(lights[i].dir_x * nx +
                                lights[i].dir_y * ny +
                                lights[i].dir_z * nz);
                     if (ndotl < 0.0) { ndotl = 0.0; };
-
-                    *out_r += lights[i].color_r * lights[i].intensity * ndotl;
-                    *out_g += lights[i].color_g * lights[i].intensity * ndotl;
-                    *out_b += lights[i].color_b * lights[i].intensity * ndotl;
+                    {
+                        contrib = lights[i].intensity * ndotl;
+                        if (contrib > 1.0) { contrib = 1.0; };
+                        *out_r += lights[i].color_r * contrib;
+                        *out_g += lights[i].color_g * contrib;
+                        *out_b += lights[i].color_b * contrib;
+                    };
                 }
                 case (R3D_LIGHT_POINT)
                 {
                     ldx  = lights[i].pos_x - wx;
                     ldy  = lights[i].pos_y - wy;
                     ldz  = lights[i].pos_z - wz;
-                    llen = sqrt(ldx*ldx + ldy*ldy + ldz*ldz);
+                    {
+                    flen = fisr((float)(ldx*ldx + ldy*ldy + ldz*ldz));
+                    llen = 1.0d / (double)flen;
+                    ndotl = (ldx*nx + ldy*ny + ldz*nz) * (double)flen;
+                    };
 
                     if (llen < RC_EPSILON) { i++; continue; };
-
-                    ldx /= llen; ldy /= llen; ldz /= llen;
-
-                    ndotl = ldx*nx + ldy*ny + ldz*nz;
                     if (ndotl < 0.0) { ndotl = 0.0; };
 
                     atten = 1.0 / (lights[i].atten_const +
                                    lights[i].atten_linear * llen +
                                    lights[i].atten_quad   * llen * llen);
 
-                    *out_r += lights[i].color_r * lights[i].intensity * ndotl * atten;
-                    *out_g += lights[i].color_g * lights[i].intensity * ndotl * atten;
-                    *out_b += lights[i].color_b * lights[i].intensity * ndotl * atten;
+                    contrib = lights[i].intensity * ndotl * atten;
+                    if (contrib > 1.0) { contrib = 1.0; };
+                    *out_r += lights[i].color_r * contrib;
+                    *out_g += lights[i].color_g * contrib;
+                    *out_b += lights[i].color_b * contrib;
                 }
                 default {};
             };
@@ -1968,7 +2348,40 @@ namespace raycaster
                          double near_z,
                          R3DClipVert* out_verts) -> i32
     {
-        // Ping-pong buffers: clip result of each plane feeds the next
+        // ---- Early accept: all verts inside all 6 planes → no clipping needed ----
+        {
+            i32 vi;
+            bool all_in;
+            R3DClipVert* v;
+            all_in = true;
+            vi = 0;
+            while (vi < in_count)
+            {
+                v = @in_verts[vi];
+                if (v.w < near_z      |   // Near
+                    v.z > v.w         |   // Far
+                    v.x < -v.w        |   // Left
+                    v.x > v.w         |   // Right
+                    v.y < -v.w        |   // Bottom
+                    v.y > v.w)            // Top
+                {
+                    all_in = false;
+                    vi = in_count;        // break
+                    continue;
+                };
+                vi++;
+            };
+
+            if (all_in)
+            {
+                vi = 0;
+                while (vi < in_count) { out_verts[vi] = *(@in_verts[vi]); vi++; };
+                return in_count;
+            };
+        };
+        // Ping-pong buffers: plane 0 reads in_verts directly (no copy-in).
+        // Planes 1-4 alternate between buf_a and buf_b.
+        // Plane 5 (last, odd) writes to out_verts directly (no copy-out).
         R3DClipVert[R3D_MAX_CLIP_VERTS] buf_a;
         R3DClipVert[R3D_MAX_CLIP_VERTS] buf_b;
         R3DClipVert* src;
@@ -1978,12 +2391,9 @@ namespace raycaster
         i32  src_count, dst_count, i, next_i, plane;
         double cur_d, nxt_d, t;
         bool   cur_in, nxt_in;
-        R3DClipVert tmp;
 
-        // Copy input into buf_a
-        src = @buf_a[0];
-        i = 0;
-        while (i < in_count) { buf_a[i] = *(@in_verts[i]); i++; };
+        // Plane 0 reads directly from the caller's array — no copy-in
+        src       = in_verts;
         src_count = in_count;
 
         // Plane 0: Near   — w >= near_z         →  d = w - near_z  (custom near distance)
@@ -1998,8 +2408,24 @@ namespace raycaster
         {
             if (src_count < 3) { return 0; };
 
-            dst = (plane & 1) ? @buf_a[0] : @buf_b[0];
-            src = (plane & 1) ? @buf_b[0] : @buf_a[0];
+            // Plane 5 (last): write directly to out_verts — no copy-out needed.
+            // Planes 1,3,5 (odd after plane 0): dst = buf_a; src = buf_b.
+            // Planes 0,2,4 (even):              dst = buf_b; src = buf_a (or in_verts for 0).
+            if (plane == 5)
+            {
+                // Last plane: read from buf_b (plane 4 wrote there), write to out_verts
+                src = @buf_b[0];
+                dst = out_verts;
+            }
+            elif (plane == 0)
+            {
+                dst = @buf_b[0];
+            }
+            else
+            {
+                dst = (plane & 1) ? @buf_a[0] : @buf_b[0];
+                src = (plane & 1) ? @buf_b[0] : @buf_a[0];
+            };
 
             dst_count = 0;
             i = 0;
@@ -2032,22 +2458,19 @@ namespace raycaster
                 if (cur_in != nxt_in)
                 {
                     t = cur_d / (cur_d - nxt_d);
-                    r3d_clip_lerp(cur, nxt, t, @tmp);
-                    dst[dst_count] = tmp;
+                    r3d_clip_lerp(cur, nxt, t, @dst[dst_count]);
                     dst_count++;
                 };
 
                 i++;
             };
 
+            // After plane 0: next src is buf_b (what we just wrote)
             src_count = dst_count;
             plane++;
         };
 
-        // After 6 planes (even number), result is in buf_a
-        src = @buf_a[0];
-        i = 0;
-        while (i < src_count) { out_verts[i] = *(@src[i]); i++; };
+        // Plane 5 wrote directly into out_verts — no copy-out needed.
         return src_count;
     };
 
@@ -2078,11 +2501,22 @@ namespace raycaster
                           double      wx_b, double wy_b, double wz_b,
                           double      wx_c, double wy_c, double wz_c,
                           double*     zbuf,
-                          u64*        buf) -> void
+                          u64*        buf,
+                          i32         thread_id,
+                          i32         num_threads,
+                          double      pre_flat_r, double pre_flat_g, double pre_flat_b) -> void
     {
         // ---- Sort vertices by Y (insertion sort, 3 elements) ----
         double tmp_d;
         i32    y_top, y_mid, y_bot;
+
+        // Capture pre-sort world position and normal of vertex A as the face
+        // reference. After sorting, these may refer to different corners in each
+        // triangle of a quad. The pre-sort values are stable per call site.
+        double face_wx, face_wy, face_wz;
+        double face_nx, face_ny, face_nz;
+        face_wx = wx_a; face_wy = wy_a; face_wz = wz_a;
+        face_nx = anx;  face_ny = any;  face_nz = anz;
 
         if (ay > by)
         {
@@ -2134,7 +2568,7 @@ namespace raycaster
 
         y_top = (i32)(ay + 0.5d);
         y_mid = (i32)(by + 0.5d);
-        y_bot = (i32)(cy2 - 0.5d);
+        y_bot = (i32)(cy2 + 0.5d) - 1;
 
         if (y_top < 0)   { y_top = 0; };
         if (y_bot >= sh) { y_bot = sh - 1; };
@@ -2148,21 +2582,11 @@ namespace raycaster
 
         if (shade_model == R3D_SHADE_FLAT)
         {
-            double fwx, fwy, fwz, fnx, fny, fnz;
-            fwx = (wx_a + wx_b + wx_c) / 3.0d;
-            fwy = (wy_a + wy_b + wy_c) / 3.0d;
-            fwz = (wz_a + wz_b + wz_c) / 3.0d;
-            fnx = (anx + bnx + cnx);
-            fny = (any + bny + cny);
-            fnz = (anz + bnz + cnz);
-            double flen;
-            flen = sqrt(fnx*fnx + fny*fny + fnz*fnz);
-            if (flen > RC_EPSILON) { fnx /= flen; fny /= flen; fnz /= flen; };
-            r3d_eval_lighting(lights, light_count,
-                              amb_r, amb_g, amb_b,
-                              fwx, fwy, fwz,
-                              fnx, fny, fnz,
-                              @flat_lr, @flat_lg, @flat_lb);
+            // Use pre-baked values computed once per mesh triangle at the call site.
+            // This ensures both triangles of a quad face use identical lighting.
+            flat_lr = pre_flat_r;
+            flat_lg = pre_flat_g;
+            flat_lb = pre_flat_b;
         };
 
         double va_lr, va_lg, va_lb;
@@ -2207,60 +2631,36 @@ namespace raycaster
 
         // Per-scanline step rates along long edge (a->c)
         double dxac, dinv_wac, du_wac, dv_wac;
-        double dnxac, dnyac, dnzac;
         double dlrac, dlgac, dlbac;
-        double dwxac, dwyac, dwzac;
         dxac    = (cx   - ax)     * inv_dy_ac;
         dinv_wac= (c_inv_w - a_inv_w) * inv_dy_ac;
         du_wac  = (cu_w  - au_w)  * inv_dy_ac;
         dv_wac  = (cv_w  - av_w)  * inv_dy_ac;
-        dnxac   = (cnx   - anx)   * inv_dy_ac;
-        dnyac   = (cny   - any)   * inv_dy_ac;
-        dnzac   = (cnz   - anz)   * inv_dy_ac;
         dlrac   = (vc_lr - va_lr) * inv_dy_ac;
         dlgac   = (vc_lg - va_lg) * inv_dy_ac;
         dlbac   = (vc_lb - va_lb) * inv_dy_ac;
-        dwxac   = (wx_c  - wx_a)  * inv_dy_ac;
-        dwyac   = (wy_c  - wy_a)  * inv_dy_ac;
-        dwzac   = (wz_c  - wz_a)  * inv_dy_ac;
 
         // Per-scanline step rates along upper short edge (a->b)
         double dxab, dinv_wab, du_wab, dv_wab;
-        double dnxab, dnyab, dnzab;
         double dlrab, dlgab, dlbab;
-        double dwxab, dwyab, dwzab;
         dxab    = (bx   - ax)     * inv_dy_ab;
         dinv_wab= (b_inv_w - a_inv_w) * inv_dy_ab;
         du_wab  = (bu_w  - au_w)  * inv_dy_ab;
         dv_wab  = (bv_w  - av_w)  * inv_dy_ab;
-        dnxab   = (bnx   - anx)   * inv_dy_ab;
-        dnyab   = (bny   - any)   * inv_dy_ab;
-        dnzab   = (bnz   - anz)   * inv_dy_ab;
         dlrab   = (vb_lr - va_lr) * inv_dy_ab;
         dlgab   = (vb_lg - va_lg) * inv_dy_ab;
         dlbab   = (vb_lb - va_lb) * inv_dy_ab;
-        dwxab   = (wx_b  - wx_a)  * inv_dy_ab;
-        dwyab   = (wy_b  - wy_a)  * inv_dy_ab;
-        dwzab   = (wz_b  - wz_a)  * inv_dy_ab;
 
         // Per-scanline step rates along lower short edge (b->c)
         double dxbc, dinv_wbc, du_wbc, dv_wbc;
-        double dnxbc, dnybc, dnzbc;
         double dlrbc, dlgbc, dlbbc;
-        double dwxbc, dwybc, dwzbc;
         dxbc    = (cx   - bx)     * inv_dy_bc;
         dinv_wbc= (c_inv_w - b_inv_w) * inv_dy_bc;
         du_wbc  = (cu_w  - bu_w)  * inv_dy_bc;
         dv_wbc  = (cv_w  - bv_w)  * inv_dy_bc;
-        dnxbc   = (cnx   - bnx)   * inv_dy_bc;
-        dnybc   = (cny   - bny)   * inv_dy_bc;
-        dnzbc   = (cnz   - bnz)   * inv_dy_bc;
         dlrbc   = (vc_lr - vb_lr) * inv_dy_bc;
         dlgbc   = (vc_lg - vb_lg) * inv_dy_bc;
         dlbbc   = (vc_lb - vb_lb) * inv_dy_bc;
-        dwxbc   = (wx_c  - wx_b)  * inv_dy_bc;
-        dwybc   = (wy_c  - wy_b)  * inv_dy_bc;
-        dwzbc   = (wz_c  - wz_b)  * inv_dy_bc;
 
         // Determine if long edge is on right or left
         bool long_edge_right;
@@ -2273,101 +2673,83 @@ namespace raycaster
             long_edge_right = ax > bx;
         };
 
-        // ---- Initialize edge walkers at y_top ----
-        double t0;
-        t0 = ((double)y_top + 0.5d - ay);
-
-        // Long edge starting values
-        double lx, linv_w, lu_w, lv_w, lnx, lny, lnz, llr, llg, llb, lwx, lwy, lwz;
-        lx    = ax     + dxac    * t0;
-        linv_w= a_inv_w+ dinv_wac* t0;
-        lu_w  = au_w   + du_wac  * t0;
-        lv_w  = av_w   + dv_wac  * t0;
-        lnx   = anx    + dnxac   * t0;
-        lny   = any    + dnyac   * t0;
-        lnz   = anz    + dnzac   * t0;
-        llr   = va_lr  + dlrac   * t0;
-        llg   = va_lg  + dlgac   * t0;
-        llb   = va_lb  + dlbac   * t0;
-        lwx   = wx_a   + dwxac   * t0;
-        lwy   = wy_a   + dwyac   * t0;
-        lwz   = wz_a   + dwzac   * t0;
-
-        // Short edge starting values (upper half a->b)
-        double ts;
-        ts = t0;
-        double sx, sinv_w, su_w, sv_w, snx, sny, snz, slr, slg, slb, swx, swy, swz;
-        sx    = ax     + dxab    * ts;
-        sinv_w= a_inv_w+ dinv_wab* ts;
-        su_w  = au_w   + du_wab  * ts;
-        sv_w  = av_w   + dv_wab  * ts;
-        snx   = anx    + dnxab   * ts;
-        sny   = any    + dnyab   * ts;
-        snz   = anz    + dnzab   * ts;
-        slr   = va_lr  + dlrab   * ts;
-        slg   = va_lg  + dlgab   * ts;
-        slb   = va_lb  + dlbab   * ts;
-        swx   = wx_a   + dwxab   * ts;
-        swy   = wy_a   + dwyab   * ts;
-        swz   = wz_a   + dwzab   * ts;
+        // ---- Edge walker storage (computed exactly each scanline, no incremental drift) ----
+        double lx, linv_w, lu_w, lv_w, llr, llg, llb;
+        double sx, sinv_w, su_w, sv_w, slr, slg, slb;
 
         i32 y, x, px_start, px_end, row_base;
         double span, inv_span;
         double x_left, x_right, inv_w_left, inv_w_right;
         double u_w_left, u_w_right, v_w_left, v_w_right;
-        double nx_left, nx_right, ny_left, ny_right, nz_left, nz_right;
         double lr_left, lr_right, lg_left, lg_right, lb_left, lb_right;
-        double wx_left, wx_right, wy_left, wy_right, wz_left, wz_right;
         double px_inv_w, px_z, px_u, px_v;
         double px_lr, px_lg, px_lb;
+        bool   px_transparent;
+        i32    scan_lod0, scan_lod1;
+        double scan_lod_frac;
+        i32    nn_tx, nn_ty;
+        double tb;
+        double d_inv_w, d_u_w, d_v_w;
+        double d_lr, d_lg, d_lb;
+        double scan_duv;
+        double mid_w, du_dx, dv_dx;
+        double t0x;
+        double cur_inv_w, cur_u_w, cur_v_w;
+        double cur_lr, cur_lg, cur_lb;
         u64    px_col;
 
-        // Whether the short edge has transitioned to b->c
-        bool in_lower;
-        in_lower = (y_top >= y_mid);
-
-        // If starting in lower half, reinitialize short edge to b->c
-        if (in_lower)
+        // Stride loop: jump directly to first owned row, then step by num_threads.
+        // Eliminates the per-row modulo and branch of the old skip pattern.
         {
-            double tb;
-            tb    = ((double)y_top + 0.5d - by);
-            sx    = bx     + dxbc    * tb;
-            sinv_w= b_inv_w+ dinv_wbc* tb;
-            su_w  = bu_w   + du_wbc  * tb;
-            sv_w  = bv_w   + dv_wbc  * tb;
-            snx   = bnx    + dnxbc   * tb;
-            sny   = bny    + dnybc   * tb;
-            snz   = bnz    + dnzbc   * tb;
-            slr   = vb_lr  + dlrbc   * tb;
-            slg   = vb_lg  + dlgbc   * tb;
-            slb   = vb_lb  + dlbbc   * tb;
-            swx   = wx_b   + dwxbc   * tb;
-            swy   = wy_b   + dwybc   * tb;
-            swz   = wz_b   + dwzbc   * tb;
+            i32 first_owned;
+            i32 rem;
+            rem = y_top % num_threads;
+            if (rem <= thread_id)
+            {
+                first_owned = y_top + (thread_id - rem);
+            }
+            else
+            {
+                first_owned = y_top + (num_threads - rem + thread_id);
+            };
+            if (first_owned > y_bot) { return; };
+            y = first_owned;
         };
-
-        y = y_top;
         while (y <= y_bot)
         {
-            // Transition short edge to lower half when needed
-            if (!in_lower & y >= y_mid)
+
+            // Evaluate long edge (a->c) exactly at this scanline center — no incremental drift
+            tb    = ((double)y + 0.5d - ay);
+            lx    = ax     + dxac    * tb;
+            linv_w= a_inv_w+ dinv_wac* tb;
+            lu_w  = au_w   + du_wac  * tb;
+            lv_w  = av_w   + dv_wac  * tb;
+            llr   = va_lr  + dlrac   * tb;
+            llg   = va_lg  + dlgac   * tb;
+            llb   = va_lb  + dlbac   * tb;
+
+            // Evaluate short edge exactly at this scanline center
+            if (y < y_mid)
             {
-                in_lower = true;
-                double tb;
+                // tb already = (y+0.5 - ay), reuse for upper short edge a->b
+                sx    = ax     + dxab    * tb;
+                sinv_w= a_inv_w+ dinv_wab* tb;
+                su_w  = au_w   + du_wab  * tb;
+                sv_w  = av_w   + dv_wab  * tb;
+                slr   = va_lr  + dlrab   * tb;
+                slg   = va_lg  + dlgab   * tb;
+                slb   = va_lb  + dlbab   * tb;
+            }
+            else
+            {
                 tb    = ((double)y + 0.5d - by);
                 sx    = bx     + dxbc    * tb;
                 sinv_w= b_inv_w+ dinv_wbc* tb;
                 su_w  = bu_w   + du_wbc  * tb;
                 sv_w  = bv_w   + dv_wbc  * tb;
-                snx   = bnx    + dnxbc   * tb;
-                sny   = bny    + dnybc   * tb;
-                snz   = bnz    + dnzbc   * tb;
                 slr   = vb_lr  + dlrbc   * tb;
                 slg   = vb_lg  + dlgbc   * tb;
                 slb   = vb_lb  + dlbbc   * tb;
-                swx   = wx_b   + dwxbc   * tb;
-                swy   = wy_b   + dwybc   * tb;
-                swz   = wz_b   + dwzbc   * tb;
             };
 
             // Assign left/right from long and short edge walkers
@@ -2377,15 +2759,9 @@ namespace raycaster
                 inv_w_left= sinv_w; inv_w_right= linv_w;
                 u_w_left  = su_w;   u_w_right  = lu_w;
                 v_w_left  = sv_w;   v_w_right  = lv_w;
-                nx_left   = snx;    nx_right   = lnx;
-                ny_left   = sny;    ny_right   = lny;
-                nz_left   = snz;    nz_right   = lnz;
                 lr_left   = slr;    lr_right   = llr;
                 lg_left   = slg;    lg_right   = llg;
                 lb_left   = slb;    lb_right   = llb;
-                wx_left   = swx;    wx_right   = lwx;
-                wy_left   = swy;    wy_right   = lwy;
-                wz_left   = swz;    wz_right   = lwz;
             }
             else
             {
@@ -2393,65 +2769,69 @@ namespace raycaster
                 inv_w_left= linv_w; inv_w_right= sinv_w;
                 u_w_left  = lu_w;   u_w_right  = su_w;
                 v_w_left  = lv_w;   v_w_right  = sv_w;
-                nx_left   = lnx;    nx_right   = snx;
-                ny_left   = lny;    ny_right   = sny;
-                nz_left   = lnz;    nz_right   = snz;
                 lr_left   = llr;    lr_right   = slr;
                 lg_left   = llg;    lg_right   = slg;
                 lb_left   = llb;    lb_right   = slb;
-                wx_left   = lwx;    wx_right   = swx;
-                wy_left   = lwy;    wy_right   = swy;
-                wz_left   = lwz;    wz_right   = swz;
             };
 
             px_start = (i32)(x_left  + 0.5d);
-            px_end   = (i32)(x_right - 0.5d);
+            px_end   = (i32)(x_right + 0.5d);
             if (px_start < 0)   { px_start = 0; };
             if (px_end   >= sw) { px_end   = sw - 1; };
 
             span = x_right - x_left;
-            if (span < 0.5d) { y++; lx+=dxac; linv_w+=dinv_wac; lu_w+=du_wac; lv_w+=dv_wac; lnx+=dnxac; lny+=dnyac; lnz+=dnzac; llr+=dlrac; llg+=dlgac; llb+=dlbac; lwx+=dwxac; lwy+=dwyac; lwz+=dwzac; if (in_lower) { sx+=dxbc; sinv_w+=dinv_wbc; su_w+=du_wbc; sv_w+=dv_wbc; snx+=dnxbc; sny+=dnybc; snz+=dnzbc; slr+=dlrbc; slg+=dlgbc; slb+=dlbbc; swx+=dwxbc; swy+=dwybc; swz+=dwzbc; } else { sx+=dxab; sinv_w+=dinv_wab; su_w+=du_wab; sv_w+=dv_wab; snx+=dnxab; sny+=dnyab; snz+=dnzab; slr+=dlrab; slg+=dlgab; slb+=dlbab; swx+=dwxab; swy+=dwyab; swz+=dwzab; }; continue; };
+            if (span < 0.5d) { y += num_threads; continue; };
 
             inv_span = 1.0d / span;
 
             // Precompute per-pixel step rates across the scanline
-            double d_inv_w, d_u_w, d_v_w, d_nx, d_ny, d_nz;
-            double d_lr, d_lg, d_lb, d_wx, d_wy, d_wz;
             d_inv_w = (inv_w_right - inv_w_left) * inv_span;
             d_u_w   = (u_w_right   - u_w_left)   * inv_span;
             d_v_w   = (v_w_right   - v_w_left)   * inv_span;
-            d_nx    = (nx_right    - nx_left)     * inv_span;
-            d_ny    = (ny_right    - ny_left)     * inv_span;
-            d_nz    = (nz_right    - nz_left)     * inv_span;
             d_lr    = (lr_right    - lr_left)     * inv_span;
             d_lg    = (lg_right    - lg_left)     * inv_span;
             d_lb    = (lb_right    - lb_left)     * inv_span;
-            d_wx    = (wx_right    - wx_left)     * inv_span;
-            d_wy    = (wy_right    - wy_left)     * inv_span;
-            d_wz    = (wz_right    - wz_left)     * inv_span;
+
+            // Compute duv: texels per screen pixel for mip level selection.
+            // d_u_w and d_v_w are (u/w) and (v/w) increments per pixel.
+            // Multiply by midspan w to recover world-space UV derivative.
+            {
+                mid_w = (inv_w_left + inv_w_right) * 0.5d;
+                if (mid_w < RC_EPSILON) { mid_w = RC_EPSILON; };
+                mid_w = 1.0d / mid_w;
+                du_dx = d_u_w * mid_w;
+                dv_dx = d_v_w * mid_w;
+                if (du_dx < 0.0d) { du_dx = -du_dx; };
+                if (dv_dx < 0.0d) { dv_dx = -dv_dx; };
+                if (tex != (RCTexture*)0)
+                {
+                    du_dx *= (double)tex.width;
+                    dv_dx *= (double)tex.height;
+                };
+                scan_duv = du_dx > dv_dx ? du_dx : dv_dx;
+            };
+
+            // Select mip LOD once per scanline — constant across all pixels
+            if (tex != (RCTexture*)0 & scan_duv >= 1.0d)
+            {
+                rc_tex_select_lod(tex, scan_duv, @scan_lod0, @scan_lod1, @scan_lod_frac);
+            }
+            else
+            {
+                scan_lod0 = 0; scan_lod1 = 0; scan_lod_frac = 0.0d;
+            };
 
             // Initialize pixel walker at px_start center
-            double t0x;
             t0x = ((double)px_start + 0.5d - x_left) * inv_span;
             if (t0x < 0.0d) { t0x = 0.0d; };
             if (t0x > 1.0d) { t0x = 1.0d; };
 
-            double cur_inv_w, cur_u_w, cur_v_w;
-            double cur_nx, cur_ny, cur_nz;
-            double cur_lr, cur_lg, cur_lb;
-            double cur_wx, cur_wy, cur_wz;
             cur_inv_w = inv_w_left + d_inv_w * ((double)px_start + 0.5d - x_left);
             cur_u_w   = u_w_left   + d_u_w   * ((double)px_start + 0.5d - x_left);
             cur_v_w   = v_w_left   + d_v_w   * ((double)px_start + 0.5d - x_left);
-            cur_nx    = nx_left    + d_nx    * ((double)px_start + 0.5d - x_left);
-            cur_ny    = ny_left    + d_ny    * ((double)px_start + 0.5d - x_left);
-            cur_nz    = nz_left    + d_nz    * ((double)px_start + 0.5d - x_left);
             cur_lr    = lr_left    + d_lr    * ((double)px_start + 0.5d - x_left);
             cur_lg    = lg_left    + d_lg    * ((double)px_start + 0.5d - x_left);
             cur_lb    = lb_left    + d_lb    * ((double)px_start + 0.5d - x_left);
-            cur_wx    = wx_left    + d_wx    * ((double)px_start + 0.5d - x_left);
-            cur_wy    = wy_left    + d_wy    * ((double)px_start + 0.5d - x_left);
-            cur_wz    = wz_left    + d_wz    * ((double)px_start + 0.5d - x_left);
 
             // #3: Cache row base index to avoid per-pixel multiply
             row_base = y * sw;
@@ -2460,27 +2840,41 @@ namespace raycaster
             while (x <= px_end)
             {
                 px_inv_w = cur_inv_w;
-                if (px_inv_w < RC_EPSILON) { x++; cur_inv_w+=d_inv_w; cur_u_w+=d_u_w; cur_v_w+=d_v_w; cur_nx+=d_nx; cur_ny+=d_ny; cur_nz+=d_nz; cur_lr+=d_lr; cur_lg+=d_lg; cur_lb+=d_lb; cur_wx+=d_wx; cur_wy+=d_wy; cur_wz+=d_wz; continue; };
 
-                px_z = 1.0d / px_inv_w;
-
-                // Depth test — use cached row_base
-                if (px_z >= zbuf[row_base + x]) { x++; cur_inv_w+=d_inv_w; cur_u_w+=d_u_w; cur_v_w+=d_v_w; cur_nx+=d_nx; cur_ny+=d_ny; cur_nz+=d_nz; cur_lr+=d_lr; cur_lg+=d_lg; cur_lb+=d_lb; cur_wx+=d_wx; cur_wy+=d_wy; cur_wz+=d_wz; continue; };
+                // Depth test in inv_w space: compute px_z only if we pass.
+                // inv_w < epsilon means behind camera; zbuf stores px_z so convert once.
+                if (px_inv_w >= RC_EPSILON)
+                {
+                    px_z = 1.0d / px_inv_w;
+                    if (px_z < zbuf[row_base + x])
+                    {
 
                 // Recover perspective-correct UVs
                 px_u = cur_u_w * px_z;
                 px_v = cur_v_w * px_z;
-                if (px_u < 0.0d) { px_u = 0.0d; } elif (px_u > 1.0d) { px_u = 1.0d; };
-                if (px_v < 0.0d) { px_v = 0.0d; } elif (px_v > 1.0d) { px_v = 1.0d; };
+                px_u = px_u - (double)(i32)px_u; if (px_u < 0.0d) { px_u += 1.0d; };
+                px_v = px_v - (double)(i32)px_v; if (px_v < 0.0d) { px_v += 1.0d; };
 
-                // Sample texture
+                // Sample texture: LOD already selected per-scanline
+                px_transparent = false;
                 if (tex != (RCTexture*)0)
                 {
-                    px_col = rc_tex_sample_bilinear(tex, px_u, px_v);
+                    if (scan_duv < 1.0d)
+                    {
+                        // Magnification: nearest-neighbor
+                        nn_tx = (i32)(px_u * (double)tex.mip_w[0]);
+                        nn_ty = (i32)(px_v * (double)tex.mip_h[0]);
+                        if (nn_tx >= tex.mip_w[0]) { nn_tx = tex.mip_w[0] - 1; };
+                        if (nn_ty >= tex.mip_h[0]) { nn_ty = tex.mip_h[0] - 1; };
+                        px_col = tex.mip_pixels[0][nn_ty * tex.mip_w[0] + nn_tx];
+                    }
+                    else
+                    {
+                        px_col = rc_tex_sample_lod(tex, px_u, px_v, scan_lod0, scan_lod1, scan_lod_frac);
+                    };
                     if ((px_col & (u64)0x0000FFFFFFFFFFFF) == (u64)0x0000FFFF0000FFFF)
                     {
-                        x++; cur_inv_w+=d_inv_w; cur_u_w+=d_u_w; cur_v_w+=d_v_w; cur_nx+=d_nx; cur_ny+=d_ny; cur_nz+=d_nz; cur_lr+=d_lr; cur_lg+=d_lg; cur_lb+=d_lb; cur_wx+=d_wx; cur_wy+=d_wy; cur_wz+=d_wz;
-                        continue;
+                        px_transparent = true;
                     };
                 }
                 else
@@ -2488,6 +2882,8 @@ namespace raycaster
                     px_col = (u64)0xFFFFFFFFFFFFFFFF;
                 };
 
+                if (!px_transparent)
+                {
                 if (tint != 0) { px_col = color64_tint(px_col, tint); };
 
                 // #4: Apply lighting
@@ -2507,37 +2903,93 @@ namespace raycaster
 
                 buf[row_base + x]  = px_col;
                 zbuf[row_base + x] = px_z;
+                };  // !px_transparent
+                    };  // depth test
+                };  // inv_w >= epsilon
 
                 x++;
                 cur_inv_w+=d_inv_w; cur_u_w+=d_u_w; cur_v_w+=d_v_w;
-                cur_nx+=d_nx; cur_ny+=d_ny; cur_nz+=d_nz;
                 cur_lr+=d_lr; cur_lg+=d_lg; cur_lb+=d_lb;
-                cur_wx+=d_wx; cur_wy+=d_wy; cur_wz+=d_wz;
             };
 
-            // Step edge walkers by one scanline
-            lx+=dxac; linv_w+=dinv_wac; lu_w+=du_wac; lv_w+=dv_wac;
-            lnx+=dnxac; lny+=dnyac; lnz+=dnzac;
-            llr+=dlrac; llg+=dlgac; llb+=dlbac;
-            lwx+=dwxac; lwy+=dwyac; lwz+=dwzac;
-
-            if (in_lower)
-            {
-                sx+=dxbc; sinv_w+=dinv_wbc; su_w+=du_wbc; sv_w+=dv_wbc;
-                snx+=dnxbc; sny+=dnybc; snz+=dnzbc;
-                slr+=dlrbc; slg+=dlgbc; slb+=dlbbc;
-                swx+=dwxbc; swy+=dwybc; swz+=dwzbc;
-            }
-            else
-            {
-                sx+=dxab; sinv_w+=dinv_wab; su_w+=du_wab; sv_w+=dv_wab;
-                snx+=dnxab; sny+=dnyab; snz+=dnzab;
-                slr+=dlrab; slg+=dlgab; slb+=dlbab;
-                swx+=dwxab; swy+=dwyab; swz+=dwzab;
-            };
-
-            y++;
+            y += num_threads;
         };
+    };
+
+    // =========================================================================
+    // INSTANCE BOUNDING SPHERE FRUSTUM CULL
+    //
+    // Transforms the mesh's object-space bounding sphere into clip space and
+    // tests it against all 6 frustum planes.  Returns true if the instance is
+    // entirely outside any plane (safe to skip).
+    // The world-space sphere centre is inst.pos + model_rot_scale * bound_c.
+    // For the cull we approximate by scaling bound_r by max(scale_x,y,z) and
+    // translating the centre — skipping rotation since the sphere is symmetric.
+    // =========================================================================
+
+    def r3d_inst_cull(R3DMeshInst* inst, R3DCamera* cam) -> bool
+    {
+        R3DMesh* mesh;
+        mesh = inst.mesh;
+        if (mesh == (R3DMesh*)0) { return false; };
+
+        // World-space sphere centre: apply full TRS to bound centre.
+        // Scale and rotate the object-space centre, then translate.
+        double max_scale, wx, wy, wz, wr;
+        max_scale = inst.scale_x;
+        if (inst.scale_y > max_scale) { max_scale = inst.scale_y; };
+        if (inst.scale_z > max_scale) { max_scale = inst.scale_z; };
+
+        {
+            // Extract rotation sub-matrix (same trig as dmat4_trs, no scale column).
+            double cx2, sxr2, cy2, sy3, cz2, sz3;
+            _sincos(inst.rot_x, @sxr2, @cx2);
+            _sincos(inst.rot_y, @sy3,  @cy2);
+            _sincos(inst.rot_z, @sz3,  @cz2);
+            double sy_sx2, cy_sx2;
+            sy_sx2 = sy3  * sxr2;
+            cy_sx2 = cy2  * sxr2;
+            // Ry*Rx*Rz applied to (bound_cx*scale_x, bound_cy*scale_y, bound_cz*scale_z)
+            double bcx, bcy, bcz;
+            bcx = mesh.bound_cx * inst.scale_x;
+            bcy = mesh.bound_cy * inst.scale_y;
+            bcz = mesh.bound_cz * inst.scale_z;
+            wx = inst.pos_x + (cy2*cz2 + sy_sx2*sz3)*bcx + (-cy2*sz3 + sy_sx2*cz2)*bcy + (sy3*cx2)*bcz;
+            wy = inst.pos_y + (cx2*sz3)              *bcx + (cx2*cz2)              *bcy + (-sxr2)  *bcz;
+            wz = inst.pos_z + (-sy3*cz2 + cy_sx2*sz3)*bcx + (sy3*sz3 + cy_sx2*cz2)*bcy + (cy2*cx2)*bcz;
+        };
+        wr = mesh.bound_r * max_scale;
+
+        // Transform centre into clip space via VP matrix
+        DMat4* vp;
+        vp = @cam.vp;
+        double cx, cy, cz, cw;
+        cx = vp.m00*wx + vp.m01*wy + vp.m02*wz + vp.m03;
+        cy = vp.m10*wx + vp.m11*wy + vp.m12*wz + vp.m13;
+        cz = vp.m20*wx + vp.m21*wy + vp.m22*wz + vp.m23;
+        cw = vp.m30*wx + vp.m31*wy + vp.m32*wz + vp.m33;
+
+        // How much does the sphere radius inflate each clip-space axis?
+        // Conservative: use the column magnitudes of VP times wr.
+        // Simpler approximation: just use wr projected by the W row magnitude.
+        double rw;
+        rw = wr * (abs(vp.m30) + abs(vp.m31) + abs(vp.m32));
+
+        // Test each frustum plane. If sphere is entirely outside any plane → cull.
+        // Near:   w >= near_z    → cull if cw + rw < near_z
+        if (cw + rw < cam.near_z) { return true; };
+        // Far:    z <= w         → cull if cz - rw > cw + rw  i.e. cz > cw + 2*rw
+        // (approximate)
+        // Left:   x >= -w        → cull if cx + rw < -(cw + rw)
+        if (cx + rw < -(cw + rw)) { return true; };
+        // Right:  x <= w         → cull if cx - rw > cw + rw
+        if (cx - rw >  (cw + rw)) { return true; };
+        // Bottom: y >= -w        → cull if cy + rw < -(cw + rw)
+        if (cy + rw < -(cw + rw)) { return true; };
+        // Top:    y <= w         → cull if cy - rw > cw + rw
+        if (cy - rw >  (cw + rw)) { return true; };
+
+        return false;
     };
 
     // =========================================================================
@@ -2550,12 +3002,15 @@ namespace raycaster
                            i32                light_count,
                            double             amb_r, double amb_g, double amb_b,
                            RCTexturePalette*  palette,
+                           Arena*             frame_arena,
                            double*            zbuf,
-                           u64*               buf) -> void
+                           u64*               buf,
+                           i32                thread_id,
+                           i32                num_threads) -> void
     {
         i32       t, v;
         R3DMesh*  mesh;
-        DMat4     model, normal_mat;
+        DMat4     model, normal_mat, mvp;
         RCTexture* tex;
 
         mesh = inst.mesh;
@@ -2566,11 +3021,8 @@ namespace raycaster
                           inst.rot_x, inst.rot_y, inst.rot_z,
                           inst.scale_x, inst.scale_y, inst.scale_z);
 
-        // Normal matrix: transpose of inverse of model upper-left 3x3
-        dmat4_normal_mat(model, @normal_mat);
-
-        // #6: Detect uniform scale — if so, normals are already unit after transform
-        // and renormalization can be skipped per-vertex.
+        // Detect uniform scale before normal matrix — skips the cofactor inverse
+        // for the common case (all stress-test cubes are uniform scale).
         double sx_diff, sy_diff;
         bool uniform_scale;
         sx_diff = inst.scale_x - inst.scale_y;
@@ -2578,6 +3030,37 @@ namespace raycaster
         if (sx_diff < 0.0d) { sx_diff = -sx_diff; };
         if (sy_diff < 0.0d) { sy_diff = -sy_diff; };
         uniform_scale = (sx_diff < RC_EPSILON & sy_diff < RC_EPSILON);
+
+        if (uniform_scale)
+        {
+            // For uniform scale the normal matrix is (1/s)*R.
+            // model rows = rotation_row * scale; divide each row by its scale.
+            double inv_sx, inv_sy, inv_sz;
+            inv_sx = (inst.scale_x > RC_EPSILON) ? (1.0d / inst.scale_x) : 1.0d;
+            inv_sy = (inst.scale_y > RC_EPSILON) ? (1.0d / inst.scale_y) : 1.0d;
+            inv_sz = (inst.scale_z > RC_EPSILON) ? (1.0d / inst.scale_z) : 1.0d;
+            normal_mat.m00 = model.m00 * inv_sx;
+            normal_mat.m01 = model.m01 * inv_sx;
+            normal_mat.m02 = model.m02 * inv_sx;
+            normal_mat.m10 = model.m10 * inv_sy;
+            normal_mat.m11 = model.m11 * inv_sy;
+            normal_mat.m12 = model.m12 * inv_sy;
+            normal_mat.m20 = model.m20 * inv_sz;
+            normal_mat.m21 = model.m21 * inv_sz;
+            normal_mat.m22 = model.m22 * inv_sz;
+            normal_mat.m03 = 0.0d; normal_mat.m13 = 0.0d; normal_mat.m23 = 0.0d;
+            normal_mat.m30 = 0.0d; normal_mat.m31 = 0.0d; normal_mat.m32 = 0.0d;
+            normal_mat.m33 = 1.0d;
+        }
+        else
+        {
+            dmat4_normal_mat(model, @normal_mat);
+        };
+
+        // Precompute MVP = VP * model once per instance.
+        // Each vertex then needs only one mat-vec multiply for clip space
+        // instead of two (model*p then vp*w).
+        mvp = dmat4_mul(cam.vp, model);
 
         // Resolve texture
         tex = (RCTexture*)0;
@@ -2587,49 +3070,38 @@ namespace raycaster
             tex = @palette.slots[mesh.tex_idx - 1];
         };
 
-        // #5: Pre-transform all vertices into world space and clip space once.
-        // Allocates on the stack — mesh.vert_count must be bounded.
-        // world positions (x,y,z), world normals (nx,ny,nz), clip (x,y,z,w)
-        double* wpos_x;  double* wpos_y;  double* wpos_z;
-        double* wnrm_x;  double* wnrm_y;  double* wnrm_z;
-        double* cpos_x;  double* cpos_y;  double* cpos_z;  double* cpos_w;
-
+        // Pre-transform all vertices into world space and clip space once.
         i32 vc;
-        vc = mesh.vert_count;
-        wpos_x = (double*)fmalloc((u64)(vc * 8));
-        wpos_y = (double*)fmalloc((u64)(vc * 8));
-        wpos_z = (double*)fmalloc((u64)(vc * 8));
-        wnrm_x = (double*)fmalloc((u64)(vc * 8));
-        wnrm_y = (double*)fmalloc((u64)(vc * 8));
-        wnrm_z = (double*)fmalloc((u64)(vc * 8));
-        cpos_x = (double*)fmalloc((u64)(vc * 8));
-        cpos_y = (double*)fmalloc((u64)(vc * 8));
-        cpos_z = (double*)fmalloc((u64)(vc * 8));
-        cpos_w = (double*)fmalloc((u64)(vc * 8));
+        R3DXVert* xverts;
+        vc     = mesh.vert_count;
+        xverts = (R3DXVert*)alloc(frame_arena, (size_t)((u64)vc * (u64)(sizeof(R3DXVert) / 8)));
 
         v = 0;
+        R3DVertex* vt;
+        R3DXVert*  xv;
+        DVec4 p, w, n, wn, c;
+        double len;
         while (v < vc)
         {
-            R3DVertex* vt;
             vt = @mesh.verts[v];
+            xv = @xverts[v];
 
-            DVec4 p, w, n, wn, c;
             p.x = vt.x; p.y = vt.y; p.z = vt.z; p.w = 1.0d;
             w  = dmat4_mul_vec4(model, p);
-            wpos_x[v] = w.x; wpos_y[v] = w.y; wpos_z[v] = w.z;
+            xv.wx = w.x; xv.wy = w.y; xv.wz = w.z;
 
             n.x = vt.nx; n.y = vt.ny; n.z = vt.nz; n.w = 0.0d;
             wn = dmat4_mul_vec4(normal_mat, n);
             if (!uniform_scale)
             {
-                double len;
                 len = sqrt(wn.x*wn.x + wn.y*wn.y + wn.z*wn.z);
                 if (len > RC_EPSILON) { wn.x /= len; wn.y /= len; wn.z /= len; };
             };
-            wnrm_x[v] = wn.x; wnrm_y[v] = wn.y; wnrm_z[v] = wn.z;
+            xv.nx = wn.x; xv.ny = wn.y; xv.nz = wn.z;
 
-            c = dmat4_mul_vec4(cam.vp, w);
-            cpos_x[v] = c.x; cpos_y[v] = c.y; cpos_z[v] = c.z; cpos_w[v] = c.w;
+            // Clip space via precomputed MVP — one mat-vec multiply instead of two.
+            c = dmat4_mul_vec4(mvp, p);
+            xv.cx = c.x; xv.cy = c.y; xv.cz = c.z; xv.cw = c.w;
 
             v++;
         };
@@ -2639,40 +3111,56 @@ namespace raycaster
         hw = (double)cam.screen_w * 0.5d;
         hh = (double)cam.screen_h * 0.5d;
 
+        i32 ia, ib, ic;
+        R3DVertex* va;
+        R3DVertex* vb;
+        R3DVertex* vc2;
+        R3DXVert*  xva;
+        R3DXVert*  xvb;
+        R3DXVert*  xvc;
+        DVec4 wa, wb, wc, ca, cb, cc;
+        DVec4 wna, wnb, wnc;
+        double fnx, fny, fnz, vdx, vdy, vdz, ndotv;
+        double pre_lr, pre_lg, pre_lb;
+        R3DClipVert[3] clip_in;
+        R3DClipVert[R3D_MAX_CLIP_VERTS] clip_out;
+        i32 clip_count;
+        i32 fan;
+        R3DClipVert* v0;
+        R3DClipVert* v1;
+        R3DClipVert* v2;
+        double inv_w0, inv_w1, inv_w2;
+        double sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2;
+
         t = 0;
         while (t < mesh.tri_count)
         {
-            i32 ia, ib, ic;
             ia = mesh.tris[t].a;
             ib = mesh.tris[t].b;
             ic = mesh.tris[t].c;
 
-            R3DVertex* va;
-            R3DVertex* vb;
-            R3DVertex* vc2;
             va  = @mesh.verts[ia];
             vb  = @mesh.verts[ib];
             vc2 = @mesh.verts[ic];
 
-            // Load pre-transformed data
-            DVec4 wa, wb, wc, ca, cb, cc;
-            wa.x = wpos_x[ia]; wa.y = wpos_y[ia]; wa.z = wpos_z[ia]; wa.w = 1.0d;
-            wb.x = wpos_x[ib]; wb.y = wpos_y[ib]; wb.z = wpos_z[ib]; wb.w = 1.0d;
-            wc.x = wpos_x[ic]; wc.y = wpos_y[ic]; wc.z = wpos_z[ic]; wc.w = 1.0d;
-            ca.x = cpos_x[ia]; ca.y = cpos_y[ia]; ca.z = cpos_z[ia]; ca.w = cpos_w[ia];
-            cb.x = cpos_x[ib]; cb.y = cpos_y[ib]; cb.z = cpos_z[ib]; cb.w = cpos_w[ib];
-            cc.x = cpos_x[ic]; cc.y = cpos_y[ic]; cc.z = cpos_z[ic]; cc.w = cpos_w[ic];
+            // Load pre-transformed data from AOS cache
+            xva = @xverts[ia];
+            xvb = @xverts[ib];
+            xvc = @xverts[ic];
 
-            DVec4 wna, wnb, wnc;
-            wna.x = wnrm_x[ia]; wna.y = wnrm_y[ia]; wna.z = wnrm_z[ia]; wna.w = 0.0d;
-            wnb.x = wnrm_x[ib]; wnb.y = wnrm_y[ib]; wnb.z = wnrm_z[ib]; wnb.w = 0.0d;
-            wnc.x = wnrm_x[ic]; wnc.y = wnrm_y[ic]; wnc.z = wnrm_z[ic]; wnc.w = 0.0d;
+            wa.x = xva.wx; wa.y = xva.wy; wa.z = xva.wz; wa.w = 1.0d;
+            wb.x = xvb.wx; wb.y = xvb.wy; wb.z = xvb.wz; wb.w = 1.0d;
+            wc.x = xvc.wx; wc.y = xvc.wy; wc.z = xvc.wz; wc.w = 1.0d;
+            ca.x = xva.cx; ca.y = xva.cy; ca.z = xva.cz; ca.w = xva.cw;
+            cb.x = xvb.cx; cb.y = xvb.cy; cb.z = xvb.cz; cb.w = xvb.cw;
+            cc.x = xvc.cx; cc.y = xvc.cy; cc.z = xvc.cz; cc.w = xvc.cw;
+
+            wna.x = xva.nx; wna.y = xva.ny; wna.z = xva.nz; wna.w = 0.0d;
+            wnb.x = xvb.nx; wnb.y = xvb.ny; wnb.z = xvb.nz; wnb.w = 0.0d;
+            wnc.x = xvc.nx; wnc.y = xvc.ny; wnc.z = xvc.nz; wnc.w = 0.0d;
 
             // ---- Backface cull in world space ----
-            // Face normal (from pre-transformed world normals, averaged).
-            // If the normal faces away from the camera, skip the triangle.
             {
-                double fnx, fny, fnz, vdx, vdy, vdz, ndotv;
                 fnx = wna.x + wnb.x + wnc.x;
                 fny = wna.y + wnb.y + wnc.y;
                 fnz = wna.z + wnb.z + wnc.z;
@@ -2683,11 +3171,19 @@ namespace raycaster
                 if (ndotv >= 0.0d) { t++; continue; };
             };
 
-            // ---- Full frustum clip (all 6 planes) ----
-            R3DClipVert[3] clip_in;
-            R3DClipVert[R3D_MAX_CLIP_VERTS] clip_out;
-            i32 clip_count;
+            // Flat shading: evaluate lighting after backface cull so invisible
+            // triangles don't pay the lighting cost.
+            pre_lr = 0.0d; pre_lg = 0.0d; pre_lb = 0.0d;
+            if (inst.shade_model == R3D_SHADE_FLAT)
+            {
+                r3d_eval_lighting(lights, light_count,
+                                  amb_r, amb_g, amb_b,
+                                  xva.wx, xva.wy, xva.wz,
+                                  xva.nx, xva.ny, xva.nz,
+                                  @pre_lr, @pre_lg, @pre_lb);
+            };
 
+            // ---- Full frustum clip (all 6 planes) ----
             clip_in[0].x = ca.x; clip_in[0].y = ca.y;
             clip_in[0].z = ca.z; clip_in[0].w = ca.w;
             clip_in[0].nx = wna.x; clip_in[0].ny = wna.y; clip_in[0].nz = wna.z;
@@ -2711,23 +3207,17 @@ namespace raycaster
             if (clip_count < 3) { t++; continue; };
 
             // Fan-triangulate and rasterize
-            i32 fan;
             fan = 1;
             while (fan < clip_count - 1)
             {
-                R3DClipVert* v0;
-                R3DClipVert* v1;
-                R3DClipVert* v2;
                 v0 = @clip_out[0];
                 v1 = @clip_out[fan];
                 v2 = @clip_out[fan + 1];
 
-                double inv_w0, inv_w1, inv_w2;
                 inv_w0 = (v0.w > cam.near_z) ? (1.0d / v0.w) : (1.0d / cam.near_z);
                 inv_w1 = (v1.w > cam.near_z) ? (1.0d / v1.w) : (1.0d / cam.near_z);
                 inv_w2 = (v2.w > cam.near_z) ? (1.0d / v2.w) : (1.0d / cam.near_z);
 
-                double sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2;
                 sx0 = ( v0.x * inv_w0 + 1.0d) * hw;
                 sy0 = (-v0.y * inv_w0 + 1.0d) * hh;
                 sz0 = v0.z * inv_w0;
@@ -2756,7 +3246,10 @@ namespace raycaster
                     wb.x, wb.y, wb.z,
                     wc.x, wc.y, wc.z,
                     zbuf,
-                    buf
+                    buf,
+                    thread_id,
+                    num_threads,
+                    pre_lr, pre_lg, pre_lb
                 );
 
                 fan++;
@@ -2765,21 +3258,20 @@ namespace raycaster
             t++;
         };
 
-        // Free pre-transformed vertex arrays
-        ffree((u64)wpos_x); ffree((u64)wpos_y); ffree((u64)wpos_z);
-        ffree((u64)wnrm_x); ffree((u64)wnrm_y); ffree((u64)wnrm_z);
-        ffree((u64)cpos_x); ffree((u64)cpos_y); ffree((u64)cpos_z); ffree((u64)cpos_w);
+        // xverts memory is owned by frame_arena; no free needed here.
     };
 
     // =========================================================================
     // 3D BILLBOARD SPRITE PASS
     // =========================================================================
 
-    def r3d_sprite_sort(R3DSprite* sprites, i32 count, R3DCamera* cam) -> void
+    // Sort sprites back-to-front by squared distance.
+    // Returns a heap-allocated i32[count] index array in sorted order.
+    // Caller must ffree() the returned pointer.
+    def r3d_sprite_sort(R3DSprite* sprites, i32 count, R3DCamera* cam) -> i32*
     {
-        i32       i, j;
-        R3DSprite tmp;
-        double    dx, dy, dz;
+        i32    i, j, tmp_idx;
+        double dx, dy, dz;
 
         // Compute squared distances
         i = 0;
@@ -2792,20 +3284,27 @@ namespace raycaster
             i++;
         };
 
-        // Insertion sort descending
+        // Allocate and fill index array
+        i32* idx = (i32*)fmalloc((size_t)(count * 4));
+        i = 0;
+        while (i < count) { idx[i] = i; i++; };
+
+        // Insertion sort indices descending by dist_sq — only i32 swaps, no struct copies
         i = 1;
         while (i < count)
         {
-            tmp = sprites[i];
-            j   = i - 1;
-            while (j >= 0 & sprites[j].dist_sq < tmp.dist_sq)
+            tmp_idx = idx[i];
+            j = i - 1;
+            while (j >= 0 & sprites[idx[j]].dist_sq < sprites[tmp_idx].dist_sq)
             {
-                sprites[j + 1] = sprites[j];
+                idx[j + 1] = idx[j];
                 j--;
             };
-            sprites[j + 1] = tmp;
+            idx[j + 1] = tmp_idx;
             i++;
         };
+
+        return idx;
     };
 
     def r3d_draw_sprites(R3DCamera*         cam,
@@ -2821,46 +3320,55 @@ namespace raycaster
         hw = (double)cam.screen_w * 0.5;
         hh = (double)cam.screen_h * 0.5;
 
-        r3d_sprite_sort(sprites, sprite_count, cam);
+        // Sort returns a heap index array — no R3DSprite struct copies
+        i32* idx = r3d_sprite_sort(sprites, sprite_count, cam);
+        defer ffree((u64)idx);
+
+        R3DSprite* sp;
+        double cx2, cy2, cz2;
+        DVec4 wpos, cpos;
+        double inv_w_c, scx, scy;
+        double half_w, half_h_ext;
+        DVec4 p_tl, p_tr, p_bl, p_br;
+        double rw, rh;
+        i32 scx_left, scx_right, scy_top, scy_bot;
+        double view_z;
+        RCTexture* tex;
+        i32    px, py;
+        double tex_u, tex_v;
+        double bs_duv;
+        u64    px_col;
 
         s = 0;
         while (s < sprite_count)
         {
-            R3DSprite* sp;
-            sp = @sprites[s];
+            // Zero-copy: alias directly into the sprite array at the sorted index
+            sp = @sprites[idx[s]];
 
             // Sprite anchor in world space (vertical offset applied on Y)
-            double cx2, cy2, cz2;
             cx2 = sp.world_x;
             cy2 = sp.world_y + sp.vert_offset;
             cz2 = sp.world_z;
 
             // Transform center to clip space
-            DVec4 wpos, cpos;
             wpos.x = cx2; wpos.y = cy2; wpos.z = cz2; wpos.w = 1.0;
             cpos = dmat4_mul_vec4(cam.vp, wpos);
 
             if (cpos.w < cam.near_z) { s++; continue; };
 
-            double inv_w_c, scx, scy;
             inv_w_c = 1.0 / cpos.w;
             scx = ( cpos.x * inv_w_c + 1.0) * hw;
             scy = (-cpos.y * inv_w_c + 1.0) * hh;
 
             // Project half-extents: use right axis for width, up axis for height
-            double half_w, half_h_ext;
             half_w     = sp.width  * 0.5;
             half_h_ext = sp.height * 0.5;
 
             // Project corners via VP (use camera right/up in view space to build quad)
-            DVec4 p_tl, p_tr, p_bl, p_br;
-            double rw, rh;
-
             // Right and up contribution to NDC span at this depth
             rw = half_w * cam.proj_dist * inv_w_c;
             rh = half_h_ext * cam.proj_dist * inv_w_c;
 
-            i32 scx_left, scx_right, scy_top, scy_bot;
             scx_left  = (i32)(scx - rw);
             scx_right = (i32)(scx + rw);
             scy_top   = (i32)(scy - rh);
@@ -2874,20 +3382,14 @@ namespace raycaster
             if (scy_top   < 0)             { scy_top   = 0; };
             if (scy_bot   >= cam.screen_h) { scy_bot   = cam.screen_h - 1; };
 
-            double view_z;
             view_z = 1.0 / inv_w_c;
 
-            RCTexture* tex;
             tex = (RCTexture*)0;
             if (palette != (RCTexturePalette*)0 & sp.tex_idx > 0 &
                 sp.tex_idx <= palette.count)
             {
                 tex = @palette.slots[sp.tex_idx - 1];
             };
-
-            i32    px, py;
-            double tex_u, tex_v;
-            u64    px_col;
 
             py = scy_top;
             while (py <= scy_bot)
@@ -2902,7 +3404,8 @@ namespace raycaster
 
                     if (tex != (RCTexture*)0)
                     {
-                        px_col = rc_tex_sample_bilinear(tex, tex_u, tex_v);
+                        bs_duv = view_z * (double)tex.width / cam.proj_dist;
+                        px_col = rc_tex_sample_mip(tex, tex_u, tex_v, bs_duv);
                         if ((px_col & (u64)0x0000FFFFFFFFFFFF) == (u64)0x0000FFFF0000FFFF)
                         {
                             px++;
@@ -2941,11 +3444,11 @@ namespace raycaster
         double t, horizon_y, pitch_offset, norm_y;
         u64    sky_col;
 
-        // Horizon is shifted up/down by pitch
-        // pitch = 0 => horizon at screen center
-        // positive pitch (look up) => horizon shifts down
+        // Horizon is shifted up/down by pitch.
+        // pitch > 0 (look up)   => horizon moves down (larger row) — more sky visible
+        // pitch < 0 (look down) => horizon moves up   (smaller row) — less sky visible
         pitch_offset = p.pitch / (cam.fov_v * 0.5);
-        horizon_y    = (double)cam.screen_h * (0.5 - pitch_offset * 0.5);
+        horizon_y    = (double)cam.screen_h * (0.5 + pitch_offset * 0.5);
 
         row = 0;
         while (row < cam.screen_h)
@@ -2975,35 +3478,47 @@ namespace raycaster
     // r3d_camera_sync() must be called before this.
     // =========================================================================
 
-    def r3d_render(R3DScene* scene,
-                   u64*      buf,
-                   double*   zbuf) -> void
+    def r3d_fxaa(u64*, i32, i32) -> void;
+
+    // Forward prototype — worker calls r3d_draw_mesh_inst which is defined above.
+    def r3d_draw_mesh_inst(R3DMeshInst*, R3DCamera*, R3DLight*, i32,
+                           double, double, double,
+                           RCTexturePalette*, Arena*, double*, u64*,
+                           i32, i32) -> void;
+
+    // =========================================================================
+    // PARALLEL MESH WORKER
+    //
+    // Each thread receives an R3DMeshWorkSlice.  It iterates all instances,
+    // culls, then rasterizes only the scanlines it owns (y % num_threads ==
+    // thread_id).  No synchronization needed — row ownership is disjoint.
+    // =========================================================================
+
+    def r3d_mesh_worker(void* arg) -> void*
     {
-        i32 i, total_px;
+        R3DMeshWorkSlice* sl;
+        R3DScene*         scene;
+        i32               i;
 
-        // Clear both buffers at the start of every frame.
-        // buf is zeroed via mem_fill (byte 0 = u64 0).
-        // zbuf requires a double fill loop since RC_INF is not zero.
-        total_px = scene.cam.screen_w * scene.cam.screen_h;
-        mem_fill((void*)buf, (byte)0, (size_t)((u64)total_px * 8));
-        i = 0;
-        while (i < total_px)
-        {
-            zbuf[i] = RC_INF;
-            i++;
-        };
+        sl = (R3DMeshWorkSlice*)arg;
 
-        if (scene.sky != (RCSky*)0)
+        // Persistent loop: sleep until woken, do one frame of work, signal done.
+        while (true)
         {
-            r3d_draw_sky(scene.sky, scene.cam, scene.player, buf);
-        };
+            semaphore_wait(@sl.wake);
 
-        if (scene.passes & R3D_PASS_MESHES)
-        {
+            // Exit signal: running set to 0 by r3d_scene_destroy.
+            if (sl.running == 0) { return (void*)0; };
+
+            scene = sl.scene;
+
+            arena_reset(sl.arena);
+
             i = 0;
             while (i < scene.inst_count)
             {
-                if (scene.insts[i] != (R3DMeshInst*)0)
+                if (scene.insts[i] != (R3DMeshInst*)0 &
+                    !r3d_inst_cull(scene.insts[i], scene.cam))
                 {
                     r3d_draw_mesh_inst(
                         scene.insts[i],
@@ -3014,10 +3529,63 @@ namespace raycaster
                         scene.ambient_g,
                         scene.ambient_b,
                         scene.palette,
-                        zbuf,
-                        buf
+                        sl.arena,
+                        sl.zbuf,
+                        sl.buf,
+                        sl.thread_id,
+                        sl.num_threads
                     );
                 };
+                i++;
+            };
+
+            semaphore_post(@sl.done);
+        };
+
+        return (void*)0;
+    };
+
+    def r3d_render(R3DScene* scene,
+                   u64*      buf,
+                   double*   zbuf) -> void
+    {
+        i32 i, total_px;
+
+        // Reset the per-frame scratch arena — O(chunks) walk, no OS calls.
+        arena_reset(@scene.frame_arena);
+
+        // Clear both buffers at the start of every frame.
+        // buf is zeroed via mem_fill (byte 0 = u64 0 = black).
+        // zbuf is filled with 0x7F: every byte 0x7F gives the double
+        // 1.38e306, a valid positive finite value far beyond any far_z.
+        total_px = scene.cam.screen_w * scene.cam.screen_h;
+        mem_fill((void*)buf,  (byte)0x00, (size_t)((u64)total_px * 8));
+        mem_fill((void*)zbuf, (byte)0x7F, (size_t)((u64)total_px * 8));
+
+        if (scene.sky != (RCSky*)0)
+        {
+            r3d_draw_sky(scene.sky, scene.cam, scene.player, buf);
+        };
+
+        if (scene.passes & R3D_PASS_MESHES)
+        {
+            // Update per-frame pointers in each slice then wake all workers.
+            // Workers are persistent threads; no OS thread creation this frame.
+            i = 0;
+            while (i < scene.num_threads)
+            {
+                scene.work_slices[i].scene = scene;
+                scene.work_slices[i].zbuf  = zbuf;
+                scene.work_slices[i].buf   = buf;
+                semaphore_post(@scene.work_slices[i].wake);
+                i++;
+            };
+
+            // Wait for all workers to finish.
+            i = 0;
+            while (i < scene.num_threads)
+            {
+                semaphore_wait(@scene.work_slices[i].done);
                 i++;
             };
         };
@@ -3030,6 +3598,465 @@ namespace raycaster
                              scene.sprites, scene.sprite_count,
                              scene.palette, zbuf, buf);
         };
+
+        // Full-screen fog post-process: applied after all geometry so sky and
+        // empty pixels are also fogged correctly.
+        // Atmospheric fog: linear depth ramp from fog_start to fog_end.
+        // Volumetric fog:  Beer-Lambert, 1 - exp(-density * depth).
+        // Pixels at sentinel depth (no geometry) are treated as infinite depth.
+        {
+            i32 pi;
+            double depth, atmo_t, vol_t2, combined_t, vd;
+            u64 fog_packed2, vol_packed, fog_target;
+            bool has_atmo, has_vol;
+            double atmo_range_inv, fog_start2, vol_density2, far_z2;
+            has_atmo = (scene.fog_end > scene.fog_start);
+            has_vol  = (scene.vol_density > 0.0d);
+
+            if (has_atmo | has_vol)
+            {
+                fog_packed2    = color64_pack(scene.fog_r,   scene.fog_g,   scene.fog_b);
+                vol_packed     = color64_pack(scene.vol_r,   scene.vol_g,   scene.vol_b);
+                atmo_range_inv = 1.0d / (scene.fog_end - scene.fog_start);
+                fog_start2     = scene.fog_start;
+                vol_density2   = scene.vol_density;
+                far_z2         = scene.cam.far_z;
+                // Hoist constant ternary: vol dominates when both are active
+                fog_target     = has_vol ? vol_packed : fog_packed2;
+
+                // Specialize the inner loop into four variants to eliminate
+                // per-pixel has_atmo / has_vol branches.
+                if (has_atmo & has_vol)
+                {
+                    pi = 0;
+                    while (pi < total_px)
+                    {
+                        depth = zbuf[pi];
+                        if (depth >= 1.0e300) { depth = far_z2; };
+
+                        atmo_t = (depth - fog_start2) * atmo_range_inv;
+                        combined_t = 0.0d;
+                        if (atmo_t > 0.0d)
+                        {
+                            if (atmo_t > 1.0d) { atmo_t = 1.0d; };
+                            combined_t = atmo_t;
+                        };
+                        // Fast approx: x/(1+x) ≈ 1-exp(-x)
+                        vd = vol_density2 * depth;
+                        vol_t2 = vd / (1.0d + vd);
+                        if (vol_t2 > combined_t) { combined_t = vol_t2; };
+
+                        if (combined_t > 0.001d)
+                        {
+                            // Blend toward whichever fog is denser
+                            if (combined_t > 1.0d) { combined_t = 1.0d; };
+                            buf[pi] = color64_lerp(buf[pi], fog_target, combined_t);
+                        };
+                        pi++;
+                    };
+                }
+                elif (has_atmo)
+                {
+                    pi = 0;
+                    while (pi < total_px)
+                    {
+                        depth = zbuf[pi];
+                        if (depth >= 1.0e300) { depth = far_z2; };
+
+                        atmo_t = (depth - fog_start2) * atmo_range_inv;
+                        if (atmo_t > 0.001d)
+                        {
+                            if (atmo_t > 1.0d) { atmo_t = 1.0d; };
+                            buf[pi] = color64_lerp(buf[pi], fog_target, atmo_t);
+                        };
+                        pi++;
+                    };
+                }
+                else
+                {
+                    // has_vol only
+                    pi = 0;
+                    while (pi < total_px)
+                    {
+                        depth = zbuf[pi];
+                        if (depth >= 1.0e300) { depth = far_z2; };
+
+                        // Fast approx: x/(1+x) ≈ 1-exp(-x)
+                        vd = vol_density2 * depth;
+                        vol_t2 = vd / (1.0d + vd);
+                        if (vol_t2 > 0.001d)
+                        {
+                            if (vol_t2 > 1.0d) { vol_t2 = 1.0d; };
+                            buf[pi] = color64_lerp(buf[pi], fog_target, vol_t2);
+                        };
+                        pi++;
+                    };
+                };
+            };
+        };
+
+        // Volumetric in-scattering pass: for each pixel, integrate how much
+        // light from each point source scatters into the view ray.
+        // A uniform fog medium scatters light proportional to density and
+        // inversely to distance from the ray to the light.
+        // Key quantity: perpendicular distance from light to view ray.
+        // Rays passing near a light accumulate much more scattered light.
+        if (scene.vol_density > 0.0d & scene.light_count > 0)
+        {
+            i32 sw3, sh3, px3, py3, li3, pi3;
+            i32 sw2, sh2, sx, sy, sy0, sy1, sx0, sx1;
+            i32 zy, zx, lj;
+            i32 pt_count;
+            i32[64] pt_idx;
+            double[64] ld_xs, ld_ys, ld_zs;
+            float inv_len;
+            double hw3, hh3;
+            double ld_x, ld_y, ld_z;
+            double perp_sq, depth3, along, cos_a;
+            double scatter, sr3, sg3, sb4;
+            u64 src3, pr3, pg3, pb4;
+            double eye_x, eye_y3, eye_z;
+            double tan_hfov3, tan_hfov_h3;
+            double row_rx, row_ry, row_rz;
+            double dcol_x, dcol_y, dcol_z;
+            double drow_x, drow_y, drow_z;
+            double ray_dx, ray_dy, ray_dz;
+            double along_x, along_y, along_z;
+            double rdx, rdy, rdz;
+            double ty, tx, w00, w10, w01, w11;
+            double* sbuf_r;
+            double* sbuf_g;
+            double* sbuf_b;
+
+            sw3 = scene.cam.screen_w;
+            sh3 = scene.cam.screen_h;
+            hw3 = (double)sw3 * 0.5d;
+            hh3 = (double)sh3 * 0.5d;
+            eye_x       = scene.cam.eye_x;
+            eye_y3      = scene.cam.eye_y;
+            eye_z       = scene.cam.eye_z;
+            tan_hfov3   = tan(scene.cam.fov_v * 0.5d);
+            tan_hfov_h3 = tan(scene.cam.fov_h * 0.5d);
+
+            sw2 = (sw3 + 1) / 2;
+            sh2 = (sh3 + 1) / 2;
+            sbuf_r = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+            sbuf_g = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+            sbuf_b = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+            double full_d, dw00, dw10, dw01, dw11, dw_sum, dd, inv_sigma2, inv_sum;
+            double* sbuf_d;
+            sbuf_d = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+
+            pt_count = 0;
+            {
+                i32 lii;
+                lii = 0;
+                while (lii < scene.light_count & pt_count < 64)
+                {
+                    if (scene.lights[lii].kind == R3D_LIGHT_POINT)
+                    {
+                        ld_xs[pt_count] = scene.lights[lii].pos_x - eye_x;
+                        ld_ys[pt_count] = scene.lights[lii].pos_y - eye_y3;
+                        ld_zs[pt_count] = scene.lights[lii].pos_z - eye_z;
+                        pt_idx[pt_count] = lii;
+                        pt_count++;
+                    };
+                    lii++;
+                };
+            };
+
+            // Half-res increments
+            dcol_x = scene.cam.right_x * tan_hfov_h3 / hw3 * 2.0d;
+            dcol_y = scene.cam.right_y * tan_hfov_h3 / hw3 * 2.0d;
+            dcol_z = scene.cam.right_z * tan_hfov_h3 / hw3 * 2.0d;
+            drow_x = -scene.cam.up_x * tan_hfov3 / hh3 * 2.0d;
+            drow_y = -scene.cam.up_y * tan_hfov3 / hh3 * 2.0d;
+            drow_z = -scene.cam.up_z * tan_hfov3 / hh3 * 2.0d;
+            row_rx = scene.cam.fwd_x + scene.cam.right_x * (-1.0d) * tan_hfov_h3 + scene.cam.up_x * ( 1.0d) * tan_hfov3;
+            row_ry = scene.cam.fwd_y + scene.cam.right_y * (-1.0d) * tan_hfov_h3 + scene.cam.up_y * ( 1.0d) * tan_hfov3;
+            row_rz = scene.cam.fwd_z + scene.cam.right_z * (-1.0d) * tan_hfov_h3 + scene.cam.up_z * ( 1.0d) * tan_hfov3;
+
+            // Pass 1: compute scatter at half resolution
+            // Cache per-light color and intensity into local arrays to avoid
+            // repeated indirect struct-field loads inside the inner loop.
+            double[64] lc_r, lc_g, lc_b, lc_int;
+            {
+                i32 lci;
+                lci = 0;
+                while (lci < pt_count)
+                {
+                    lj = pt_idx[lci];
+                    lc_r[lci]   = scene.lights[lj].color_r;
+                    lc_g[lci]   = scene.lights[lj].color_g;
+                    lc_b[lci]   = scene.lights[lj].color_b;
+                    lc_int[lci] = scene.lights[lj].intensity;
+                    lci++;
+                };
+            };
+            double vol_density3;
+            vol_density3 = scene.vol_density;
+
+            sy = 0;
+            while (sy < sh2)
+            {
+                ray_dx = row_rx;
+                ray_dy = row_ry;
+                ray_dz = row_rz;
+                sx = 0;
+                i32 sy_row2;
+                sy_row2 = sy * sw2;
+                while (sx < sw2)
+                {
+                    inv_len = fisr((float)(ray_dx*ray_dx + ray_dy*ray_dy + ray_dz*ray_dz));
+                    rdx = ray_dx * (double)inv_len;
+                    rdy = ray_dy * (double)inv_len;
+                    rdz = ray_dz * (double)inv_len;
+
+                    sr3 = 0.0d; sg3 = 0.0d; sb4 = 0.0d;
+                    zy = sy * 2; zx = sx * 2;
+                    depth3 = zbuf[zy * sw3 + zx];
+                    if (depth3 >= 1.0e200) { depth3 = scene.cam.far_z; };
+                    cos_a = rdx*scene.cam.fwd_x + rdy*scene.cam.fwd_y + rdz*scene.cam.fwd_z;
+                    if (cos_a > 0.0001d) { depth3 = depth3 / cos_a; };
+
+                    li3 = 0;
+                    while (li3 < pt_count)
+                    {
+                        ld_x  = ld_xs[li3];
+                        ld_y  = ld_ys[li3];
+                        ld_z  = ld_zs[li3];
+                        along = ld_x*rdx + ld_y*rdy + ld_z*rdz;
+                        if (along < 0.0d) { li3++; continue; };
+                        if (along > depth3) { along = depth3; };
+                        along_x = along*rdx; along_y = along*rdy; along_z = along*rdz;
+                        perp_sq = (ld_x-along_x)*(ld_x-along_x) +
+                                  (ld_y-along_y)*(ld_y-along_y) +
+                                  (ld_z-along_z)*(ld_z-along_z);
+                        scatter = lc_int[li3] / (1.0d + perp_sq * 0.8d);
+                        scatter *= (vol_density3 * along) / (1.0d + vol_density3 * along);
+                        scatter *= 2.0d;
+                        // Early-out: skip negligible contribution before color accumulation
+                        if (scatter < 0.0005d) { li3++; continue; };
+                        if (scatter > 1.0d) { scatter = 1.0d; };
+                        sr3 += lc_r[li3] * scatter;
+                        sg3 += lc_g[li3] * scatter;
+                        sb4 += lc_b[li3] * scatter;
+                        li3++;
+                    };
+
+                    sbuf_r[sy_row2+sx] = sr3;
+                    sbuf_g[sy_row2+sx] = sg3;
+                    sbuf_b[sy_row2+sx] = sb4;
+                    sbuf_d[sy_row2+sx] = depth3;
+
+                    ray_dx += dcol_x; ray_dy += dcol_y; ray_dz += dcol_z;
+                    sx++;
+                };
+                row_rx += drow_x; row_ry += drow_y; row_rz += drow_z;
+                sy++;
+            };
+
+            // Pass 2: bilinear upsample and additive blend into framebuffer
+            // Pass 2: bilateral upsample — weight scatter samples by depth
+            // similarity to suppress bleeding across geometry edges.
+            double full_d, dw00, dw10, dw01, dw11, dw_sum;
+            py3 = 0;
+            while (py3 < sh3)
+            {
+                sy0 = py3 / 2;
+                sy1 = sy0 + 1; if (sy1 >= sh2) { sy1 = sh2 - 1; };
+                ty  = (double)(py3 & 1) * 0.5d;
+                // Hoist half-res row base offsets and full-res row base offset
+                i32 srow0, srow1, frow;
+                srow0 = sy0 * sw2;
+                srow1 = sy1 * sw2;
+                frow  = py3 * sw3;
+                px3 = 0;
+                while (px3 < sw3)
+                {
+                    sx0 = px3 / 2;
+                    sx1 = sx0 + 1; if (sx1 >= sw2) { sx1 = sw2 - 1; };
+                    tx  = (double)(px3 & 1) * 0.5d;
+
+                    // Bilinear spatial weights
+                    w00 = (1.0d-tx)*(1.0d-ty); w10 = tx*(1.0d-ty);
+                    w01 = (1.0d-tx)*ty;         w11 = tx*ty;
+
+                    // Full-res pixel depth for bilateral comparison
+                    full_d = zbuf[frow + px3];
+                    if (full_d >= 1.0e200) { full_d = scene.cam.far_z; };
+
+                    // Depth weights: suppress samples whose depth differs
+                    // significantly (across a geometry edge). Sigma ~ 2 units.
+                    {
+                        inv_sigma2 = 0.25d;
+                        dd = sbuf_d[srow0+sx0] - full_d; dw00 = w00 / (1.0d + dd*dd*inv_sigma2);
+                        dd = sbuf_d[srow0+sx1] - full_d; dw10 = w10 / (1.0d + dd*dd*inv_sigma2);
+                        dd = sbuf_d[srow1+sx0] - full_d; dw01 = w01 / (1.0d + dd*dd*inv_sigma2);
+                        dd = sbuf_d[srow1+sx1] - full_d; dw11 = w11 / (1.0d + dd*dd*inv_sigma2);
+                        dw_sum = dw00 + dw10 + dw01 + dw11;
+                    };
+
+                    if (dw_sum > 0.0001d)
+                    {
+                        inv_sum = 1.0d / dw_sum;
+                        sr3 = (sbuf_r[srow0+sx0]*dw00 + sbuf_r[srow0+sx1]*dw10 +
+                               sbuf_r[srow1+sx0]*dw01 + sbuf_r[srow1+sx1]*dw11) * inv_sum;
+                        sg3 = (sbuf_g[srow0+sx0]*dw00 + sbuf_g[srow0+sx1]*dw10 +
+                               sbuf_g[srow1+sx0]*dw01 + sbuf_g[srow1+sx1]*dw11) * inv_sum;
+                        sb4 = (sbuf_b[srow0+sx0]*dw00 + sbuf_b[srow0+sx1]*dw10 +
+                               sbuf_b[srow1+sx0]*dw01 + sbuf_b[srow1+sx1]*dw11) * inv_sum;
+
+                        if (sr3 > 0.001d | sg3 > 0.001d | sb4 > 0.001d)
+                        {
+                            pi3  = frow + px3;
+                            src3 = buf[pi3];
+                            pr3  = ((src3 >> 32) & (u64)0xFFFF) + (u64)(sr3 * 65535.0d);
+                            pg3  = ((src3 >> 16) & (u64)0xFFFF) + (u64)(sg3 * 65535.0d);
+                            pb4  = ( src3        & (u64)0xFFFF) + (u64)(sb4 * 65535.0d);
+                            if (pr3 > (u64)0xFFFF) { pr3 = (u64)0xFFFF; };
+                            if (pg3 > (u64)0xFFFF) { pg3 = (u64)0xFFFF; };
+                            if (pb4 > (u64)0xFFFF) { pb4 = (u64)0xFFFF; };
+                            buf[pi3] = (u64)0xFFFF000000000000 | (pr3 << 32) | (pg3 << 16) | pb4;
+                        };
+                    };
+                    px3++;
+                };
+                py3++;
+            };
+
+            ffree((u64)sbuf_r);
+            ffree((u64)sbuf_g);
+            ffree((u64)sbuf_b);
+            ffree((u64)sbuf_d);
+        };
+
+        if (scene.passes & R3D_PASS_FXAA)
+        {
+            r3d_fxaa(buf, scene.cam.screen_w, scene.cam.screen_h);
+        };
+    };
+
+    // =========================================================================
+    // FXAA  (Fast Approximate Anti-Aliasing)
+    //
+    // Single-pass screen-space edge filter.  For each pixel:
+    //   1. Sample a 3x3 luma neighbourhood.
+    //   2. Compute local contrast (max luma - min luma in cross).
+    //   3. Skip pixels below the contrast threshold (interior / sky).
+    //   4. Determine edge orientation (horizontal vs vertical) from the
+    //      Sobel-style luma gradient.
+    //   5. Blend the pixel toward its two neighbours across the edge by
+    //      a factor proportional to the contrast.
+    //
+    // Operates in-place on buf, reading from a scratch copy of the row
+    // above and current row to avoid allocating a full-frame temp buffer.
+    // =========================================================================
+
+    def r3d_fxaa(u64* buf, i32 sw, i32 sh) -> void
+    {
+        size_t row_bytes;
+        u64*   row_prev;
+        u64*   row_cur;
+        u64*   row_tmp;
+
+        row_bytes = (size_t)((u64)sw * 8);
+        row_prev  = (u64*)fmalloc(row_bytes);
+        row_cur   = (u64*)fmalloc(row_bytes);
+
+        i32 x, y;
+        u64 lN, lW, lC, lE, lS;
+        u64 luma_min, luma_max, contrast;
+        u64 edge_h, edge_v, blend16, ib16;
+        u64 neighbour_a, neighbour_b, avg_n;
+        u64 fr, fg, fb;
+        x = 0;
+        while (x < sw) { row_prev[x] = buf[x]; x++; };
+
+        y = 1;
+        while (y < sh - 1)
+        {
+            x = 0;
+            while (x < sw) { row_cur[x] = buf[y * sw + x]; x++; };
+
+            x = 1;
+            while (x < sw - 1)
+            {
+                lN = color64_luma(row_prev[x]);
+                lW = color64_luma(row_cur[x - 1]);
+                lC = color64_luma(row_cur[x]);
+                lE = color64_luma(row_cur[x + 1]);
+                lS = color64_luma(buf[(y+1)*sw + x]);
+
+                luma_min = lN;
+                if (lW < luma_min) { luma_min = lW; };
+                if (lC < luma_min) { luma_min = lC; };
+                if (lE < luma_min) { luma_min = lE; };
+                if (lS < luma_min) { luma_min = lS; };
+
+                luma_max = lN;
+                if (lW > luma_max) { luma_max = lW; };
+                if (lC > luma_max) { luma_max = lC; };
+                if (lE > luma_max) { luma_max = lE; };
+                if (lS > luma_max) { luma_max = lS; };
+
+                contrast = luma_max - luma_min;
+
+                // Skip: contrast too low or below 10% of local max
+                if (contrast < (u64)1310 | contrast * (u64)10 < luma_max)
+                {
+                    x++;
+                    continue;
+                };
+
+                edge_h = lN > lS ? lN - lS : lS - lN;
+                edge_v = lW > lE ? lW - lE : lE - lW;
+
+                // blend16 in [0, 49152] (0..75% of 65536)
+                if (luma_max > (u64)0)
+                {
+                    blend16 = (contrast << 16) / luma_max / 2;
+                }
+                else
+                {
+                    blend16 = (u64)0;
+                };
+                if (blend16 > (u64)49152) { blend16 = (u64)49152; };
+
+                if (edge_h >= edge_v)
+                {
+                    neighbour_a = row_prev[x];
+                    neighbour_b = buf[(y+1)*sw + x];
+                }
+                else
+                {
+                    neighbour_a = row_cur[x - 1];
+                    neighbour_b = row_cur[x + 1];
+                };
+
+                avg_n = color64_lerp(neighbour_a, neighbour_b, 0.5d);
+
+                ib16 = (u64)65536 - blend16;
+                fr = (((row_cur[x] >> 32) & (u64)0xFFFF) * ib16 + ((avg_n >> 32) & (u64)0xFFFF) * blend16) >> 16;
+                fg = (((row_cur[x] >> 16) & (u64)0xFFFF) * ib16 + ((avg_n >> 16) & (u64)0xFFFF) * blend16) >> 16;
+                fb = (((row_cur[x]      ) & (u64)0xFFFF) * ib16 + ((avg_n      ) & (u64)0xFFFF) * blend16) >> 16;
+                buf[y * sw + x] = (u64)0xFFFF000000000000 | (fr << 32) | (fg << 16) | fb;
+
+                x++;
+            };
+
+            // Slide row_prev down: swap pointers
+            row_tmp  = row_prev;
+            row_prev = row_cur;
+            row_cur  = row_tmp;
+
+            y++;
+        };
+
+        ffree((u64)row_prev);
+        ffree((u64)row_cur);
+
+        return;
     };
 
     // =========================================================================
@@ -3050,12 +4077,52 @@ namespace raycaster
         scene.sprite_count  = 0;
         scene.lights        = (R3DLight*)0;
         scene.light_count   = 0;
-        scene.ambient_r     = 0.1;
-        scene.ambient_g     = 0.1;
-        scene.ambient_b     = 0.1;
+        scene.ambient_r     = 0.01;
+        scene.ambient_g     = 0.01;
+        scene.ambient_b     = 0.02;
         scene.palette       = palette;
         scene.sky           = sky;
         scene.passes        = R3D_PASS_ALL;
+        scene.fog_start     = 0.0;
+        scene.fog_end       = 0.0;   // 0 = disabled
+        scene.fog_r         = 0.0;
+        scene.fog_g         = 0.0;
+        scene.fog_b         = 0.0;
+        scene.vol_density   = 0.0;   // 0 = disabled
+        scene.vol_falloff   = 1.0;
+        scene.vol_base_y    = 0.0;
+        scene.vol_r         = 0.15;
+        scene.vol_g         = 0.15;
+        scene.vol_b         = 0.15;
+        arena_init(@scene.frame_arena);
+
+        // Detect logical core count and initialise per-thread arenas and semaphores,
+        // then spawn persistent worker threads that sleep until woken each frame.
+        {
+            SYSTEM_INFO_PARTIAL sysinfo;
+            GetSystemInfo((void*)@sysinfo);
+            scene.num_threads = (i32)sysinfo.dwNumberOfProcessors;
+            if (scene.num_threads < 1)               { scene.num_threads = 1; };
+            if (scene.num_threads > R3D_MAX_THREADS) { scene.num_threads = R3D_MAX_THREADS; };
+        };
+        {
+            i32 ti;
+            ti = 0;
+            while (ti < scene.num_threads)
+            {
+                arena_init(@scene.thread_arenas[ti]);
+                scene.work_slices[ti].thread_id  = ti;
+                scene.work_slices[ti].num_threads = scene.num_threads;
+                scene.work_slices[ti].arena       = @scene.thread_arenas[ti];
+                scene.work_slices[ti].running     = 1;
+                semaphore_init(@scene.work_slices[ti].wake, 0);
+                semaphore_init(@scene.work_slices[ti].done, 0);
+                thread_create((void*)@r3d_mesh_worker,
+                              (void*)@scene.work_slices[ti],
+                              @scene.threads[ti]);
+                ti++;
+            };
+        };
     };
 
     def r3d_scene_set_insts(R3DScene* scene,
@@ -3085,6 +4152,57 @@ namespace raycaster
         scene.ambient_r = r;
         scene.ambient_g = g;
         scene.ambient_b = b;
+    };
+
+    def r3d_scene_set_fog(R3DScene* scene,
+                          double start, double end,
+                          double r, double g, double b) -> void
+    {
+        scene.fog_start = start;
+        scene.fog_end   = end;
+        scene.fog_r     = r;
+        scene.fog_g     = g;
+        scene.fog_b     = b;
+    };
+
+    // Exponential height fog: thickest below base_y, falls off with height.
+    // density: overall strength (0.05–0.5 typical)
+    // falloff: vertical falloff rate (0.5–3.0 typical; higher = thinner layer)
+    // base_y:  world Y of the fog floor
+    def r3d_scene_set_vol_fog(R3DScene* scene,
+                              double density, double falloff, double base_y,
+                              double r, double g, double b) -> void
+    {
+        scene.vol_density = density;
+        scene.vol_falloff = falloff;
+        scene.vol_base_y  = base_y;
+        scene.vol_r       = r;
+        scene.vol_g       = g;
+        scene.vol_b       = b;
+    };
+
+    // Shut down the persistent worker thread pool.
+    // Call once when the scene is no longer needed, before freeing scene memory.
+    def r3d_scene_destroy(R3DScene* scene) -> void
+    {
+        i32 ti;
+        ti = 0;
+        while (ti < scene.num_threads)
+        {
+            scene.work_slices[ti].running = 0;
+            semaphore_post(@scene.work_slices[ti].wake);
+            ti++;
+        };
+        ti = 0;
+        while (ti < scene.num_threads)
+        {
+            thread_join(@scene.threads[ti]);
+            semaphore_destroy(@scene.work_slices[ti].wake);
+            semaphore_destroy(@scene.work_slices[ti].done);
+            arena_destroy(@scene.thread_arenas[ti]);
+            ti++;
+        };
+        arena_destroy(@scene.frame_arena);
     };
 
     // =========================================================================
@@ -3132,13 +4250,8 @@ namespace raycaster
         zbytes   = (size_t)(total_px * (i32)(sizeof(double) / 8));
         zbuf     = (double*)fmalloc(zbytes);
 
-        // Fill zbuf with effective infinity
-        i = 0;
-        while (i < total_px)
-        {
-            zbuf[i] = RC_INF;
-            i++;
-        };
+        // Fill zbuf with 0x7F sentinel (double 1.38e306, beyond any far_z)
+        mem_fill((void*)zbuf, (byte)0x7F, zbytes);
 
         if (rc_scene != (RCScene*)0)
         {

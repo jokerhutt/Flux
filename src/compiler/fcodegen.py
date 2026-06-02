@@ -363,6 +363,11 @@ class CodegenVisitor:
     def visit_NoreturnStatement(self, node, builder, module):
         if not builder.block.is_terminated:
             builder.unreachable()
+        # Mark the enclosing function as noreturn so call sites know
+        # execution never continues past a call to this function.
+        func = builder.block.function
+        if func is not None:
+            func.attributes.add('noreturn')
         return None
 
     def visit_EscapeStatement(self, node, builder, module):
@@ -1168,7 +1173,7 @@ class CodegenVisitor:
                             av = builder.load(av, name=f"op_deref_{i}")
                         else:
                             av = FunctionTypeHandler.convert_argument_to_parameter_type(
-                                builder, module, av, pt, i)
+                                builder, module, av, pt, i, node)
                         adapted.append(av)
                     return builder.call(overload_func, adapted, name="op_overload_result")
 
@@ -2248,12 +2253,16 @@ class CodegenVisitor:
             if output_constraint.startswith('=m'):
                 final_input_operands.insert(0, output_op)
                 final_constraints.insert(0, output_constraint.replace('=m', '+m'))
+            elif output_constraint.startswith(('=x', '=f')):
+                # XMM / float register output: the return type carries the output,
+                # no input operand slot is consumed by an = output constraint.
+                final_constraints.insert(0, output_constraint)
             else:
                 final_constraints.insert(0, output_constraint)
         final_constraints.extend(f"~{{{c}}}" for c in clobber_list)
         constraint_str = ','.join(final_constraints)
         input_types = [op.type for op in final_input_operands]
-        has_reg_out = any(c.startswith(('=r', '=a', '=b')) for c in output_constraints)
+        has_reg_out = any(c.startswith(('=r', '=a', '=b', '=x', '=f')) for c in output_constraints)
         if has_reg_out and output_operands:
             out_type = output_operands[0].type
             if isinstance(out_type, ir.PointerType):
@@ -2940,7 +2949,7 @@ class CodegenVisitor:
                                     f"[{node.source_line}:{node.source_col}]"
                                 )
                 arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
-                    builder, module, arg_val, expected, i)
+                    builder, module, arg_val, expected, i, node)
             processed_args.append(arg_val)
         call_instr = builder.call(func, processed_args)
         current_func = builder.function
@@ -3099,7 +3108,7 @@ class CodegenVisitor:
                 zero = ir.Constant(ir.IntType(32), 0)
                 arg_val = builder.gep(arg_val, [zero, zero], name=f"marg{i}_decay")
             if arg_val.type != expected_type:
-                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i, node)
             args.append(arg_val)
         return builder.call(func, args)
 
@@ -3158,7 +3167,7 @@ class CodegenVisitor:
                         gv.linkage = 'internal'; gv.global_constant = True; gv.initializer = str_const
                         zero = ir.Constant(ir.IntType(32), 0)
                         arg_val = builder.gep(gv, [zero, zero], name=f"arg{i}_str_ptr")
-                    arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+                    arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i, node)
                 coerced.append(arg_val)
             args = coerced
         return builder.call(func_ptr, args, name="indirect_call", cconv=_get_fp_cconv(node.pointer, module))
@@ -5097,6 +5106,9 @@ class CodegenVisitor:
             llvm_cc = CALLING_CONV_MAP.get(node.calling_conv, node.calling_conv)
             func.calling_convention = llvm_cc
 
+        if getattr(node, 'is_inline', False):
+            func.attributes.add('alwaysinline')
+
         for i, param in enumerate(func.args):
             if node.parameters[i].name is not None:
                 param.name = node.parameters[i].name
@@ -6655,9 +6667,12 @@ class CodegenVisitor:
         sizeof_val = builder.ptrtoint(size_ptr, i64_ty, name='sizeof_val')
 
         # --- call fmalloc ------------------------------------------------
-        # fmalloc takes and returns a u64 raw address, so convert via inttoptr.
+        # fmalloc returns a u64 raw address.  inttoptr only works to simple
+        # pointer types; for aggregate pointees (arrays, structs) we must go
+        # through i8* first and then bitcast to the real pointer type.
         raw_addr  = builder.call(fmalloc_fn, [sizeof_val], name=f'{node.name}_raw')
-        typed_ptr = builder.inttoptr(raw_addr, ptr_ty, name=f'{node.name}_ptr')
+        i8_ptr_val = builder.inttoptr(raw_addr, i8_ptr_ty, name=f'{node.name}_i8ptr')
+        typed_ptr = builder.bitcast(i8_ptr_val, ptr_ty, name=f'{node.name}_ptr') if ptr_ty != i8_ptr_ty else i8_ptr_val
 
         # --- alloca to hold the pointer (so the symbol has an address) ---
         # Hoist to entry block if inside a switch case body
@@ -6676,14 +6691,11 @@ class CodegenVisitor:
 
         builder.store(typed_ptr, ptr_alloca)
 
-        # Annotate so callers know this alloca holds a heap pointer
-        ptr_alloca._flux_is_heap = True
-        if resolved_type_spec:
-            ptr_alloca._flux_type_spec = resolved_type_spec
-
         # --- register *pointer* type in symbol table ---------------------
         # Build a synthetic pointer type-spec so that loads of this symbol
         # produce T* (not T), matching behaviour of ``T* p = fmalloc(...);``.
+        # is_array / array_size are intentionally NOT copied: the alloca holds
+        # a pointer, not an array, so should_return_pointer must not fire on it.
         ptr_type_spec = None
         if resolved_type_spec is not None:
             try:
@@ -6699,6 +6711,13 @@ class CodegenVisitor:
             except TypeError:
                 ptr_type_spec = resolved_type_spec  # fallback: use original spec
 
+        # Annotate so callers know this alloca holds a heap pointer.
+        # Use ptr_type_spec (not resolved_type_spec) so that array_size is absent
+        # and should_return_pointer does not treat this alloca as an array.
+        ptr_alloca._flux_is_heap = True
+        if ptr_type_spec is not None:
+            ptr_alloca._flux_type_spec = ptr_type_spec
+
         module.symbol_table.define(
             node.name, SymbolKind.VARIABLE,
             type_spec=ptr_type_spec,
@@ -6710,13 +6729,26 @@ class CodegenVisitor:
         if node.initial_value and not isinstance(node.initial_value, _NoInit):
             init_val = self.visit(node.initial_value, builder, module)
             if init_val is not None:
-                if hasattr(init_val, 'type') and init_val.type != llvm_type:
-                    init_val = CoercionContext.coerce_return_value(builder, init_val, llvm_type)
-                builder.store(init_val, typed_ptr)
+                if isinstance(llvm_type, ir.ArrayType):
+                    # Heap array: init_val is a pointer to array data (e.g. [N x i8]*).
+                    # Use memcpy to copy the array contents into the fmalloc'd region.
+                    src_ptr = init_val
+                    if not isinstance(src_ptr.type, ir.PointerType):
+                        tmp = builder.alloca(llvm_type, name=f'{node.name}_init_tmp')
+                        builder.store(src_ptr, tmp)
+                        src_ptr = tmp
+                    ArrayTypeHandler.emit_memcpy_dynamic(builder, module, typed_ptr, src_ptr, sizeof_val)
+                else:
+                    if hasattr(init_val, 'type') and init_val.type != llvm_type:
+                        init_val = CoercionContext.coerce_return_value(builder, init_val, llvm_type)
+                    builder.store(init_val, typed_ptr)
         else:
             # Zero-initialise the heap allocation (mirrors stack zero-init)
-            zero = TypeSystem.get_default_initializer(llvm_type)
-            builder.store(zero, typed_ptr)
+            if isinstance(llvm_type, ir.ArrayType):
+                ArrayTypeHandler.emit_memset(builder, module, typed_ptr, 0, llvm_type.count * (llvm_type.element.width // 8) if isinstance(llvm_type.element, ir.IntType) else llvm_type.count)
+            else:
+                zero = TypeSystem.get_default_initializer(llvm_type)
+                builder.store(zero, typed_ptr)
 
         return ptr_alloca
 
@@ -6925,7 +6957,7 @@ class CodegenVisitor:
 
             if param_index < len(func.args):
                 expected_type = func.args[param_index].type
-                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i)
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(builder, module, arg_val, expected_type, i, node)
 
             args.append(arg_val)
 

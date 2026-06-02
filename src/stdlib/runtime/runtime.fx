@@ -22,6 +22,7 @@ Also, standard input/output is pulled in, and is minimal.
 
 const void* STDLIB_GVP = (void*)@void;
 const data{64} U64MAXVAL = 0xFFFFFFFFFFFFFFFFu;
+const bool _fltused = true;
 
 #def NULL STDLIB_GVP;
 
@@ -88,6 +89,10 @@ using standard::memory::allocators::stdheap;
 //#import "collections.fx";
 //#endif;
 
+#ifdef FLUX_SHADOW_STACK
+#import "shadowstack.fx";
+#endif;
+
 extern
 {
 #ifdef __WINDOWS__
@@ -95,7 +100,8 @@ extern
         GetStdHandle(int nStdHandle) -> i64;
     def !!
         GetCommandLineW() -> wchar*,
-        LocalFree(void* x) -> void*;
+        LocalFree(void* x) -> void*,
+        RtlExitUserProcess(u32 code) -> void;
 #endif;
 };
 
@@ -306,6 +312,15 @@ def !!FRTStartup() -> int
     };
 
     // Call the appropriate main overload
+#ifdef FLUX_SHADOW_STACK
+    // Initialize the shadow stack allocator so the per-function contracts
+    // (FSS_Protect_Frame / FSS_Cleanup_Frame) can use it.
+    if (!fss_init())
+    {
+        standard::io::console::print("WARNING: shadow stack allocation failed, continuing unprotected\n\0");
+    };
+#endif; // FLUX_SHADOW_STACK
+
     if (argc > 1)
     {
         // Check 32-bit / 64-bit here, call appropriate main
@@ -320,6 +335,10 @@ def !!FRTStartup() -> int
     {
         return_code = main();
     };
+
+#ifdef FLUX_SHADOW_STACK
+    fss_teardown();
+#endif; // FLUX_SHADOW_STACK
 
     // Free converted argv
     while (k < argc)

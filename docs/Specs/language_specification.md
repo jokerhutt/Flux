@@ -2555,7 +2555,7 @@ vectorcall{}* someSIMDfunc() -> u64*;
 alignof, and, as, asm, assert, auto, bool, break, byte, case, catch,
 cdecl, char, const, continue, contract, data, def, default, defer,
 deprecate, do, double, elif, else, enum, escape, export, extern,
-false, fastcall, float, for, global, goto, heap, if, is, in, int, jump,
+false, fastcall, float, for, global, goto, heap, if, is, in, inline, int, jump,
 label, local, long, macro, namespace, noinit, noreturn, not, object,
 operator, or, private, public, register, return, signed, singinit, sizeof,
 stack, stdcall, struct, switch, this, thiscall, throw, trait, true,

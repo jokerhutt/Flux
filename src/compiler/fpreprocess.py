@@ -236,8 +236,10 @@ class FXPreprocessor:
         """Process a single line, return next line index"""
         line = lines[i]
         
-        # Skip empty lines (we'll handle removal at the end)
+        # Skip empty lines but preserve them in line_map so line numbers stay accurate
         if not line.strip():
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         stripped = line.strip()
@@ -256,6 +258,8 @@ class FXPreprocessor:
                     if dir_path not in self.lib_dirs:
                         self.lib_dirs.append(dir_path)
                         print(f"[PREPROCESSOR] Added library directory: {dir_path}")
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         # Check for #def
@@ -280,6 +284,8 @@ class FXPreprocessor:
                     
                 self.constants[constant_name] = constant_value
                 print(f"[PREPROCESSOR] Defined constant: {constant_name} = {constant_value}")
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         # Check for #ifdef
@@ -318,6 +324,8 @@ class FXPreprocessor:
             for import_file in import_files:
                 self._process_file(import_file)
             
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         # Check for #warn
@@ -330,6 +338,8 @@ class FXPreprocessor:
                 if end_idx != -1:
                     message = line[start_idx + 1:end_idx]
                     print(f"[PREPROCESSOR] {message}")
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         # Check for #stop
@@ -347,10 +357,14 @@ class FXPreprocessor:
         
         # Check for #endif - skip it
         if stripped.startswith("#endif;"):
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         # Check for #else - skip it (handled in conditional processing)
         if stripped == "#else":
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
             return i + 1
         
         # Regular line - do constant substitution
@@ -374,9 +388,18 @@ class FXPreprocessor:
         in_else = False
         else_seen = False
         
+        # Emit a blank entry for the #ifdef/#ifndef line itself so it is accounted for
+        self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+        self.output_lines.append('')
+        
         # Store lines that should be included, paired with their original local line numbers
         lines_to_include = []
         origins_to_include = []  # parallel list: local line number (1-based) for each entry
+        # excluded_origins tracks lines NOT included (for blank line_map entries)
+        excluded_origins = []
+        # Base local lineno at block entry; used to compute correct original line for each
+        # sub-array line when this function is called recursively with a lines_to_include slice.
+        entry_local_lineno = self._current_local_lineno
         
         while i < len(lines):
             line = lines[i]
@@ -392,6 +415,9 @@ class FXPreprocessor:
                     raise SyntaxError("Multiple #else directives in same conditional block")
                 else_seen = True
                 in_else = True
+                # Emit blank for the #else line
+                self.line_map.append((getattr(self, '_current_file', self.source_file), i + 1))
+                self.output_lines.append('')
                 i += 1
                 continue
             
@@ -399,6 +425,13 @@ class FXPreprocessor:
             if stripped.startswith("#endif;"):
                 depth -= 1
                 if depth == 0:
+                    # Emit blank for excluded lines so line_map stays in sync
+                    for orig in excluded_origins:
+                        self.line_map.append((getattr(self, '_current_file', self.source_file), orig))
+                        self.output_lines.append('')
+                    # Emit blank for the #endif line itself
+                    self.line_map.append((getattr(self, '_current_file', self.source_file), i + 1))
+                    self.output_lines.append('')
                     # End of our block - process collected lines
                     if lines_to_include:
                         j = 0
@@ -408,16 +441,22 @@ class FXPreprocessor:
                     return i + 1
             
             # Collect lines based on condition
+            # original_lineno: correct local line in the original file for line i
+            original_lineno = entry_local_lineno + (i - start_i)
             if depth > 1:
                 # Inside nested block - always include
                 if (condition_true and not in_else) or (not condition_true and in_else):
                     lines_to_include.append(line)
-                    origins_to_include.append(i + 1)
+                    origins_to_include.append(original_lineno)
+                else:
+                    excluded_origins.append(original_lineno)
             else:
                 # Our depth level
                 if (condition_true and not in_else) or (not condition_true and in_else):
                     lines_to_include.append(line)
-                    origins_to_include.append(i + 1)
+                    origins_to_include.append(original_lineno)
+                else:
+                    excluded_origins.append(original_lineno)
             
             i += 1
         

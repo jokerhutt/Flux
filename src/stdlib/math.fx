@@ -165,29 +165,36 @@ namespace standard
         };
         def sqrt(float x) -> float
         {
-            if (x <= 0.0f) { return 0.0f; };
-            float y = x / 2.0f, prev_y = 0.0f;
-            for (i32 i = 0; i < 20; i++)
+            float result;
+            volatile asm
             {
-                prev_y = y;
-                y = (y + x / y) / 2.0f;
-                if (abs(y - prev_y) < 0.000001f) { break; };
-            };
-            return y;
+                sqrtss $1, $0
+            } : "=x"(result) : "x"(x) : ;
+            return result;
         };
         def sqrt(double x) -> double
         {
-            if (x <= 0.0) { return 0.0; };
-            double y = x / 2.0, prev_y = 0.0;
-            for (i32 i = 0; i < 40; i++)
+            double result;
+            volatile asm
             {
-                prev_y = y;
-                y = (y + x / y) / 2.0;
-                if (abs(y - prev_y) < 1e-15) { break; };
-            };
-            return y;
+                sqrtsd $1, $0
+            } : "=x"(result) : "x"(x) : ;
+            return result;
         };
 
+        def fisr(float x) -> float
+        {
+            float  x2, y;
+            u32    i;
+            x2 = x * 0.5f;
+            y  = x;
+            i  = *((u32*)@y);                // evil floating point bit hack
+            i  = (u32)0x5F3759DF - (i >> 1); // what the fuck?
+            y  = *((float*)@i);
+            y  = y * (1.5f - (x2 * y * y));
+            //y  = y * (1.5f - (x2 * y * y));   // second iteration for better precision
+            return y;
+        };
         // ==================== Factorial (overflow check) ====================
         def factorial(i8 n) -> i8
         {
@@ -355,61 +362,118 @@ namespace standard
         def round(i64 x) -> i64 { return x; };
 
         // ==================== Trigonometry ====================
-        def sin(float x) -> float
+        //
+        // sin/cos use Cody-Waite range reduction to [-pi/4, pi/4], then
+        // evaluate minimax polynomials.  The pi/2 constant is split into
+        // three double-precision parts (pio2_1, pio2_2, pio2_3) to avoid
+        // cancellation for large arguments.
+        //
+        // Polynomial coefficients are from the standard fdlibm/SLEEF set,
+        // accurate to within 1 ULP across the reduced range.
+
+        // High-precision pi/2 split for Cody-Waite reduction:
+        //   pio2_1  = first 33 bits of pi/2
+        //   pio2_2  = second 33 bits
+        //   pio2_3  = remainder
+        #def _PIO2_1   1.57079632673412561417e+00;
+        #def _PIO2_2   6.07710050650619224932e-11;
+        #def _PIO2_3   6.12323399573676603587e-22;
+        #def _TWO_OVER_PI 0.63661977236758134308;
+
+        // Internal: evaluate sin kernel on r in [-pi/4, pi/4].
+        // Uses degree-11 minimax polynomial (odd terms only).
+        def _sin_kernel(double r) -> double
         {
-            while (x > PIF) { x -= 2.0f * PIF; };
-            while (x < -PIF) { x += 2.0f * PIF; };
-            float result = x, term = x, x2 = x * x;
-            for (i32 i = 1; i <= 5; i++)
-            {
-                term = -term * x2 / (float)((2*i) * (2*i+1));
-                result += term;
-            };
-            return result;
+            double r2;
+            r2 = r * r;
+            return r + r * r2 * (-1.66666666666666324348e-01
+                 + r2 * ( 8.33333333332248946124e-03
+                 + r2 * (-1.98412698298579493134e-04
+                 + r2 * ( 2.75573137070700491217e-06
+                 + r2 * (-2.50507602534165206869e-08
+                 + r2 *   1.58969099521155010221e-10)))));
         };
+
+        // Internal: evaluate cos kernel on r in [-pi/4, pi/4].
+        // Uses degree-10 minimax polynomial (even terms only).
+        def _cos_kernel(double r) -> double
+        {
+            double r2;
+            r2 = r * r;
+            return 1.0 - r2 * (5.0e-01
+                 - r2 * ( 4.16666666666666019037e-02
+                 - r2 * ( 1.38888888888741095749e-03
+                 - r2 * ( 2.48015872894767294178e-05
+                 - r2 * ( 2.75573143513906633035e-07
+                 - r2 * ( 2.08757232129817851248e-09
+                 - r2 *   1.13596475577881948265e-11))))));
+        };
+
+        // Internal: range-reduce x to [-pi/4, pi/4], return quadrant in *q.
+        def _trig_reduce(double x, i32* q) -> double
+        {
+            // For |x| <= pi/4 no reduction needed
+            if (x < 0.0) { x = -x; };
+            double fn;
+            i32    n;
+            fn = x * _TWO_OVER_PI + 0.5;
+            n  = (i32)fn;
+            fn = (double)n;
+            x  = x - fn * _PIO2_1;
+            x  = x - fn * _PIO2_2;
+            x  = x - fn * _PIO2_3;
+            *q = n;
+            return x;
+        };
+
         def sin(double x) -> double
         {
-            // Cody-Waite reduction: represent 2π as two parts to avoid
-            // catastrophic cancellation when subtracting large multiples.
-            // 2π ≈ TWO_PI_HI + TWO_PI_LO
-            double TWO_PI_HI, TWO_PI_LO, n_d, r, x2, result, term;
-            i32    n, i;
-            TWO_PI_HI = 6.283185307179586d;
-            TWO_PI_LO = 0.00000000000000024492935982947064d;
-
-            // Round to nearest multiple of 2π
-            n_d = x / TWO_PI_HI;
-            n   = (i32)n_d;
-            if (n_d < 0.0d) { n = n - 1; };
-            r = (x - (double)n * TWO_PI_HI) - (double)n * TWO_PI_LO;
-
-            // Reduce into [-π, π]
-            if (r >  3.141592653589793d) { r -= TWO_PI_HI; };
-            if (r < -3.141592653589793d) { r += TWO_PI_HI; };
-
-            // Reduce into [-π/2, π/2] using sin(π - x) = sin(x)
-            if (r >  1.5707963267948966d) { r = 3.141592653589793d - r; };
-            if (r < -1.5707963267948966d) { r = -3.141592653589793d - r; };
-
-            // Taylor series for sin(r), 14 terms — r in [-π/2, π/2]
-            x2     = r * r;
-            result = r;
-            term   = r;
-            i = 1;
-            while (i <= 14)
+            bool neg;
+            double r;
+            i32    q;
+            neg = x < 0.0;
+            if (neg) { x = -x; };
+            if (x <= 7.85398163397448278999e-01)
             {
-                term   = -term * x2 / (double)((2*i) * (2*i+1));
-                result += term;
-                i++;
+                r = _sin_kernel(x);
+                if (neg) { r = -r; };
+                return r;
             };
-            return result;
+            r = _trig_reduce(x, @q);
+            switch (q & 3)
+            {
+                case (0) { r =  _sin_kernel(r); }
+                case (1) { r =  _cos_kernel(r); }
+                case (2) { r = -_sin_kernel(r); }
+                default  { r = -_cos_kernel(r); };
+            };
+            if (neg) { r = -r; };
+            return r;
         };
+
         def cos(double x) -> double
         {
-            // cos(x) = sin(x + π/2)
-            return sin(x + 1.5707963267948966d);
+            double r;
+            i32    q;
+            if (x < 0.0) { x = -x; };
+            if (x <= 7.85398163397448278999e-01)
+            {
+                return _cos_kernel(x);
+            };
+            r = _trig_reduce(x, @q);
+            switch (q & 3)
+            {
+                case (0) { r =  _cos_kernel(r); }
+                case (1) { r = -_sin_kernel(r); }
+                case (2) { r = -_cos_kernel(r); }
+                default  { r =  _sin_kernel(r); };
+            };
+            return r;
         };
-        def cos(float x) -> float { return sin(PIF/2.0f - x); };
+
+        def sin(float x) -> float { return (float)sin((double)x); };
+        def cos(float x) -> float { return (float)cos((double)x); };
+
         def tan(float x) -> float
         {
             float c = cos(x);
@@ -422,30 +486,34 @@ namespace standard
             if (abs(c) < 1e-12) { return 0.0; };
             return sin(x) / c;
         };
-        def atan(float x) -> float
-        {
-            bool neg = x < 0.0f, recip;
-            if (neg) { x = -x; };
-            recip = x > 1.0f;
-            if (recip) { x = 1.0f / x; };
-            float x2 = x * x;
-            float r = x * (1.0f - x2 * (0.3333333f - x2 * (0.2f - x2 * (0.142857f - x2 * (0.111111f - x2 * 0.090909f)))));
-            if (recip) { r = PIF * 0.5f - r; };
-            if (neg)   { r = -r; };
-            return r;
-        };
         def atan(double x) -> double
         {
-            bool neg = x < 0.0, recip;
-            if (neg) { x = -x; };
+            // Reduce to [0, 1] via identity atan(x) = pi/2 - atan(1/x) for x > 1,
+            // then evaluate a degree-13 minimax polynomial on [0, 1].
+            bool neg, recip;
+            neg   = x < 0.0;
+            if (neg)   { x = -x; };
             recip = x > 1.0;
             if (recip) { x = 1.0 / x; };
             double x2 = x * x;
-            double r = x * (1.0 - x2 * (1.0/3.0 - x2 * (1.0/5.0 - x2 * (1.0/7.0 - x2 * (1.0/9.0 - x2 * 1.0/11.0)))));
-            if (recip) { r = PID * 0.5 - r; };
+            double r = x * (1.0
+                + x2 * (-3.33333333333329318027e-01
+                + x2 * ( 1.99999999998764832476e-01
+                + x2 * (-1.42857142725034663415e-01
+                + x2 * ( 1.11111104054623529297e-01
+                + x2 * (-9.09088713343650656196e-02
+                + x2 * ( 7.69187620504482999495e-02
+                + x2 * (-6.66107313738753120669e-02
+                + x2 * ( 5.83357013379057348645e-02
+                + x2 * (-4.76190184591045773639e-02
+                + x2 * ( 3.64977340573025229249e-02
+                + x2 * (-2.19986706991864906437e-02
+                + x2 *   8.49330165602148348398e-03))))))))))));
+            if (recip) { r = 1.57079632679489661923 - r; };
             if (neg)   { r = -r; };
             return r;
         };
+        def atan(float x) -> float { return (float)atan((double)x); };
         def asin(float x) -> float
         {
             if (x >= 1.0f)  { return PIF * 0.5f; };
@@ -544,58 +612,85 @@ namespace standard
         };
 
         // ==================== Exponential and Logarithmic ====================
-        def exp(float x) -> float
-        {
-            float result = 1.0f, term = 1.0f;
-            for (i32 i = 1; i <= 12; i++)
-            {
-                term = term * x / (float)i;
-                result += term;
-            };
-            return result;
-        };
         def exp(double x) -> double
         {
-            double result = 1.0, term = 1.0;
-            for (i32 i = 1; i <= 20; i++)
-            {
-                term = term * x / (double)i;
-                result += term;
-            };
-            return result;
+            // Clamp to avoid overflow/underflow
+            if (x >  7.09782712893383996732e+02) { return 1.7976931348623157e+308; };
+            if (x < -7.45133219101941108420e+02) { return 0.0; };
+
+            // Range reduction: x = n*ln2 + r, |r| <= ln2/2
+            // ln2_hi + ln2_lo = ln2 to extra precision
+            double ln2_hi = 6.93147180369123816490e-01;
+            double ln2_lo = 1.90821492927058770002e-10;
+            double inv_ln2 = 1.44269504088896338700e+00;
+
+            double fn = x * inv_ln2;
+            i32    n;
+            if (fn >= 0.0) { n = (i32)(fn + 0.5); } else { n = (i32)(fn - 0.5); };
+            double r = x - (double)n * ln2_hi;
+            r = r - (double)n * ln2_lo;
+
+            // Degree-6 minimax for exp(r) on [-ln2/2, ln2/2]
+            double r2 = r * r;
+            double p = r * (1.0
+                + r2 * (1.66666666666666019037e-01
+                + r2 * (4.16666666666602470952e-03
+                + r2 * (8.33333333310201598374e-05
+                + r2 * (1.38888888885959271366e-06
+                + r2 *  2.48015872894612088499e-08)))));
+            double result = 1.0 + (r * p / (2.0 - p) + r);
+
+            // Scale by 2^n via exponent field manipulation
+            if (n == 0) { return result; };
+            u64 bits;
+            bits = *(u64*)@result;
+            i64 exp_field;
+            exp_field = (i64)((bits >> 52) & (u64)0x7FF) + (i64)n;
+            if (exp_field <= 0)  { return 0.0; };
+            if (exp_field >= 2047) { return 1.7976931348623157e+308; };
+            bits = (bits & (u64)0x800FFFFFFFFFFFFF) | ((u64)exp_field << 52);
+            return *(double*)@bits;
         };
-        def log(float x) -> float
-        {
-            if (x <= 0.0f) { return 0.0f; };
-            float y = (x - 1.0f) / (x + 1.0f);
-            float y2 = y*y, result = 2.0f*y, term = y;
-            for (i32 i = 1; i <= 10; i += 2)
-            {
-                term = term * y2;
-                result += (2.0f / (float)(2*i+1)) * term;
-            };
-            return result;
-        };
+        def exp(float x) -> float { return (float)exp((double)x); };
         def log(double x) -> double
         {
-            if (x <= 0.0) { return 0.0; };
-            double m = x;
-            i32 e = 0;
-            while (m >= 2.0) { m = m / 2.0; e = e + 1; };
-            while (m < 1.0)  { m = m * 2.0; e = e - 1; };
-            double t = (m - 1.0) / (m + 1.0);
-            double t2 = t*t, term = t, result = t, contrib;
-            for (i32 i = 1; i < 40; i++)
-            {
-                term = term * t2;
-                contrib = term / (double)(2*i+1);
-                result = result + contrib;
-                if (abs(contrib) < 1e-15) { break; };
-            };
-            result = result * 2.0;
-            result = result + (double)e * LN2_D;
+            if (x <= 0.0) { return -1.7976931348623157e+308; };
+
+            // Extract exponent and mantissa via bit manipulation
+            u64 bits = *(u64*)@x;
+            i32 e    = (i32)((bits >> 52) & (u64)0x7FF) - 1023;
+            // Set exponent to 0 (biased 1023) to get mantissa in [1, 2)
+            bits = (bits & (u64)0x800FFFFFFFFFFFFF) | (u64)0x3FF0000000000000;
+            double m = *(double*)@bits;
+
+            // Reduce to [sqrt(2)/2, sqrt(2)] — if m < sqrt(2)/2, shift up
+            if (m < 7.07106781186547524401e-01) { m = m * 2.0; e = e - 1; };
+
+            // Minimax polynomial for log((1+f)/(1-f)) where f = (m-1)/(m+1)
+            // This form has much better convergence than log(1+x) series
+            double f  = (m - 1.0) / (m + 1.0);
+            double f2 = f * f;
+            double w  = f2 * f2;
+            // Odd-term Horner: coefficients from fdlibm
+            double r1 = 6.66666666666735130309e-01
+                      + w * (2.85714285135205626685e-01
+                      + w * (1.81818180850050775676e-01
+                      + w *  1.41253449399408350459e-01));
+            double r2 = 3.99999999994889520090e-01
+                      + w * (2.22222198432149984031e-01
+                      + w *  1.53846227504559030779e-01);
+            double r  = f2 * r2 + w * r1;
+            double hfsq = 0.5 * f * f;
+            double result = f * (1.0 - hfsq + r) * 2.0;
+
+            // Add exponent contribution: result + n * ln2
+            double ln2_hi = 6.93147180369123816490e-01;
+            double ln2_lo = 1.90821492927058770002e-10;
+            result = result + (double)e * ln2_lo;
+            result = result + (double)e * ln2_hi;
             return result;
         };
+        def log(float x) -> float { return (float)log((double)x); };
         def log10(float x) -> float { return log(x) * LOG10E_F; };
         def log10(double x) -> double { return log(x) * LOG10E_D; };
         def log2(float x) -> float { return log(x) * LOG2E_F; };

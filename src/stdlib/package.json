@@ -215,11 +215,27 @@
         "flux-types": ">=1.0.0"
       }
     },
+    "flux-raycasting": {
+      "version": "1.0.0",
+      "entry": "raycasting.fx",
+      "path": "",
+      "description": "Raycasting primitives and utilities",
+      "dependencies": {
+        "flux-allocators": ">=1.0.7",
+        "flux-math": ">=1.0.5",
+        "flux-matrices": ">=1.0.0",
+        "flux-memory": ">=1.0.2",
+        "flux-sys": ">=1.0.0",
+        "flux-threading": ">=1.0.0",
+        "flux-types": ">=1.0.0",
+        "flux-vectors": ">=1.0.1"
+      }
+    },
     "flux-raytracing": {
       "version": "1.0.0",
       "entry": "raytracing.fx",
       "path": "",
-      "description": "Ray tracing primitives and utilities",
+      "description": "Raytracing primitives and utilities",
       "dependencies": {
         "flux-allocators": ">=1.0.7",
         "flux-math": ">=1.0.5",
@@ -260,9 +276,8 @@
       "path": "",
       "description": "TLS 1.3",
       "dependencies": {
-        "flux-cryptography": ">=1.0.1",
-        "flux-net-linux": ">=1.0.0",
-        "flux-net-windows": ">=1.0.1",
+        "flux-memory": ">=1.0.2",
+        "flux-sockets": ">=1.0.1",
         "flux-types": ">=1.0.0"
       }
     },
@@ -401,10 +416,21 @@
         "flux-file": ">=1.0.1",
         "flux-io": ">=1.0.1",
         "flux-memory": ">=1.0.2",
+        "flux-shadowstack": ">=1.0.0",
         "flux-string": ">=1.0.4",
         "flux-string-utilities": ">=1.0.3",
         "flux-sys": ">=1.0.0",
         "flux-timing": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
+    },
+    "flux-shadowstack": {
+      "version": "1.0.0",
+      "entry": "shadowstack.fx",
+      "path": "runtime",
+      "description": "Stack protection",
+      "dependencies": {
+        "flux-memory": ">=1.0.2",
         "flux-types": ">=1.0.0"
       }
     },

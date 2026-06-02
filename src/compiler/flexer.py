@@ -95,6 +95,7 @@ class TokenType(Enum):
     HEAP = auto()         # "        heap
     IF = auto()           # "        if
     IN = auto()           # "        in
+    INLINE = auto()       # "        inline
     IS = auto()           # "        is
     JUMP = auto()         # "        jump
     LABEL = auto()        # "        label
@@ -406,6 +407,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.HEAP:       'heap',
     TokenType.IF:         'if',
     TokenType.IN:         'in',
+    TokenType.INLINE:     'inline',
     TokenType.IS:         'is',
     TokenType.JUMP:       'jump',
     TokenType.LABEL:      'label',
@@ -542,6 +544,7 @@ class FluxLexer:
             'heap': TokenType.HEAP,
             'if': TokenType.IF,
             'in': TokenType.IN,
+            'inline': TokenType.INLINE,
             'is': TokenType.IS,
             'int': TokenType.SINT,
             'jump': TokenType.JUMP,

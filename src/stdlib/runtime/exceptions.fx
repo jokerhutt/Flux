@@ -254,32 +254,32 @@ namespace standard
         //  __exc_push  -  arm guard, snapshot call site.
         //  Returns 0 initially; returns 1 after a hardware fault.
         // ----------------------------------------------------------
-def !! __exc_push(jmp_buf* buf) -> long
-{
-    _active_buf = buf;
-    _fault_addr = 0;
+        def !! __exc_push(jmp_buf* buf) -> long
+        {
+            _active_buf = buf;
+            _fault_addr = 0;
 
-    long result;
-    volatile asm
-    {
-        movq  $1,    %r11
-        movq  %rbx,  0x00(%r11)
-        movq  %rbp,  0x08(%r11)
-        movq  %rsi,  0x10(%r11)
-        movq  %rdi,  0x18(%r11)
-        leaq  0x10(%rbp), %rax       // caller's RSP (rbp+16, ABI-stable)
-        movq  %rax,  0x20(%r11)
-        movq  %r12,  0x28(%r11)
-        movq  %r13,  0x30(%r11)
-        movq  %r14,  0x38(%r11)
-        movq  %r15,  0x40(%r11)
-        movq  0x08(%rbp), %rax       // return address to caller (rbp+8, ABI-stable)
-        movq  %rax,  0x48(%r11)
-        xorq  %rax,  %rax            // RAX = 0 on normal path
-    } : "={rax}"(result) : "r"(buf) : "r11", "memory";
+            long result;
+            volatile asm
+            {
+                movq  $1,    %r11
+                movq  %rbx,  0x00(%r11)
+                movq  %rbp,  0x08(%r11)
+                movq  %rsi,  0x10(%r11)
+                movq  %rdi,  0x18(%r11)
+                leaq  0x10(%rbp), %rax       // caller's RSP (rbp+16, ABI-stable)
+                movq  %rax,  0x20(%r11)
+                movq  %r12,  0x28(%r11)
+                movq  %r13,  0x30(%r11)
+                movq  %r14,  0x38(%r11)
+                movq  %r15,  0x40(%r11)
+                movq  0x08(%rbp), %rax       // return address to caller (rbp+8, ABI-stable)
+                movq  %rax,  0x48(%r11)
+                xorq  %rax,  %rax            // RAX = 0 on normal path
+            } : "={rax}"(result) : "r"(buf) : "r11", "memory";
 
-    return result;
-};
+            return result;
+        };
 
         // ----------------------------------------------------------
         //  __exc_pop  -  disarm the guard.

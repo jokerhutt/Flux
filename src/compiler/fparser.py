@@ -214,29 +214,12 @@ class ParseError(Exception):
 
         # Suggestion line: only for cases where the fix is a simple symbol insertion.
         #   • END_OF_PREV_LINE_TYPES (SEMICOLON, COMMA): append the symbol at the end.
-        #     Special case: if got LEFT_BRACKET, the user wrote C-style `type varname[N]`
-        #     instead of Flux-style `type[N] varname` -- rewrite the suggestion accordingly.
         #   • RETURN_ARROW: insert '->' at the caret column in the source line.
         suggestion = ''
         fix_sym = _TOKEN_SYMBOL_MAP.get(self.expected_type) if self.expected_type is not None else None
         if fix_sym is not None:
             if self.expected_type in self._END_OF_PREV_LINE_TYPES:
-                # Detect C-array syntax: expected ';' but got '[', meaning the user
-                # wrote `type varname[N];` instead of `type[N] varname;`
-                if (self.expected_type == TokenType.SEMICOLON
-                        and self.token is not None
-                        and self.token.type == TokenType.LEFT_BRACKET
-                        and self.prev_token is not None):
-                    import re as _re
-                    raw = raw_line.rstrip()
-                    m = _re.match(r'^(\s*)(\S+)\s+(\S+?)(\[\d+\])(;?)$', raw)
-                    if m:
-                        _indent, _typ, _varname, _brackets, _semi = m.groups()
-                        suggestion = f'{_indent}{_typ}{_brackets} {_varname};  // try this'
-                    else:
-                        suggestion = src_line + fix_sym + '  // try this'
-                else:
-                    suggestion = src_line + fix_sym + '  // try this'
+                suggestion = src_line + fix_sym + '  // try this'
             elif self.expected_type == TokenType.RETURN_ARROW:
                 suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
 
@@ -790,11 +773,11 @@ class FluxParser:
             saved_token = self.current_token
             
             # Skip past const/volatile to see what comes next
-            while self.expect(TokenType.CONST, TokenType.VOLATILE, TokenType.SINGINIT):
+            while self.expect(TokenType.CONST, TokenType.VOLATILE, TokenType.SINGINIT, TokenType.INLINE):
                 self.advance()
             
             is_asm = self.expect(TokenType.ASM)
-            is_func = self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS
+            is_func = self.expect(TokenType.DEF) or self.expect(TokenType.INLINE) or self.current_token.type in _CALLING_CONV_TOKENS
             
             # Restore position
             self.position = saved_pos
@@ -837,6 +820,8 @@ class FluxParser:
             return self.export_statement()
         elif self.expect(TokenType.CONTRACT):
             return self.contract_def()
+        elif self.expect(TokenType.INLINE):
+            return self.function_def()
         elif self.expect(TokenType.DEF):
             return self.function_def()
         elif self.current_token.type in _CALLING_CONV_TOKENS:
@@ -1415,7 +1400,7 @@ class FluxParser:
 
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
-        function_def -> ('const')? ('volatile')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL | F_STRING | I_STRING | STRINGIFY) '(' parameter_list? ')' '->' type_spec (';' | block ';')
+        function_def -> ('const')? ('volatile')? ('inline')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL | F_STRING | I_STRING | STRINGIFY) '(' parameter_list? ')' '->' type_spec (';' | block ';')
         
         Now supports string literals as function names for mangled/decorated names:
             def "??@YAPAX?_FOO"()->void{};
@@ -1431,6 +1416,7 @@ class FluxParser:
         """
         is_const = False
         is_volatile = False
+        is_inline = False
         no_mangle = False
         tok = self.current_token
         
@@ -1440,6 +1426,10 @@ class FluxParser:
         
         if self.expect(TokenType.VOLATILE):
             is_volatile = True
+            self.advance()
+
+        if self.expect(TokenType.INLINE):
+            is_inline = True
             self.advance()
         
         # Consume 'def' OR a calling-convention keyword (already consumed by caller when CC-prefixed)
@@ -1558,8 +1548,9 @@ class FluxParser:
             _real_params = [p for p in parameters if not getattr(p, '_is_variadic_sentinel', False)]
             
             # Add the first prototype
-            prototypes.append(FunctionDef(name, _real_params, return_type, Block([]), 
-                                        is_const, is_volatile, True, no_mangle, _is_var, calling_conv))
+            prototypes.append(FunctionDef(name, _real_params, return_type, Block([]),
+                                        is_const, is_volatile, True, no_mangle, _is_var, calling_conv,
+                                        False, is_inline))
             
             # Parse additional prototypes
             while self.expect(TokenType.COMMA):
@@ -1637,7 +1628,8 @@ class FluxParser:
 
                 # no_mangle applies to ALL functions in this comma-separated list
                 _proto_fd = FunctionDef(proto_name, _proto_real, proto_return_type,
-                                        Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var, calling_conv)
+                                        Block([]), is_const, is_volatile, True, no_mangle, _proto_is_var, calling_conv,
+                                        False, is_inline)
                 if proto_template_params:
                     _proto_fd._is_trait_template_proto = True
                 prototypes.append(_proto_fd)
@@ -1750,13 +1742,13 @@ class FluxParser:
         if template_params:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
                                    is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                                   is_recursive)
+                                   is_recursive, is_inline)
             self._template_functions[name] = (template_params, func_def)
             return None
 
-        return FunctionDef(name, real_parameters, return_type, body, is_const, 
+        return FunctionDef(name, real_parameters, return_type, body, is_const,
                           is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                          is_recursive).set_location(tok.line, tok.column)
+                          is_recursive, is_inline).set_location(tok.line, tok.column)
 
     def _is_function_pointer_declaration(self) -> bool:
         """
@@ -2300,7 +2292,7 @@ class FluxParser:
         prototypes = []
         self._in_trait += 1
         while not self.expect(TokenType.RIGHT_BRACE):
-            if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+            if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 proto = self.function_def()
                 if proto is None:
                     # Templated prototype: function_def() stored it in _template_functions
@@ -2408,7 +2400,7 @@ class FluxParser:
                 self.consume(TokenType.LEFT_BRACE)
                 
                 while not self.expect(TokenType.RIGHT_BRACE):
-                    if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                    if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                         _obj_tmpl_keys_before = set(self._template_functions.keys())
                         method = self.function_def()
                         if method is None:
@@ -2472,7 +2464,7 @@ class FluxParser:
                 self.consume(TokenType.SEMICOLON)
             else:
                 # Regular member (defaults to public)
-                if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+                if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                     _obj_tmpl_keys_before = set(self._template_functions.keys())
                     method = self.function_def()
                     if method is None:
@@ -2607,7 +2599,7 @@ class FluxParser:
                 else:
                     variables.append(var_decl)
                 self.consume(TokenType.SEMICOLON)
-            elif self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
+            elif self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 if self.expect(TokenType.DEF) and self.peek().type == TokenType.FUNCTION_POINTER:
                     self.advance() #def
                     self.advance() #{}*

@@ -1757,6 +1757,14 @@ class VariableTypeHandler:
             return ir.Constant(llvm_type, lit.value)
         elif lit.type == FastDataType.BOOL:
             return ir.Constant(llvm_type, 1 if lit.value else 0)
+        elif lit.type in (FastDataType.UINT, FastDataType.ULONG, FastDataType.DATA):
+            if isinstance(llvm_type, ir.IntType):
+                val = int(lit.value, 0) if isinstance(lit.value, str) else int(lit.value)
+                # Convert to signed two's complement so llvmlite accepts it
+                max_signed = (1 << (llvm_type.width - 1)) - 1
+                if val > max_signed:
+                    val = val - (1 << llvm_type.width)
+                return ir.Constant(llvm_type, val)
         return None
     
     @staticmethod
@@ -2246,6 +2254,19 @@ class ArrayTypeHandler:
             return 1
 
     @staticmethod
+    def _is_null_terminated_byte_concat(left_elem_type: ir.Type, left_len: int, operator) -> bool:
+        """Return True when concatenating null-terminated byte (i8) arrays with +."""
+        import fconfig as _fconfig
+        from fast import Operator as _Operator
+        if operator != _Operator.ADD:
+            return False
+        if not (isinstance(left_elem_type, ir.IntType) and left_elem_type.width == 8):
+            return False
+        if left_len < 1:
+            return False
+        return _fconfig.config.get('null_terminate_strings', '0').strip() == '1'
+
+    @staticmethod
     def concatenate(builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, operator) -> ir.Value:
         """Handle array concatenation (+ and -) operations."""
         
@@ -2257,18 +2278,26 @@ class ArrayTypeHandler:
         if left_elem_type != right_elem_type:
             raise ValueError(f"ArrayTypeHandler.concatenate: Cannot {operator.value} arrays with different element types: {left_elem_type} vs {right_elem_type}")
         
-        result_len = left_len + right_len if operator == Operator.ADD else max(left_len - right_len, 0)
+        null_term_concat = ArrayTypeHandler._is_null_terminated_byte_concat(left_elem_type, left_len, operator)
+        if null_term_concat:
+            # Left array ends with a null terminator; the right array's content
+            # (including its own null) should overwrite it so the result is one
+            # contiguous null-terminated string: left_chars + right_chars + '\0'.
+            # Result length = (left_len - 1) + right_len  (drop left's null).
+            result_len = (left_len - 1) + right_len
+        else:
+            result_len = left_len + right_len if operator == Operator.ADD else max(left_len - right_len, 0)
         result_array_type = ir.ArrayType(left_elem_type, result_len)
         
         # Check for compile-time concatenation
         if (isinstance(left_val, ir.GlobalVariable) and isinstance(right_val, ir.GlobalVariable) and 
             getattr(left_val, 'global_constant', False) and getattr(right_val, 'global_constant', False)):
-            return ArrayTypeHandler.create_global_array_concat(module, left_val, right_val, result_array_type, operator)
+            return ArrayTypeHandler.create_global_array_concat(module, left_val, right_val, result_array_type, operator, null_term_concat)
         else:
-            return ArrayTypeHandler.create_runtime_array_concat(builder, module, left_val, right_val, result_array_type, operator)
+            return ArrayTypeHandler.create_runtime_array_concat(builder, module, left_val, right_val, result_array_type, operator, null_term_concat)
     
     @staticmethod
-    def create_global_array_concat(module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator) -> ir.Value:
+    def create_global_array_concat(module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator, null_term_concat: bool = False) -> ir.Value:
         """Create compile-time global array concatenation."""
         from fast import Operator
         
@@ -2278,7 +2307,12 @@ class ArrayTypeHandler:
         
         # Create concatenated constant
         if operator == Operator.ADD:
-            result_elements = list(left_init.constant) + list(right_init.constant)
+            if null_term_concat:
+                # Drop the null terminator from the left side so the right side's
+                # content (including its own null) forms one contiguous string.
+                result_elements = list(left_init.constant[:-1]) + list(right_init.constant)
+            else:
+                result_elements = list(left_init.constant) + list(right_init.constant)
         else:  # SUB
             result_elements = list(left_init.constant[:result_array_type.count])
         
@@ -2293,7 +2327,7 @@ class ArrayTypeHandler:
         return global_var
     
     @staticmethod
-    def create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator) -> ir.Value:
+    def create_runtime_array_concat(builder: ir.IRBuilder, module: ir.Module, left_val: ir.Value, right_val: ir.Value, result_array_type: ir.ArrayType, operator, null_term_concat: bool = False) -> ir.Value:
         """Create runtime array concatenation using memcpy."""
         from fast import Operator
         
@@ -2304,18 +2338,23 @@ class ArrayTypeHandler:
         # Calculate element size in bytes
         elem_size_bytes = left_elem_type.width // 8
         
+        # When null_term_concat is True the left array ends with a null terminator
+        # that must be overwritten by the right array's content.  We copy only
+        # (left_len - 1) bytes from the left and start the right copy there.
+        left_copy_len = (left_len - 1) if null_term_concat else left_len
+        
         # Allocate new array for result
         result_ptr = builder.alloca(result_array_type, name="array_concat_result")
         
         # Copy left array to result
-        if left_len > 0:
+        if left_copy_len > 0:
             result_start = ArrayTypeHandler._get_array_start_ptr(builder, result_ptr, "result_start")
             left_start = ArrayTypeHandler._get_array_start_ptr(builder, left_val, "left_start")
-            ArrayTypeHandler.emit_memcpy(builder, module, result_start, left_start, left_len * elem_size_bytes)
+            ArrayTypeHandler.emit_memcpy(builder, module, result_start, left_start, left_copy_len * elem_size_bytes)
         if operator == Operator.ADD and right_len > 0:
             zero = ArrayTypeHandler._zero()
-            left_len_const = ArrayTypeHandler._index(left_len)
-            result_right_start = builder.gep(result_ptr, [zero, left_len_const], name="result_right_start")
+            right_offset_const = ArrayTypeHandler._index(left_copy_len)
+            result_right_start = builder.gep(result_ptr, [zero, right_offset_const], name="result_right_start")
             right_start = ArrayTypeHandler._get_array_start_ptr(builder, right_val, "right_start")
             ArrayTypeHandler.emit_memcpy(builder, module, result_right_start, right_start, right_len * elem_size_bytes)
         
@@ -3175,9 +3214,12 @@ class LiteralTypeHandler:
         # Parse the value if it's a string (hex literals come as strings)
         val = int(literal_value, 0) if isinstance(literal_value, str) else int(literal_value)
         
-        # For unsigned types with large values, convert to signed representation
-        # LLVM IR constants are always signed, but we need to preserve the bit pattern
-        if literal_type == DataType.UINT:
+        # For unsigned types with large values, convert to signed two's complement
+        # representation. LLVM IR integer constants must fit in the signed range
+        # for the given width, so 0xFFFFFFFFFFFFFFFF must become -1, etc.
+        # This applies to all unsigned and data types, not just DataType.UINT.
+        unsigned_types = (DataType.UINT, DataType.ULONG, DataType.DATA)
+        if literal_type in unsigned_types or literal_type is None:
             # If value is larger than max signed value for this width, convert to negative
             max_signed = (1 << (width - 1)) - 1
             if val > max_signed:
@@ -3874,7 +3916,7 @@ class FunctionTypeHandler:
     @staticmethod
     def convert_argument_to_parameter_type(builder: ir.IRBuilder, module: ir.Module, 
                                           arg_val: ir.Value, expected_type: ir.Type, 
-                                          arg_index: int) -> ir.Value:
+                                          arg_index: int, node=None) -> ir.Value:
         if arg_val.type == expected_type:
             return arg_val
         
@@ -3977,8 +4019,19 @@ class FunctionTypeHandler:
 
         # If we couldn't convert and types don't match, raise an error
         if arg_val.type != expected_type:
+            loc = ''
+            if node is not None:
+                line = getattr(node, 'source_line', None)
+                col  = getattr(node, 'source_col', None)
+                line_map = getattr(module, '_flux_line_map', None) if module is not None else None
+                if line_map and isinstance(line, int) and 1 <= line <= len(line_map):
+                    import os as _os
+                    fname, local_line = line_map[line - 1]
+                    loc = f' [{_os.path.basename(fname)}:{local_line}:{col}]'
+                elif line is not None:
+                    loc = f' [{line}:{col}]'
             raise TypeError(
-                f"FunctionTypeHandler.convert_argument_to_parameter_type: Type of #{arg_index + 1} arg mismatch: {arg_val.type} != {expected_type}\n"
+                f"FunctionTypeHandler.convert_argument_to_parameter_type: Type of #{arg_index + 1} arg mismatch: {arg_val.type} != {expected_type}{loc}\n"
                 f"Cannot convert argument type {arg_val.type} to expected parameter type {expected_type}"
             )
         

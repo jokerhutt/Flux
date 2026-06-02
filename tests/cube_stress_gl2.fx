@@ -30,12 +30,13 @@
 //   fxc cube_stress.fx -o cube_stress.exe
 // ============================================================================
 
-#import "standard.fx", "math.fx", "vectors.fx", "matrices.fx", "windows.fx", "opengl.fx", "raycasting.fx";
+#import "standard.fx", "math.fx", "vectors.fx", "matrices.fx", "windows.fx", "opengl.fx", "raycasting.fx", "string_utilities.fx";
 
 using standard::io::console,
       standard::system::windows,
       standard::math,
       standard::vectors,
+      standard::strings,
       raycaster;
 
 // ============================================================================
@@ -64,78 +65,78 @@ def build_cube_mesh(R3DMesh* mesh) -> void
     mesh.verts[ 0].u =  0.0; mesh.verts[ 0].v =  0.0;
 
     mesh.verts[ 1].x =  0.5; mesh.verts[ 1].y = -0.5; mesh.verts[ 1].z =  0.5;
-    mesh.verts[ 1].u =  1.0; mesh.verts[ 1].v =  0.0;
+    mesh.verts[ 1].u =  8.0; mesh.verts[ 1].v =  0.0;
 
     mesh.verts[ 2].x =  0.5; mesh.verts[ 2].y =  0.5; mesh.verts[ 2].z =  0.5;
-    mesh.verts[ 2].u =  1.0; mesh.verts[ 2].v =  1.0;
+    mesh.verts[ 2].u =  8.0; mesh.verts[ 2].v =  8.0;
 
     mesh.verts[ 3].x = -0.5; mesh.verts[ 3].y =  0.5; mesh.verts[ 3].z =  0.5;
-    mesh.verts[ 3].u =  0.0; mesh.verts[ 3].v =  1.0;
+    mesh.verts[ 3].u =  0.0; mesh.verts[ 3].v =  8.0;
 
     // -- -Z face (back, nz = -1) ----------------------------------------------
     mesh.verts[ 4].x =  0.5; mesh.verts[ 4].y = -0.5; mesh.verts[ 4].z = -0.5;
     mesh.verts[ 4].u =  0.0; mesh.verts[ 4].v =  0.0;
 
     mesh.verts[ 5].x = -0.5; mesh.verts[ 5].y = -0.5; mesh.verts[ 5].z = -0.5;
-    mesh.verts[ 5].u =  1.0; mesh.verts[ 5].v =  0.0;
+    mesh.verts[ 5].u =  8.0; mesh.verts[ 5].v =  0.0;
 
     mesh.verts[ 6].x = -0.5; mesh.verts[ 6].y =  0.5; mesh.verts[ 6].z = -0.5;
-    mesh.verts[ 6].u =  1.0; mesh.verts[ 6].v =  1.0;
+    mesh.verts[ 6].u =  8.0; mesh.verts[ 6].v =  8.0;
 
     mesh.verts[ 7].x =  0.5; mesh.verts[ 7].y =  0.5; mesh.verts[ 7].z = -0.5;
-    mesh.verts[ 7].u =  0.0; mesh.verts[ 7].v =  1.0;
+    mesh.verts[ 7].u =  0.0; mesh.verts[ 7].v =  8.0;
 
     // -- +X face (right, nx = +1) ---------------------------------------------
     mesh.verts[ 8].x =  0.5; mesh.verts[ 8].y = -0.5; mesh.verts[ 8].z =  0.5;
     mesh.verts[ 8].u =  0.0; mesh.verts[ 8].v =  0.0;
 
     mesh.verts[ 9].x =  0.5; mesh.verts[ 9].y = -0.5; mesh.verts[ 9].z = -0.5;
-    mesh.verts[ 9].u =  1.0; mesh.verts[ 9].v =  0.0;
+    mesh.verts[ 9].u =  8.0; mesh.verts[ 9].v =  0.0;
 
     mesh.verts[10].x =  0.5; mesh.verts[10].y =  0.5; mesh.verts[10].z = -0.5;
-    mesh.verts[10].u =  1.0; mesh.verts[10].v =  1.0;
+    mesh.verts[10].u =  8.0; mesh.verts[10].v =  8.0;
 
     mesh.verts[11].x =  0.5; mesh.verts[11].y =  0.5; mesh.verts[11].z =  0.5;
-    mesh.verts[11].u =  0.0; mesh.verts[11].v =  1.0;
+    mesh.verts[11].u =  0.0; mesh.verts[11].v =  8.0;
 
     // -- -X face (left, nx = -1) ----------------------------------------------
     mesh.verts[12].x = -0.5; mesh.verts[12].y = -0.5; mesh.verts[12].z = -0.5;
     mesh.verts[12].u =  0.0; mesh.verts[12].v =  0.0;
 
     mesh.verts[13].x = -0.5; mesh.verts[13].y = -0.5; mesh.verts[13].z =  0.5;
-    mesh.verts[13].u =  1.0; mesh.verts[13].v =  0.0;
+    mesh.verts[13].u =  8.0; mesh.verts[13].v =  0.0;
 
     mesh.verts[14].x = -0.5; mesh.verts[14].y =  0.5; mesh.verts[14].z =  0.5;
-    mesh.verts[14].u =  1.0; mesh.verts[14].v =  1.0;
+    mesh.verts[14].u =  8.0; mesh.verts[14].v =  8.0;
 
     mesh.verts[15].x = -0.5; mesh.verts[15].y =  0.5; mesh.verts[15].z = -0.5;
-    mesh.verts[15].u =  0.0; mesh.verts[15].v =  1.0;
+    mesh.verts[15].u =  0.0; mesh.verts[15].v =  8.0;
 
     // -- +Y face (top, ny = +1) -----------------------------------------------
     mesh.verts[16].x = -0.5; mesh.verts[16].y =  0.5; mesh.verts[16].z =  0.5;
     mesh.verts[16].u =  0.0; mesh.verts[16].v =  0.0;
 
     mesh.verts[17].x =  0.5; mesh.verts[17].y =  0.5; mesh.verts[17].z =  0.5;
-    mesh.verts[17].u =  1.0; mesh.verts[17].v =  0.0;
+    mesh.verts[17].u =  8.0; mesh.verts[17].v =  0.0;
 
     mesh.verts[18].x =  0.5; mesh.verts[18].y =  0.5; mesh.verts[18].z = -0.5;
-    mesh.verts[18].u =  1.0; mesh.verts[18].v =  1.0;
+    mesh.verts[18].u =  8.0; mesh.verts[18].v =  8.0;
 
     mesh.verts[19].x = -0.5; mesh.verts[19].y =  0.5; mesh.verts[19].z = -0.5;
-    mesh.verts[19].u =  0.0; mesh.verts[19].v =  1.0;
+    mesh.verts[19].u =  0.0; mesh.verts[19].v =  8.0;
 
     // -- -Y face (bottom, ny = -1) --------------------------------------------
     mesh.verts[20].x = -0.5; mesh.verts[20].y = -0.5; mesh.verts[20].z = -0.5;
     mesh.verts[20].u =  0.0; mesh.verts[20].v =  0.0;
 
     mesh.verts[21].x =  0.5; mesh.verts[21].y = -0.5; mesh.verts[21].z = -0.5;
-    mesh.verts[21].u =  1.0; mesh.verts[21].v =  0.0;
+    mesh.verts[21].u =  8.0; mesh.verts[21].v =  0.0;
 
     mesh.verts[22].x =  0.5; mesh.verts[22].y = -0.5; mesh.verts[22].z =  0.5;
-    mesh.verts[22].u =  1.0; mesh.verts[22].v =  1.0;
+    mesh.verts[22].u =  8.0; mesh.verts[22].v =  8.0;
 
     mesh.verts[23].x = -0.5; mesh.verts[23].y = -0.5; mesh.verts[23].z =  0.5;
-    mesh.verts[23].u =  0.0; mesh.verts[23].v =  1.0;
+    mesh.verts[23].u =  0.0; mesh.verts[23].v =  8.0;
 
     // -- Triangle indices (CCW winding when viewed from outside) --------------
     // Face 0 (+Z)
@@ -169,12 +170,9 @@ def build_cube_mesh(R3DMesh* mesh) -> void
 
 def make_metal_texture(RCTexturePalette* pal) -> void
 {
-    // 256x256 with 16-texel checker squares.
-    // Each square is 4x more texels per side than the old 64x64/4-texel version,
-    // so nearest-neighbor at close range renders actual detail instead of
-    // zoomed-in 4-pixel blocks.
-    const int TEX_W = 256,
-              TEX_H = 256;
+    // 2x2 checkerboard: one texel per square, minimal possible texture.
+    const int TEX_W = 2,
+              TEX_H = 2;
 
     size_t bytes;
     u64*   pixels;
@@ -190,10 +188,9 @@ def make_metal_texture(RCTexturePalette* pal) -> void
         x = 0;
         while (x < TEX_W)
         {
-            // 16x16 checker squares (same visual proportion as 4x4 in 64x64)
-            check = ((x / 16) + (y / 16)) % 2;
+            // 1x1 checker squares -- each texel is one square
+            check = (x + y) % 2;
 
-            // No per-square noise or scratch variation -- pure flat color per square.
             noise = 0.0;
             scratch = 0.0;
 
@@ -227,6 +224,9 @@ def make_metal_texture(RCTexturePalette* pal) -> void
     // Slot index 1 (slot 0 reserved by raycasting.fx convention)
     rc_palette_add(pal, pixels, TEX_W, TEX_H);
 
+    // Build mip chain so rc_tex_sample_mip can filter at oblique angles
+    rc_tex_build_mips(@pal.slots[pal.count - 1]);
+
     return;
 };
 
@@ -256,8 +256,45 @@ def lcg_range(u64* seed, double lo, double hi) -> double
 };
 
 // ============================================================================
-// MAIN
+// FPS TITLE BUILDER
+//
+// Writes "Cube Stress | FPS: NNN | Avg/min: NNN.N" into buf (must be >= 64
+// bytes) and null-terminates it.  Returns nothing; caller passes buf to
+// win.set_title().
 // ============================================================================
+
+def build_fps_title(byte* buf, int fps_now, double fps_avg) -> void
+{
+    // Prefix
+    byte[64] tmp;
+    int pos, n, k;
+    pos = 0;
+
+    // "Cube Stress | FPS: "
+    byte* prefix = "Cube Stress | FPS: ";
+    k = 0;
+    while (prefix[k] != (byte)0) { buf[pos] = prefix[k]; pos++; k++; };
+
+    // current FPS integer
+    n = i32str((i32)fps_now, @tmp[0]);
+    k = 0;
+    while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
+
+    // " | Avg/min: "
+    byte* mid = " | Avg/min: ";
+    k = 0;
+    while (mid[k] != (byte)0) { buf[pos] = mid[k]; pos++; k++; };
+
+    // average FPS with 1 decimal place
+    n = dbl2str(fps_avg, @tmp[0], (i32)1);
+    k = 0;
+    while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
+
+    buf[pos] = (byte)0;
+    return;
+};
+
+
 
 const int VK_LEFT  = 0x25,
           VK_RIGHT = 0x27,
@@ -338,6 +375,8 @@ def main() -> int
     // Seed chosen arbitrarily; change to get a different field layout.
     u64 rng_seed = (u64)0xDEADBEEF1337C0DE;
     int i;
+    double s, lx, ly, lz, lr, lg, lb;
+    int which;
 
     i = 0;
     while (i < NUM_CUBES)
@@ -351,7 +390,6 @@ def main() -> int
 
         // Random uniform scale [0.4, 2.5]
         {
-            double s;
             s = lcg_range(@rng_seed, 0.4d, 2.5d);
             insts[i].scale_x = s;
             insts[i].scale_y = s;
@@ -366,39 +404,55 @@ def main() -> int
         // Cycle through the four tints
         insts[i].tint = tints[i % 4];
 
-        insts[i].shade_model = R3D_SHADE_GOURAUD;
+        insts[i].shade_model = R3D_SHADE_FLAT;
 
         inst_ptrs[i] = @insts[i];
 
         i++;
     };
 
-    // -- Lights (identical three-point rig from cube_demo.fx) ------------------
-    R3DLight[3] lights;
+    // -- Lights: one directional key + scattered point lights ------------------
+    const int NUM_LIGHTS = 33;  // 1 directional + 32 point lights
+    u64 light_seed = (u64)0xCAFEBABEDEADF00D;
 
-    // Key light: sun-like warm white, shining from upper-left-front
+    R3DLight* lights = (R3DLight*)fmalloc((size_t)(NUM_LIGHTS * (i32)(sizeof(R3DLight) / 8)));
+
     r3d_light_directional(@lights[0],
-        -0.6, -0.8, -0.4,        // direction vector (points at scene)
-         1.00, 0.95, 0.85,       // warm white color
-         1.1);                    // intensity
+        -0.6, -0.8, -0.4,
+         1.00, 0.95, 0.85,
+         0.3);
 
-    // Fill light: cool blue-tinted point light to the right
-    r3d_light_point(@lights[1],
-         3.0, 1.0, 2.0,          // position (right, mid-height, in front)
-         0.6, 0.7, 1.0,          // cool blue tint
-         0.8,                     // intensity
-         1.0, 0.15, 0.03);        // attenuation: const, linear, quad
+    i = 1;
+    while (i < NUM_LIGHTS)
+    {
+        lx = lcg_range(@light_seed, -40.0d, 40.0d);
+        ly = lcg_range(@light_seed, -15.0d, 15.0d);
+        lz = lcg_range(@light_seed, -40.0d, 40.0d);
 
-    // Rim light: icy silver from behind-right for edge definition
-    r3d_light_directional(@lights[2],
-         0.7, 0.3, 0.9,          // direction vector (from front-left, hitting back-right)
-         0.85, 0.90, 1.0,        // near-white with cool cast
-         0.45);                   // intensity
+        which = lcg_next(@light_seed) % 6;
+        switch (which)
+        {
+            case (0) { lr = 1.0d; lg = 0.3d; lb = 0.2d; }
+            case (1) { lr = 1.0d; lg = 0.6d; lb = 0.1d; }
+            case (2) { lr = 0.2d; lg = 1.0d; lb = 0.3d; }
+            case (3) { lr = 0.1d; lg = 0.7d; lb = 1.0d; }
+            case (4) { lr = 0.6d; lg = 0.2d; lb = 1.0d; }
+            default  { lr = 1.0d; lg = 1.0d; lb = 0.6d; };
+        };
+
+        r3d_light_point(@lights[i],
+            lx, ly, lz,
+            lr, lg, lb,
+            0.9,
+            1.0, 0.5, 0.5);
+
+        i++;
+    };
 
     // -- Sky -------------------------------------------------------------------
     RCSky sky;
-    sky.color_top     = color64_pack(0.04d, 0.07d, 0.18d);   // deep midnight blue
-    sky.color_horizon = color64_pack(0.01d, 0.02d, 0.06d);   // near-black at horizon
+    sky.color_top     = color64_pack(0.04d, 0.04d, 0.05d);   // near-black at zenith
+    sky.color_horizon = color64_pack(0.15d, 0.15d, 0.15d);   // neutral gray at horizon, matches fog
 
     // -- Camera + player -------------------------------------------------------
     R3DCamera cam;
@@ -414,15 +468,32 @@ def main() -> int
     R3DScene scene;
     r3d_scene_init(@scene, @cam, @player, @palette, @sky);
     r3d_scene_set_insts(@scene, inst_ptrs, NUM_CUBES);
-    r3d_scene_set_lights(@scene, @lights[0], 3);
-    r3d_scene_set_ambient(@scene, 0.06d, 0.07d, 0.10d);
+    r3d_scene_set_lights(@scene, @lights[0], NUM_LIGHTS);
+    r3d_scene_set_ambient(@scene, 0.002d, 0.002d, 0.004d);
+    r3d_scene_set_fog(@scene, 0.0d, 0.0d, 0.15d, 0.15d, 0.15d);
+    r3d_scene_set_vol_fog(@scene, 0.012d, 0.4d, -5.0d, 0.10d, 0.10d, 0.12d);
     scene.passes = R3D_PASS_ALL;
 
     // -- State variables -------------------------------------------------------
     DWORD t_start, t_last, t_now;
     double dt, elapsed;
+    double speed_y, speed_x;
     WORD  left_st, right_st, up_st, dn_st, w_st, s_st, a_st, d_st, q_st, e_st, r_st;
     RECT  cr;
+    i32 cur_w, cur_h;
+
+    // -- FPS counter state -----------------------------------------------------
+    // fps_frames counts raw frames in the current second.
+    // fps_now is the last completed second's frame count (displayed).
+    // fps_ring[60] stores one fps_now per second for the rolling minute average.
+    // fps_ring_count is how many slots are filled (caps at 60).
+    // fps_ring_pos is the next write slot (wraps at 60).
+    // fps_sec_accum accumulates sub-second time until a full second passes.
+    // fps_avg is the running per-minute average recomputed each second.
+    int    fps_frames, fps_now, fps_ring_count, fps_ring_pos;
+    double fps_sec_accum, fps_avg;
+    int[60] fps_ring;
+    byte[64] fps_title_buf;
 
     t_start = GetTickCount();
     t_last  = t_start;
@@ -433,6 +504,35 @@ def main() -> int
         t_now = GetTickCount();
         dt    = (double)(t_now - t_last) / 1000.0d;
         t_last = t_now;
+
+        // -- FPS accounting ---------------------------------------------------
+        fps_frames++;
+        fps_sec_accum = fps_sec_accum + dt;
+        if (fps_sec_accum >= 1.0d)
+        {
+            fps_sec_accum = fps_sec_accum - 1.0d;
+            fps_now = fps_frames;
+            fps_frames = 0;
+
+            // Push fps_now into the 60-slot ring buffer
+            fps_ring[fps_ring_pos] = fps_now;
+            fps_ring_pos++;
+            if (fps_ring_pos >= 60) { fps_ring_pos = 0; };
+            if (fps_ring_count < 60) { fps_ring_count++; };
+
+            // Recompute rolling average over filled slots
+            {
+                int ri, rsum;
+                ri = 0;
+                rsum = 0;
+                while (ri < fps_ring_count) { rsum = rsum + fps_ring[ri]; ri++; };
+                if (fps_ring_count > 0) { fps_avg = (double)rsum / (double)fps_ring_count; }
+                else { fps_avg = 0.0d; };
+            };
+
+            build_fps_title(@fps_title_buf[0], fps_now, fps_avg);
+            win.set_title(@fps_title_buf[0]);
+        };
         if (dt > 0.1d) { dt = 0.1d; };
 
         // -- Input ------------------------------------------------------------
@@ -486,7 +586,6 @@ def main() -> int
         i = 0;
         while (i < NUM_CUBES)
         {
-            double speed_y, speed_x;
             speed_y = 0.30d + (double)(i % 17) * 0.02d;
             speed_x = 0.15d + (double)(i % 11) * 0.018d;
             // Base offsets were seeded randomly at init; just add elapsed rotation
@@ -503,7 +602,6 @@ def main() -> int
         // -- Resize check -----------------------------------------------------
         GetClientRect(win.handle, @cr);
         {
-            i32 cur_w, cur_h;
             cur_w = cr.right  - cr.left;
             cur_h = cr.bottom - cr.top;
             if (cur_w < 1) { cur_w = 1; };
@@ -541,6 +639,7 @@ def main() -> int
     rc_palette_free(@palette);
     ffree((u64)insts);
     ffree((u64)inst_ptrs);
+    ffree((u64)lights);
     ffree((u64)pixels);
     ffree((u64)zbuf);
 

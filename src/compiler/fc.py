@@ -401,11 +401,10 @@ class FluxCompiler:
                 # TODO:
                 # match (compiler):   case "clang", case "llc", etc...
                 compiler_args = [
-                    #"-O" + config['lto_optimization_level'],  # Aggressive optimization level
+                    "-O3",                              # Maximum optimization level
                     "-filetype=obj",                    # Direct object file output
                     "-mtriple=" + self.module_triple,   # Target triple
-                    #"-march=" + config['architecture'], # Architecture
-                    #"-mcpu=" + config['cpu'],           # Target CPU
+                    *self._get_llc_target_flags(),      # march/mcpu/mattr
                     "-enable-misched",                  # Enable machine instruction scheduler
                     "-enable-tail-merge",               # Merge similar tail code
                     "-optimize-regalloc",               # Optimize register allocation
@@ -420,6 +419,39 @@ class FluxCompiler:
                     "-o",
                     str(obj_file)
                 ]
+
+                # Run opt to clean IR before llc: mem2reg eliminates the
+                # redundant struct-alloca reload pattern the codegen emits,
+                # sroa scalarizes aggregates, and inline/instcombine/dce
+                # remove dead code. This dramatically reduces what llc sees.
+                # Try versioned names first (MSYS2/MinGW ships opt-21, opt-18, etc.)
+                opt_exe = None
+                for opt_candidate in ["opt-21", "opt-20", "opt-19", "opt-18", "opt"]:
+                    try:
+                        opt_exe = resolve_llvm_tool(opt_candidate)
+                        break
+                    except FileNotFoundError:
+                        continue
+
+                if opt_exe is not None:
+                    opt_ll  = temp_dir / f"{base_name}.opt.ll"
+                    opt_cmd = [
+                        opt_exe,
+                        "-passes=mem2reg,sroa,dce,simplifycfg",
+                        "-S",
+                        str(ll_file),
+                        "-o",
+                        str(opt_ll)
+                    ]
+                    try:
+                        subprocess.run(opt_cmd, check=True, capture_output=True, text=True)
+                        ll_file = opt_ll
+                        self.temp_files.append(opt_ll)
+                        self.logger.info("opt IR optimization pass complete", compiler)
+                    except subprocess.CalledProcessError as opt_err:
+                        self.logger.warning(f"opt pass failed: {opt_err.stderr[:200]}", compiler)
+                else:
+                    self.logger.warning("opt pass skipped (not available or failed)", compiler)
 
                 # Compile LLVM IR to object file using desired compiler
                 cmd = [compiler_exe] + compiler_args
@@ -587,6 +619,10 @@ class FluxCompiler:
                     #"msvcrt.lib",   # Optional, link with C runtime
                     "user32.lib",  # Uncomment only if GUI functions are used
                     "gdi32.lib",   # Uncomment only if drawing functions are used
+                    "secur32.lib",
+                    "crypt32.lib",
+                    "bcrypt.lib",
+                    "ncrypt.lib",
                     *extra_libs,
                     f"/out:build\\{output_dir}\\{output_bin}"
                 ]
@@ -631,7 +667,7 @@ class FluxCompiler:
                                 "-Wl,/ENTRY:FRTStartup "  # Use CRT startup for compatibility
                                 "-Wl,/SUBSYSTEM:CONSOLE "
                                 # Link only necessary libraries:
-                                "-lkernel32 "  # Windows kernel functions (CreateFile, ReadFile, etc.)
+                                "-lkernel32 -lntdll "  # Windows kernel functions (CreateFile, ReadFile, etc.)
                                 "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
                                 "-lWs2_32 "
                                 "-luser32 "
@@ -644,6 +680,7 @@ class FluxCompiler:
                                 "-ld2d1 "
                                 "-ldwrite "
                                 "-lucrt -lmsvcrt "
+                                "-lsecur32 -lcrypt32 -lbcrypt -lncrypt "
                                 #"-lfreetype "
                                 #"-lgdiplus "
                                 #"-ld2d1 "
@@ -652,8 +689,6 @@ class FluxCompiler:
                                 "-llegacy_stdio_definitions "  # For stdio functions in UCRT
                                 # Alternatively for older MSVCRT:
                                 # "-lmsvcrt "  # Old C runtime (smaller but may have issues)
-                                "-ld3d11 -ld3dcompiler -ldxgi ",
-                                shell=True
                             )
                         except Exception as e:
                             print("EXCEPTION:",e)

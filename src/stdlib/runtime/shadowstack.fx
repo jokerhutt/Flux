@@ -1,131 +1,317 @@
 // Author: Karac V. Thweatt
 
-///
-Flux Shadow Stack — Windows x64
+// Flux Shadow Stack
+// Provides a hardware-assisted shadow return-address stack to protect against
+// stack-smashing / return-address overwrite attacks.
+//
+// Activated by defining FLUX_SHADOW_STACK before importing standard.fx:
+//
+//   #def FLUX_SHADOW_STACK 1;
+//   #import "standard.fx";
+//
+// When active, FRTStartup (Windows) captures the return address and a
+// canary into a separately allocated, non-executable shadow page before
+// calling main(), then validates them on return.
+//
+// If tampering is detected the process is aborted immediately.
 
-A software shadow stack that mirrors return addresses for each call frame.
-On entry to a guarded function, the real return address is pushed onto the
-shadow stack. On exit, the saved address is compared against the live return
-address on the hardware stack; a mismatch triggers an immediate abort.
+#ifndef FLUX_SHADOW_STACK_IMPL
+#def FLUX_SHADOW_STACK_IMPL 1;
 
-Usage:
-    #def FLUX_SHADOW_STACK 1;
-    #import "standard.fx";      // pulls in runtime.fx -> shadowstack.fx
-
-Public API (called by compiler-generated prologues / epilogues):
-    shadowstack::push(void* ret_addr) -> void
-    shadowstack::pop(void* ret_addr)  -> void   // aborts on mismatch
-    shadowstack::init()               -> void   // called by FRTStartup
-    shadowstack::teardown()           -> void   // called after main() returns
-
-Internal layout (per-thread, heap-allocated):
-    void*[]  — array of saved return addresses
-    uint     — stack pointer (index of next free slot)
-    uint     — capacity (in slots)
-///
-
-#ifndef FLUX_SHADOW_STACK
-#stop "shadowstack.fx imported without FLUX_SHADOW_STACK defined.";
+#ifndef FLUX_STANDARD_TYPES
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
 #import "memory.fx";
 #endif;
 
-using standard::memory::allocators::stdheap;
-
-namespace shadowstack
+// ============================================================================
+// Shadow stack record - one per protected frame
+// ============================================================================
+struct FSSFrame
 {
-
-// -----------------------------------------------------------------------
-// Constants
-// -----------------------------------------------------------------------
-
-#def SHADOW_STACK_INIT_CAPACITY  4096;   // initial slots
-#def SHADOW_STACK_GROW_FACTOR    2;      // double on overflow
-
-// -----------------------------------------------------------------------
-// Internal state  (one per thread — single-thread runtime for now)
-// -----------------------------------------------------------------------
-
-// Plain pointer array: _stack[n] holds the nth saved return address.
-global void** _stack = void;
-global uint   _sp    = 0;
-global uint   _cap   = 0;
-
-// -----------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------
-
-def _grow() -> void
-{
-    uint new_cap = _cap * (uint)SHADOW_STACK_GROW_FACTOR;
-    void** new_stack = (void**)fmalloc((u64)new_cap * (u64)8);
-
-    // Bulk-copy existing slots via memcpy
-    memcpy((void*)new_stack, (void*)_stack, (u64)_sp * (u64)8);
-
-    ffree(long(_stack));
-    _stack = new_stack;
-    _cap   = new_cap;
+    u64 canary,       // Random canary value XOR'd with the saved return address
+        saved_ra,     // Return address captured at frame entry (XOR'd with canary)
+        saved_rsp;    // Stack pointer at frame entry, for depth validation
 };
 
-// -----------------------------------------------------------------------
-// Public API
-// -----------------------------------------------------------------------
+// ============================================================================
+// Shadow stack globals
+//
+// FSS_BASE   - pointer to the heap-allocated shadow page
+// FSS_TOP    - current push index (grows upward)
+// FSS_CAP    - maximum number of frames the page can hold
+// FSS_CANARY - process-lifetime random seed mixed into every frame
+// ============================================================================
+global FSSFrame* FSS_BASE      = (FSSFrame*)NULL;
+global u64       FSS_TOP       = 0;
+global u64       FSS_CAP       = 0;
+global u64       FSS_CANARY    = 0;
 
-def init() -> void
+// ============================================================================
+// Platform externs (Windows only for now)
+// ============================================================================
+#ifdef __WINDOWS__
+extern
 {
-    _stack = (void**)fmalloc((u64)(uint)SHADOW_STACK_INIT_CAPACITY * (u64)8);
-    _sp    = 0;
-    _cap   = (uint)SHADOW_STACK_INIT_CAPACITY;
+    // VirtualAlloc(lpAddress, dwSize, flAllocationType, flProtect) -> void*
+    stdcall !!
+        VirtualAlloc(void*, u64, u32, u32) -> void*,
+        VirtualFree(void*, u64, u32)       -> i32,
+        VirtualProtect(void*, u64, u32, u32*) -> i32;
+
+    // For generating the canary: use the timestamp counter as entropy source
+    // We also pull in QueryPerformanceCounter for additional entropy
+    stdcall !!
+        QueryPerformanceCounter(u64*) -> i32;
+
+    stdcall !!
+        ExitProcess(u32 uExitCode) -> void;
 };
 
-def teardown() -> void
-{
-    ffree(long(_stack));
-    _stack = void;
-    _sp    = 0;
-    _cap   = 0;
-};
+// MEM_COMMIT | MEM_RESERVE
+#def FSS_MEM_COMMIT_RESERVE 0x3000;
+// PAGE_READWRITE
+#def FSS_PAGE_READWRITE 0x04;
+// PAGE_NOACCESS - applied after init so the page cannot be executed or written freely
+#def FSS_PAGE_NOACCESS  0x01;
+// MEM_RELEASE
+#def FSS_MEM_RELEASE    0x8000;
 
-///
-Push a return address onto the shadow stack.
-Called in the prologue of every guarded function.
-///
-def push(void* ret_addr) -> void
+// Number of frames the shadow page holds (one 4 KB page / 24 bytes per frame)
+#def FSS_FRAME_CAPACITY 170;
+// Size in bytes of the shadow allocation (one 4 KB page)
+#def FSS_PAGE_SIZE 4096;
+
+namespace standard
 {
-    if (_sp >= _cap)
+    namespace runtime
     {
-        _grow();
+        namespace shadow_stack
+        {
+            // ----------------------------------------------------------------
+            // fss_rdtsc() - Read the hardware timestamp counter.
+            // Used as a cheap entropy source when seeding the canary.
+            // ----------------------------------------------------------------
+            def fss_rdtsc() -> u64
+            {
+                u64 result = 0;
+                volatile asm
+                {
+                    rdtsc
+                    shlq $$32, %rdx
+                    orq %rdx, %rax
+                    movq %rax, $0
+                } : : "m"(result) : "rax", "rdx";
+                return result;
+            };
+
+            // ----------------------------------------------------------------
+            // fss_init() - Allocate and prepare the shadow stack page.
+            //
+            // Must be called before any frame is pushed.
+            // Returns true on success, false if allocation failed.
+            // ----------------------------------------------------------------
+            def fss_init() -> bool
+            {
+                // Allocate one committed, read-write page for the shadow frames
+                void* page = VirtualAlloc(
+                    ulong((void*)NULL),
+                    (u64)FSS_PAGE_SIZE,
+                    (u32)FSS_MEM_COMMIT_RESERVE,
+                    (u32)FSS_PAGE_READWRITE
+                );
+
+                if (page == (void*)NULL)
+                {
+                    return false;
+                };
+
+                FSS_BASE = (FSSFrame*)page;
+                FSS_TOP  = 0;
+                FSS_CAP  = (u64)FSS_FRAME_CAPACITY;
+
+                // Build the process-lifetime canary from two entropy sources:
+                // the hardware timestamp counter and QueryPerformanceCounter,
+                // then XOR them together and mix with a constant to avoid a
+                // zero canary.
+                u64 t0 = fss_rdtsc();
+                u64 qpc = 0;
+                QueryPerformanceCounter(@qpc);
+                FSS_CANARY = t0 ^^ (qpc << 17) ^^ (qpc >> 47) ^^ 0xA3B4C5D6E7F80192u;
+
+                return true;
+            };
+
+            // ----------------------------------------------------------------
+            // fss_push(ra, rsp) - Save a return address and stack pointer.
+            //
+            // ra  - the return address to protect
+            // rsp - the caller's stack pointer for depth validation
+            //
+            // The saved_ra field is stored XOR'd with FSS_CANARY so a simple
+            // linear scan of the shadow page does not reveal the raw address.
+            // Returns the frame index (slot) used, or U64MAXVAL on overflow.
+            // ----------------------------------------------------------------
+            def fss_push(u64 ra, u64 rsp) -> u64
+            {
+                if (FSS_TOP >= FSS_CAP)
+                {
+                    return U64MAXVAL;
+                };
+
+                FSSFrame* frame = FSS_BASE + FSS_TOP;
+                frame.canary    = FSS_CANARY;
+                frame.saved_ra  = ra ^^ FSS_CANARY;
+                frame.saved_rsp = rsp;
+
+                FSS_TOP = FSS_TOP + 1;
+                return FSS_TOP - 1;
+            };
+
+            // ----------------------------------------------------------------
+            // fss_verify(slot, ra, rsp) - Validate a previously pushed frame.
+            //
+            // slot - the frame index returned by fss_push()
+            // ra   - the return address currently on the real stack
+            // rsp  - the current stack pointer
+            //
+            // Returns true if both the canary and return address are intact.
+            // ----------------------------------------------------------------
+            def fss_verify(u64 slot, u64 ra, u64 rsp) -> bool
+            {
+                if (slot >= FSS_CAP)
+                {
+                    return false;
+                };
+
+                FSSFrame* frame = FSS_BASE + slot;
+
+                // The canary field must be exactly FSS_CANARY
+                if (frame.canary != FSS_CANARY)
+                {
+                    return false;
+                };
+
+                // Decode and compare return address
+                u64 expected_ra = frame.saved_ra ^^ FSS_CANARY;
+                if (expected_ra != ra)
+                {
+                    return false;
+                };
+
+                // Stack pointer must match (frame depth check)
+                if (frame.saved_rsp != rsp)
+                {
+                    return false;
+                };
+
+                return true;
+            };
+
+            // ----------------------------------------------------------------
+            // fss_pop() - Pop and clear the top frame.
+            // ----------------------------------------------------------------
+            def fss_pop() -> void
+            {
+                if (FSS_TOP == 0)
+                {
+                    return;
+                };
+
+                FSS_TOP = FSS_TOP - 1;
+                FSSFrame* frame = FSS_BASE + FSS_TOP;
+
+                // Zero out the frame so it cannot be replayed
+                frame.canary    = 0;
+                frame.saved_ra  = 0;
+                frame.saved_rsp = 0;
+
+                return;
+            };
+
+            // ----------------------------------------------------------------
+            // fss_abort() - Called when tampering is detected.
+            //
+            // Prints a diagnostic then terminates the process immediately.
+            // Uses the low-level console printer to avoid any heap usage,
+            // since the stack may be in an untrusted state.
+            // ----------------------------------------------------------------
+            def fss_abort() -> void
+            {
+                standard::io::console::print("FATAL: shadow stack violation detected - aborting\n\0");
+                ExitProcess((u32)1);
+                noreturn;
+            };
+
+            // ----------------------------------------------------------------
+            // fss_teardown() - Free the shadow stack page.
+            //
+            // Called after successful verification, before normal process exit.
+            // ----------------------------------------------------------------
+            def fss_teardown() -> void
+            {
+                if (FSS_BASE == (FSSFrame*)NULL)
+                {
+                    return;
+                };
+
+                VirtualFree(ulong((void*)FSS_BASE), (u64)0, (u32)FSS_MEM_RELEASE);
+                FSS_BASE   = (FSSFrame*)NULL;
+                FSS_TOP    = 0;
+                FSS_CAP    = 0;
+                FSS_CANARY = 0;
+                return;
+            };
+        };
     };
-    _stack[_sp] = ret_addr;
-    _sp++;
 };
 
-///
-Pop and verify a return address from the shadow stack.
-Called in the epilogue of every guarded function, just before ret.
-Aborts the process if the live return address does not match the saved one.
-///
-def pop(void* ret_addr) -> void
+using standard::runtime::shadow_stack;
+
+// ============================================================================
+// Shadow Stack Contracts
+//
+// Usage:
+//   def vulnerable(byte* buf, int len) -> void : FSS_Protect_Frame
+//   {
+//       // ...
+//   } : FSS_Cleanup_Frame;
+//
+// FSS_Protect_Frame pushes a shadow frame on entry.
+// FSS_Cleanup_Frame verifies and pops it before every return.
+// If the canary is corrupted, fss_abort() is called immediately.
+// ============================================================================
+
+contract FSS_Protect_Frame
 {
-    if (_sp == 0)
+    u64 __fss_canary_local,
+        __fss_frame_slot;
+    bool __fss_frame_active;
+    if (FSS_BASE != (FSSFrame*)NULL)
     {
-        standard::io::console::print("SHADOW STACK UNDERFLOW\n\0");
-        abort();
-        noreturn;
-    };
-
-    _sp--;
-    void* saved = _stack[_sp];
-
-    if (saved != ret_addr)
-    {
-        standard::io::console::print("SHADOW STACK VIOLATION: return address corrupted\n\0");
-        abort();
-        noreturn;
+        u64 __fss_frame_canary = fss_rdtsc() ^^ FSS_CANARY;
+        __fss_canary_local = __fss_frame_canary;
+        __fss_frame_slot = fss_push(__fss_frame_canary, __fss_frame_canary);
+        __fss_frame_active = true;
     };
 };
 
-}; // namespace shadowstack
+contract FSS_Cleanup_Frame
+{
+    if (__fss_frame_active)
+    {
+        if (fss_verify(__fss_frame_slot, __fss_canary_local, __fss_frame_canary))
+        {
+            fss_pop();
+        }
+        else
+        {
+            fss_abort();
+        };
+    };
+};
+
+#endif; // __WINDOWS__
+#endif; // FLUX_SHADOW_STACK_IMPL

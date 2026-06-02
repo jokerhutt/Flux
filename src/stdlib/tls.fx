@@ -1,1789 +1,2232 @@
 // Author: Karac V. Thweatt
-// tls13.fx - TLS 1.3 Client + Server Implementation
-//
-// Implements TLS 1.3 (RFC 8446) client-side handshake and record layer.
-// Cipher suite: TLS_AES_128_GCM_SHA256 (the only mandatory TLS 1.3 suite)
-// Key exchange:  x25519
-// PRF:           HKDF-SHA-256
-//
-// Public API:
-//   tls13_connect(TLS13_CTX*, int sockfd, byte* hostname, int hostname_len) -> int
-//     Performs the full TLS 1.3 handshake over an already-connected TCP socket.
-//     Returns 1 on success, 0 on failure.
-//
-//   tls13_send(TLS13_CTX*, byte* data, int len) -> int
-//     Encrypts and sends application data. Returns bytes sent, -1 on error.
-//
-//   tls13_recv(TLS13_CTX*, byte* buf, int buf_len) -> int
-//     Receives and decrypts one TLS record. Returns plaintext bytes, -1 on error.
-//
-//   tls13_close(TLS13_CTX*) -> void
-//     Sends a close_notify alert and tears down the session.
-//
-// Limitations (initial implementation):
-//   - Client authentication not supported
-//   - Session resumption (PSK) not supported
-//   - Certificate chain validation not performed (records cert but does not verify)
-//   - SNI extension sent; no ALPN
-//   - IPv4 TCP only (matches net_windows.fx)
+
+// tls.fx - TLS Library for Windows
+// Wraps Windows Schannel (secur32.dll / crypt32.dll / ncrypt.dll / bcrypt.dll)
+// Provides TLS client/server connections, X.509 certificate handling,
+// RSA and ECDSA key operations via Windows CNG (Cryptography API: Next Generation)
+
+// ===========
+// Goal is to be entirely native. Currently relying on FFI
+// just so we at least have it.
+// - Karac
+// ===========
 
 #ifndef FLUX_STANDARD_TYPES
 #import "types.fx";
 #endif;
 
-#ifndef FLUX_STANDARD_NET
-#ifdef __WINDOWS__
-#import "net_windows.fx";
-#endif;
-#ifdef __LINUX__
-#import "net_linux.fx";
-#endif;
+#ifndef FLUX_STANDARD_MEMORY
+#import "memory.fx";
 #endif;
 
-#ifndef FLUX_STANDARD_CRYPTO
-#import "cryptography.fx";
+#ifndef FLUX_STANDARD_SOCKETS
+#import "socket_object_raw.fx";
 #endif;
 
-#ifndef FLUX_TLS
-#def FLUX_TLS 1;
-#endif;
-
-#ifndef FLUX_TLS13
-#def FLUX_TLS13 1;
+#ifndef FLUX_STANDARD_TLS
+#def FLUX_STANDARD_TLS 1;
 
 // ============================================================
-// TLS 1.3 constants
+// WINDOWS HANDLE / PLATFORM TYPES
 // ============================================================
 
-// Record content types (RFC 8446 §5.1)
-#def TLS_CT_CHANGE_CIPHER_SPEC  20;
-#def TLS_CT_ALERT               21;
-#def TLS_CT_HANDSHAKE           22;
-#def TLS_CT_APPLICATION_DATA    23;
+// Opaque Windows HANDLEs are pointer-sized on all platforms
+u64 as HCERTSTORE;
+u64 as HCRYPTPROV;
+u64 as NCRYPT_KEY_HANDLE;
+u64 as NCRYPT_PROV_HANDLE;
+u64 as BCRYPT_ALG_HANDLE;
+u64 as BCRYPT_KEY_HANDLE;
+u64 as BCRYPT_HASH_HANDLE;
+u64 as CredHandle_lo;   // lower half of SecHandle (u64 pair)
+u64 as CtxtHandle_lo;
 
-// Handshake message types (RFC 8446 §4)
-#def TLS_HT_CLIENT_HELLO        1;
-#def TLS_HT_SERVER_HELLO        2;
-#def TLS_HT_NEW_SESSION_TICKET  4;
-#def TLS_HT_ENCRYPTED_EXTS      8;
-#def TLS_HT_CERTIFICATE         11;
-#def TLS_HT_CERT_VERIFY         15;
-#def TLS_HT_FINISHED            20;
+// ============================================================
+// SCHANNEL / SSPI STRUCTS
+// ============================================================
 
-// Alert levels and descriptions
-#def TLS_ALERT_LEVEL_WARNING    1;
-#def TLS_ALERT_LEVEL_FATAL      2;
-#def TLS_ALERT_CLOSE_NOTIFY     0;
-#def TLS_ALERT_DECRYPT_ERROR    51;
+// SECURITY_INTEGER / TimeStamp
+struct TimeStamp
+{
+    u32 LowPart;
+    i32 HighPart;
+};
 
-// Cipher suite
-#def TLS_AES_128_GCM_SHA256_HI  0x13;
-#def TLS_AES_128_GCM_SHA256_LO  0x01;
+// SecHandle = two pointer-sized fields (CredHandle / CtxtHandle)
+struct SecHandle
+{
+    u64 dwLower, dwUpper;
+};
 
-// Extension types
-#def TLS_EXT_SERVER_NAME        0;
-#def TLS_EXT_SUPPORTED_GROUPS   10;
-#def TLS_EXT_SIG_ALGS           13;
-#def TLS_EXT_SUPPORTED_VERSIONS 43;
-#def TLS_EXT_KEY_SHARE          51;
+// SecBuffer
+struct SecBuffer
+{
+    u32  cbBuffer,       // size of buffer data
+         BufferType;     // SECBUFFER_* constant
+    void* pvBuffer;      // pointer to buffer data
+};
 
-// Named group x25519
-#def TLS_GROUP_X25519_HI        0x00;
-#def TLS_GROUP_X25519_LO        0x1D;
+// SecBufferDesc
+struct SecBufferDesc
+{
+    u32        ulVersion,    // SECBUFFER_VERSION = 0
+               cBuffers;     // number of SecBuffer entries
+    SecBuffer* pBuffers;     // array of SecBuffer
+};
 
-// Signature algorithm ed25519 / rsa_pss_rsae_sha256
-#def TLS_SIG_RSA_PSS_SHA256_HI  0x08;
-#def TLS_SIG_RSA_PSS_SHA256_LO  0x04;
-#def TLS_SIG_ECDSA_SHA256_HI    0x04;
-#def TLS_SIG_ECDSA_SHA256_LO    0x03;
+// SCHANNEL_CRED (used to configure Schannel credentials)
+struct SCHANNEL_CRED
+{
+    u32   dwVersion,               // SCHANNEL_CRED_VERSION = 4
+          cCreds;                  // number of creds (cert contexts)
+    void** paCred;                 // array of PCCERT_CONTEXT
+    u64   hRootStore;              // HCERTSTORE (optional)
+    u32   cMappers;
+    void** aphMappers;
+    u32   cSupportedAlgs;
+    u32*  palgSupportedAlgs;
+    u32   grbitEnabledProtocols,   // SP_PROT_* flags
+          dwMinimumCipherStrength,
+          dwMaximumCipherStrength,
+          dwSessionLifespan,
+          dwFlags,                 // SCH_CRED_* flags
+          dwCredFormat;
+};
 
-// TLS version bytes
-#def TLS_VERSION_12_HI          0x03;
-#def TLS_VERSION_12_LO          0x03;
-#def TLS_VERSION_13_HI          0x03;
-#def TLS_VERSION_13_LO          0x04;
+// SCH_CREDENTIALS — modern replacement for SCHANNEL_CRED (Windows 10 1809+)
+// dwVersion = SCH_CREDENTIALS_VERSION = 5
+struct TLS_PARAMETERS
+{
+    u32   cAlpnIds;
+    void* rgstrAlpnIds;
+    u32   grbitDisabledProtocols,
+          cDisabledCrypto;
+    void* pDisabledCrypto;
+    u32   dwFlags;
+};
 
-// HKDF-SHA-256 hash length
-#def TLS13_HASH_LEN             32;
-// AES-128-GCM key length
-#def TLS13_KEY_LEN              16;
-// AES-GCM nonce/IV length
-#def TLS13_IV_LEN               12;
-// GCM authentication tag length
-#def TLS13_TAG_LEN              16;
-// Maximum TLS plaintext record size (RFC 8446 §5.1)
-#def TLS13_MAX_PLAINTEXT        16384;
-// Maximum TLS ciphertext record overhead: 5 (header) + 16 (tag) + 1 (inner type)
-#def TLS13_RECORD_OVERHEAD      22;
+struct SCH_CREDENTIALS
+{
+    u32           dwVersion,       // SCH_CREDENTIALS_VERSION = 5
+                  dwCredFormat,    // 0
+                  cCreds;
+    void**        paCred;          // array of PCCERT_CONTEXT
+    u64           hRootStore;      // 0
+    u32           cMappers;
+    void**        aphMappers;      // NULL
+    u32           dwSessionLifespan,
+                  dwFlags,         // SCH_CRED_* flags
+                  cTlsParameters;
+    TLS_PARAMETERS* pTlsParameters;
+};
+
+
+struct SecPkgContext_StreamSizes
+{
+    u32 cbHeader,
+        cbTrailer,
+        cbMaximumMessage,
+        cBuffers,
+        cbBlockSize;
+};
+
+// CERT_CONTEXT — minimal layout matching wincrypt.h
+struct CERT_CONTEXT
+{
+    u32   dwCertEncodingType;
+    byte* pbCertEncoded;
+    u32   cbCertEncoded;
+    void* pCertInfo;            // CERT_INFO* — parsed lazily via Crypt32
+    u64   hCertStore;           // HCERTSTORE owning this context
+};
+
+// CRYPT_BLOB — generic byte array descriptor used throughout Crypt32
+struct CRYPT_BLOB
+{
+    u32   cbData;
+    byte* pbData;
+};
+
+// CERT_PUBLIC_KEY_INFO
+struct CERT_PUBLIC_KEY_INFO
+{
+    CRYPT_BLOB Algorithm,       // OID
+               PublicKey;       // bit string
+};
+
+// CRYPT_BIT_BLOB
+struct CRYPT_BIT_BLOB
+{
+    u32   cbData;
+    byte* pbData;
+    u32   cUnusedBits;
+};
+
+// BCrypt key blob header for ECDSA/RSA import
+struct BCRYPT_KEY_BLOB
+{
+    u32 Magic;    // BCRYPT_ECDSA_PUBLIC_P256_MAGIC etc.
+};
+
+struct BCRYPT_ECCKEY_BLOB
+{
+    u32 dwMagic,
+        cbKey;    // byte length of each coordinate (32 for P-256)
+};
+
+struct BCRYPT_RSAKEY_BLOB
+{
+    u32 Magic,
+        BitLength,
+        cbPublicExp,
+        cbModulus,
+        cbPrime1,
+        cbPrime2;
+};
+
+// Single-element array wrapper for SCHANNEL_CRED.paCred
+// paCred is void** — pointer to an array of PCCERT_CONTEXT.
+// Using a struct field ensures @field gives the raw stack address.
+struct CertContextArray
+{
+    void* ctx;
+};
+
+// NCrypt buffer descriptor — used to pass parameters to NCryptImportKey
+struct NCryptBuffer
+{
+    u32   cbBuffer,    // size of pvBuffer in bytes
+          BufferType;  // NCRYPTBUFFER_* constant
+    void* pvBuffer;    // pointer to buffer data
+};
+
+struct NCryptBufferDesc
+{
+    u32           ulVersion,  // 0
+                  cBuffers;
+    NCryptBuffer* pBuffers;
+};
+
+// CRYPT_KEY_PROV_INFO — tells Schannel where to find the private key in a KSP
+struct CRYPT_KEY_PROV_INFO
+{
+    void* pwszContainerName,   // wchar* key container/name
+          pwszProvName;        // wchar* provider name (e.g. MS KSP)
+    u32   dwProvType,          // 0 for CNG/NCrypt providers
+          dwFlags,             // 0
+          cProvParam;          // 0
+    void* rgProvParam;         // NULL
+    u32   dwKeySpec;           // AT_KEYEXCHANGE=1, AT_SIGNATURE=2, or 0 for CNG
+};
+
+u32 SCHANNEL_CRED_VERSION         = 4u,
+    SCH_CREDENTIALS_VERSION       = 5u,
+    SP_PROT_TLS1_2_CLIENT         = 0x00000800u,
+    SP_PROT_TLS1_2_SERVER         = 0x00000400u,
+    SP_PROT_TLS1_3_CLIENT         = 0x00002000u,
+    SP_PROT_TLS1_3_SERVER         = 0x00001000u;
+
+u32 SCH_CRED_NO_DEFAULT_CREDS     = 0x00000010u,
+    SCH_CRED_MANUAL_CRED_VALIDATION = 0x00000008u,
+    SCH_SEND_ROOT_CERT            = 0x00040000u,
+    SCH_USE_STRONG_CRYPTO         = 0x00400000u;
+
+u32 ISC_REQ_SEQUENCE_DETECT       = 0x00000008u,
+    ISC_REQ_REPLAY_DETECT         = 0x00000004u,
+    ISC_REQ_CONFIDENTIALITY       = 0x00000010u,
+    ISC_REQ_EXTENDED_ERROR        = 0x00004000u,
+    ISC_REQ_ALLOCATE_MEMORY       = 0x00000100u,
+    ISC_REQ_STREAM                = 0x00008000u,
+    ISC_REQ_MANUAL_CRED_VALIDATION = 0x00080000u;
+
+u32 ASC_REQ_SEQUENCE_DETECT       = 0x00000008u,
+    ASC_REQ_REPLAY_DETECT         = 0x00000004u,
+    ASC_REQ_CONFIDENTIALITY       = 0x00000010u,
+    ASC_REQ_EXTENDED_ERROR        = 0x00000200u,
+    ASC_REQ_ALLOCATE_MEMORY       = 0x00000100u,
+    ASC_REQ_STREAM                = 0x00010000u;
+
+i32 SEC_E_OK                      = 0,
+    SEC_I_CONTINUE_NEEDED         = 0x00090312,
+    SEC_I_COMPLETE_NEEDED         = 0x00090313,
+    SEC_I_COMPLETE_AND_CONTINUE   = 0x00090314,
+    SEC_E_INCOMPLETE_MESSAGE      = -2146893032,   // 0x8009031,
+    SEC_E_CONTEXT_EXPIRED         = -2146893033,
+    SEC_I_RENEGOTIATE             = 0x00090321;
+
+u32 SECBUFFER_VERSION             = 0u,
+    SECBUFFER_EMPTY               = 0u,
+    SECBUFFER_DATA                = 1u,
+    SECBUFFER_TOKEN               = 2u,
+    SECBUFFER_PKG_PARAMS          = 3u,
+    SECBUFFER_MISSING             = 4u,
+    SECBUFFER_EXTRA               = 5u,
+    SECBUFFER_STREAM_TRAILER      = 6u,
+    SECBUFFER_STREAM_HEADER       = 7u,
+    SECBUFFER_ALERT               = 17u,
+    SECBUFFER_STREAM              = 10u,
+    SECBUFFER_READONLY_WITH_CHECKSUM = 0x10000000u;
+
+u32 SECPKG_ATTR_STREAM_SIZES      = 4u,
+    SECPKG_ATTR_REMOTE_CERT_CONTEXT = 83u;
+
+// Crypt32 / X.509 constants
+u32 X509_ASN_ENCODING             = 0x00000001u,
+    PKCS_7_ASN_ENCODING           = 0x00010000u,
+    CERT_FIND_SUBJECT_STR_W       = 0x00080007u,
+    CERT_FIND_ANY                 = 0u,
+    CERT_STORE_ADD_REPLACE_EXISTING = 3u,
+    CERT_CLOSE_STORE_CHECK_FLAG   = 2u;
+
+// BCrypt algorithm identifiers (Unicode string pointers — passed as wchar*)
+// We define them as byte arrays with the UTF-16LE encoding
+byte[22] BCRYPT_ECDSA_P256_ALGORITHM = [
+    0x45, 0x00, 0x43, 0x00, 0x44, 0x00, 0x53, 0x00,  // E C D S
+    0x41, 0x00, 0x5F, 0x00, 0x50, 0x00, 0x32, 0x00,  // A _ P 2
+    0x35, 0x00, 0x36, 0x00, 0x00, 0x00               // 5 6 \0
+];
+
+byte[22] BCRYPT_ECDSA_P384_ALGORITHM = [
+    0x45, 0x00, 0x43, 0x00, 0x44, 0x00, 0x53, 0x00,
+    0x41, 0x00, 0x5F, 0x00, 0x50, 0x00, 0x33, 0x00,
+    0x38, 0x00, 0x34, 0x00, 0x00, 0x00
+];
+
+byte[10] BCRYPT_RSA_ALGORITHM = [
+    0x52, 0x00, 0x53, 0x00, 0x41, 0x00, 0x00, 0x00  // R S A \0
+];
+
+byte[18] BCRYPT_SHA256_ALGORITHM = [
+    0x53, 0x00, 0x48, 0x00, 0x41, 0x00, 0x32, 0x00,
+    0x35, 0x00, 0x36, 0x00, 0x00, 0x00
+];
+
+// BCrypt magic values
+u32 BCRYPT_ECDSA_PUBLIC_P256_MAGIC  = 0x31534345u,  // ECS1
+    BCRYPT_ECDSA_PRIVATE_P256_MAGIC = 0x32534345u,  // ECS2
+    BCRYPT_ECDSA_PUBLIC_P384_MAGIC  = 0x33534345u,  // ECS3
+    BCRYPT_ECDSA_PRIVATE_P384_MAGIC = 0x34534345u,  // ECS4
+    BCRYPT_RSAPUBLIC_MAGIC          = 0x31415352u,  // RSA1
+    BCRYPT_RSAPRIVATE_MAGIC         = 0x32415352u,  // RSA2
+    BCRYPT_RSAFULLPRIVATE_MAGIC     = 0x33415352u;  // RSA3
+
+u32 BCRYPT_HASH_REUSABLE_FLAG       = 0x00000020u,
+    BCRYPT_NO_KEY_VALIDATION        = 0x00000008u,
+    BCRYPT_PAD_PKCS1                = 0x00000002u,
+    BCRYPT_PAD_PSS                  = 0x00000008u,
+    BCRYPT_PAD_OAEP                 = 0x00000004u;
+
+// NCrypt key storage
+byte[80] MS_KEY_STORAGE_PROVIDER = [
+    0x4D, 0x00, 0x69, 0x00, 0x63, 0x00, 0x72, 0x00,  // M i c r
+    0x6F, 0x00, 0x73, 0x00, 0x6F, 0x00, 0x66, 0x00,  // o s o f
+    0x74, 0x00, 0x20, 0x00, 0x53, 0x00, 0x6F, 0x00,  // t   S o
+    0x66, 0x00, 0x74, 0x00, 0x77, 0x00, 0x61, 0x00,  // f t w a
+    0x72, 0x00, 0x65, 0x00, 0x20, 0x00, 0x4B, 0x00,  // r e   K
+    0x65, 0x00, 0x79, 0x00, 0x20, 0x00, 0x53, 0x00,  // e y   S
+    0x74, 0x00, 0x6F, 0x00, 0x72, 0x00, 0x61, 0x00,  // t o r a
+    0x67, 0x00, 0x65, 0x00, 0x20, 0x00, 0x50, 0x00,  // g e   P
+    0x72, 0x00, 0x6F, 0x00, 0x76, 0x00, 0x69, 0x00,  // r o v i
+    0x64, 0x00, 0x65, 0x00, 0x72, 0x00, 0x00, 0x00   // d e r \0
+];
+
+// ============================================================
+// FFI DECLARATIONS — secur32.dll (SSPI / Schannel)
+// ============================================================
+
+extern
+{
+    // Acquire credentials handle (e.g. for Schannel client/server)
+    stdcall !!
+        AcquireCredentialsHandleW(
+            void*,          // pszPrincipal  (NULL for Schannel)
+            void*,          // pszPackage    (L"Schannel")
+            u32,            // fCredentialUse: SECPKG_CRED_OUTBOUND=2 / INBOUND=1
+            void*,          // pvLogonID     (NULL)
+            void*,          // pAuthData     (SCHANNEL_CRED*)
+            void*,          // pGetKeyFn     (NULL)
+            void*,          // pvGetKeyArgument (NULL)
+            SecHandle*,     // phCredential  (out)
+            TimeStamp*      // ptsExpiry     (out, may be NULL)
+        ) -> i32,
+
+        // Initiate TLS handshake (client side, called in a loop)
+        InitializeSecurityContextW(
+            SecHandle*,     // phCredential
+            SecHandle*,     // phContext     (NULL on first call)
+            void*,          // pszTargetName (wchar* server name)
+            u32,            // fContextReq   (ISC_REQ_*)
+            u32,            // Reserved1     (0)
+            u32,            // TargetDataRep (0)
+            SecBufferDesc*, // pInput        (NULL on first call)
+            u32,            // Reserved2     (0)
+            SecHandle*,     // phNewContext  (out)
+            SecBufferDesc*, // pOutput       (out)
+            u32*,           // pfContextAttr (out)
+            TimeStamp*      // ptsExpiry     (out, may be NULL)
+        ) -> i32,
+
+        // Accept TLS connection (server side, called in a loop)
+        AcceptSecurityContext(
+            SecHandle*,     // phCredential
+            SecHandle*,     // phContext     (NULL on first call)
+            SecBufferDesc*, // pInput
+            u32,            // fContextReq   (ASC_REQ_*)
+            u32,            // TargetDataRep (0)
+            SecHandle*,     // phNewContext  (out)
+            SecBufferDesc*, // pOutput       (out)
+            u32*,           // pfContextAttr (out)
+            TimeStamp*      // ptsExpiry     (out, may be NULL)
+        ) -> i32,
+
+        // Query attributes of an established security context
+        QueryContextAttributesW(
+            SecHandle*,     // phContext
+            u32,            // ulAttribute (SECPKG_ATTR_*)
+            void*           // pBuffer     (out, attribute-specific struct)
+        ) -> i32,
+
+        // Encrypt a TLS application data record
+        EncryptMessage(
+            SecHandle*,     // phContext
+            u32,            // fQOP        (0)
+            SecBufferDesc*, // pMessage    (in/out)
+            u32             // MessageSeqNo (0 for stream)
+        ) -> i32,
+
+        // Decrypt a received TLS record
+        DecryptMessage(
+            SecHandle*,     // phContext
+            SecBufferDesc*, // pMessage    (in/out)
+            u32,            // MessageSeqNo (0)
+            u32*            // pfQOP       (out, may be NULL)
+        ) -> i32,
+
+        // Apply control token (e.g. SCHANNEL_SHUTDOWN) to context
+        ApplyControlToken(
+            SecHandle*,     // phContext
+            SecBufferDesc*  // pInput
+        ) -> i32,
+
+        // Release a credential handle
+        FreeCredentialsHandle(SecHandle*) -> i32,
+
+        // Release a security context handle
+        DeleteSecurityContext(SecHandle*) -> i32,
+
+        // Free a buffer allocated by SSPI
+        FreeContextBuffer(void*) -> i32;
+};
+
+// ============================================================
+// FFI DECLARATIONS — crypt32.dll (X.509 / certificate store)
+// ============================================================
+
+extern
+{
+    stdcall !!
+        // Open an in-memory certificate store
+        CertOpenStore(
+            void*,      // lpszStoreProvider (CERT_STORE_PROV_MEMORY = (void*)2)
+            u32,        // dwEncodingType
+            u64,        // hCryptProv        (0 = default)
+            u32,        // dwFlags
+            void*       // pvPara            (NULL)
+        ) -> u64,       // returns HCERTSTORE
+
+        // Open a named system store (e.g. L"MY", L"ROOT")
+        CertOpenSystemStoreW(
+            u64,        // hProv    (0)
+            void*       // szSubsystemProtocol (wchar*)
+        ) -> u64,
+
+        // Close a certificate store
+        CertCloseStore(
+            u64,        // hCertStore
+            u32         // dwFlags
+        ) -> bool,
+
+        // Add a DER-encoded certificate to a store
+        CertAddEncodedCertificateToStore(
+            u64,        // hCertStore
+            u32,        // dwCertEncodingType
+            byte*,      // pbCertEncoded
+            u32,        // cbCertEncoded
+            u32,        // dwAddDisposition
+            void**      // ppCertContext (out, may be NULL)
+        ) -> bool,
+
+        // Find a certificate in a store
+        CertFindCertificateInStore(
+            u64,        // hCertStore
+            u32,        // dwCertEncodingType
+            u32,        // dwFindFlags (0)
+            u32,        // dwFindType  (CERT_FIND_*)
+            void*,      // pvFindPara  (search criteria)
+            void*       // pPrevCertContext (NULL to start)
+        ) -> void*,     // returns PCCERT_CONTEXT
+
+        // Duplicate a certificate context (increments ref count)
+        CertDuplicateCertificateContext(void*) -> void*,
+
+        // Free a certificate context
+        CertFreeCertificateContext(void*) -> bool,
+
+        // Decode a DER-encoded X.509 structure into a native struct
+        CryptDecodeObjectEx(
+            u32,        // dwCertEncodingType
+            void*,      // lpszStructType (OID string or integer cast)
+            byte*,      // pbEncoded
+            u32,        // cbEncoded
+            u32,        // dwFlags        (CRYPT_DECODE_ALLOC_FLAG = 0x8000)
+            void*,      // pDecodePara    (NULL)
+            void*,      // pvStructInfo   (out)
+            u32*        // pcbStructInfo  (in/out)
+        ) -> bool,
+
+        // Encode a native struct into DER
+        CryptEncodeObjectEx(
+            u32,        // dwCertEncodingType
+            void*,      // lpszStructType
+            void*,      // pvStructInfo
+            u32,        // dwFlags
+            void*,      // pEncodePara (NULL)
+            byte*,      // pbEncoded   (out, NULL to query size)
+            u32*        // pcbEncoded  (in/out)
+        ) -> bool,
+
+        // Verify certificate chain
+        CertGetCertificateChain(
+            void*,      // hChainEngine  (NULL = default)
+            void*,      // pCertContext  (PCCERT_CONTEXT)
+            void*,      // pTime         (NULL = now)
+            u64,        // hAdditionalStore
+            void*,      // pChainPara    (CERT_CHAIN_PARA*)
+            u32,        // dwFlags       (CERT_CHAIN_REVOCATION_CHECK_CHAIN = 0x20000000)
+            void*,      // pvReserved    (NULL)
+            void**      // ppChainContext (out)
+        ) -> bool,
+
+        // Free a certificate chain context
+        CertFreeCertificateChain(void*) -> void,
+
+        // Get the subject/issuer name as a string
+        CertNameToStrW(
+            u32,        // dwCertEncodingType
+            CRYPT_BLOB*, // pName  (CERT_NAME_BLOB*)
+            u32,        // dwStrType
+            void*,      // psz    (wchar* out buffer)
+            u32         // csz    (buffer size in chars)
+        ) -> u32,
+
+        // Link a private key to a certificate context
+        CertSetCertificateContextProperty(
+            void*,      // pCertContext
+            u32,        // dwPropId      (CERT_KEY_PROV_HANDLE_PROP_ID = 1)
+            u32,        // dwFlags       (0)
+            void*       // pvData        (HCRYPTPROV_OR_NCRYPT_KEY_HANDLE*)
+        ) -> bool;
+};
+
+// ============================================================
+// FFI DECLARATIONS — bcrypt.dll (BCrypt / CNG primitives)
+// ============================================================
+
+extern
+{
+    stdcall !!
+        BCryptOpenAlgorithmProvider(
+            BCRYPT_ALG_HANDLE*, // phAlgorithm (out)
+            void*,              // pszAlgId    (wchar*)
+            void*,              // pszImplementation (NULL = default)
+            u32                 // dwFlags
+        ) -> i32,
+
+        BCryptCloseAlgorithmProvider(
+            BCRYPT_ALG_HANDLE,  // hAlgorithm
+            u32                 // dwFlags (0)
+        ) -> i32,
+
+        // Import a public or private key from a key blob
+        BCryptImportKeyPair(
+            BCRYPT_ALG_HANDLE,  // hAlgorithm
+            BCRYPT_KEY_HANDLE,  // hImportKey  (NULL)
+            void*,              // pszBlobType (wchar*) e.g. BCRYPT_ECCPUBLIC_BLOB
+            BCRYPT_KEY_HANDLE*, // phKey       (out)
+            byte*,              // pbInput     (blob data)
+            u32,                // cbInput
+            u32                 // dwFlags     (0 or BCRYPT_NO_KEY_VALIDATION)
+        ) -> i32,
+
+        // Export a key to a blob
+        BCryptExportKey(
+            BCRYPT_KEY_HANDLE,  // hKey
+            BCRYPT_KEY_HANDLE,  // hExportKey  (NULL)
+            void*,              // pszBlobType (wchar*)
+            byte*,              // pbOutput    (NULL to query size)
+            u32,                // cbOutput
+            u32*,               // pcbResult   (out)
+            u32                 // dwFlags     (0)
+        ) -> i32,
+
+        // Destroy a key handle
+        BCryptDestroyKey(BCRYPT_KEY_HANDLE) -> i32,
+
+        // Sign a hash using the private key (ECDSA or RSA)
+        BCryptSignHash(
+            BCRYPT_KEY_HANDLE,  // hKey
+            void*,              // pPaddingInfo (BCRYPT_PKCS1_PADDING_INFO* for RSA, NULL for ECDSA)
+            byte*,              // pbInput      (hash bytes)
+            u32,                // cbInput
+            byte*,              // pbOutput     (signature out, NULL to query size)
+            u32,                // cbOutput
+            u32*,               // pcbResult    (out)
+            u32                 // dwFlags      (BCRYPT_PAD_PKCS1 for RSA, 0 for ECDSA)
+        ) -> i32,
+
+        // Verify a signature against a hash using the public key
+        BCryptVerifySignature(
+            BCRYPT_KEY_HANDLE,  // hKey
+            void*,              // pPaddingInfo
+            byte*,              // pbHash
+            u32,                // cbHash
+            byte*,              // pbSignature
+            u32,                // cbSignature
+            u32                 // dwFlags
+        ) -> i32,
+
+        // Generate a random key pair
+        BCryptGenerateKeyPair(
+            BCRYPT_ALG_HANDLE,  // hAlgorithm
+            BCRYPT_KEY_HANDLE*, // phKey       (out)
+            u32,                // dwLength    (key length in bits, e.g. 256 for P-256, 2048 for RSA)
+            u32                 // dwFlags     (0)
+        ) -> i32,
+
+        // Finalize the key pair (must call after GenerateKeyPair before use)
+        BCryptFinalizeKeyPair(
+            BCRYPT_KEY_HANDLE,  // hKey
+            u32                 // dwFlags (0)
+        ) -> i32,
+
+        // Hash data
+        BCryptCreateHash(
+            BCRYPT_ALG_HANDLE,  // hAlgorithm
+            BCRYPT_HASH_HANDLE*, // phHash (out)
+            byte*,              // pbHashObject  (NULL = allocate)
+            u32,                // cbHashObject  (0)
+            byte*,              // pbSecret      (NULL for plain hash)
+            u32,                // cbSecret      (0)
+            u32                 // dwFlags       (BCRYPT_HASH_REUSABLE_FLAG)
+        ) -> i32,
+
+        BCryptHashData(
+            BCRYPT_HASH_HANDLE, // hHash
+            byte*,              // pbInput
+            u32,                // cbInput
+            u32                 // dwFlags (0)
+        ) -> i32,
+
+        BCryptFinishHash(
+            BCRYPT_HASH_HANDLE, // hHash
+            byte*,              // pbOutput
+            u32,                // cbOutput
+            u32                 // dwFlags (0)
+        ) -> i32,
+
+        BCryptDestroyHash(BCRYPT_HASH_HANDLE) -> i32,
+
+        // Encrypt/decrypt using asymmetric key (RSA OAEP / PKCS1)
+        BCryptEncrypt(
+            BCRYPT_KEY_HANDLE,  // hKey
+            byte*,              // pbInput
+            u32,                // cbInput
+            void*,              // pPaddingInfo
+            byte*,              // pbIV         (NULL for RSA)
+            u32,                // cbIV         (0)
+            byte*,              // pbOutput     (NULL to query size)
+            u32,                // cbOutput
+            u32*,               // pcbResult    (out)
+            u32                 // dwFlags      (BCRYPT_PAD_OAEP / BCRYPT_PAD_PKCS1)
+        ) -> i32,
+
+        BCryptDecrypt(
+            BCRYPT_KEY_HANDLE,
+            byte*,
+            u32,
+            void*,
+            byte*,
+            u32,
+            byte*,
+            u32,
+            u32*,
+            u32
+        ) -> i32;
+};
+
+// ============================================================
+// FFI DECLARATIONS — ncrypt.dll (NCrypt key storage)
+// ============================================================
+
+extern stdcall !! GetLastError() -> u32;
+
+extern
+{
+    stdcall !!
+        NCryptOpenStorageProvider(
+            NCRYPT_PROV_HANDLE*, // phProvider (out)
+            void*,               // pszProviderName (wchar*, NULL = default)
+            u32                  // dwFlags (0)
+        ) -> i32,
+
+        NCryptImportKey(
+            NCRYPT_PROV_HANDLE,  // hProvider
+            NCRYPT_KEY_HANDLE,   // hImportKey  (0)
+            void*,               // pszBlobType (wchar*)
+            void*,               // pParameterList (NULL)
+            NCRYPT_KEY_HANDLE*,  // phKey       (out)
+            byte*,               // pbData
+            u32,                 // cbData
+            u32                  // dwFlags     (0)
+        ) -> i32,
+
+        NCryptExportKey(
+            NCRYPT_KEY_HANDLE,   // hKey
+            NCRYPT_KEY_HANDLE,   // hExportKey  (0)
+            void*,               // pszBlobType (wchar*)
+            void*,               // pParameterList (NULL)
+            byte*,               // pbOutput    (NULL to query size)
+            u32,                 // cbOutput
+            u32*,                // pcbResult   (out)
+            u32                  // dwFlags     (0)
+        ) -> i32,
+
+        NCryptFreeObject(u64) -> i32,     // frees provider or key handle
+
+        NCryptFinalizeKey(
+            NCRYPT_KEY_HANDLE,  // hKey
+            u32                 // dwFlags (0)
+        ) -> i32,
+
+        NCryptSetProperty(
+            u64,        // hObject (key or provider handle)
+            void*,      // pszProperty (wchar*)
+            byte*,      // pbInput
+            u32,        // cbInput
+            u32         // dwFlags
+        ) -> i32,
+
+        // Convert a BCrypt key handle to an NCrypt key handle (no KSP import needed)
+        NCryptTranslateHandle(
+            NCRYPT_PROV_HANDLE*, // phProvider  (out, optional — pass NULL)
+            NCRYPT_KEY_HANDLE*,  // phKey       (out)
+            BCRYPT_ALG_HANDLE,   // hBCryptAlg  (NULL)
+            BCRYPT_KEY_HANDLE,   // hBCryptKey
+            u32,                 // dwLegacyKeySpec (0)
+            u32                  // dwFlags         (0)
+        ) -> i32,
+
+        NCryptSignHash(
+            NCRYPT_KEY_HANDLE,   // hKey
+            void*,               // pPaddingInfo
+            byte*,               // pbHashValue
+            u32,                 // cbHashValue
+            byte*,               // pbSignature (NULL to query size)
+            u32,                 // cbSignature
+            u32*,                // pcbResult   (out)
+            u32                  // dwFlags     (BCRYPT_PAD_PKCS1 / 0)
+        ) -> i32,
+
+        NCryptVerifySignature(
+            NCRYPT_KEY_HANDLE,
+            void*,
+            byte*,
+            u32,
+            byte*,
+            u32,
+            u32
+        ) -> i32;
+};
+
+// ============================================================
+// WCHAR BLOB HELPERS
+// Keys to BCrypt functions require wchar* string constants.
+// We use the pre-defined byte arrays above; these helper pointers
+// make passing them ergonomic.
+// ============================================================
+
+byte[44] BLOB_TYPE_ECCPUBLIC = [
+    0x42,0x00,0x43,0x00,0x52,0x00,0x59,0x00,  // B C R Y
+    0x50,0x00,0x54,0x00,0x5F,0x00,0x45,0x00,  // P T _ E
+    0x43,0x00,0x43,0x00,0x50,0x00,0x55,0x00,  // C C P U
+    0x42,0x00,0x4C,0x00,0x49,0x00,0x43,0x00,  // B L I C
+    0x5F,0x00,0x42,0x00,0x4C,0x00,0x4F,0x00,  // _ B L O
+    0x42,0x00,0x00,0x00                         // B \0
+];
+
+byte[46] BLOB_TYPE_ECCPRIVATE = [
+    0x42,0x00,0x43,0x00,0x52,0x00,0x59,0x00,
+    0x50,0x00,0x54,0x00,0x5F,0x00,0x45,0x00,
+    0x43,0x00,0x43,0x00,0x50,0x00,0x52,0x00,
+    0x49,0x00,0x56,0x00,0x41,0x00,0x54,0x00,
+    0x45,0x00,0x5F,0x00,0x42,0x00,0x4C,0x00,
+    0x4F,0x00,0x42,0x00,0x00,0x00
+];
+
+byte[30] BLOB_TYPE_RSAPUBLIC = [
+    0x52,0x00,0x53,0x00,0x41,0x00,0x50,0x00,  // R S A P
+    0x55,0x00,0x42,0x00,0x4C,0x00,0x49,0x00,  // U B L I
+    0x43,0x00,0x42,0x00,0x4C,0x00,0x4F,0x00,  // C B L O
+    0x42,0x00,0x00,0x00                         // B \0
+];
+
+byte[32] BLOB_TYPE_RSAPRIVATE = [
+    0x52,0x00,0x53,0x00,0x41,0x00,0x50,0x00,
+    0x52,0x00,0x49,0x00,0x56,0x00,0x41,0x00,
+    0x54,0x00,0x45,0x00,0x42,0x00,0x4C,0x00,
+    0x4F,0x00,0x42,0x00,0x00,0x00
+];
+
+// L"RSAFULLPRIVATEBLOB" UTF-16LE — BCrypt/NCrypt blob type for full RSA private keys (RSA3, includes CRT params)
+byte[38] BLOB_TYPE_RSAFULLPRIVATE = [
+    0x52,0x00,0x53,0x00,0x41,0x00,0x46,0x00,  // R S A F
+    0x55,0x00,0x4C,0x00,0x4C,0x00,0x50,0x00,  // U L L P
+    0x52,0x00,0x49,0x00,0x56,0x00,0x41,0x00,  // R I V A
+    0x54,0x00,0x45,0x00,0x42,0x00,0x4C,0x00,  // T E B L
+    0x4F,0x00,0x42,0x00,0x00,0x00             // O B \0
+];
+
+// L"LEGACY_RSAPRIVATEBLOB" UTF-16LE — NCrypt blob type accepting BCrypt RSA2-format blobs
+byte[44] BLOB_TYPE_LEGACY_RSAPRIVATE = [
+    0x4C,0x00,0x45,0x00,0x47,0x00,0x41,0x00,  // L E G A
+    0x43,0x00,0x59,0x00,0x5F,0x00,0x52,0x00,  // C Y _ R
+    0x53,0x00,0x41,0x00,0x50,0x00,0x52,0x00,  // S A P R
+    0x49,0x00,0x56,0x00,0x41,0x00,0x54,0x00,  // I V A T
+    0x45,0x00,0x42,0x00,0x4C,0x00,0x4F,0x00,  // E B L O
+    0x42,0x00,0x00,0x00                         // B \0
+];
+
+// Ephemeral key name used when importing into the KSP — L"flux_tls_ephemeral"
+byte[38] NCRYPT_EPHEMERAL_KEY_NAME = [
+    0x66,0x00,0x6C,0x00,0x75,0x00,0x78,0x00,  // f l u x
+    0x5F,0x00,0x74,0x00,0x6C,0x00,0x73,0x00,  // _ t l s
+    0x5F,0x00,0x65,0x00,0x70,0x00,0x68,0x00,  // _ e p h
+    0x65,0x00,0x6D,0x00,0x65,0x00,0x72,0x00,  // e m e r
+    0x61,0x00,0x6C,0x00,0x00,0x00             // a l \0
+];
+
+// L"Schannel" UTF-16LE
+byte[18] SCHANNEL_NAME_W = [
+    0x53,0x00,0x63,0x00,0x68,0x00,0x61,0x00,  // S c h a
+    0x6E,0x00,0x6E,0x00,0x65,0x00,0x6C,0x00,  // n n e l
+    0x00,0x00                                   // \0
+];
+
+u32 SECPKG_CRED_OUTBOUND = 2u;
+u32 SECPKG_CRED_INBOUND  = 1u;
+
+// SCHANNEL_SHUTDOWN token value
+u32 SCHANNEL_SHUTDOWN = 1u;
+
+// CertNameToStr flags
+u32 CERT_X500_NAME_STR    = 3u;
+u32 CERT_NAME_STR_NO_PLUS = 0x20000000u;
+
+// CertSetCertificateContextProperty prop IDs
+u32 CERT_KEY_PROV_HANDLE_PROP_ID       = 1u;   // Legacy CAPI HCRYPTPROV
+u32 CERT_KEY_PROV_INFO_PROP_ID         = 2u;   // CRYPT_KEY_PROV_INFO* (key location by name)
+u32 CERT_NCRYPT_KEY_HANDLE_PROP_ID     = 78u;  // CNG/NCrypt NCRYPT_KEY_HANDLE
+
+// dwFlags for CertSetCertificateContextProperty
+// Prevents the cert context from freeing the key handle on release
+u32 CERT_STORE_NO_CRYPT_RELEASE_FLAG   = 0x00000001u;
+
+// NCrypt import/key flags
+u32 NCRYPT_OVERWRITE_KEY_FLAG          = 0x00000080u;
+u32 NCRYPT_SILENT_FLAG                 = 0x00000040u;
+u32 NCRYPT_DO_NOT_FINALIZE_FLAG        = 0x00000400u;
+u32 NCRYPT_ALLOW_DECRYPT_FLAG          = 0x00000001u;
+u32 NCRYPT_ALLOW_SIGNING_FLAG          = 0x00000002u;
+u32 NCRYPT_ALLOW_KEY_AGREEMENT_FLAG    = 0x00000004u;
+u32 NCRYPT_ALLOW_ALL_USAGES            = 0x00FFFFFFu;
+
+// L"Key Usage" UTF-16LE
+byte[20] NCRYPT_KEY_USAGE_PROPERTY = [
+    0x4B,0x00,0x65,0x00,0x79,0x00,0x20,0x00,  // K e y  
+    0x55,0x00,0x73,0x00,0x61,0x00,0x67,0x00,  // U s a g
+    0x65,0x00,0x00,0x00                         // e \0
+];
+u32 NCRYPTBUFFER_PKCS_KEY_NAME         = 45u;   // pvBuffer = wchar* key name
+
+// NCrypt export policy flags (used with NCRYPT_EXPORT_POLICY_PROPERTY)
+u32 NCRYPT_ALLOW_EXPORT_FLAG           = 0x00000001u;
+u32 NCRYPT_ALLOW_PLAINTEXT_EXPORT_FLAG = 0x00000002u;
+
+// L"Export Policy" UTF-16LE — NCrypt property name for export policy DWORD
+byte[28] NCRYPT_EXPORT_POLICY_PROPERTY = [
+    0x45,0x00,0x78,0x00,0x70,0x00,0x6F,0x00,  // E x p o
+    0x72,0x00,0x74,0x00,0x20,0x00,0x50,0x00,  // r t   P
+    0x6F,0x00,0x6C,0x00,0x69,0x00,0x63,0x00,  // o l i c
+    0x79,0x00,0x00,0x00                         // y \0
+];
+
+// CertOpenStore provider
+u64 CERT_STORE_PROV_MEMORY = 2;
+
+// Crypt decode flags
+u32 CRYPT_DECODE_ALLOC_FLAG = 0x8000u;
+
+// ============================================================
+// ERROR / STATUS
+// ============================================================
+
+enum tls_error
+{
+    TLS_OK,
+    TLS_ERR_CRED,
+    TLS_ERR_HANDSHAKE,
+    TLS_ERR_ENCRYPT,
+    TLS_ERR_DECRYPT,
+    TLS_ERR_SEND,
+    TLS_ERR_RECV,
+    TLS_ERR_CERT,
+    TLS_ERR_KEY,
+    TLS_ERR_ALLOC,
+    TLS_ERR_SHUTDOWN
+};
+
+// ============================================================
+// NAMESPACE
+// ============================================================
 
 namespace standard
 {
     namespace tls
     {
-        // ============================================================
-        // Structs
-        // ============================================================
-
-        // Per-direction traffic key material derived from the key schedule
-        struct TLS13_TrafficKeys
+        // ---- ECDSA namespace ----
+        namespace ecdsa
         {
-            byte[32] secret;    // Raw 32-byte traffic secret (for Finished MAC)
-            byte[16] key;       // AES-128 key
-            byte[12] iv;        // 12-byte base IV
-            u64      seq;       // Record sequence number (for nonce construction)
-        };
-
-        // Full TLS 1.3 session context
-        struct TLS13_CTX
-        {
-            int  sockfd;                    // Underlying TCP socket fd
-
-            // Ephemeral x25519 key pair
-            byte[32] our_priv,             // Our ephemeral private scalar
-                     our_pub,              // Our ephemeral public key
-                     their_pub,            // Server's ephemeral public key (from KeyShare)
-                     shared_secret,        // x25519 ECDH shared secret
-
-            // Key schedule secrets (all 32 bytes, SHA-256 output size)
-                     early_secret,
-                     handshake_secret,
-                     master_secret;
-
-            // Derived traffic keys
-            TLS13_TrafficKeys client_hs,   // client → server handshake
-                              server_hs,   // server → client handshake
-                              client_app,  // client → server application
-                              server_app;  // server → client application
-
-            // Running transcript hash context (SHA-256)
-            // We maintain two copies: one through ServerHello (for handshake key derivation)
-            // and the running one through Finished.
-            standard::crypto::hashing::SHA256::SHA256_CTX transcript;
-
-            // GCM contexts (re-initialised whenever keys change)
-            standard::crypto::encryption::AES::GCM_CTX  gcm_write, // For outbound records
-                                                        gcm_read;  // For inbound records
-
-            // State flags
-            int  handshake_done,           // 1 once application keys are active
-                 is_server;
-        };
-
-        // ============================================================
-        // Internal helpers
-        // ============================================================
-
-        // Debug helper: print label then hex bytes
-        def tls_debug_hex(byte* xlabel, byte* buf, int len) -> void
-        {
-            int i;
-            byte b, hi, lo;
-            print(xlabel);
-            while (i < len)
+            // Opaque key container wrapping a BCrypt key handle
+            object EcKey
             {
-                b  = buf[i];
-                hi = (b >> 4) & (byte)0x0F;
-                lo = b & (byte)0x0F;
-                if (hi < (byte)10) { print((byte)('0' + hi)); }
-                else               { print((byte)('A' + (hi - (byte)10))); };
-                if (lo < (byte)10) { print((byte)('0' + lo)); }
-                else               { print((byte)('A' + (lo - (byte)10))); };
-                i++;
-            };
-            print("\n\0");
-            return;
-        };
+                BCRYPT_KEY_HANDLE   hKey,
+                                    hAlg;
+                bool                is_private;
+                u32                 curve_bits;  // 256 or 384
 
-        // Write a big-endian u16 into buf[0..1]
-        def tls_put_u16(byte* buf, int v) -> void
-        {
-            buf[0] = (byte)((v >> 8) & 0xFF);
-            buf[1] = (byte)(v & 0xFF);
-            return;
-        };
-
-        // Write a big-endian u24 into buf[0..2]
-        def tls_put_u24(byte* buf, int v) -> void
-        {
-            buf[0] = (byte)((v >> 16) & 0xFF);
-            buf[1] = (byte)((v >> 8) & 0xFF);
-            buf[2] = (byte)(v & 0xFF);
-            return;
-        };
-
-        // Read a big-endian u16 from buf[0..1]
-        def tls_get_u16(byte* buf) -> int
-        {
-            return (((int)(buf[0] & 0xFF)) << 8) | ((int)(buf[1] & 0xFF));
-        };
-
-        // Read a big-endian u24 from buf[0..2]
-        def tls_get_u24(byte* buf) -> int
-        {
-            return (((int)(buf[0] & 0xFF)) << 16) |
-                   (((int)(buf[1] & 0xFF)) << 8)  |
-                    ((int)(buf[2] & 0xFF));
-        };
-
-        // Send exactly len bytes over the socket.
-        // Returns 1 on success, 0 on error.
-        def tls_send_exact(int fd, byte* buf, int len) -> int
-        {
-            int sent, total;
-            while (total < len)
-            {
-                sent = send(fd, (void*)buf, len - total, 0);
-                if (sent <= 0) { return 0; };
-                total = total + sent;
-                buf = (byte*)((u64)buf + (u64)sent);
-            };
-            return 1;
-        };
-
-        // Receive exactly len bytes from the socket.
-        // Returns 1 on success, 0 on error/EOF.
-        def tls_recv_exact(int fd, byte* buf, int len) -> int
-        {
-            int got, total;
-            while (total < len)
-            {
-                got = recv(fd, (void*)buf, len - total, 0);
-                if (got <= 0) { return 0; };
-                total = total + got;
-                buf = (byte*)((u64)buf + (u64)got);
-            };
-            return 1;
-        };
-
-        // ============================================================
-        // TLS record layer — send a plaintext record (pre-handshake)
-        // ============================================================
-
-        // Send a raw (unencrypted) TLS record.
-        // Used for ClientHello (before keys exist).
-        def tls_send_record_plain(int fd, int content_type, byte* payload, int payload_len) -> int
-        {
-            byte[5] hdr;
-            hdr[0] = (byte)content_type;
-            hdr[1] = (byte)TLS_VERSION_12_HI;
-            hdr[2] = (byte)TLS_VERSION_12_LO;
-            tls_put_u16(@hdr[3], payload_len);
-            if (!tls_send_exact(fd, @hdr[0], 5)) { return 0; };
-            if (!tls_send_exact(fd, payload, payload_len)) { return 0; };
-            return 1;
-        };
-
-        // ============================================================
-        // TLS record layer — send an encrypted record (post-handshake)
-        //
-        // TLS 1.3 encrypted record format (RFC 8446 §5.2):
-        //   outer header: content_type=23 (application_data), 5 bytes
-        //   payload:      GCM( inner_plaintext || inner_content_type ) + tag
-        //   AAD:          the 5-byte outer header
-        //
-        // Nonce: base_iv XOR (seq padded to 12 bytes, big-endian)
-        // ============================================================
-        def tls_send_record_enc(TLS13_CTX* ctx, int inner_type, byte* payload, int payload_len) -> int
-        {
-            byte[TLS13_MAX_PLAINTEXT + 1] inner_plain;
-            byte[TLS13_MAX_PLAINTEXT + TLS13_RECORD_OVERHEAD] ct_buf;
-            byte[5]  hdr;
-            byte[12] nonce;
-            byte[TLS13_TAG_LEN] tag;
-            int i, ct_len, total_inner;
-            u64 seq;
-
-            // Build inner plaintext: payload || inner_content_type
-            for (i = 0; i < payload_len; i++) { inner_plain[i] = payload[i]; };
-            inner_plain[payload_len] = (byte)inner_type;
-            total_inner = payload_len + 1;
-
-            // Outer header (AAD): content_type=23, TLS 1.2 version, encrypted length
-            ct_len = total_inner + TLS13_TAG_LEN;
-            hdr[0] = (byte)TLS_CT_APPLICATION_DATA;
-            hdr[1] = (byte)TLS_VERSION_12_HI;
-            hdr[2] = (byte)TLS_VERSION_12_LO;
-            tls_put_u16(@hdr[3], ct_len);
-
-            // Nonce: base_iv XOR seq (big-endian, right-aligned in 12 bytes)
-            seq = ctx.client_hs.seq;
-            if (ctx.is_server != 0)   { seq = ctx.server_hs.seq; };
-            if (ctx.handshake_done != 0)
-            {
-                seq = ctx.client_app.seq;
-                if (ctx.is_server != 0) { seq = ctx.server_app.seq; };
-            };
-            for (i = 0; i < 12; i++) { nonce[i] = '\0'; };
-            // Write seq into bytes 4..11 (big-endian u64)
-            nonce[4]  = (byte)((seq >> 56) & 0xFF);
-            nonce[5]  = (byte)((seq >> 48) & 0xFF);
-            nonce[6]  = (byte)((seq >> 40) & 0xFF);
-            nonce[7]  = (byte)((seq >> 32) & 0xFF);
-            nonce[8]  = (byte)((seq >> 24) & 0xFF);
-            nonce[9]  = (byte)((seq >> 16) & 0xFF);
-            nonce[10] = (byte)((seq >>  8) & 0xFF);
-            nonce[11] = (byte)( seq        & 0xFF);
-            // XOR with base IV
-            if (ctx.handshake_done != 0)
-            {
-                if (ctx.is_server != 0)
+                def __init() -> this
                 {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_app.iv[i]; };
-                }
-                else
-                {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_app.iv[i]; };
+                    this.curve_bits = 256;
+                    return this;
                 };
-            }
-            else
-            {
-                if (ctx.is_server != 0)
+
+                def __exit() -> void
                 {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_hs.iv[i]; };
-                }
-                else
-                {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_hs.iv[i]; };
-                };
-            };
-
-            standard::crypto::encryption::AES::gcm_encrypt(@ctx.gcm_write, @nonce[0],
-                        @hdr[0], 5,
-                        @inner_plain[0], total_inner,
-                        @ct_buf[0], @tag[0]);
-
-            // Append tag to ciphertext
-            for (i = 0; i < TLS13_TAG_LEN; i++) { ct_buf[total_inner + i] = tag[i]; };
-
-            // Increment sequence
-            if (ctx.handshake_done != 0)
-            {
-                if (ctx.is_server != 0) { ctx.server_app.seq = ctx.server_app.seq + 1u; }
-                else                    { ctx.client_app.seq = ctx.client_app.seq + 1u; };
-            }
-            else
-            {
-                if (ctx.is_server != 0) { ctx.server_hs.seq  = ctx.server_hs.seq  + 1u; }
-                else                    { ctx.client_hs.seq  = ctx.client_hs.seq  + 1u; };
-            };
-
-            if (!tls_send_exact(ctx.sockfd, @hdr[0], 5)) { return 0; };
-            if (!tls_send_exact(ctx.sockfd, @ct_buf[0], ct_len)) { return 0; };
-            return 1;
-        };
-
-        // ============================================================
-        // TLS record layer — receive one record
-        //
-        // Reads a 5-byte header then the record body into buf.
-        // out_type: set to the content-type byte.
-        // Returns body length on success, -1 on error.
-        // ============================================================
-        def tls_recv_record(TLS13_CTX* ctx, byte* buf, int buf_len, int* out_type) -> int
-        {
-            byte[5] hdr;
-            int body_len;
-
-            if (!tls_recv_exact(ctx.sockfd, @hdr[0], 5)) { return -1; };
-            *out_type = (int)(hdr[0] & 0xFF);
-            body_len  = tls_get_u16(@hdr[3]);
-            if (body_len > buf_len) { return -1; };
-            if (!tls_recv_exact(ctx.sockfd, buf, body_len)) { return -1; };
-            return body_len;
-        };
-
-        // Decrypt an inbound TLS 1.3 encrypted record in-place.
-        // buf points to the ciphertext+tag (length = ct_len).
-        // hdr is the 5-byte outer header (used as AAD).
-        // On success: buf holds the inner plaintext, returns inner plaintext length.
-        // Returns -1 if tag verification fails.
-        def tls_decrypt_record(TLS13_CTX* ctx, byte* buf, int ct_len, byte* hdr) -> int
-        {
-            byte[TLS13_MAX_PLAINTEXT + 1] plain;
-            byte[TLS13_TAG_LEN] tag;
-            byte[12] nonce;
-            int i, inner_len, result;
-            u64 seq;
-
-            if (ct_len < TLS13_TAG_LEN) { return -1; };
-            inner_len = ct_len - TLS13_TAG_LEN;
-
-            // Extract tag (last 16 bytes)
-            for (i = 0; i < TLS13_TAG_LEN; i++) { tag[i] = buf[inner_len + i]; };
-
-            // Build nonce
-            seq = ctx.server_hs.seq;
-            if (ctx.is_server != 0)   { seq = ctx.client_hs.seq; };
-            if (ctx.handshake_done != 0)
-            {
-                seq = ctx.server_app.seq;
-                if (ctx.is_server != 0) { seq = ctx.client_app.seq; };
-            };
-            for (i = 0; i < 12; i++) { nonce[i] = '\0'; };
-            nonce[4]  = (byte)((seq >> 56) & 0xFF);
-            nonce[5]  = (byte)((seq >> 48) & 0xFF);
-            nonce[6]  = (byte)((seq >> 40) & 0xFF);
-            nonce[7]  = (byte)((seq >> 32) & 0xFF);
-            nonce[8]  = (byte)((seq >> 24) & 0xFF);
-            nonce[9]  = (byte)((seq >> 16) & 0xFF);
-            nonce[10] = (byte)((seq >>  8) & 0xFF);
-            nonce[11] = (byte)( seq        & 0xFF);
-            if (ctx.handshake_done != 0)
-            {
-                if (ctx.is_server != 0)
-                {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_app.iv[i]; };
-                }
-                else
-                {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_app.iv[i]; };
-                };
-            }
-            else
-            {
-                if (ctx.is_server != 0)
-                {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.client_hs.iv[i]; };
-                }
-                else
-                {
-                    for (i = 0; i < 12; i++) { nonce[i] = nonce[i] ^^ ctx.server_hs.iv[i]; };
-                };
-            };
-
-            result = standard::crypto::encryption::AES::gcm_decrypt(@ctx.gcm_read, @nonce[0],
-                                 hdr, 5,
-                                 buf, inner_len,
-                                 @plain[0], @tag[0]);
-            if (result == 0) { return -1; };
-
-            // Increment read sequence
-            if (ctx.handshake_done != 0)
-            {
-                if (ctx.is_server != 0) { ctx.client_app.seq = ctx.client_app.seq + 1u; }
-                else                    { ctx.server_app.seq = ctx.server_app.seq + 1u; };
-            }
-            else
-            {
-                if (ctx.is_server != 0) { ctx.client_hs.seq  = ctx.client_hs.seq  + 1u; }
-                else                    { ctx.server_hs.seq  = ctx.server_hs.seq  + 1u; };
-            };
-
-            // Copy plaintext back (excluding inner content type byte at end)
-            for (i = 0; i < inner_len; i++) { buf[i] = plain[i]; };
-            return inner_len;
-        };
-
-        // ============================================================
-        // TLS 1.3 Key Schedule  (RFC 8446 §7.1)
-        //
-        // HKDF-Expand-Label:
-        //   HKDF-Expand(secret, label, context, length)
-        //   where label = "tls13 " + label_str
-        //         the info = length(2) || length(label)(1) || label || length(context)(1) || context
-        //
-        // Derive-Secret:
-        //   HKDF-Expand-Label(secret, label, Transcript-Hash(messages), Hash.length)
-        // ============================================================
-
-        // Build the HkdfLabel info blob into `info` and return its byte length.
-        // out_len: the requested key material length (fits in u16)
-        // label: "tls13 " already prepended by caller
-        // label_len: full label length including "tls13 " prefix
-        // ctx_hash: the transcript hash bytes (32 bytes for SHA-256), or null if empty
-        // ctx_len: 0 for empty context
-        def tls13_make_hkdf_label(byte* info,
-                                  int   out_len,
-                                  byte* xlabel,  int label_len,
-                                  byte* ctx_bytes, int ctx_len) -> int
-        {
-            int pos;
-            int i;
-
-            // 2-byte length (big-endian)
-            info[0] = (byte)((out_len >> 8) & 0xFF);
-            info[1] = (byte)(out_len & 0xFF);
-            pos = 2;
-
-            // 1-byte label length
-            info[pos] = (byte)(label_len & 0xFF);
-            pos = pos + 1;
-
-            // label bytes
-            for (i = 0; i < label_len; i++) { info[pos + i] = xlabel[i]; };
-            pos = pos + label_len;
-
-            // 1-byte context length
-            info[pos] = (byte)(ctx_len & 0xFF);
-            pos = pos + 1;
-
-            // context bytes
-            for (i = 0; i < ctx_len; i++) { info[pos + i] = ctx_bytes[i]; };
-            pos = pos + ctx_len;
-
-            return pos;
-        };
-
-        // HKDF-Expand-Label — derives exactly `out_len` bytes into `out`.
-        // label_suffix: the label string AFTER "tls13 " (e.g. "key\0")
-        // suffix_len: byte length of label_suffix
-        // ctx_hash: transcript hash or null; ctx_len: 0 if null
-        def tls13_expand_label(byte* secret,
-                               byte* label_suffix, int suffix_len,
-                               byte* ctx_hash,     int ctx_len,
-                               byte* out,          int out_len) -> void
-        {
-            // Full label = "tls13 " + suffix  (max 255 bytes total)
-            byte[256] full_label;
-            byte[320] info;
-            int i, info_len, full_len;
-
-            // Prepend "tls13 "
-            full_label[0] = 't';
-            full_label[1] = 'l';
-            full_label[2] = 's';
-            full_label[3] = '1';
-            full_label[4] = '3';
-            full_label[5] = ' ';
-            full_len = 6;
-            for (i = 0; i < suffix_len; i++) { full_label[6 + i] = label_suffix[i]; };
-            full_len = full_len + suffix_len;
-
-            info_len = tls13_make_hkdf_label(@info[0], out_len,
-                                             @full_label[0], full_len,
-                                             ctx_hash, ctx_len);
-
-            crypto::KDF::HKDF::hkdf_expand(secret, @info[0], info_len, out, out_len);
-            return;
-        };
-
-        // Derive-Secret(secret, label, transcript_hash)
-        // Wrapper that always targets TLS13_HASH_LEN (32) output.
-        def tls13_derive_secret(byte* secret,
-                                byte* xlabel,     int label_len,
-                                byte* txhash,    int txhash_len,
-                                byte* out) -> void
-        {
-            tls13_expand_label(secret, xlabel, label_len,
-                               txhash, txhash_len,
-                               out, TLS13_HASH_LEN);
-            return;
-        };
-
-        // Hash of empty string (SHA-256) — used for empty transcript hash.
-        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-        global byte[32] TLS13_EMPTY_HASH;
-        global int TLS13_EMPTY_HASH_INIT;
-
-        def tls13_get_empty_hash(byte* out) -> void
-        {
-            SHA256_CTX hctx;
-            int i;
-            if (TLS13_EMPTY_HASH_INIT == 0)
-            {
-                crypto::hashing::SHA256::sha256_init(@hctx);
-                crypto::hashing::SHA256::sha256_final(@hctx, @TLS13_EMPTY_HASH[0]);
-                TLS13_EMPTY_HASH_INIT = 1;
-            };
-            for (i = 0; i < 32; i++) { out[i] = TLS13_EMPTY_HASH[i]; };
-            return;
-        };
-
-        // Derive all four traffic key/IV pairs from a traffic secret.
-        // Fills in a TLS13_TrafficKeys struct (key + iv, seq reset to 0).
-        def tls13_derive_traffic_keys(byte* traffic_secret, TLS13_TrafficKeys* tk) -> void
-        {
-            int i;
-            byte[8] lbl_key, lbl_iv;
-
-            // label "key" (3 bytes), label "iv" (2 bytes)
-            lbl_key[0] = 'k'; lbl_key[1] = 'e'; lbl_key[2] = 'y';
-            lbl_iv[0]  = 'i'; lbl_iv[1]  = 'v';
-
-            // Store the raw traffic secret for Finished MAC computation
-            for (i = 0; i < 32; i++) { tk.secret[i] = traffic_secret[i]; };
-
-            tls13_expand_label(traffic_secret,
-                               @lbl_key[0], 3,
-                               (byte*)0, 0,
-                               @tk.key[0], TLS13_KEY_LEN);
-
-            tls13_expand_label(traffic_secret,
-                               @lbl_iv[0], 2,
-                               (byte*)0, 0,
-                               @tk.iv[0], TLS13_IV_LEN);
-
-            tk.seq = 0u;
-            return;
-        };
-
-        // Run the full TLS 1.3 key schedule up through application keys.
-        //
-        // Inputs:
-        //   ctx.shared_secret   — x25519 ECDH output (32 bytes)
-        //   txhash_server_hello — SHA-256 of transcript up to and including ServerHello
-        //   txhash_server_fin   — SHA-256 of transcript up to and including server Finished
-        //
-        // Outputs (written into ctx):
-        //   ctx.early_secret, ctx.handshake_secret, ctx.master_secret
-        //   ctx.client_hs, ctx.server_hs
-        //   ctx.client_app, ctx.server_app
-        //   ctx.gcm_write (client_hs keys), ctx.gcm_read (server_hs keys)
-        def tls13_key_schedule(TLS13_CTX* ctx,
-                               byte* txhash_server_hello,
-                               byte* txhash_server_fin) -> void
-        {
-            byte[32] zeros, derived, c_hs_ts, s_hs_ts, c_app_ts, s_app_ts;
-            byte[32] empty_hash;
-            byte[8]  lbl_derived, lbl_c_hs, lbl_s_hs, lbl_c_ap, lbl_s_ap;
-            int i;
-
-            for (i = 0; i < 32; i++) { zeros[i] = '\0'; };
-
-            // "derived" label (7 bytes)
-            lbl_derived[0] = 'd'; lbl_derived[1] = 'e'; lbl_derived[2] = 'r';
-            lbl_derived[3] = 'i'; lbl_derived[4] = 'v'; lbl_derived[5] = 'e';
-            lbl_derived[6] = 'd';
-
-            // "c hs traffic" (12 bytes)
-            lbl_c_hs[0] = 'c'; lbl_c_hs[1] = ' '; lbl_c_hs[2] = 'h';
-            lbl_c_hs[3] = 's'; lbl_c_hs[4] = ' '; lbl_c_hs[5] = 't';
-            lbl_c_hs[6] = 'r'; lbl_c_hs[7] = 'a';
-
-            // "s hs traffic" (12 bytes) — same structure
-            lbl_s_hs[0] = 's'; lbl_s_hs[1] = ' '; lbl_s_hs[2] = 'h';
-            lbl_s_hs[3] = 's'; lbl_s_hs[4] = ' '; lbl_s_hs[5] = 't';
-            lbl_s_hs[6] = 'r'; lbl_s_hs[7] = 'a';
-
-            // "c ap traffic" (12 bytes)
-            lbl_c_ap[0] = 'c'; lbl_c_ap[1] = ' '; lbl_c_ap[2] = 'a';
-            lbl_c_ap[3] = 'p'; lbl_c_ap[4] = ' '; lbl_c_ap[5] = 't';
-            lbl_c_ap[6] = 'r'; lbl_c_ap[7] = 'a';
-
-            // "s ap traffic" (12 bytes)
-            lbl_s_ap[0] = 's'; lbl_s_ap[1] = ' '; lbl_s_ap[2] = 'a';
-            lbl_s_ap[3] = 'p'; lbl_s_ap[4] = ' '; lbl_s_ap[5] = 't';
-            lbl_s_ap[6] = 'r'; lbl_s_ap[7] = 'a';
-
-            tls13_get_empty_hash(@empty_hash[0]);
-
-            // ---- Early Secret ----
-            // early_secret = HKDF-Extract(zeros, zeros)
-            crypto::KDF::HKDF::hkdf_extract(@zeros[0], 32, @zeros[0], 32, @ctx.early_secret[0]);
-
-            // ---- Handshake Secret ----
-            // derived_from_early = Derive-Secret(early_secret, "derived", "")
-            tls13_derive_secret(@ctx.early_secret[0],
-                                @lbl_derived[0], 7,
-                                @empty_hash[0], 32,
-                                @derived[0]);
-
-            // handshake_secret = HKDF-Extract(derived_from_early, ecdh_secret)
-            crypto::KDF::HKDF::hkdf_extract(@derived[0], 32,
-                                            @ctx.shared_secret[0], 32,
-                                            @ctx.handshake_secret[0]);
-
-            // ---- Handshake traffic secrets ----
-            // c_hs_ts = Derive-Secret(hs_secret, "c hs traffic", transcript_to_SH)
-            // These need the full 12-char labels but we only stored 8-char buffers;
-            // pass inline arrays directly.
-            {
-                byte[16] full_c_hs, full_s_hs;
-                full_c_hs[0]  = 'c'; full_c_hs[1]  = ' '; full_c_hs[2]  = 'h';
-                full_c_hs[3]  = 's'; full_c_hs[4]  = ' '; full_c_hs[5]  = 't';
-                full_c_hs[6]  = 'r'; full_c_hs[7]  = 'a'; full_c_hs[8]  = 'f';
-                full_c_hs[9]  = 'f'; full_c_hs[10] = 'i'; full_c_hs[11] = 'c';
-
-                full_s_hs[0]  = 's'; full_s_hs[1]  = ' '; full_s_hs[2]  = 'h';
-                full_s_hs[3]  = 's'; full_s_hs[4]  = ' '; full_s_hs[5]  = 't';
-                full_s_hs[6]  = 'r'; full_s_hs[7]  = 'a'; full_s_hs[8]  = 'f';
-                full_s_hs[9]  = 'f'; full_s_hs[10] = 'i'; full_s_hs[11] = 'c';
-
-                tls13_derive_secret(@ctx.handshake_secret[0],
-                                    @full_c_hs[0], 12,
-                                    txhash_server_hello, 32,
-                                    @c_hs_ts[0]);
-
-                tls13_derive_secret(@ctx.handshake_secret[0],
-                                    @full_s_hs[0], 12,
-                                    txhash_server_hello, 32,
-                                    @s_hs_ts[0]);
-            };
-
-            tls13_derive_traffic_keys(@c_hs_ts[0], @ctx.client_hs);
-            tls13_derive_traffic_keys(@s_hs_ts[0], @ctx.server_hs);
-
-            // Install handshake write/read GCM contexts
-            crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.client_hs.key[0]);
-            crypto::encryption::AES::gcm_init(@ctx.gcm_read,  @ctx.server_hs.key[0]);
-
-            // ---- Master Secret ----
-            // derived_from_hs = Derive-Secret(hs_secret, "derived", "")
-            tls13_derive_secret(@ctx.handshake_secret[0],
-                                @lbl_derived[0], 7,
-                                @empty_hash[0], 32,
-                                @derived[0]);
-
-            // master_secret = HKDF-Extract(derived_from_hs, zeros)
-            crypto::KDF::HKDF::hkdf_extract(@derived[0], 32, @zeros[0], 32, @ctx.master_secret[0]);
-
-            // ---- Application traffic secrets ----
-            {
-                byte[16] full_c_ap, full_s_ap;
-                full_c_ap[0]  = 'c'; full_c_ap[1]  = ' '; full_c_ap[2]  = 'a';
-                full_c_ap[3]  = 'p'; full_c_ap[4]  = ' '; full_c_ap[5]  = 't';
-                full_c_ap[6]  = 'r'; full_c_ap[7]  = 'a'; full_c_ap[8]  = 'f';
-                full_c_ap[9]  = 'f'; full_c_ap[10] = 'i'; full_c_ap[11] = 'c';
-
-                full_s_ap[0]  = 's'; full_s_ap[1]  = ' '; full_s_ap[2]  = 'a';
-                full_s_ap[3]  = 'p'; full_s_ap[4]  = ' '; full_s_ap[5]  = 't';
-                full_s_ap[6]  = 'r'; full_s_ap[7]  = 'a'; full_s_ap[8]  = 'f';
-                full_s_ap[9]  = 'f'; full_s_ap[10] = 'i'; full_s_ap[11] = 'c';
-
-                tls13_derive_secret(@ctx.master_secret[0],
-                                    @full_c_ap[0], 12,
-                                    txhash_server_fin, 32,
-                                    @c_app_ts[0]);
-
-                tls13_derive_secret(@ctx.master_secret[0],
-                                    @full_s_ap[0], 12,
-                                    txhash_server_fin, 32,
-                                    @s_app_ts[0]);
-            };
-
-            tls13_derive_traffic_keys(@c_app_ts[0], @ctx.client_app);
-            tls13_derive_traffic_keys(@s_app_ts[0], @ctx.server_app);
-            return;
-        };
-
-        // ============================================================
-        // Finished MAC
-        //
-        // RFC 8446 §4.4.4:
-        //   finished_key = HKDF-Expand-Label(base_key, "finished", "", Hash.length)
-        //   verify_data  = HMAC-SHA-256(finished_key, Transcript-Hash(handshake_context))
-        // ============================================================
-        def tls13_compute_finished(byte* base_key, byte* txhash, byte* out) -> void
-        {
-            byte[32] finished_key;
-            byte[16] lbl;
-            int i;
-
-            lbl[0] = 'f'; lbl[1] = 'i'; lbl[2] = 'n'; lbl[3] = 'i';
-            lbl[4] = 's'; lbl[5] = 'h'; lbl[6] = 'e'; lbl[7] = 'd';
-
-            tls13_expand_label(base_key,
-                               @lbl[0], 8,
-                               (byte*)0, 0,
-                               @finished_key[0], TLS13_HASH_LEN);
-
-            crypto::KDF::HKDF::hmac_sha256(@finished_key[0], TLS13_HASH_LEN,
-                                           txhash, TLS13_HASH_LEN,
-                                           out);
-            return;
-        };
-
-        // ============================================================
-        // Build ClientHello
-        //
-        // ClientHello structure (RFC 8446 §4.1.2):
-        //   legacy_version     : 0x0303
-        //   random             : 32 bytes (we use a fixed test nonce; real impl needs CSPRNG)
-        //   legacy_session_id  : 0 bytes (empty)
-        //   cipher_suites      : TLS_AES_128_GCM_SHA256 (2 bytes)
-        //   legacy_compression : 0x01 0x00
-        //   extensions:
-        //     supported_versions : 0x0304
-        //     supported_groups   : x25519
-        //     signature_algs     : rsa_pss_rsae_sha256, ecdsa_secp256r1_sha256
-        //     key_share          : x25519 public key (32 bytes)
-        //     server_name        : hostname (SNI)
-        //
-        // Returns total handshake fragment length written into buf.
-        // buf must be at least 512 + hostname_len bytes.
-        // ============================================================
-        def tls13_build_client_hello(TLS13_CTX* ctx,
-                                     byte* hostname, int hostname_len,
-                                     byte* buf) -> int
-        {
-            int pos, ext_start, ext_len_pos, hs_start;
-            int ext_total, hs_len, i;
-
-            // Handshake header: type(1) + length(3) — fill length after
-            buf[0] = (byte)TLS_HT_CLIENT_HELLO;
-            hs_start = 1;
-            pos = 4; // skip 3-byte length field for now
-
-            // legacy_version = 0x0303
-            buf[pos] = (byte)TLS_VERSION_12_HI; pos++;
-            buf[pos] = (byte)TLS_VERSION_12_LO; pos++;
-
-            // random (32 bytes) — use our ephemeral public key bytes as the nonce
-            // (sufficient for a test/bootstrap; production should use a CSPRNG here)
-            for (i = 0; i < 32; i++) { buf[pos + i] = ctx.our_pub[i]; };
-            pos = pos + 32;
-
-            // legacy_session_id: 0 length
-            buf[pos] = '\0'; pos++;
-
-            // cipher_suites: 2 suites length = 2, then TLS_AES_128_GCM_SHA256
-            buf[pos] = (byte)0x00; buf[pos+1] = (byte)0x02; pos = pos + 2;
-            buf[pos] = (byte)TLS_AES_128_GCM_SHA256_HI;
-            buf[pos+1] = (byte)TLS_AES_128_GCM_SHA256_LO;
-            pos = pos + 2;
-
-            // legacy_compression_methods: length=1, method=0 (null)
-            buf[pos] = (byte)0x01; pos++;
-            buf[pos] = '\0'; pos++;
-
-            // Extensions — record position of 2-byte total length
-            ext_len_pos = pos;
-            pos = pos + 2;
-            ext_start = pos;
-
-            // --- Extension: supported_versions (43) ---
-            // ext_type(2) + ext_len(2) + versions_len(1) + 0x0304(2)
-            tls_put_u16(@buf[pos], TLS_EXT_SUPPORTED_VERSIONS); pos = pos + 2;
-            tls_put_u16(@buf[pos], 3); pos = pos + 2; // ext data length = 3
-            buf[pos] = (byte)0x02; pos++;             // versions list length = 2
-            buf[pos] = (byte)TLS_VERSION_13_HI; pos++;
-            buf[pos] = (byte)TLS_VERSION_13_LO; pos++;
-
-            // --- Extension: supported_groups (10) ---
-            // ext_type(2) + ext_len(2) + groups_len(2) + x25519(2)
-            tls_put_u16(@buf[pos], TLS_EXT_SUPPORTED_GROUPS); pos = pos + 2;
-            tls_put_u16(@buf[pos], 4); pos = pos + 2;
-            tls_put_u16(@buf[pos], 2); pos = pos + 2; // named_group_list length
-            buf[pos] = (byte)TLS_GROUP_X25519_HI; pos++;
-            buf[pos] = (byte)TLS_GROUP_X25519_LO; pos++;
-
-            // --- Extension: signature_algorithms (13) ---
-            // rsa_pss_rsae_sha256 (0x0804) + ecdsa_secp256r1_sha256 (0x0403)
-            tls_put_u16(@buf[pos], TLS_EXT_SIG_ALGS); pos = pos + 2;
-            tls_put_u16(@buf[pos], 6); pos = pos + 2;
-            tls_put_u16(@buf[pos], 4); pos = pos + 2; // algs list length
-            buf[pos] = (byte)TLS_SIG_RSA_PSS_SHA256_HI; pos++;
-            buf[pos] = (byte)TLS_SIG_RSA_PSS_SHA256_LO; pos++;
-            buf[pos] = (byte)TLS_SIG_ECDSA_SHA256_HI;   pos++;
-            buf[pos] = (byte)TLS_SIG_ECDSA_SHA256_LO;   pos++;
-
-            // --- Extension: key_share (51) ---
-            // ext_type(2) + ext_len(2) + client_shares_len(2) + group(2) + key_len(2) + key(32)
-            tls_put_u16(@buf[pos], TLS_EXT_KEY_SHARE); pos = pos + 2;
-            tls_put_u16(@buf[pos], 38); pos = pos + 2;   // ext data length
-            tls_put_u16(@buf[pos], 36); pos = pos + 2;   // client_shares length
-            buf[pos] = (byte)TLS_GROUP_X25519_HI; pos++;
-            buf[pos] = (byte)TLS_GROUP_X25519_LO; pos++;
-            tls_put_u16(@buf[pos], 32); pos = pos + 2;   // key_exchange length
-            for (i = 0; i < 32; i++) { buf[pos + i] = ctx.our_pub[i]; };
-            pos = pos + 32;
-
-            // --- Extension: server_name (0) ---
-            // ext_type(2) + ext_len(2) + list_len(2) + name_type(1) + name_len(2) + hostname
-            tls_put_u16(@buf[pos], TLS_EXT_SERVER_NAME); pos = pos + 2;
-            tls_put_u16(@buf[pos], hostname_len + 5); pos = pos + 2;
-            tls_put_u16(@buf[pos], hostname_len + 3); pos = pos + 2; // list length
-            buf[pos] = '\0'; pos++;                                    // name_type = host_name
-            tls_put_u16(@buf[pos], hostname_len); pos = pos + 2;
-            for (i = 0; i < hostname_len; i++) { buf[pos + i] = hostname[i]; };
-            pos = pos + hostname_len;
-
-            // Fill extensions total length
-            ext_total = pos - ext_start;
-            tls_put_u16(@buf[ext_len_pos], ext_total);
-
-            // Fill handshake message length (bytes after the 4-byte header)
-            hs_len = pos - 4;
-            tls_put_u24(@buf[1], hs_len);
-
-            return pos;
-        };
-
-        // ============================================================
-        // Parse ServerHello
-        //
-        // Extracts the server's x25519 public key from the key_share extension.
-        // Returns 1 on success, 0 on failure.
-        // ============================================================
-        def tls13_parse_server_hello(TLS13_CTX* ctx, byte* buf, int len) -> int
-        {
-            int pos, ext_total, ext_end, ext_type, ext_len;
-            int ks_group, ks_key_len, i;
-
-            // Skip: legacy_version(2) + random(32) + session_id_len(1) + session_id(var)
-            // + cipher_suite(2) + compression(1)
-            if (len < 38) { print("[SH] fail: len<38\n\0"); return 0; };
-            pos = 2 + 32; // version + random
-            // session_id
-            pos = pos + 1 + (int)(buf[pos] & 0xFF); // skip len + data
-            pos = pos + 2; // cipher suite
-            pos = pos + 1; // compression
-
-            // Extensions
-            if (pos + 2 > len) { print("[SH] fail: pos+2>len\n\0"); return 0; };
-            ext_total = tls_get_u16(@buf[pos]); pos = pos + 2;
-            ext_end   = pos + ext_total;
-
-            while (pos + 4 <= ext_end)
-            {
-                ext_type = tls_get_u16(@buf[pos]); pos = pos + 2;
-                ext_len  = tls_get_u16(@buf[pos]); pos = pos + 2;
-
-                if (ext_type == TLS_EXT_KEY_SHARE)
-                {
-                    // key_share: group(2) + key_len(2) + key_data
-                    if (ext_len < 36) { print("[SH] fail: ks ext_len<36\n\0"); return 0; };
-                    ks_group   = tls_get_u16(@buf[pos]);
-                    ks_key_len = tls_get_u16(@buf[pos + 2]);
-                    if ((ks_group != (TLS_GROUP_X25519_HI << 8 | TLS_GROUP_X25519_LO)) |
-                        (ks_key_len != 32))
+                    if (this.hKey != 0)
                     {
-                        print("[SH] fail: bad group/keylen\n\0");
-                        return 0;
+                        BCryptDestroyKey(this.hKey);
+                        this.hKey = 0;
                     };
-                    for (i = 0; i < 32; i++) { ctx.their_pub[i] = buf[pos + 4 + i]; };
-                };
-
-                pos = pos + ext_len;
-            };
-
-            print("[SH] parsed ok\n\0");
-            return 1;
-        };
-        //
-        // Flow:
-        //   1. Generate x25519 ephemeral key pair
-        //   2. Build & send ClientHello
-        //   3. Receive ServerHello, parse key_share
-        //   4. Compute x25519 shared secret
-        //   5. Derive handshake keys, install GCM contexts
-        //   6. Receive & decrypt: ChangeCipherSpec (optional), EncryptedExtensions,
-        //      Certificate, CertificateVerify, Finished
-        //   7. Verify server Finished MAC
-        //   8. Send client Finished
-        //   9. Derive application keys
-        //
-        // Returns 1 on success, 0 on any failure.
-        // ============================================================
-        def tls13_connect(TLS13_CTX* ctx, int sockfd,
-                          byte* hostname, int hostname_len) -> int
-        {
-            byte[16384] buf;
-            byte[5]    rec_hdr;
-            byte[32]   txhash_sh, txhash_sf, server_fin_verify, client_fin_verify;
-            SHA256_CTX tx_ctx_at_sh;
-            int        rec_type, rec_len, hs_type, hs_len, i, result;
-            int        pos;
-
-            ctx.sockfd        = sockfd;
-            ctx.handshake_done = 0;
-
-            // --------------------------------------------------
-            // 1. Generate ephemeral x25519 key pair
-            //    Private key: use a deterministic scalar derived from
-            //    a fixed seed XORed with its own address so different
-            //    calls produce different keys without a CSPRNG.
-            //    Production code must replace this with a CSPRNG read.
-            // --------------------------------------------------
-            {
-                byte[32] seed;
-                u64 addr_bits;
-                addr_bits = (u64)@seed[0];
-                for (i = 0; i < 32; i++)
-                {
-                    seed[i] = (byte)((addr_bits >> ((i % 8) * 8)) & 0xFF);
-                    seed[i] = seed[i] ^^ (byte)(i * 7 + 13);
-                };
-                // RFC 7748 §5: clamp the scalar
-                seed[0]  = seed[0]  & (byte)0xF8;
-                seed[31] = (seed[31] & (byte)0x7F) | (byte)0x40;
-                for (i = 0; i < 32; i++) { ctx.our_priv[i] = seed[i]; };
-            };
-            crypto::ECDH::X25519::x25519_pubkey(@ctx.our_pub[0], @ctx.our_priv[0]);
-
-            // --------------------------------------------------
-            // 2. Build ClientHello and send it
-            // --------------------------------------------------
-            {
-                int ch_len;
-                ch_len = tls13_build_client_hello(ctx, hostname, hostname_len, @buf[0]);
-                // Feed ClientHello into transcript (the 4-byte handshake header + body)
-                crypto::hashing::SHA256::sha256_init(@ctx.transcript);
-                crypto::hashing::SHA256::sha256_update(@ctx.transcript, @buf[0], (u64)ch_len);
-                // Send as handshake record
-                if (!tls_send_record_plain(sockfd, TLS_CT_HANDSHAKE, @buf[0], ch_len))
-                {
-                    return 0;
-                };
-            };
-
-            // --------------------------------------------------
-            // 3. Receive ServerHello
-            // --------------------------------------------------
-            // Read record header
-            if (!tls_recv_exact(sockfd, @rec_hdr[0], 5)) { return 0; };
-            rec_type = (int)(rec_hdr[0] & 0xFF);
-            rec_len  = tls_get_u16(@rec_hdr[3]);
-            if ((rec_type != TLS_CT_HANDSHAKE) | (rec_len > 16384)) { return 0; };
-            if (!tls_recv_exact(sockfd, @buf[0], rec_len)) { return 0; };
-
-            // buf[0] = handshake type, buf[1..3] = length
-            hs_type = (int)(buf[0] & 0xFF);
-            hs_len  = tls_get_u24(@buf[1]);
-            print("[client] rec_type=\0"); print(rec_type); print(" hs_type=\0"); print(hs_type); print(" hs_len=\0"); print(hs_len); print("\n\0");
-            if (hs_type != TLS_HT_SERVER_HELLO) { return 0; };
-
-            // Feed ServerHello into transcript
-            crypto::hashing::SHA256::sha256_update(@ctx.transcript, @buf[0], (u64)(hs_len + 4));
-
-            // Parse server key_share from the body (starting at buf[4])
-            if (!tls13_parse_server_hello(ctx, @buf[4], hs_len)) { return 0; };
-
-            // Snapshot transcript hash at ServerHello for key derivation
-            tx_ctx_at_sh = ctx.transcript;
-            crypto::hashing::SHA256::sha256_final(@tx_ctx_at_sh, @txhash_sh[0]);
-
-            // --------------------------------------------------
-            // 4. Compute x25519 shared secret
-            // --------------------------------------------------
-            crypto::ECDH::X25519::x25519(@ctx.shared_secret[0],
-                                         @ctx.our_priv[0],
-                                         @ctx.their_pub[0]);
-
-            tls_debug_hex("[client] their_pub:      \0", @ctx.their_pub[0], 32);
-            tls_debug_hex("[client] shared_secret:  \0", @ctx.shared_secret[0], 32);
-            tls_debug_hex("[client] txhash_sh:      \0", @txhash_sh[0], 32);
-
-            // --------------------------------------------------
-            // 5. Derive handshake keys (we'll fill app keys after server Finished)
-            //    Pass a placeholder for txhash_sf — we update app keys later.
-            // --------------------------------------------------
-            // We call tls13_key_schedule twice conceptually; but since we don't
-            // yet have the server Finished hash, we derive handshake keys now
-            // using a temporary dummy for the app key derivation, then re-derive
-            // app keys once we have the server Finished hash.
-            // Simpler approach: derive hs keys + master now, store traffic secrets,
-            // then derive app keys once we have txhash_sf.
-            {
-                byte[32] zeros, derived, c_hs_ts, s_hs_ts;
-                byte[32] empty_hash;
-                byte[16] lbl_c_hs, lbl_s_hs, lbl_derived;
-
-                for (i = 0; i < 32; i++) { zeros[i] = '\0'; };
-                tls13_get_empty_hash(@empty_hash[0]);
-
-                lbl_derived[0] = 'd'; lbl_derived[1] = 'e'; lbl_derived[2] = 'r';
-                lbl_derived[3] = 'i'; lbl_derived[4] = 'v'; lbl_derived[5] = 'e';
-                lbl_derived[6] = 'd';
-
-                // early_secret = HKDF-Extract(0^32, 0^32)
-                crypto::KDF::HKDF::hkdf_extract(@zeros[0], 32, @zeros[0], 32, @ctx.early_secret[0]);
-
-                // derived_from_early
-                tls13_derive_secret(@ctx.early_secret[0], @lbl_derived[0], 7,
-                                    @empty_hash[0], 32, @derived[0]);
-
-                // handshake_secret = HKDF-Extract(derived, ecdh)
-                crypto::KDF::HKDF::hkdf_extract(@derived[0], 32,
-                                                @ctx.shared_secret[0], 32,
-                                                @ctx.handshake_secret[0]);
-
-                lbl_c_hs[0]  = 'c'; lbl_c_hs[1]  = ' '; lbl_c_hs[2]  = 'h';
-                lbl_c_hs[3]  = 's'; lbl_c_hs[4]  = ' '; lbl_c_hs[5]  = 't';
-                lbl_c_hs[6]  = 'r'; lbl_c_hs[7]  = 'a'; lbl_c_hs[8]  = 'f';
-                lbl_c_hs[9]  = 'f'; lbl_c_hs[10] = 'i'; lbl_c_hs[11] = 'c';
-
-                lbl_s_hs[0]  = 's'; lbl_s_hs[1]  = ' '; lbl_s_hs[2]  = 'h';
-                lbl_s_hs[3]  = 's'; lbl_s_hs[4]  = ' '; lbl_s_hs[5]  = 't';
-                lbl_s_hs[6]  = 'r'; lbl_s_hs[7]  = 'a'; lbl_s_hs[8]  = 'f';
-                lbl_s_hs[9]  = 'f'; lbl_s_hs[10] = 'i'; lbl_s_hs[11] = 'c';
-
-                tls13_derive_secret(@ctx.handshake_secret[0], @lbl_c_hs[0], 12,
-                                    @txhash_sh[0], 32, @c_hs_ts[0]);
-                tls13_derive_secret(@ctx.handshake_secret[0], @lbl_s_hs[0], 12,
-                                    @txhash_sh[0], 32, @s_hs_ts[0]);
-
-                tls13_derive_traffic_keys(@c_hs_ts[0], @ctx.client_hs);
-                tls13_derive_traffic_keys(@s_hs_ts[0], @ctx.server_hs);
-
-                tls_debug_hex("[client] server_hs.key:  \0", @ctx.server_hs.key[0], 16);
-                tls_debug_hex("[client] server_hs.iv:   \0", @ctx.server_hs.iv[0], 12);
-
-                // Install handshake GCM contexts
-                crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.client_hs.key[0]);
-                crypto::encryption::AES::gcm_init(@ctx.gcm_read,  @ctx.server_hs.key[0]);
-
-                // Compute master_secret now (needs derived_from_hs)
-                tls13_derive_secret(@ctx.handshake_secret[0], @lbl_derived[0], 7,
-                                    @empty_hash[0], 32, @derived[0]);
-                crypto::KDF::HKDF::hkdf_extract(@derived[0], 32, @zeros[0], 32,
-                                                @ctx.master_secret[0]);
-            };
-
-            // --------------------------------------------------
-            // 6. Receive encrypted handshake messages from server
-            //    Expect: (optional CCS), EncryptedExtensions, Certificate,
-            //            CertificateVerify, Finished
-            // --------------------------------------------------
-            {
-                int saw_finished;
-
-                while (saw_finished == 0)
-                {
-                    // Read a record header
-                    if (!tls_recv_exact(sockfd, @rec_hdr[0], 5)) { return 0; };
-                    rec_type = (int)(rec_hdr[0] & 0xFF);
-                    rec_len  = tls_get_u16(@rec_hdr[3]);
-                    if (rec_len > 16384) { return 0; };
-
-                    // Receive record body
-                    if (!tls_recv_exact(sockfd, @buf[0], rec_len)) { return 0; };
-
-                    // ChangeCipherSpec records are ignored (compatibility middlebox)
-                    if (rec_type == TLS_CT_CHANGE_CIPHER_SPEC) { saw_finished = 0; };
-
-                    if (rec_type == TLS_CT_APPLICATION_DATA)
+                    if (this.hAlg != 0)
                     {
-                        // Decrypt in-place
-                        int plain_len;
-                        plain_len = tls_decrypt_record(ctx, @buf[0], rec_len, @rec_hdr[0]);
-                        if (plain_len < 0) { return 0; };
-
-                        // Inner content type is the last byte of the plaintext
-                        int inner_type;
-                        inner_type = (int)(buf[plain_len - 1] & 0xFF);
-                        int msg_body_len;
-                        msg_body_len = plain_len - 1; // strip inner type byte
-
-                        if (inner_type == TLS_CT_HANDSHAKE)
-                        {
-                            // May contain multiple handshake messages
-                            int hpos;
-                            while (hpos + 4 <= msg_body_len)
-                            {
-                                hs_type = (int)(buf[hpos] & 0xFF);
-                                hs_len  = tls_get_u24(@buf[hpos + 1]);
-
-                                if (hs_type == TLS_HT_FINISHED)
-                                {
-                                    // Snapshot transcript BEFORE feeding Finished
-                                    SHA256_CTX snap;
-                                    snap = ctx.transcript;
-                                    crypto::hashing::SHA256::sha256_final(@snap, @txhash_sf[0]);
-
-                                    tls_debug_hex("[client] txhash_sf:      \0", @txhash_sf[0], 32);
-
-                                    // Verify server Finished
-                                    tls13_compute_finished(@ctx.server_hs.secret[0],
-                                                           @txhash_sf[0],
-                                                           @server_fin_verify[0]);
-
-                                    int fin_diff;
-                                    for (i = 0; i < 32; i++)
-                                    {
-                                        fin_diff = fin_diff |
-                                            (int)(server_fin_verify[i] ^^ buf[hpos + 4 + i]);
-                                    };
-                                    if (fin_diff != 0) { return 0; };
-
-                                    // Feed Finished message into transcript
-                                    crypto::hashing::SHA256::sha256_update(
-                                        @ctx.transcript, @buf[hpos], (u64)(hs_len + 4));
-
-                                    saw_finished = 1;
-                                }
-                                else
-                                {
-                                    // Feed all other handshake messages into transcript
-                                    crypto::hashing::SHA256::sha256_update(
-                                        @ctx.transcript, @buf[hpos], (u64)(hs_len + 4));
-                                };
-
-                                hpos = hpos + 4 + hs_len;
-                            };
-                        };
+                        BCryptCloseAlgorithmProvider(this.hAlg, 0u);
+                        this.hAlg = 0;
                     };
                 };
-            };
 
-            // --------------------------------------------------
-            // 7. Derive application traffic keys
-            //    txhash_sf = hash of transcript through server Finished
-            // --------------------------------------------------
-            {
-                byte[32] c_app_ts, s_app_ts;
-                byte[16] lbl_c_ap, lbl_s_ap;
-
-                lbl_c_ap[0]  = 'c'; lbl_c_ap[1]  = ' '; lbl_c_ap[2]  = 'a';
-                lbl_c_ap[3]  = 'p'; lbl_c_ap[4]  = ' '; lbl_c_ap[5]  = 't';
-                lbl_c_ap[6]  = 'r'; lbl_c_ap[7]  = 'a'; lbl_c_ap[8]  = 'f';
-                lbl_c_ap[9]  = 'f'; lbl_c_ap[10] = 'i'; lbl_c_ap[11] = 'c';
-
-                lbl_s_ap[0]  = 's'; lbl_s_ap[1]  = ' '; lbl_s_ap[2]  = 'a';
-                lbl_s_ap[3]  = 'p'; lbl_s_ap[4]  = ' '; lbl_s_ap[5]  = 't';
-                lbl_s_ap[6]  = 'r'; lbl_s_ap[7]  = 'a'; lbl_s_ap[8]  = 'f';
-                lbl_s_ap[9]  = 'f'; lbl_s_ap[10] = 'i'; lbl_s_ap[11] = 'c';
-
-                tls13_derive_secret(@ctx.master_secret[0], @lbl_c_ap[0], 12,
-                                    @txhash_sf[0], 32, @c_app_ts[0]);
-                tls13_derive_secret(@ctx.master_secret[0], @lbl_s_ap[0], 12,
-                                    @txhash_sf[0], 32, @s_app_ts[0]);
-
-                tls13_derive_traffic_keys(@c_app_ts[0], @ctx.client_app);
-                tls13_derive_traffic_keys(@s_app_ts[0], @ctx.server_app);
-            };
-
-            // --------------------------------------------------
-            // 8. Send client Finished
-            //    Transcript hash at this point covers everything through server Finished.
-            //    client Finished verify_data = HMAC(client_hs_finished_key, txhash_cf)
-            //    txhash_cf = transcript hash BEFORE feeding client Finished itself.
-            // --------------------------------------------------
-            {
-                byte[32] txhash_cf;
-                byte[36] finished_msg; // 4-byte HS header + 32-byte verify_data
-                SHA256_CTX snap;
-
-                snap = ctx.transcript;
-                crypto::hashing::SHA256::sha256_final(@snap, @txhash_cf[0]);
-
-                tls13_compute_finished(@ctx.client_hs.secret[0], @txhash_cf[0],
-                                       @client_fin_verify[0]);
-
-                finished_msg[0] = (byte)TLS_HT_FINISHED;
-                tls_put_u24(@finished_msg[1], 32);
-                for (i = 0; i < 32; i++) { finished_msg[4 + i] = client_fin_verify[i]; };
-
-                // Send encrypted with handshake keys
-                if (!tls_send_record_enc(ctx, TLS_CT_HANDSHAKE, @finished_msg[0], 36))
+                def __expr() -> EcKey*
                 {
-                    return 0;
+                    return this;
                 };
             };
 
-            // --------------------------------------------------
-            // 9. Switch to application keys
-            // --------------------------------------------------
-            crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.client_app.key[0]);
-            crypto::encryption::AES::gcm_init(@ctx.gcm_read,  @ctx.server_app.key[0]);
-            ctx.handshake_done = 1;
-
-            return 1;
-        };
-
-        // ============================================================
-        // tls13_send — encrypt and send application data
-        //
-        // Fragments into TLS13_MAX_PLAINTEXT-byte records if needed.
-        // Returns total bytes from data sent, -1 on error.
-        // ============================================================
-        def tls13_send(TLS13_CTX* ctx, byte* xdata, int len) -> int
-        {
-            int sent, chunk, offset;
-            while (offset < len)
+            // Generate a new ECDSA P-256 or P-384 key pair
+            // curve_bits: 256 or 384
+            // Returns true on success; key is placed in out_key
+            def generate(EcKey* out_key, u32 curve_bits) -> bool
             {
-                chunk = len - offset;
-                if (chunk > TLS13_MAX_PLAINTEXT) { chunk = TLS13_MAX_PLAINTEXT; };
-                if (!tls_send_record_enc(ctx, TLS_CT_APPLICATION_DATA,
-                                         (byte*)((u64)xdata + (u64)offset), chunk))
+                void* alg_id;
+                if (curve_bits == 384)
+                {
+                    alg_id = @BCRYPT_ECDSA_P384_ALGORITHM[0];
+                }
+                else
+                {
+                    alg_id = @BCRYPT_ECDSA_P256_ALGORITHM[0];
+                };
+
+                i32 status = BCryptOpenAlgorithmProvider(@out_key.hAlg, alg_id, (void*)0, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                status = BCryptGenerateKeyPair(out_key.hAlg, @out_key.hKey, curve_bits, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                status = BCryptFinalizeKeyPair(out_key.hKey, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                out_key.is_private  = true;
+                out_key.curve_bits  = curve_bits;
+                return true;
+            };
+
+            // Import an ECDSA public key from a raw uncompressed point
+            // raw: 64 bytes (P-256) or 96 bytes (P-384) — X || Y
+            def import_public(EcKey* out_key, byte* raw, u32 raw_len, u32 curve_bits) -> bool
+            {
+                void* alg_id;
+                u32   coord_len, magic;
+                if (curve_bits == 384)
+                {
+                    alg_id    = @BCRYPT_ECDSA_P384_ALGORITHM[0];
+                    coord_len = 48u;
+                    magic     = BCRYPT_ECDSA_PUBLIC_P384_MAGIC;
+                }
+                else
+                {
+                    alg_id    = @BCRYPT_ECDSA_P256_ALGORITHM[0];
+                    coord_len = 32u;
+                    magic     = BCRYPT_ECDSA_PUBLIC_P256_MAGIC;
+                };
+
+                if (raw_len < coord_len * 2) { return false; };
+
+                i32 status = BCryptOpenAlgorithmProvider(@out_key.hAlg, alg_id, (void*)0, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                // Build BCRYPT_ECCKEY_BLOB + X + Y in a heap buffer
+                u32 blob_size = 8u + coord_len * 2;
+                byte* blob = fmalloc(blob_size);
+                if (blob == (byte*)0) { return false; };
+
+                // Write header
+                u32* bptr = (u32*)blob;
+                bptr[0]   = magic;
+                bptr[1]   = coord_len;
+                // Copy X then Y
+                memcpy(blob + 8, raw, coord_len * 2);
+
+                status = BCryptImportKeyPair(
+                    out_key.hAlg, 0, @BLOB_TYPE_ECCPUBLIC[0],
+                    @out_key.hKey, blob, blob_size, 0u
+                );
+                ffree((u64)blob);
+
+                if (status != SEC_E_OK) { return false; };
+
+                out_key.is_private = false;
+                out_key.curve_bits = curve_bits;
+                return true;
+            };
+
+            // Import an ECDSA private key from raw scalar + optional public point
+            // priv_raw: 32 or 48 bytes (big-endian scalar d)
+            // pub_raw:  64 or 96 bytes (X || Y), or NULL to let Windows derive it
+            def import_private(EcKey* out_key, byte* priv_raw, byte* pub_raw, u32 curve_bits) -> bool
+            {
+                void* alg_id;
+                u32   coord_len, magic;
+                if (curve_bits == 384)
+                {
+                    alg_id    = @BCRYPT_ECDSA_P384_ALGORITHM[0];
+                    coord_len = 48u;
+                    magic     = BCRYPT_ECDSA_PRIVATE_P256_MAGIC;
+                }
+                else
+                {
+                    alg_id    = @BCRYPT_ECDSA_P256_ALGORITHM[0];
+                    coord_len = 32u;
+                    magic     = BCRYPT_ECDSA_PRIVATE_P256_MAGIC;
+                };
+
+                i32 status = BCryptOpenAlgorithmProvider(@out_key.hAlg, alg_id, (void*)0, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                // BCRYPT_ECCKEY_BLOB + X + Y + d
+                u32 blob_size = 8u + coord_len * 3;
+                byte* blob = fmalloc(blob_size);
+                if (blob == (byte*)0) { return false; };
+
+                u32* bptr = (u32*)blob;
+                bptr[0]   = magic;
+                bptr[1]   = coord_len;
+
+                // If caller provided public point use it, else zero-pad (Windows will regenerate)
+                if (pub_raw != (byte*)0)
+                {
+                    memcpy(blob + 8, pub_raw, coord_len * 2);
+                }
+                else
+                {
+                    memset(blob + 8, 0, coord_len * 2);
+                };
+                memcpy(blob + 8 + coord_len * 2, priv_raw, coord_len);
+
+                status = BCryptImportKeyPair(
+                    out_key.hAlg, 0, @BLOB_TYPE_ECCPRIVATE[0],
+                    @out_key.hKey, blob, blob_size, BCRYPT_NO_KEY_VALIDATION
+                );
+                ffree((u64)blob);
+
+                if (status != SEC_E_OK) { return false; };
+
+                out_key.is_private = true;
+                out_key.curve_bits = curve_bits;
+                return true;
+            };
+
+            // Export the public key to raw uncompressed X || Y bytes
+            // out_buf must be at least 64 (P-256) or 96 (P-384) bytes
+            def export_public(EcKey* key, byte* out_buf, u32* out_len) -> bool
+            {
+                u32 coord_len = (key.curve_bits == 384) ? 48u : 32u;
+                u32 blob_size = 8u + coord_len * 2;
+
+                byte* blob = fmalloc(blob_size);
+                if (blob == (byte*)0) { return false; };
+
+                u32 actual;
+                i32 status = BCryptExportKey(
+                    key.hKey, 0, @BLOB_TYPE_ECCPUBLIC[0],
+                    blob, blob_size, @actual, 0u
+                );
+
+                if (status == SEC_E_OK)
+                {
+                    *out_len = coord_len * 2;
+                    memcpy(out_buf, blob + 8, coord_len * 2);
+                };
+
+                ffree((u64)blob);
+                return (status == SEC_E_OK);
+            };
+
+            // Sign a pre-computed hash (SHA-256 = 32 bytes, SHA-384 = 48 bytes)
+            // sig_buf must be at least 72 bytes (P-256 DER max) or 104 bytes (P-384)
+            // Returns actual signature length in *sig_len
+            def sign(EcKey* key, byte* hash_buf, u32 hash_len, byte* sig_buf, u32* sig_len) -> bool
+            {
+                if (!key.is_private) { return false; };
+
+                // Query required signature size
+                u32 needed;
+                i32 status = BCryptSignHash(
+                    key.hKey, (void*)0,
+                    hash_buf, hash_len,
+                    (byte*)0, 0u, @needed, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                byte* raw_sig = fmalloc(needed);
+                if (raw_sig == (byte*)0) { return false; };
+
+                u32 actual;
+                status = BCryptSignHash(
+                    key.hKey, (void*)0,
+                    hash_buf, hash_len,
+                    raw_sig, needed, @actual, 0u
+                );
+
+                if (status == SEC_E_OK)
+                {
+                    memcpy(sig_buf, raw_sig, actual);
+                    *sig_len = actual;
+                };
+
+                ffree((u64)raw_sig);
+                return (status == SEC_E_OK);
+            };
+
+            // Verify a signature (raw or DER — BCrypt accepts both for ECDSA on Windows 10+)
+            def verify(EcKey* key, byte* hash_buf, u32 hash_len, byte* sig_buf, u32 sig_len) -> bool
+            {
+                i32 status = BCryptVerifySignature(
+                    key.hKey, (void*)0,
+                    hash_buf, hash_len,
+                    sig_buf, sig_len, 0u
+                );
+                return (status == SEC_E_OK);
+            };
+        }; // ecdsa
+
+        // ---- RSA namespace ----
+        namespace rsa
+        {
+            object RsaKey
+            {
+                BCRYPT_KEY_HANDLE  hKey;
+                BCRYPT_ALG_HANDLE  hAlg;
+                bool               is_private;
+                u32                key_bits;
+                NCRYPT_KEY_HANDLE  hNKey;   // NCrypt handle populated by import_private_blob
+                NCRYPT_PROV_HANDLE hNProv;  // NCrypt provider handle
+
+                def __init() -> this
+                {
+                    this.hKey       = 0;
+                    this.hAlg       = 0;
+                    this.is_private = false;
+                    this.key_bits   = 2048;
+                    this.hNKey      = 0;
+                    this.hNProv     = 0;
+                    return this;
+                };
+
+                def __exit() -> void
+                {
+                    if (this.hKey != 0)
+                    {
+                        BCryptDestroyKey(this.hKey);
+                        this.hKey = 0;
+                    };
+                    if (this.hAlg != 0)
+                    {
+                        BCryptCloseAlgorithmProvider(this.hAlg, 0u);
+                        this.hAlg = 0;
+                    };
+                    if (this.hNKey != 0)
+                    {
+                        NCryptFreeObject(this.hNKey);
+                        this.hNKey = 0;
+                    };
+                    if (this.hNProv != 0)
+                    {
+                        NCryptFreeObject(this.hNProv);
+                        this.hNProv = 0;
+                    };
+                };
+
+                def __expr() -> RsaKey*
+                {
+                    return this;
+                };
+            };
+
+            // Generate an RSA key pair
+            def generate(RsaKey* out_key, u32 key_bits) -> bool
+            {
+                i32 status = BCryptOpenAlgorithmProvider(
+                    @out_key.hAlg, @BCRYPT_RSA_ALGORITHM[0], (void*)0, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                status = BCryptGenerateKeyPair(out_key.hAlg, @out_key.hKey, key_bits, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                status = BCryptFinalizeKeyPair(out_key.hKey, 0u);
+                if (status != SEC_E_OK) { return false; };
+
+                out_key.is_private = true;
+                out_key.key_bits   = key_bits;
+                return true;
+            };
+
+            // Import an RSA public key from a DER-encoded PKCS#1 RSAPublicKey blob
+            // (modulus || publicExponent in BCRYPT_RSAKEY_BLOB format)
+            // For simplicity, caller passes the raw BCrypt blob directly
+            def import_public_blob(RsaKey* out_key, byte* blob, u32 blob_len) -> bool
+            {
+                i32 status = BCryptOpenAlgorithmProvider(
+                    @out_key.hAlg, @BCRYPT_RSA_ALGORITHM[0], (void*)0, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                status = BCryptImportKeyPair(
+                    out_key.hAlg, 0, @BLOB_TYPE_RSAPUBLIC[0],
+                    @out_key.hKey, blob, blob_len, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                out_key.is_private = false;
+                return true;
+            };
+
+            // Import an RSA private key from a BCRYPT_RSAFULLPRIVATEBLOB (RSA3).
+            // Imports into the MS KSP under a fixed ephemeral name so that
+            // the resulting NCRYPT_KEY_HANDLE can be attached to a certificate
+            // context for Schannel via CERT_NCRYPT_KEY_HANDLE_PROP_ID.
+            def import_private_blob(RsaKey* out_key, byte* blob, u32 blob_len) -> bool
+            {
+                i32 status = BCryptOpenAlgorithmProvider(
+                    @out_key.hAlg, @BCRYPT_RSA_ALGORITHM[0], (void*)0, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                status = BCryptImportKeyPair(
+                    out_key.hAlg, 0, @BLOB_TYPE_RSAFULLPRIVATE[0],
+                    @out_key.hKey, blob, blob_len, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                i32 nstatus = NCryptOpenStorageProvider(
+                    @out_key.hNProv, @MS_KEY_STORAGE_PROVIDER[0], 0u
+                );
+                if (nstatus != SEC_E_OK) { return false; };
+
+                NCryptBuffer name_buf;
+                name_buf.cbBuffer   = 38u;
+                name_buf.BufferType = NCRYPTBUFFER_PKCS_KEY_NAME;
+                name_buf.pvBuffer   = @NCRYPT_EPHEMERAL_KEY_NAME[0];
+
+                NCryptBufferDesc param_list;
+                param_list.ulVersion = 0u;
+                param_list.cBuffers  = 1u;
+                param_list.pBuffers  = @name_buf;
+
+                nstatus = NCryptImportKey(
+                    out_key.hNProv, 0, @BLOB_TYPE_RSAFULLPRIVATE[0],
+                    @param_list,
+                    @out_key.hNKey, blob, blob_len,
+                    NCRYPT_OVERWRITE_KEY_FLAG | NCRYPT_SILENT_FLAG | NCRYPT_DO_NOT_FINALIZE_FLAG
+                );
+                if (nstatus != SEC_E_OK) { return false; };
+
+                // Set key usage to allow decrypt and key agreement for TLS
+                u32 key_usage = NCRYPT_ALLOW_DECRYPT_FLAG | NCRYPT_ALLOW_KEY_AGREEMENT_FLAG | NCRYPT_ALLOW_SIGNING_FLAG;
+                nstatus = NCryptSetProperty(
+                    out_key.hNKey,
+                    @NCRYPT_KEY_USAGE_PROPERTY[0],
+                    (byte*)@key_usage,
+                    4u,
+                    0u
+                );
+                if (nstatus != SEC_E_OK) { return false; };
+
+                nstatus = NCryptFinalizeKey(out_key.hNKey, 0u);
+                if (nstatus != SEC_E_OK) { return false; };
+
+                out_key.is_private = true;
+                return true;
+            };
+
+            // Export the public key as a BCrypt RSAPUBLICBLOB
+            // Returns the blob in a heap buffer; caller must ffree((u64))
+            def export_public_blob(RsaKey* key, byte** out_blob, u32* out_len) -> bool
+            {
+                u32 needed;
+                i32 status = BCryptExportKey(
+                    key.hKey, 0, @BLOB_TYPE_RSAPUBLIC[0],
+                    (byte*)0, 0u, @needed, 0u
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                byte* buf = fmalloc(needed);
+                if (buf == (byte*)0) { return false; };
+
+                u32 actual;
+                status = BCryptExportKey(
+                    key.hKey, 0, @BLOB_TYPE_RSAPUBLIC[0],
+                    buf, needed, @actual, 0u
+                );
+                if (status != SEC_E_OK) { ffree((u64)buf); return false; };
+
+                *out_blob = buf;
+                *out_len  = actual;
+                return true;
+            };
+
+            // Sign a hash using PKCS#1 v1.5 padding
+            // hash_alg_oid: UTF-16 OID string e.g. L"SHA256"
+            // Signature blob returned in caller-supplied buffer (sig_buf)
+            def sign_pkcs1(RsaKey* key, byte* hash_buf, u32 hash_len, byte* sig_buf, u32* sig_len) -> bool
+            {
+                if (!key.is_private) { return false; };
+
+                u32 needed;
+                i32 status = BCryptSignHash(
+                    key.hKey, (void*)0,
+                    hash_buf, hash_len,
+                    (byte*)0, 0u, @needed, BCRYPT_PAD_PKCS1
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                u32 actual;
+                status = BCryptSignHash(
+                    key.hKey, (void*)0,
+                    hash_buf, hash_len,
+                    sig_buf, needed, @actual, BCRYPT_PAD_PKCS1
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                *sig_len = actual;
+                return true;
+            };
+
+            // Verify a PKCS#1 v1.5 signature
+            def verify_pkcs1(RsaKey* key, byte* hash_buf, u32 hash_len, byte* sig_buf, u32 sig_len) -> bool
+            {
+                i32 status = BCryptVerifySignature(
+                    key.hKey, (void*)0,
+                    hash_buf, hash_len,
+                    sig_buf, sig_len, BCRYPT_PAD_PKCS1
+                );
+                return (status == SEC_E_OK);
+            };
+
+            // Encrypt with RSA-OAEP (public key operation)
+            def encrypt_oaep(RsaKey* key, byte* plain, u32 plain_len, byte* cipher_buf, u32* cipher_len) -> bool
+            {
+                u32 needed;
+                i32 status = BCryptEncrypt(
+                    key.hKey, plain, plain_len,
+                    (void*)0, (byte*)0, 0u,
+                    (byte*)0, 0u, @needed, BCRYPT_PAD_OAEP
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                u32 actual;
+                status = BCryptEncrypt(
+                    key.hKey, plain, plain_len,
+                    (void*)0, (byte*)0, 0u,
+                    cipher_buf, needed, @actual, BCRYPT_PAD_OAEP
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                *cipher_len = actual;
+                return true;
+            };
+
+            // Decrypt with RSA-OAEP (private key operation)
+            def decrypt_oaep(RsaKey* key, byte* cipher, u32 cipher_len, byte* plain_buf, u32* plain_len) -> bool
+            {
+                if (!key.is_private) { return false; };
+
+                u32 needed;
+                i32 status = BCryptDecrypt(
+                    key.hKey, cipher, cipher_len,
+                    (void*)0, (byte*)0, 0u,
+                    (byte*)0, 0u, @needed, BCRYPT_PAD_OAEP
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                u32 actual;
+                status = BCryptDecrypt(
+                    key.hKey, cipher, cipher_len,
+                    (void*)0, (byte*)0, 0u,
+                    plain_buf, needed, @actual, BCRYPT_PAD_OAEP
+                );
+                if (status != SEC_E_OK) { return false; };
+
+                *plain_len = actual;
+                return true;
+            };
+        }; // rsa
+
+        // ---- X.509 namespace ----
+        namespace x509
+        {
+            // Lightweight X.509 certificate wrapper
+            object Certificate
+            {
+                void* ctx;          // PCCERT_CONTEXT (from Crypt32)
+                u64   store;        // HCERTSTORE owning temporary store (if any)
+
+                def __init() -> this
+                {
+                    this.ctx   = (void*)0;
+                    this.store = 0;
+                    return this;
+                };
+
+                def __exit() -> void
+                {
+                    if (this.ctx != (void*)0)
+                    {
+                        CertFreeCertificateContext(this.ctx);
+                        this.ctx = (void*)0;
+                    };
+                    if (this.store != 0)
+                    {
+                        CertCloseStore(this.store, 0u);
+                        this.store = 0;
+                    };
+                };
+
+                def __expr() -> Certificate*
+                {
+                    return this;
+                };
+            };
+
+            // Load a certificate from a DER-encoded byte buffer
+            def load_der(Certificate* out_cert, byte* der_buf, u32 der_len) -> bool
+            {
+                // Open a temporary in-memory store
+                out_cert.store = CertOpenStore(
+                    (void*)CERT_STORE_PROV_MEMORY,
+                    X509_ASN_ENCODING `| PKCS_7_ASN_ENCODING,
+                    0u, 0u, (void*)0
+                );
+                if (out_cert.store == 0) { return false; };
+
+                bool ok = CertAddEncodedCertificateToStore(
+                    out_cert.store,
+                    X509_ASN_ENCODING `| PKCS_7_ASN_ENCODING,
+                    der_buf, der_len,
+                    CERT_STORE_ADD_REPLACE_EXISTING,
+                    @out_cert.ctx
+                );
+                if (!ok) { return false; };
+                return true;
+            };
+
+            // Get the raw DER bytes of the certificate
+            // Fills out_buf (caller must supply enough space); sets *out_len
+            def get_der(Certificate* cert, byte* out_buf, u32* out_len) -> bool
+            {
+                if (cert.ctx == (void*)0) { return false; };
+                CERT_CONTEXT* cc = (CERT_CONTEXT*)cert.ctx;
+                *out_len = cc.cbCertEncoded;
+                if (out_buf != (byte*)0)
+                {
+                    memcpy(out_buf, cc.pbCertEncoded, cc.cbCertEncoded);
+                };
+                return true;
+            };
+
+            // Verify the certificate's chain against the local trust store
+            // Returns true if the chain builds to a trusted root and is not revoked
+            def verify_chain(Certificate* cert) -> bool
+            {
+                if (cert.ctx == (void*)0) { return false; };
+
+                void* chain_ctx;
+                bool ok = CertGetCertificateChain(
+                    (void*)0,
+                    cert.ctx,
+                    (void*)0,
+                    0,
+                    (void*)0,
+                    0u,
+                    (void*)0,
+                    @chain_ctx
+                );
+                if (!ok | chain_ctx == (void*)0) { return false; };
+
+                CertFreeCertificateChain(chain_ctx);
+                return true;
+            };
+
+            // Associate an NCrypt private key with a certificate context.
+            // pvData for CERT_NCRYPT_KEY_HANDLE_PROP_ID is the handle value
+            // itself cast to void* — not a pointer to the handle.
+            def attach_ncrypt_key(Certificate* cert, NCRYPT_KEY_HANDLE* hKey) -> bool
+            {
+                if (cert.ctx == (void*)0) { return false; };
+                void* pvData = hKey;
+                bool result = CertSetCertificateContextProperty(
+                    cert.ctx,
+                    CERT_NCRYPT_KEY_HANDLE_PROP_ID,
+                    0u,
+                    pvData
+                );
+                if (!result) { return false; };
+
+                // Also set CERT_KEY_PROV_INFO_PROP_ID so Schannel can locate
+                // the key by name in the KSP at AcquireCredentialsHandleW time.
+                CRYPT_KEY_PROV_INFO prov_info;
+                prov_info.pwszContainerName = @NCRYPT_EPHEMERAL_KEY_NAME[0];
+                prov_info.pwszProvName      = @MS_KEY_STORAGE_PROVIDER[0];
+                prov_info.dwProvType        = 0u;
+                prov_info.dwFlags           = 0u;
+                prov_info.cProvParam        = 0u;
+                prov_info.rgProvParam       = (void*)0;
+                prov_info.dwKeySpec         = 0u;
+
+                return CertSetCertificateContextProperty(
+                    cert.ctx,
+                    CERT_KEY_PROV_INFO_PROP_ID,
+                    0u,
+                    (void*)@prov_info
+                );
+            };
+        }; // x509
+
+        // ---- TLS context (connection) ----
+        namespace conn
+        {
+            // Maximum TLS record overhead (header + trailer) and message size
+            u32 TLS_MAX_RECORD      = 16384u;
+            u32 TLS_HEADER_MAX      = 5u;
+            u32 TLS_TRAILER_MAX     = 36u;
+
+            object TlsConn
+            {
+                SecHandle      cred;          // credential handle
+                SecHandle      ctx;           // security context handle
+                int            sockfd;        // underlying socket fd
+                bool           ctx_valid;     // security context has been established
+                bool           cred_valid;
+                int            error_state;   // tls_error enum
+                SecPkgContext_StreamSizes sizes;  // record size limits
+
+                // Heap-allocated IO buffers
+                byte*          recv_raw;      // raw ciphertext accumulation buffer
+                u32            recv_raw_len;  // bytes currently in recv_raw
+                u32            recv_raw_cap;  // capacity of recv_raw
+
+                byte*          plaintext;     // pending decrypted data
+                u32            plaintext_len;
+                u32            plaintext_pos;
+
+                def __init(int fd) -> this
+                {
+                    this.sockfd         = fd;
+                    this.ctx_valid      = false;
+                    this.cred_valid     = false;
+                    this.error_state    = tls_error.TLS_OK;
+                    this.recv_raw       = (byte*)0;
+                    this.recv_raw_len   = 0u;
+                    this.recv_raw_cap   = 0u;
+                    this.plaintext      = (byte*)0;
+                    this.plaintext_len  = 0u;
+                    this.plaintext_pos  = 0u;
+                    return this;
+                };
+
+                def __exit() -> void
+                {
+                    if (this.ctx_valid)
+                    {
+                        DeleteSecurityContext(@this.ctx);
+                        this.ctx_valid = false;
+                    };
+                    if (this.cred_valid)
+                    {
+                        FreeCredentialsHandle(@this.cred);
+                        this.cred_valid = false;
+                    };
+                    if (this.recv_raw != (byte*)0)
+                    {
+                        ffree((u64)this.recv_raw);
+                        this.recv_raw = (byte*)0;
+                    };
+                    if (this.plaintext != (byte*)0)
+                    {
+                        ffree((u64)this.plaintext);
+                        this.plaintext = (byte*)0;
+                    };
+                };
+
+                def __expr() -> TlsConn*
+                {
+                    return this;
+                };
+            };
+
+            // ---- Internal helpers ----
+
+            // Grow the raw receive buffer to ensure it can hold at least min_cap bytes
+            def _ensure_recv_cap(TlsConn* c, u32 min_cap) -> bool
+            {
+                if (c.recv_raw_cap >= min_cap) { return true; };
+                u32 new_cap = min_cap + TLS_MAX_RECORD;
+                byte* nb = realloc(c.recv_raw, new_cap);
+                if (nb == (byte*)0) { return false; };
+                c.recv_raw     = nb;
+                c.recv_raw_cap = new_cap;
+                return true;
+            };
+
+            // Read more ciphertext from the socket into recv_raw
+            def _socket_recv_more(TlsConn* c) -> int
+            {
+                if (!_ensure_recv_cap(c, c.recv_raw_len + TLS_MAX_RECORD))
                 {
                     return -1;
                 };
-                offset = offset + chunk;
-            };
-            return len;
-        };
-
-        // ============================================================
-        // tls13_recv — receive and decrypt one TLS application record
-        //
-        // Reads exactly one record. Caller must call repeatedly if more data expected.
-        // Returns number of plaintext bytes written into buf, -1 on error.
-        // Silently discards non-application-data records (alerts, NewSessionTicket).
-        // ============================================================
-        def tls13_recv(TLS13_CTX* ctx, byte* buf, int buf_len) -> int
-        {
-            byte[TLS13_MAX_PLAINTEXT + TLS13_RECORD_OVERHEAD] rec_body;
-            byte[5]  rec_hdr;
-            int rec_type, rec_len, plain_len, inner_type, i;
-
-            while (true)
-            {
-                if (!tls_recv_exact(ctx.sockfd, @rec_hdr[0], 5)) { return -1; };
-                rec_type = (int)(rec_hdr[0] & 0xFF);
-                rec_len  = tls_get_u16(@rec_hdr[3]);
-
-                if (rec_len > (TLS13_MAX_PLAINTEXT + TLS13_RECORD_OVERHEAD)) { return -1; };
-                if (!tls_recv_exact(ctx.sockfd, @rec_body[0], rec_len)) { return -1; };
-
-                if (rec_type == TLS_CT_ALERT)
+                int n = recv(c.sockfd, c.recv_raw + c.recv_raw_len, (int)(c.recv_raw_cap - c.recv_raw_len), 0);
+                if (n > 0)
                 {
-                    // close_notify or fatal alert — signal EOF
-                    return -1;
+                    c.recv_raw_len += (u32)n;
+                };
+                return n;
+            };
+
+            // Send a token buffer over the raw socket
+            def _send_token(TlsConn* c, SecBuffer* tok) -> bool
+            {
+                if (tok.cbBuffer == 0 | tok.pvBuffer == (void*)0) { return true; };
+                int sent = send(c.sockfd, tok.pvBuffer, (int)tok.cbBuffer, 0);
+                FreeContextBuffer(tok.pvBuffer);
+                tok.pvBuffer  = (void*)0;
+                tok.cbBuffer  = 0u;
+                return (sent > 0);
+            };
+
+            // ---- Client handshake ----
+
+            // Acquire outbound (client) Schannel credentials
+            // cert_ctx: optional client certificate PCCERT_CONTEXT, NULL for none
+            def client_create_cred(TlsConn* c, void* cert_ctx) -> bool
+            {
+                SCHANNEL_CRED sc_cred;
+                memset(@sc_cred, 0, sizeof(SCHANNEL_CRED) / sizeof(byte));
+                sc_cred.dwVersion            = SCHANNEL_CRED_VERSION;
+                sc_cred.grbitEnabledProtocols = SP_PROT_TLS1_2_CLIENT;
+                sc_cred.dwFlags              = SCH_CRED_NO_DEFAULT_CREDS `| SCH_CRED_MANUAL_CRED_VALIDATION;
+
+                if (cert_ctx != (void*)0)
+                {
+                    sc_cred.cCreds  = 1u;
+                    CertContextArray cca;
+                    cca.ctx = cert_ctx;
+                    sc_cred.paCred  = @cca.ctx;
                 };
 
-                if (rec_type == TLS_CT_APPLICATION_DATA)
+                TimeStamp expiry;
+                i32 status = AcquireCredentialsHandleW(
+                    (void*)0, @SCHANNEL_NAME_W[0],
+                    SECPKG_CRED_OUTBOUND,
+                    (void*)0, @sc_cred,
+                    (void*)0, (void*)0,
+                    @c.cred, @expiry
+                );
+                c.cred_valid = (status == SEC_E_OK);
+                if (!c.cred_valid) { c.error_state = tls_error.TLS_ERR_CRED; };
+                return c.cred_valid;
+            };
+
+            // Perform the full TLS client handshake
+            // server_name_w: wchar* server name for SNI / certificate validation
+            def client_handshake(TlsConn* c, void* server_name_w) -> bool
+            {
+                if (!c.cred_valid) { return false; };
+
+                // Ensure recv buffer
+                if (!_ensure_recv_cap(c, TLS_MAX_RECORD * 2))
                 {
-                    plain_len = tls_decrypt_record(ctx, @rec_body[0], rec_len, @rec_hdr[0]);
-                    if (plain_len < 0) { return -1; };
+                    c.error_state = tls_error.TLS_ERR_ALLOC;
+                    return false;
+                };
 
-                    // Strip inner content type byte
-                    inner_type = (int)(rec_body[plain_len - 1] & 0xFF);
-                    plain_len  = plain_len - 1;
+                u32 req_flags = ISC_REQ_SEQUENCE_DETECT `|
+                                ISC_REQ_REPLAY_DETECT   `|
+                                ISC_REQ_CONFIDENTIALITY `|
+                                ISC_REQ_EXTENDED_ERROR  `|
+                                ISC_REQ_ALLOCATE_MEMORY `|
+                                ISC_REQ_STREAM          `|
+                                ISC_REQ_MANUAL_CRED_VALIDATION;
 
-                    if (inner_type == TLS_CT_APPLICATION_DATA)
+                bool first_call = true;
+                i32  status;
+                u32  ctx_attrs;
+                TimeStamp expiry;
+
+                // Output buffers
+                SecBuffer[1] out_bufs;
+                SecBufferDesc out_desc;
+                out_desc.ulVersion = SECBUFFER_VERSION;
+                out_desc.cBuffers  = 1u;
+                out_desc.pBuffers  = @out_bufs[0];
+
+                // Input buffers (unused on first call)
+                SecBuffer[2] in_bufs;
+                SecBufferDesc in_desc;
+                in_desc.ulVersion = SECBUFFER_VERSION;
+                in_desc.cBuffers  = 2u;
+                in_desc.pBuffers  = @in_bufs[0];
+
+                do
+                {
+                    out_bufs[0].BufferType = SECBUFFER_TOKEN;
+                    out_bufs[0].cbBuffer   = 0u;
+                    out_bufs[0].pvBuffer   = (void*)0;
+
+                    if (first_call)
                     {
-                        if (plain_len > buf_len) { plain_len = buf_len; };
-                        for (i = 0; i < plain_len; i++) { buf[i] = rec_body[i]; };
-                        return plain_len;
+                        status = InitializeSecurityContextW(
+                            @c.cred,
+                            (SecHandle*)0,
+                            server_name_w,
+                            req_flags, 0u, 0u,
+                            (SecBufferDesc*)0, 0u,
+                            @c.ctx,
+                            @out_desc,
+                            @ctx_attrs, @expiry
+                        );
+                        first_call = false;
+                    }
+                    else
+                    {
+                        in_bufs[0].BufferType = SECBUFFER_TOKEN;
+                        in_bufs[0].cbBuffer   = c.recv_raw_len;
+                        in_bufs[0].pvBuffer   = c.recv_raw;
+                        in_bufs[1].BufferType = SECBUFFER_EMPTY;
+                        in_bufs[1].cbBuffer   = 0u;
+                        in_bufs[1].pvBuffer   = (void*)0;
+
+                        status = InitializeSecurityContextW(
+                            @c.cred,
+                            @c.ctx,
+                            server_name_w,
+                            req_flags, 0u, 0u,
+                            @in_desc, 0u,
+                            @c.ctx,
+                            @out_desc,
+                            @ctx_attrs, @expiry
+                        );
                     };
-                    // Other inner types (NewSessionTicket etc.) — discard and loop
-                };
-                // Non-application outer records — discard and loop
-            };
-            return -1;
-        };
 
-        // ============================================================
-        // tls13_close — send close_notify and shut down
-        // ============================================================
-        def tls13_close(TLS13_CTX* ctx) -> void
-        {
-            byte[2] alert;
-            alert[0] = (byte)TLS_ALERT_LEVEL_WARNING;
-            alert[1] = (byte)TLS_ALERT_CLOSE_NOTIFY;
-            tls_send_record_enc(ctx, TLS_CT_ALERT, @alert[0], 2);
-            return;
-        };
-
-        // ============================================================
-        // tls13_accept — server-side TLS 1.3 handshake
-        //
-        // Called after a TCP accept(). Performs the full server-side
-        // TLS 1.3 handshake:
-        //   1. Receive and parse ClientHello — extract client x25519 key_share
-        //   2. Generate server ephemeral x25519 key pair
-        //   3. Send ServerHello (with server key_share)
-        //   4. Derive handshake keys from ECDH shared secret
-        //   5. Send encrypted: EncryptedExtensions, Certificate (stub),
-        //      CertificateVerify (stub), Finished
-        //   6. Receive and verify client Finished
-        //   7. Derive and install application keys
-        //
-        // Certificate is sent as an empty list — valid wire format, and the
-        // client (tls13_connect) does not verify the certificate chain.
-        // CertificateVerify is omitted (zero-length stub message body) since
-        // there is no real private key to sign with.
-        //
-        // Returns 1 on success, 0 on any failure.
-        // ============================================================
-        def tls13_accept(TLS13_CTX* ctx, int sockfd) -> int
-        {
-            byte[16384] buf;
-            byte[5]     rec_hdr;
-            byte[32]    txhash_sh, txhash_sf;
-            byte[32]    server_fin_mac, client_fin_verify;
-            int         rec_type, rec_len, hs_type, hs_len;
-            int         i, pos, ext_end, ext_len, ext_type, result;
-
-            ctx.sockfd         = sockfd;
-            ctx.handshake_done = 0;
-            ctx.is_server      = 1;
-
-            // --------------------------------------------------
-            // 1. Receive ClientHello
-            // --------------------------------------------------
-            if (!tls_recv_exact(sockfd, @rec_hdr[0], 5)) { return 0; };
-            rec_type = (int)(rec_hdr[0] & 0xFF);
-            rec_len  = tls_get_u16(@rec_hdr[3]);
-            if ((rec_type != TLS_CT_HANDSHAKE) | (rec_len > 16384)) { return 0; };
-            if (!tls_recv_exact(sockfd, @buf[0], rec_len)) { return 0; };
-
-            hs_type = (int)(buf[0] & 0xFF);
-            hs_len  = tls_get_u24(@buf[1]);
-            if (hs_type != TLS_HT_CLIENT_HELLO) { return 0; };
-
-            // Feed ClientHello into transcript
-            crypto::hashing::SHA256::sha256_init(@ctx.transcript);
-            crypto::hashing::SHA256::sha256_update(@ctx.transcript, @buf[0], (u64)(hs_len + 4));
-
-            // Parse client x25519 key_share from ClientHello body (buf[4..])
-            // ClientHello body: version(2) + random(32) + sid_len(1) + sid(var)
-            //                   + cs_len(2) + cs(var) + comp_len(1) + comp(var)
-            //                   + ext_len(2) + extensions
-            {
-                int ch_pos;
-                ch_pos = 4; // skip hs header
-                ch_pos = ch_pos + 2 + 32; // skip version + random
-                ch_pos = ch_pos + 1 + (int)(buf[ch_pos] & 0xFF); // skip sid
-                int cs_len;
-                cs_len = tls_get_u16(@buf[ch_pos]); ch_pos = ch_pos + 2 + cs_len;
-                int comp_len;
-                comp_len = (int)(buf[ch_pos] & 0xFF); ch_pos = ch_pos + 1 + comp_len;
-
-                // Extensions
-                int ch_ext_total;
-                ch_ext_total = tls_get_u16(@buf[ch_pos]); ch_pos = ch_pos + 2;
-                ext_end = ch_pos + ch_ext_total;
-
-                while (ch_pos + 4 <= ext_end)
-                {
-                    ext_type = tls_get_u16(@buf[ch_pos]); ch_pos = ch_pos + 2;
-                    ext_len  = tls_get_u16(@buf[ch_pos]); ch_pos = ch_pos + 2;
-
-                    if (ext_type == TLS_EXT_KEY_SHARE)
+                    // Send any output token
+                    if (out_bufs[0].cbBuffer > 0u)
                     {
-                        // client_shares_len(2) + group(2) + key_len(2) + key(32)
-                        int ks_list_len, ks_group, ks_key_len;
-                        ks_list_len = tls_get_u16(@buf[ch_pos]);
-                        ks_group    = tls_get_u16(@buf[ch_pos + 2]);
-                        ks_key_len  = tls_get_u16(@buf[ch_pos + 4]);
-                        if ((ks_group == (TLS_GROUP_X25519_HI << 8 | TLS_GROUP_X25519_LO)) &
-                            (ks_key_len == 32))
+                        if (!_send_token(c, @out_bufs[0]))
                         {
-                            for (i = 0; i < 32; i++)
-                            {
-                                ctx.their_pub[i] = buf[ch_pos + 6 + i];
-                            };
+                            c.error_state = tls_error.TLS_ERR_SEND;
+                            return false;
                         };
                     };
 
-                    ch_pos = ch_pos + ext_len;
-                };
-            };
-
-            // --------------------------------------------------
-            // 2. Generate server ephemeral x25519 key pair
-            // --------------------------------------------------
-            {
-                byte[32] seed;
-                u64 addr_bits;
-                addr_bits = (u64)@seed[0];
-                for (i = 0; i < 32; i++)
-                {
-                    seed[i] = (byte)((addr_bits >> ((i % 8) * 8)) & 0xFF);
-                    seed[i] = seed[i] ^^ (byte)(i * 11 + 7);
-                };
-                seed[0]  = seed[0]  & (byte)0xF8;
-                seed[31] = (seed[31] & (byte)0x7F) | (byte)0x40;
-                for (i = 0; i < 32; i++) { ctx.our_priv[i] = seed[i]; };
-            };
-            crypto::ECDH::X25519::x25519_pubkey(@ctx.our_pub[0], @ctx.our_priv[0]);
-
-            // --------------------------------------------------
-            // 3. Build and send ServerHello
-            //
-            // ServerHello body:
-            //   version(2) + random(32) + sid_len(1) + sid(0)
-            //   + cipher_suite(2) + compression(1)
-            //   + ext_len(2) + supported_versions(7) + key_share(40)
-            // --------------------------------------------------
-            {
-                int sh_body_pos, sh_ext_start, sh_ext_len_pos, sh_len;
-
-                // hs header: type(1) + length(3)
-                buf[0] = (byte)TLS_HT_SERVER_HELLO;
-                pos = 4; // fill length after
-
-                // legacy_version = 0x0303
-                buf[pos] = (byte)TLS_VERSION_12_HI; pos++;
-                buf[pos] = (byte)TLS_VERSION_12_LO; pos++;
-
-                // random: use our public key bytes (same CSPRNG caveat as client)
-                for (i = 0; i < 32; i++) { buf[pos + i] = ctx.our_pub[i]; };
-                pos = pos + 32;
-
-                // legacy_session_id: 0 bytes
-                buf[pos] = '\0'; pos++;
-
-                // cipher_suite: TLS_AES_128_GCM_SHA256
-                buf[pos] = (byte)TLS_AES_128_GCM_SHA256_HI; pos++;
-                buf[pos] = (byte)TLS_AES_128_GCM_SHA256_LO; pos++;
-
-                // compression: 0
-                buf[pos] = '\0'; pos++;
-
-                // extensions length placeholder
-                sh_ext_len_pos = pos; pos = pos + 2;
-                sh_ext_start = pos;
-
-                // supported_versions: 0x0304
-                tls_put_u16(@buf[pos], TLS_EXT_SUPPORTED_VERSIONS); pos = pos + 2;
-                tls_put_u16(@buf[pos], 2); pos = pos + 2;
-                buf[pos] = (byte)TLS_VERSION_13_HI; pos++;
-                buf[pos] = (byte)TLS_VERSION_13_LO; pos++;
-
-                // key_share: group(2) + key_len(2) + key(32)
-                tls_put_u16(@buf[pos], TLS_EXT_KEY_SHARE); pos = pos + 2;
-                tls_put_u16(@buf[pos], 36); pos = pos + 2;
-                buf[pos] = (byte)TLS_GROUP_X25519_HI; pos++;
-                buf[pos] = (byte)TLS_GROUP_X25519_LO; pos++;
-                tls_put_u16(@buf[pos], 32); pos = pos + 2;
-                for (i = 0; i < 32; i++) { buf[pos + i] = ctx.our_pub[i]; };
-                pos = pos + 32;
-
-                // fill extensions length
-                tls_put_u16(@buf[sh_ext_len_pos], pos - sh_ext_start);
-
-                // fill handshake message length
-                tls_put_u24(@buf[1], pos - 4);
-
-                sh_len = pos;
-
-                // Feed ServerHello into transcript
-                crypto::hashing::SHA256::sha256_update(@ctx.transcript, @buf[0], (u64)sh_len);
-
-                // Send as plaintext handshake record
-                if (!tls_send_record_plain(sockfd, TLS_CT_HANDSHAKE, @buf[0], sh_len))
-                {
-                    return 0;
-                };
-            };
-
-            // --------------------------------------------------
-            // 4. Derive handshake keys
-            // --------------------------------------------------
-            // Snapshot transcript at ServerHello
-            {
-                SHA256_CTX snap;
-                snap = ctx.transcript;
-                crypto::hashing::SHA256::sha256_final(@snap, @txhash_sh[0]);
-            };
-
-            // x25519 shared secret
-            crypto::ECDH::X25519::x25519(@ctx.shared_secret[0],
-                                         @ctx.our_priv[0],
-                                         @ctx.their_pub[0]);
-
-            tls_debug_hex("[server] their_pub:      \0", @ctx.their_pub[0], 32);
-            tls_debug_hex("[server] shared_secret:  \0", @ctx.shared_secret[0], 32);
-            tls_debug_hex("[server] txhash_sh:      \0", @txhash_sh[0], 32);
-
-            // Full key schedule (handshake + master)
-            {
-                byte[32] zeros, derived, c_hs_ts, s_hs_ts;
-                byte[32] empty_hash;
-                byte[16] lbl_c_hs, lbl_s_hs, lbl_derived;
-
-                for (i = 0; i < 32; i++) { zeros[i] = '\0'; };
-                tls13_get_empty_hash(@empty_hash[0]);
-
-                lbl_derived[0] = 'd'; lbl_derived[1] = 'e'; lbl_derived[2] = 'r';
-                lbl_derived[3] = 'i'; lbl_derived[4] = 'v'; lbl_derived[5] = 'e';
-                lbl_derived[6] = 'd';
-
-                crypto::KDF::HKDF::hkdf_extract(@zeros[0], 32, @zeros[0], 32,
-                                                @ctx.early_secret[0]);
-
-                tls13_derive_secret(@ctx.early_secret[0], @lbl_derived[0], 7,
-                                    @empty_hash[0], 32, @derived[0]);
-
-                crypto::KDF::HKDF::hkdf_extract(@derived[0], 32,
-                                                @ctx.shared_secret[0], 32,
-                                                @ctx.handshake_secret[0]);
-
-                lbl_c_hs[0]  = 'c'; lbl_c_hs[1]  = ' '; lbl_c_hs[2]  = 'h';
-                lbl_c_hs[3]  = 's'; lbl_c_hs[4]  = ' '; lbl_c_hs[5]  = 't';
-                lbl_c_hs[6]  = 'r'; lbl_c_hs[7]  = 'a'; lbl_c_hs[8]  = 'f';
-                lbl_c_hs[9]  = 'f'; lbl_c_hs[10] = 'i'; lbl_c_hs[11] = 'c';
-
-                lbl_s_hs[0]  = 's'; lbl_s_hs[1]  = ' '; lbl_s_hs[2]  = 'h';
-                lbl_s_hs[3]  = 's'; lbl_s_hs[4]  = ' '; lbl_s_hs[5]  = 't';
-                lbl_s_hs[6]  = 'r'; lbl_s_hs[7]  = 'a'; lbl_s_hs[8]  = 'f';
-                lbl_s_hs[9]  = 'f'; lbl_s_hs[10] = 'i'; lbl_s_hs[11] = 'c';
-
-                tls13_derive_secret(@ctx.handshake_secret[0], @lbl_c_hs[0], 12,
-                                    @txhash_sh[0], 32, @c_hs_ts[0]);
-                tls13_derive_secret(@ctx.handshake_secret[0], @lbl_s_hs[0], 12,
-                                    @txhash_sh[0], 32, @s_hs_ts[0]);
-
-                tls13_derive_traffic_keys(@c_hs_ts[0], @ctx.client_hs);
-                tls13_derive_traffic_keys(@s_hs_ts[0], @ctx.server_hs);
-
-                tls_debug_hex("[server] server_hs.key:  \0", @ctx.server_hs.key[0], 16);
-                tls_debug_hex("[server] server_hs.iv:   \0", @ctx.server_hs.iv[0], 12);
-
-                // Server writes with server_hs, reads with client_hs
-                crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.server_hs.key[0]);
-                crypto::encryption::AES::gcm_init(@ctx.gcm_read,  @ctx.client_hs.key[0]);
-
-                tls13_derive_secret(@ctx.handshake_secret[0], @lbl_derived[0], 7,
-                                    @empty_hash[0], 32, @derived[0]);
-                crypto::KDF::HKDF::hkdf_extract(@derived[0], 32, @zeros[0], 32,
-                                                @ctx.master_secret[0]);
-            };
-
-            // --------------------------------------------------
-            // 5. Send encrypted server flight:
-            //    EncryptedExtensions + Certificate (empty) + Finished
-            //
-            //    CertificateVerify is omitted — the client does not
-            //    verify it and we have no real signing key.
-            // --------------------------------------------------
-
-            // Build the entire flight into buf, then send as one record each.
-
-            // --- EncryptedExtensions ---
-            // HS header(4) + ext_total_len(2) = 6 bytes, no extensions
-            {
-                byte[8] ee_msg;
-                ee_msg[0] = (byte)TLS_HT_ENCRYPTED_EXTS;
-                tls_put_u24(@ee_msg[1], 2);
-                ee_msg[4] = '\0'; // extensions length = 0
-                ee_msg[5] = '\0';
-                crypto::hashing::SHA256::sha256_update(@ctx.transcript, @ee_msg[0], 6);
-                if (!tls_send_record_enc(ctx, TLS_CT_HANDSHAKE, @ee_msg[0], 6))
-                {
-                    return 0;
-                };
-            };
-
-            // --- Certificate (empty list) ---
-            // HS type(1) + length(3) + request_context_len(1) + cert_list_len(3)
-            // = 8 bytes total, cert_list_len = 0
-            {
-                byte[8] cert_msg;
-                cert_msg[0] = (byte)TLS_HT_CERTIFICATE;
-                tls_put_u24(@cert_msg[1], 4); // body = 4 bytes
-                cert_msg[4] = '\0';           // request_context length = 0
-                cert_msg[5] = '\0';           // cert_list length (24-bit) = 0
-                cert_msg[6] = '\0';
-                cert_msg[7] = '\0';
-                crypto::hashing::SHA256::sha256_update(@ctx.transcript, @cert_msg[0], 8);
-                if (!tls_send_record_enc(ctx, TLS_CT_HANDSHAKE, @cert_msg[0], 8))
-                {
-                    return 0;
-                };
-            };
-
-            // --- Finished ---
-            // Snapshot transcript hash before Finished
-            {
-                SHA256_CTX snap;
-                snap = ctx.transcript;
-                crypto::hashing::SHA256::sha256_final(@snap, @txhash_sf[0]);
-            };
-
-            tls13_compute_finished(@ctx.server_hs.secret[0], @txhash_sf[0], @server_fin_mac[0]);
-
-            {
-                byte[36] fin_msg;
-                fin_msg[0] = (byte)TLS_HT_FINISHED;
-                tls_put_u24(@fin_msg[1], 32);
-                for (i = 0; i < 32; i++) { fin_msg[4 + i] = server_fin_mac[i]; };
-                crypto::hashing::SHA256::sha256_update(@ctx.transcript, @fin_msg[0], 36);
-                if (!tls_send_record_enc(ctx, TLS_CT_HANDSHAKE, @fin_msg[0], 36))
-                {
-                    return 0;
-                };
-            };
-
-            // --------------------------------------------------
-            // 6. Derive application keys now
-            //    txhash_sf = transcript through server Finished
-            // --------------------------------------------------
-            {
-                byte[32] c_app_ts, s_app_ts;
-                byte[16] lbl_c_ap, lbl_s_ap;
-
-                lbl_c_ap[0]  = 'c'; lbl_c_ap[1]  = ' '; lbl_c_ap[2]  = 'a';
-                lbl_c_ap[3]  = 'p'; lbl_c_ap[4]  = ' '; lbl_c_ap[5]  = 't';
-                lbl_c_ap[6]  = 'r'; lbl_c_ap[7]  = 'a'; lbl_c_ap[8]  = 'f';
-                lbl_c_ap[9]  = 'f'; lbl_c_ap[10] = 'i'; lbl_c_ap[11] = 'c';
-
-                lbl_s_ap[0]  = 's'; lbl_s_ap[1]  = ' '; lbl_s_ap[2]  = 'a';
-                lbl_s_ap[3]  = 'p'; lbl_s_ap[4]  = ' '; lbl_s_ap[5]  = 't';
-                lbl_s_ap[6]  = 'r'; lbl_s_ap[7]  = 'a'; lbl_s_ap[8]  = 'f';
-                lbl_s_ap[9]  = 'f'; lbl_s_ap[10] = 'i'; lbl_s_ap[11] = 'c';
-
-                tls13_derive_secret(@ctx.master_secret[0], @lbl_c_ap[0], 12,
-                                    @txhash_sf[0], 32, @c_app_ts[0]);
-                tls13_derive_secret(@ctx.master_secret[0], @lbl_s_ap[0], 12,
-                                    @txhash_sf[0], 32, @s_app_ts[0]);
-
-                tls13_derive_traffic_keys(@c_app_ts[0], @ctx.client_app);
-                tls13_derive_traffic_keys(@s_app_ts[0], @ctx.server_app);
-            };
-
-            // --------------------------------------------------
-            // 7. Receive and verify client Finished
-            // --------------------------------------------------
-            {
-                int saw_client_finished;
-                while (saw_client_finished == 0)
-                {
-                    if (!tls_recv_exact(sockfd, @rec_hdr[0], 5)) { return 0; };
-                    rec_type = (int)(rec_hdr[0] & 0xFF);
-                    rec_len  = tls_get_u16(@rec_hdr[3]);
-                    if (rec_len > 16384) { return 0; };
-                    if (!tls_recv_exact(sockfd, @buf[0], rec_len)) { return 0; };
-
-                    if (rec_type == TLS_CT_CHANGE_CIPHER_SPEC) { saw_client_finished = 0; };
-
-                    if (rec_type == TLS_CT_APPLICATION_DATA)
+                    // Handle EXTRA buffer (leftover data after handshake token)
+                    if (in_bufs[1].BufferType == SECBUFFER_EXTRA & in_bufs[1].cbBuffer > 0u)
                     {
-                        int plain_len;
-                        plain_len = tls_decrypt_record(ctx, @buf[0], rec_len, @rec_hdr[0]);
-                        if (plain_len < 0) { return 0; };
+                        u32 extra = in_bufs[1].cbBuffer;
+                        memmove(c.recv_raw, c.recv_raw + (c.recv_raw_len - extra), extra);
+                        c.recv_raw_len = extra;
+                    }
+                    else
+                    {
+                        c.recv_raw_len = 0u;
+                    };
 
-                        int inner_type;
-                        inner_type = (int)(buf[plain_len - 1] & 0xFF);
-                        int msg_body_len;
-                        msg_body_len = plain_len - 1;
-
-                        if (inner_type == TLS_CT_HANDSHAKE)
+                    if (status == SEC_I_CONTINUE_NEEDED `| status == SEC_E_INCOMPLETE_MESSAGE)
+                    {
+                        // Need more data from server
+                        int n = _socket_recv_more(c);
+                        if (n <= 0)
                         {
-                            int hpos;
-                            while (hpos + 4 <= msg_body_len)
-                            {
-                                hs_type = (int)(buf[hpos] & 0xFF);
-                                hs_len  = tls_get_u24(@buf[hpos + 1]);
+                            c.error_state = tls_error.TLS_ERR_RECV;
+                            return false;
+                        };
+                    }
+                    elif (status == SEC_E_OK)
+                    {
+                        // Handshake complete
+                        c.ctx_valid = true;
+                    }
+                    else
+                    {
+                        c.error_state = tls_error.TLS_ERR_HANDSHAKE;
+                        return false;
+                    };
+                }
+                while (status != SEC_E_OK);
 
-                                if (hs_type == TLS_HT_FINISHED)
-                                {
-                                    // Compute expected client Finished
-                                    // Transcript hash at this point = through server Finished
-                                    // (client computes over transcript before its own Finished)
-                                    byte[32] txhash_cf;
-                                    SHA256_CTX snap;
-                                    snap = ctx.transcript;
-                                    crypto::hashing::SHA256::sha256_final(@snap, @txhash_cf[0]);
+                // Query stream sizes for IO buffer sizing
+                QueryContextAttributesW(@c.ctx, SECPKG_ATTR_STREAM_SIZES, @c.sizes);
 
-                                    tls_debug_hex("[server] txhash_cf:      \0", @txhash_cf[0], 32);
+                // Allocate plaintext buffer
+                byte* pt = fmalloc(c.sizes.cbMaximumMessage);
+                if (pt == (byte*)0)
+                {
+                    c.error_state = tls_error.TLS_ERR_ALLOC;
+                    return false;
+                };
+                c.plaintext     = pt;
+                c.plaintext_len = 0u;
+                c.plaintext_pos = 0u;
 
-                                    tls13_compute_finished(@ctx.client_hs.secret[0],
-                                                           @txhash_cf[0],
-                                                           @client_fin_verify[0]);
+                return true;
+            };
 
-                                    int fin_diff;
-                                    for (i = 0; i < 32; i++)
-                                    {
-                                        fin_diff = fin_diff |
-                                            (int)(client_fin_verify[i] ^^ buf[hpos + 4 + i]);
-                                    };
-                                    if (fin_diff != 0) { return 0; };
+            // ---- Server handshake ----
 
-                                    saw_client_finished = 1;
-                                };
+            // Acquire inbound (server) Schannel credentials
+            // cert_ctx: server certificate PCCERT_CONTEXT (required)
+            def server_create_cred(TlsConn* c, void* cert_ctx) -> bool
+            {
+                SCH_CREDENTIALS sc_cred;
+                memset(@sc_cred, 0, sizeof(SCH_CREDENTIALS) / sizeof(byte));
+                sc_cred.dwVersion  = SCH_CREDENTIALS_VERSION;
+                sc_cred.cCreds     = 1u;
+                CertContextArray cca;
+                cca.ctx = cert_ctx;
+                sc_cred.paCred     = @cca.ctx;
+                sc_cred.dwFlags    = SCH_SEND_ROOT_CERT;
 
-                                hpos = hpos + 4 + hs_len;
-                            };
+                TimeStamp expiry;
+                i32 status = AcquireCredentialsHandleW(
+                    (void*)0, @SCHANNEL_NAME_W[0],
+                    SECPKG_CRED_INBOUND,
+                    (void*)0, @sc_cred,
+                    (void*)0, (void*)0,
+                    @c.cred, @expiry
+                );
+                c.cred_valid = (status == SEC_E_OK);
+                if (!c.cred_valid) { c.error_state = tls_error.TLS_ERR_CRED; };
+                return c.cred_valid;
+            };
+
+            // Perform the full TLS server handshake
+            def server_handshake(TlsConn* c) -> bool
+            {
+                if (!c.cred_valid) { return false; };
+
+                if (!_ensure_recv_cap(c, TLS_MAX_RECORD * 2))
+                {
+                    c.error_state = tls_error.TLS_ERR_ALLOC;
+                    return false;
+                };
+
+                u32 req_flags = ASC_REQ_SEQUENCE_DETECT `|
+                                ASC_REQ_REPLAY_DETECT   `|
+                                ASC_REQ_CONFIDENTIALITY `|
+                                ASC_REQ_EXTENDED_ERROR  `|
+                                ASC_REQ_ALLOCATE_MEMORY `|
+                                ASC_REQ_STREAM;
+
+                bool first_call = true;
+                i32  status;
+                u32  ctx_attrs;
+                TimeStamp expiry;
+
+                SecBuffer[2] out_bufs;
+                SecBufferDesc out_desc;
+                out_desc.ulVersion = SECBUFFER_VERSION;
+                out_desc.cBuffers  = 1u;
+                out_desc.pBuffers  = @out_bufs[0];
+
+                SecBuffer[2] in_bufs;
+                SecBufferDesc in_desc;
+                in_desc.ulVersion = SECBUFFER_VERSION;
+                in_desc.cBuffers  = 2u;
+                in_desc.pBuffers  = @in_bufs[0];
+
+                do
+                {
+                    // Read from client if we have no buffered data yet
+                    if (c.recv_raw_len == 0u)
+                    {
+                        int n = _socket_recv_more(c);
+                        if (n <= 0)
+                        {
+                            c.error_state = tls_error.TLS_ERR_RECV;
+                            return false;
                         };
                     };
-                };
+
+                    in_bufs[0].BufferType = SECBUFFER_TOKEN;
+                    in_bufs[0].cbBuffer   = c.recv_raw_len;
+                    in_bufs[0].pvBuffer   = c.recv_raw;
+                    in_bufs[1].BufferType = SECBUFFER_EMPTY;
+                    in_bufs[1].cbBuffer   = 0u;
+                    in_bufs[1].pvBuffer   = (void*)0;
+
+                    out_bufs[0].BufferType = SECBUFFER_TOKEN;
+                    out_bufs[0].cbBuffer   = 0u;
+                    out_bufs[0].pvBuffer   = (void*)0;
+
+                    SecHandle* ctx_ptr = first_call ? (SecHandle*)0 : @c.ctx;
+
+                    status = AcceptSecurityContext(
+                        @c.cred, ctx_ptr,
+                        @in_desc, req_flags, 0u,
+                        @c.ctx, @out_desc,
+                        @ctx_attrs, @expiry
+                    );
+                    first_call = false;
+
+                    // Send any token the server generated
+                    if (out_bufs[0].cbBuffer > 0u)
+                    {
+                        if (!_send_token(c, @out_bufs[0]))
+                        {
+                            c.error_state = tls_error.TLS_ERR_SEND;
+                            return false;
+                        };
+                    };
+
+                    // Consume processed bytes from recv buffer
+                    if (in_bufs[1].BufferType == SECBUFFER_EXTRA & in_bufs[1].cbBuffer > 0u)
+                    {
+                        u32 extra = in_bufs[1].cbBuffer;
+                        memmove(c.recv_raw, c.recv_raw + (c.recv_raw_len - extra), extra);
+                        c.recv_raw_len = extra;
+                    }
+                    else
+                    {
+                        c.recv_raw_len = 0u;
+                    };
+
+                    if (status == SEC_I_CONTINUE_NEEDED `| status == SEC_E_INCOMPLETE_MESSAGE)
+                    {
+                        int n = _socket_recv_more(c);
+                        if (n <= 0) { c.error_state = tls_error.TLS_ERR_RECV; return false; };
+                    }
+                    elif (status == SEC_E_OK `| status == SEC_I_COMPLETE_NEEDED `| status == SEC_I_COMPLETE_AND_CONTINUE)
+                    {
+                        c.ctx_valid = true;
+                    }
+                    else
+                    {
+                        c.error_state = tls_error.TLS_ERR_HANDSHAKE;
+                        return false;
+                    };
+                }
+                while (!c.ctx_valid);
+
+                QueryContextAttributesW(@c.ctx, SECPKG_ATTR_STREAM_SIZES, @c.sizes);
+
+                byte* pt = fmalloc(c.sizes.cbMaximumMessage);
+                if (pt == (byte*)0) { c.error_state = tls_error.TLS_ERR_ALLOC; return false; };
+                c.plaintext     = pt;
+                c.plaintext_len = 0u;
+                c.plaintext_pos = 0u;
+
+                return true;
             };
 
-            // --------------------------------------------------
-            // 8. Switch to application keys
-            //    Server writes with server_app, reads with client_app
-            // --------------------------------------------------
-            crypto::encryption::AES::gcm_init(@ctx.gcm_write, @ctx.server_app.key[0]);
-            crypto::encryption::AES::gcm_init(@ctx.gcm_read,  @ctx.client_app.key[0]);
-            ctx.handshake_done = 1;
+            // ---- Application data send / receive ----
 
-            return 1;
-        };
-    };
-};
+            // Send plaintext over an established TLS connection
+            // Returns bytes sent on success, -1 on error
+            def tls_send(TlsConn* c, byte* dat, u32 data_len) -> int
+            {
+                if (!c.ctx_valid) { return -1; };
 
-#endif; // FLUX_TLS13
+                u32 hdr_sz  = c.sizes.cbHeader;
+                u32 trl_sz  = c.sizes.cbTrailer;
+                u32 max_msg = c.sizes.cbMaximumMessage;
+                u32 offset  = 0u;
+
+                while (offset < data_len)
+                {
+                    u32 chunk = data_len - offset;
+                    if (chunk > max_msg) { chunk = max_msg; };
+
+                    u32 buf_total = hdr_sz + chunk + trl_sz;
+                    byte* outbuf = fmalloc(buf_total);
+                    if (outbuf == (byte*)0) { c.error_state = tls_error.TLS_ERR_ALLOC; return -1; };
+
+                    memcpy(outbuf + hdr_sz, dat + offset, chunk);
+
+                    SecBuffer[4] bufs;
+                    SecBufferDesc desc;
+                    desc.ulVersion = SECBUFFER_VERSION;
+                    desc.cBuffers  = 4u;
+                    desc.pBuffers  = @bufs[0];
+
+                    bufs[0].BufferType = SECBUFFER_STREAM_HEADER;
+                    bufs[0].cbBuffer   = hdr_sz;
+                    bufs[0].pvBuffer   = outbuf;
+
+                    bufs[1].BufferType = SECBUFFER_DATA;
+                    bufs[1].cbBuffer   = chunk;
+                    bufs[1].pvBuffer   = outbuf + hdr_sz;
+
+                    bufs[2].BufferType = SECBUFFER_STREAM_TRAILER;
+                    bufs[2].cbBuffer   = trl_sz;
+                    bufs[2].pvBuffer   = outbuf + hdr_sz + chunk;
+
+                    bufs[3].BufferType = SECBUFFER_EMPTY;
+                    bufs[3].cbBuffer   = 0u;
+                    bufs[3].pvBuffer   = (void*)0;
+
+                    i32 status = EncryptMessage(@c.ctx, 0u, @desc, 0u);
+                    if (status != SEC_E_OK)
+                    {
+                        ffree((u64)outbuf);
+                        c.error_state = tls_error.TLS_ERR_ENCRYPT;
+                        return -1;
+                    };
+
+                    u32 enc_len = bufs[0].cbBuffer + bufs[1].cbBuffer + bufs[2].cbBuffer;
+                    int sent = send(c.sockfd, outbuf, (int)enc_len, 0);
+                    ffree((u64)outbuf);
+
+                    if (sent <= 0) { c.error_state = tls_error.TLS_ERR_SEND; return -1; };
+                    offset += chunk;
+                };
+
+                return (int)data_len;
+            };
+
+            // Receive decrypted plaintext into buf
+            // Returns bytes received (>0), 0 on graceful close, -1 on error
+            def tls_recv(TlsConn* c, byte* buf, u32 buf_len) -> int
+            {
+                if (!c.ctx_valid) { return -1; };
+
+                // Drain any already-decrypted bytes first
+                if (c.plaintext_len > c.plaintext_pos)
+                {
+                    u32 avail = c.plaintext_len - c.plaintext_pos;
+                    u32 copy  = (avail < buf_len) ? avail : buf_len;
+                    memcpy(buf, c.plaintext + c.plaintext_pos, copy);
+                    c.plaintext_pos += copy;
+                    if (c.plaintext_pos >= c.plaintext_len)
+                    {
+                        c.plaintext_len = 0u;
+                        c.plaintext_pos = 0u;
+                    };
+                    return (int)copy;
+                };
+
+                // Need to decrypt a new record
+                do
+                {
+                    if (c.recv_raw_len == 0u)
+                    {
+                        int n = _socket_recv_more(c);
+                        if (n == 0)  { return 0; };   // connection closed
+                        if (n < 0)   { c.error_state = tls_error.TLS_ERR_RECV; return -1; };
+                    };
+
+                    SecBuffer[4] bufs;
+                    SecBufferDesc desc;
+                    desc.ulVersion = SECBUFFER_VERSION;
+                    desc.cBuffers  = 4u;
+                    desc.pBuffers  = @bufs[0];
+
+                    bufs[0].BufferType = SECBUFFER_DATA;
+                    bufs[0].cbBuffer   = c.recv_raw_len;
+                    bufs[0].pvBuffer   = c.recv_raw;
+
+                    bufs[1].BufferType = SECBUFFER_EMPTY;
+                    bufs[1].cbBuffer   = 0u;
+                    bufs[1].pvBuffer   = (void*)0;
+
+                    bufs[2].BufferType = SECBUFFER_EMPTY;
+                    bufs[2].cbBuffer   = 0u;
+                    bufs[2].pvBuffer   = (void*)0;
+
+                    bufs[3].BufferType = SECBUFFER_EMPTY;
+                    bufs[3].cbBuffer   = 0u;
+                    bufs[3].pvBuffer   = (void*)0;
+
+                    u32 qop;
+                    i32 status = DecryptMessage(@c.ctx, @desc, 0u, @qop);
+
+                    if (status == SEC_E_OK)
+                    {
+                        // Find the DATA buffer
+                        u32 di;
+                        for (di = 0; di < 4; di++)
+                        {
+                            if (bufs[di].BufferType == SECBUFFER_DATA)
+                            {
+                                u32 plen = bufs[di].cbBuffer;
+                                memcpy(c.plaintext, bufs[di].pvBuffer, plen);
+                                c.plaintext_len = plen;
+                                c.plaintext_pos = 0u;
+                            };
+                        };
+
+                        // Handle leftover EXTRA data (another TLS record)
+                        u32 ei;
+                        for (ei = 0; ei < 4; ei++)
+                        {
+                            if (bufs[ei].BufferType == SECBUFFER_EXTRA & bufs[ei].cbBuffer > 0u)
+                            {
+                                u32 extra = bufs[ei].cbBuffer;
+                                memmove(c.recv_raw, c.recv_raw + (c.recv_raw_len - extra), extra);
+                                c.recv_raw_len = extra;
+                                // Do not break — fall through to return plaintext
+                            };
+                        };
+
+                        // If no EXTRA found, raw buffer is consumed
+                        if (c.plaintext_len > 0u)
+                        {
+                            // Return decrypted bytes to caller
+                            u32 copy = (c.plaintext_len < buf_len) ? c.plaintext_len : buf_len;
+                            memcpy(buf, c.plaintext, copy);
+                            c.plaintext_pos = copy;
+                            if (copy >= c.plaintext_len) { c.plaintext_len = 0u; c.plaintext_pos = 0u; };
+                            return (int)copy;
+                        };
+                    }
+                    elif (status == SEC_E_INCOMPLETE_MESSAGE)
+                    {
+                        int n = _socket_recv_more(c);
+                        if (n <= 0) { c.error_state = tls_error.TLS_ERR_RECV; return -1; };
+                    }
+                    elif (status == SEC_I_RENEGOTIATE)
+                    {
+                        // Server requested renegotiation — not supported; close
+                        c.error_state = tls_error.TLS_ERR_HANDSHAKE;
+                        return -1;
+                    }
+                    elif (status == SEC_E_CONTEXT_EXPIRED)
+                    {
+                        return 0;    // graceful closure
+                    }
+                    else
+                    {
+                        c.error_state = tls_error.TLS_ERR_DECRYPT;
+                        return -1;
+                    };
+                }
+                while (true);
+
+                return -1;
+            };
+
+            // Graceful TLS shutdown — sends close_notify alert
+            def tls_shutdown(TlsConn* c) -> bool
+            {
+                if (!c.ctx_valid) { return false; };
+
+                // Build SCHANNEL_SHUTDOWN token
+                u32 shutdown_type = SCHANNEL_SHUTDOWN;
+                SecBuffer[1] in_bufs;
+                SecBufferDesc in_desc;
+                in_bufs[0].BufferType = SECBUFFER_TOKEN;
+                in_bufs[0].cbBuffer   = 4u;
+                in_bufs[0].pvBuffer   = (void*)@shutdown_type;
+                in_desc.ulVersion     = SECBUFFER_VERSION;
+                in_desc.cBuffers      = 1u;
+                in_desc.pBuffers      = @in_bufs[0];
+
+                i32 status = ApplyControlToken(@c.ctx, @in_desc);
+                if (status != SEC_E_OK) { c.error_state = tls_error.TLS_ERR_SHUTDOWN; return false; };
+
+                // Drive ISC to generate the close_notify record
+                SecBuffer[1] out_bufs;
+                SecBufferDesc out_desc;
+                out_bufs[0].BufferType = SECBUFFER_TOKEN;
+                out_bufs[0].cbBuffer   = 0u;
+                out_bufs[0].pvBuffer   = (void*)0;
+                out_desc.ulVersion     = SECBUFFER_VERSION;
+                out_desc.cBuffers      = 1u;
+                out_desc.pBuffers      = @out_bufs[0];
+
+                u32 ctx_attrs;
+                TimeStamp expiry;
+                status = InitializeSecurityContextW(
+                    @c.cred, @c.ctx,
+                    (void*)0, 0u, 0u, 0u,
+                    (SecBufferDesc*)0, 0u,
+                    @c.ctx, @out_desc,
+                    @ctx_attrs, @expiry
+                );
+
+                if (out_bufs[0].cbBuffer > 0u)
+                {
+                    send(c.sockfd, out_bufs[0].pvBuffer, (int)out_bufs[0].cbBuffer, 0);
+                    FreeContextBuffer(out_bufs[0].pvBuffer);
+                };
+
+                DeleteSecurityContext(@c.ctx);
+                c.ctx_valid = false;
+                return true;
+            };
+
+            // Retrieve the peer's certificate context after handshake
+            // Returns PCCERT_CONTEXT (caller must CertFreeCertificateContext when done), or NULL
+            def get_peer_certificate(TlsConn* c) -> void*
+            {
+                if (!c.ctx_valid) { return (void*)0; };
+                void* cert_ctx;
+                i32 status = QueryContextAttributesW(
+                    @c.ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, @cert_ctx
+                );
+                if (status != SEC_E_OK) { return (void*)0; };
+                return cert_ctx;
+            };
+
+        }; // conn
+    }; // tls
+}; // standard
+
+#endif; // FLUX_STANDARD_TLS

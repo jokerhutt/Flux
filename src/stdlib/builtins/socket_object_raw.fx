@@ -619,7 +619,7 @@ namespace standard
         {
             addr.sin_family = (u16)AF_INET;
             addr.sin_port = htons(port);
-            addr.sin_addr = htonl(inet_addr(ip_str));
+            addr.sin_addr = inet_addr(ip_str);
             
             // Zero out padding
             int i;

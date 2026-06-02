@@ -950,6 +950,7 @@ class FunctionDef(ASTNode):
     is_variadic: bool = False
     calling_conv: Optional[str] = None  # LLVM calling convention string, e.g. 'fastcc'
     is_recursive: bool = False
+    is_inline: bool = False
 
     # Map Flux calling-convention keywords to LLVM CC strings
     _CALLING_CONV_MAP: ClassVar[dict] = {

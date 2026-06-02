@@ -53,8 +53,12 @@ def main() -> int
     print("Waiting for connections...\n\0");
     
     // Accept client connection
-    socket client_socket = server_socket.accept();
-    
+    sockaddr_in client_addr;
+    socket client_socket(socket_type.TCP);
+    client_socket.fd = tcp_server_accept(server_socket.fd, @client_addr);
+    client_socket.connected = true;
+    client_socket.remote_addr = client_addr;
+
     if (!client_socket.is_open())
     {
         print("Failed to accept client connection\n\0");
