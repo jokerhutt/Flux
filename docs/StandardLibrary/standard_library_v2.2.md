@@ -58,6 +58,9 @@ Date: June 2026
    - [raytracing.fx](#raytracingfx)
    - [raycasting.fx](#raycastingfx)
    - [datautils.fx](#datautilsfx)
+   - [search.fx](#searchfx)
+   - [sorting.fx](#sortingfx)
+   - [rle.fx](#rlefx)
 9. [Security](#security)
    - [shadowstack.fx](#shadowstackfx)
 10. [Import Guidelines](#import-guidelines)
@@ -3754,6 +3757,228 @@ def fill_buf(byte* buf, int len, byte val) -> void
 
 ---
 
+### search.fx
+
+**Purpose**: Generic search algorithms over arrays
+
+**Namespace**: `standard::search`
+
+**Guard macro**: `FLUX_STANDARD_SEARCH`
+
+**Dependencies**: `types.fx`
+
+#### Overview
+
+Provides linear, binary, and interpolation search over typed arrays. Every algorithm has a plain variant (uses `==` / `<` / `<=` operators) and a `_cmp` variant that accepts a comparator function pointer with signature `def{}* cmp(void*, void*) -> int` returning negative, zero, or positive.
+
+#### API
+
+```flux
+// Linear scan — unsorted arrays, O(n)
+def search_linear<T>(T* arr, int n, T key) -> int
+def search_linear_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+
+// Binary search — sorted ascending, O(log n)
+// Returns any matching index, or -1.
+def search_binary<T>(T* arr, int n, T key) -> int
+def search_binary_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+
+// First (lowest) index of key, or -1.
+def search_binary_first<T>(T* arr, int n, T key) -> int
+def search_binary_first_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+
+// Last (highest) index of key, or -1.
+def search_binary_last<T>(T* arr, int n, T key) -> int
+def search_binary_last_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+
+// Index of first element >= key, or n if all < key.
+def search_lower_bound<T>(T* arr, int n, T key) -> int
+def search_lower_bound_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+
+// Index of first element > key, or n if all <= key.
+def search_upper_bound<T>(T* arr, int n, T key) -> int
+def search_upper_bound_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+
+// Interpolation search — uniformly distributed sorted data.
+// O(log log n) average, O(n) worst case.
+// T must support arithmetic (integer or float types).
+def search_interpolation<T>(T* arr, int n, T key) -> int
+```
+
+`cmp(a, b)` receives pointers to elements and must return `< 0` if `*a < *b`, `0` if equal, `> 0` if `*a > *b`.
+
+**Example**:
+```flux
+#import "search.fx";
+using standard::search;
+
+int[8] data = [1, 3, 5, 7, 9, 11, 13, 15];
+int idx = search_binary<int>(@data[0], 8, 9);   // returns 4
+int lb  = search_lower_bound<int>(@data[0], 8, 6); // returns 3 (first >= 6)
+```
+
+---
+
+### sorting.fx
+
+**Purpose**: Generic sorting algorithms for typed arrays
+
+**Namespace**: `standard::sorting`
+
+**Guard macro**: `FLUX_STANDARD_SORTING`
+
+**Dependencies**: `types.fx`, `memory.fx`
+
+#### Overview
+
+Provides a suite of comparison-based and non-comparison sorting algorithms. Plain variants use the built-in `<` / `<=` / `>` operators; `_cmp` variants accept a comparator pointer with signature `def{}* cmp(void*, void*) -> int`.
+
+Merge sort and radix sort require a caller-supplied scratch buffer of `n` elements. No allocations are performed internally.
+
+#### Algorithm Summary
+
+| Function | Algorithm | Stable | Time (avg) | Extra memory |
+|---|---|---|---|---|
+| `sort_insertion<T>` | Insertion sort | Yes | O(n²) | O(1) |
+| `sort_insertion_cmp<T>` | Insertion sort | Yes | O(n²) | O(1) |
+| `sort_shell<T>` | Shell sort (Ciura gaps) | No | O(n log² n) | O(1) |
+| `sort_heap<T>` | Heapsort | No | O(n log n) | O(1) |
+| `sort_heap_cmp<T>` | Heapsort | No | O(n log n) | O(1) |
+| `sort_quick<T>` | Quicksort (median-of-three) | No | O(n log n) | O(log n) stack |
+| `sort_quick_cmp<T>` | Quicksort | No | O(n log n) | O(log n) stack |
+| `sort_merge<T>` | Bottom-up mergesort | Yes | O(n log n) | O(n) scratch |
+| `sort_merge_cmp<T>` | Bottom-up mergesort | Yes | O(n log n) | O(n) scratch |
+| `sort_radix_u32` | LSD radix (base-256) | Yes | O(n) | O(n) scratch |
+| `sort_radix_u64` | LSD radix (base-256) | Yes | O(n) | O(n) scratch |
+
+#### API
+
+```flux
+def sort_insertion<T>(T* arr, int n) -> void
+def sort_insertion_cmp<T>(T* arr, int n, void* cmp) -> void
+
+def sort_shell<T>(T* arr, int n) -> void
+
+def sort_heap<T>(T* arr, int n) -> void
+def sort_heap_cmp<T>(T* arr, int n, void* cmp) -> void
+
+def sort_quick<T>(T* arr, int n) -> void
+def sort_quick_cmp<T>(T* arr, int n, void* cmp) -> void
+
+// scratch must point to n elements of type T
+def sort_merge<T>(T* arr, int n, T* scratch) -> void
+def sort_merge_cmp<T>(T* arr, int n, T* scratch, void* cmp) -> void
+
+// scratch must point to n u32 / u64 elements respectively
+def sort_radix_u32(u32* arr, int n, u32* scratch) -> void
+def sort_radix_u64(u64* arr, int n, u64* scratch) -> void
+
+// Predicates
+def is_sorted<T>(T* arr, int n) -> bool
+def is_sorted_cmp<T>(T* arr, int n, void* cmp) -> bool
+```
+
+Quicksort automatically falls back to insertion sort for partitions of 16 or fewer elements. Stack depth is bounded to O(log n) by always pushing the larger partition last.
+
+**Example**:
+```flux
+#import "sorting.fx";
+using standard::sorting;
+
+int[6] data = [5, 3, 8, 1, 9, 2];
+sort_quick<int>(@data[0], 6);
+// data is now [1, 2, 3, 5, 8, 9]
+
+u32[4] udata = [300, 100, 400, 200];
+u32[4] scratch;
+sort_radix_u32(@udata[0], 4, @scratch[0]);
+
+bool ok = is_sorted<int>(@data[0], 6);  // true
+```
+
+---
+
+### rle.fx
+
+**Purpose**: Run-length encoding (byte-level PackBits and generic element-level)
+
+**Namespace**: `standard::rle`
+
+**Guard macro**: `FLUX_STANDARD_RLE`
+
+**Dependencies**: `types.fx`, `memory.fx`
+
+#### Overview
+
+Provides two independent RLE subsystems:
+
+- **Byte RLE** — PackBits-style encoding/decoding of raw byte buffers. Variable-length output. Useful for compressing repetitive binary data, pixel arrays, or serialized records.
+- **Generic RLE** — Element-level encoding into parallel value/count arrays for any fixed-width element type. Uses `mem_equals` for comparison and `mem_copy` for copying.
+
+#### PackBits Format
+
+A control byte precedes each run:
+
+| Control byte | Meaning |
+|---|---|
+| `0`–`127` | Literal run: the next `ctrl + 1` bytes are copied verbatim |
+| `128` | No-op escape; skipped by decoder |
+| `129`–`255` | Repeat run: the next byte is repeated `256 - ctrl + 1` times |
+
+Maximum run per pair: 128 bytes literal or 128 bytes repeat.
+
+#### Byte RLE API
+
+```flux
+// Worst-case encoded size for src_len bytes (= src_len * 2).
+def rle_encode_size(byte* src, int src_len) -> int
+
+// Exact decoded byte count by scanning an encoded stream.
+def rle_decode_size(byte* src, int src_len) -> int
+
+// Encode src into dst. Returns bytes written, or -1 if dst_cap insufficient.
+def rle_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+
+// Decode src into dst. Returns bytes written, or -1 if dst_cap insufficient.
+def rle_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+```
+
+#### Generic RLE API
+
+```flux
+// Encode n elements from src into parallel run arrays.
+// dst_vals holds one representative element per run (elem_size bytes each).
+// dst_counts holds the run length for each run.
+// Returns number of runs written, or -1 if dst_cap exceeded.
+def rle_encode_generic(void* src, int n, int elem_size,
+                       void* dst_vals, int* dst_counts, int dst_cap) -> int
+
+// Reconstruct element sequence from parallel run arrays into dst.
+// Returns number of elements written, or -1 if dst_cap (in elements) exceeded.
+def rle_decode_generic(void* src_vals, int* src_counts, int n_runs,
+                       int elem_size, void* dst, int dst_cap) -> int
+```
+
+**Example**:
+```flux
+#import "rle.fx";
+using standard::rle;
+
+// Byte RLE
+byte[12] src = [0xAA, 0xAA, 0xAA, 0x01, 0x02, 0x03];
+int cap = rle_encode_size(@src[0], 6);
+byte* enc = (byte*)fmalloc(cap / sizeof(byte));
+int enc_len = rle_encode(@src[0], 6, enc, cap);
+
+byte* dec = (byte*)fmalloc(6);
+rle_decode(enc, enc_len, dec, 6);
+
+ffree(enc);
+ffree(dec);
+```
+
+---
+
 
 
 ### Basic Import
@@ -3855,6 +4080,15 @@ Extended libraries must be imported explicitly:
 
 // 2.5D raycaster
 #import "raycasting.fx";
+
+// Search algorithms
+#import "search.fx";
+
+// Sorting algorithms
+#import "sorting.fx";
+
+// Run-length encoding
+#import "rle.fx";
 ```
 
 ### Namespace Usage
@@ -4199,6 +4433,9 @@ Preprocessor definitions set automatically at compile time:
 
 **Version 2.2** (June 2026)
 - `shadowstack.fx` added: opt-in per-function shadow stack protection for Windows x86-64
+- `search.fx` added: generic linear, binary (first/last/any), lower/upper bound, and interpolation search with plain and comparator variants
+- `sorting.fx` added: insertion, shell, heap, quicksort, mergesort, radix (u32/u64) with plain and comparator variants; `is_sorted` predicates
+- `rle.fx` added: PackBits-style byte RLE encode/decode and generic element-level RLE with parallel value/count arrays
 
 **Version 2.1** (May 2026)
 - Documentation updated to better reflect library contents
