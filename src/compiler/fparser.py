@@ -3389,28 +3389,43 @@ class FluxParser:
                 initializers.append(None)
             
             if self.expect(TokenType.COMMA) and initializers[0] is None:
-                # Mode: int x,y,z = 1,2,3; Collect all names first, then all initializers
+                # Mode: int x, y, z  or  int x, y = 1, z  or  int x,y,z = 1,2,3
+                # Peek ahead: if after collecting all bare names we see `from` or `=`
+                # without a per-name `=` immediately after each name, treat as bulk
+                # initializer mode.  But if any name is immediately followed by `=`
+                # or `@=`, switch to per-name mode for the remainder.
                 while self.expect(TokenType.COMMA):
                     self.advance()
                     var_name = self.consume(TokenType.IDENTIFIER).value
                     self.symbol_table.define(var_name, SymbolKind.VARIABLE, type_spec)
                     names.append(var_name)
-                initializers = []
-                if self.expect(TokenType.FROM):
-                    # Mode: type a,b,c,d from source_expr;
-                    # Unpacks source_expr into each variable by index order
-                    self.advance()
-                    source_expr = self.expression()
-                    for i in range(len(names)):
-                        initializers.append(ArrayAccess(source_expr, Literal(i, DataType.SINT)))
-                elif self.expect(TokenType.ASSIGN):
-                    self.advance()
-                    for _ in names:
+                    if self.expect(TokenType.ADDRESS_ASSIGN):
+                        addr_tok = self.current_token
+                        self.advance()
+                        rhs = self.expression()
+                        initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
+                    elif self.expect(TokenType.ASSIGN):
+                        self.advance()
                         initializers.append(self.expression())
-                        if self.expect(TokenType.COMMA):
-                            self.advance()
-                        else:
-                            break
+                    else:
+                        initializers.append(None)
+                # If no per-name initializers were collected and a bulk assign/from follows, apply it.
+                if all(v is None for v in initializers):
+                    initializers = []
+                    if self.expect(TokenType.FROM):
+                        # Mode: type a,b,c,d from source_expr;
+                        self.advance()
+                        source_expr = self.expression()
+                        for i in range(len(names)):
+                            initializers.append(ArrayAccess(source_expr, Literal(i, DataType.SINT)))
+                    elif self.expect(TokenType.ASSIGN):
+                        self.advance()
+                        for _ in names:
+                            initializers.append(self.expression())
+                            if self.expect(TokenType.COMMA):
+                                self.advance()
+                            else:
+                                break
             elif self.expect(TokenType.COMMA):
                 # Mode: int x = 1, y = 2, z = 3; each name has its own initializer
                 # Also handles: int* px @= x, px2 @= x; (address-assign sugar)

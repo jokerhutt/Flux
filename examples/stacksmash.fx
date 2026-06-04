@@ -1,5 +1,5 @@
 #def FLUX_SHADOW_STACK 1;
-#import "standard.fx";
+#import <standard.fx>;
 using standard::io::console;
 
 def test() -> void : FSS_Protect_Frame
@@ -10,6 +10,7 @@ def test() -> void : FSS_Protect_Frame
         canary_addr = ulong(@__fss_canary_local);
     u64* target     = (u64*)canary_addr;
     *target = 0xDEADBEEFCAFEBABEu;
+    return;
 } : FSS_Cleanup_Frame;
 
 def main() -> int

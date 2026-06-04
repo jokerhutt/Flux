@@ -1,11 +1,11 @@
 // Author: Karac V. Thweatt
 
 #ifndef FLUX_STANDARD_IO
-#import "io.fx";
+#import <..\io.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_NET
-#import "net_windows.fx";
+#import <..\net_windows.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_SOCKETS
@@ -896,7 +896,5 @@ namespace standard
         };
     };
 };
-
-using standard::sockets;
 
 #endif;

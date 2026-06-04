@@ -19,7 +19,7 @@
 #def FLUX_SHADOW_STACK_IMPL 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <..\types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY

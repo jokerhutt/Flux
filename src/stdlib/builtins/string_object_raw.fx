@@ -1,11 +1,11 @@
 // Author: Karac V. Thweatt
 
 #ifndef FLUX_STANDARD_IO
-#import "io.fx";
+#import <..\io.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_STRINGS
-#import "string_utilities.fx";
+#import <..\utility\string_utilities.fx>;
 #endif;
 
 #ifdef FLUX_STANDARD_STRINGS

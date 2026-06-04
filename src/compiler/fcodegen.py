@@ -1446,6 +1446,11 @@ class CodegenVisitor:
                     st.volatile = True
             elif isinstance(node.operand, MemberAccess):
                 builder.store(new_val, node.operand._get_member_ptr(builder, module))
+            else:
+                from fast import ArrayAccess
+                if isinstance(node.operand, ArrayAccess):
+                    ptr = self._array_access_get_ptr(node.operand, builder, module)
+                    builder.store(new_val, ptr)
             return new_val if not node.is_postfix else operand_val
 
         elif node.operator == Operator.DECREMENT:
@@ -1460,6 +1465,11 @@ class CodegenVisitor:
                     st.volatile = True
             elif isinstance(node.operand, MemberAccess):
                 builder.store(new_val, node.operand._get_member_ptr(builder, module))
+            else:
+                from fast import ArrayAccess
+                if isinstance(node.operand, ArrayAccess):
+                    ptr = self._array_access_get_ptr(node.operand, builder, module)
+                    builder.store(new_val, ptr)
             return new_val if not node.is_postfix else operand_val
 
         elif node.operator == Operator.BITNOT:
@@ -1470,6 +1480,35 @@ class CodegenVisitor:
 
         raise ValueError(
             f"Unsupported unary operator: {node.operator} [{node.source_line}:{node.source_col}]")
+
+    def _array_access_get_ptr(self, node, builder, module):
+        """Return a pointer to the element addressed by an ArrayAccess node,
+        without loading it.  Used by ++ / -- to store back the new value."""
+        array_val = self.visit(node.array, builder, module)
+        _ts    = getattr(array_val, '_flux_type_spec', None)
+        _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
+        _is_arr = getattr(_ts, 'is_array', False) if _ts else False
+        if (not _is_arr and _depth <= 1 and
+                isinstance(array_val.type, ir.PointerType) and
+                isinstance(array_val.type.pointee, ir.PointerType) and
+                not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
+            array_val = builder.load(array_val, name="ptr_loaded_for_inc")
+        index_val = self.visit(node.index, builder, module)
+        if index_val.type != ir.IntType(32):
+            if isinstance(index_val.type, ir.IntType):
+                index_val = (builder.trunc(index_val, ir.IntType(32), name="idx_trunc")
+                             if index_val.type.width > 32
+                             else builder.sext(index_val, ir.IntType(32), name="idx_ext"))
+        zero = ir.Constant(ir.IntType(32), 0)
+        if isinstance(array_val, ir.GlobalVariable):
+            return builder.gep(array_val, [zero, index_val], inbounds=True, name="inc_gep")
+        if isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
+            return builder.gep(array_val, [zero, index_val], inbounds=True, name="inc_gep")
+        if isinstance(array_val.type, ir.PointerType):
+            return builder.gep(array_val, [index_val], inbounds=True, name="inc_gep")
+        raise ValueError(
+            f"Cannot get element pointer for ++ / -- on type: {array_val.type} "
+            f"[{node.source_line}:{node.source_col}]")
 
     def _unary_get_var_ptr(self, name, node, builder, module):
         if (not module.symbol_table.is_global_scope() and
@@ -3663,6 +3702,9 @@ class CodegenVisitor:
                                 val = builder.trunc(val, element_type, name="val_trunc")
                             else:
                                 val = builder.sext(val, element_type, name="val_ext")
+                        elif (isinstance(val.type, ir.PointerType) and
+                              str(val.type.pointee) == str(element_type)):
+                            val = builder.load(val, name="struct_elem_load")
                     builder.store(val, elem_ptr)
                     return val
             return AssignmentTypeHandler.handle_array_element_assignment(

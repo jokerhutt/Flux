@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -12,6 +12,6 @@ def main() -> int
                  b = "ing!";
     heap byte[9] c = a + b;
 
-	println(z);
+	println(c);
 	return 0;
 };

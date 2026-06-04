@@ -1,227 +1,292 @@
 // Author: Karac V. Thweatt
-// rle.fx - Run Length Encoding / Decoding
 
-#ifndef FLUX_STANDARD_STRINGS
-#import "string_utilities.fx";
+// rle.fx - Run-Length Encoding for Flux.
+//
+// Provides byte-level and generic RLE encode/decode.
+//
+// Byte RLE  (PackBits-style, variable output size):
+//
+//   rle_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+//       Encodes src into dst using PackBits framing.
+//       Returns number of bytes written, or -1 if dst_cap is insufficient.
+//       Format: [count byte][data...] pairs.
+//         count  0..127  -> literal run: copy the next (count+1) bytes verbatim.
+//         count  128     -> escape: signals a repeat run follows.
+//         count  129..255 -> repeat run: repeat the next byte (256-count+1) times.
+//       Max run encoded per pair: 128 bytes literal, 128 bytes repeat.
+//
+//   rle_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+//       Decodes a PackBits stream into dst.
+//       Returns number of bytes written, or -1 if dst_cap is insufficient.
+//
+//   rle_encode_size(byte* src, int src_len) -> int
+//       Returns the worst-case encoded byte count for a given input length.
+//       Safe upper bound for sizing dst before calling rle_encode.
+//
+//   rle_decode_size(byte* src, int src_len) -> int
+//       Scans an encoded stream and returns the exact decoded byte count.
+//
+// Generic RLE  (element-level, fixed-width elements):
+//
+//   rle_encode_generic(void* src, int n, int elem_size,
+//                      void* dst_vals, int* dst_counts, int dst_cap) -> int
+//       Encodes n elements from src into parallel arrays: dst_vals holds one
+//       representative element per run, dst_counts holds the run length.
+//       Returns the number of runs written, or -1 if dst_cap is insufficient.
+//       Uses mem_equals for element comparison.
+//
+//   rle_decode_generic(void* src_vals, int* src_counts, int n_runs,
+//                      int elem_size, void* dst, int dst_cap) -> int
+//       Reconstructs original element sequence from parallel run arrays.
+//       Returns the number of elements written, or -1 if dst_cap is insufficient.
+//
+// Dependencies: standard::types, standard::memory
+
+#ifndef FLUX_STANDARD_TYPES
+#import <types.fx>;
 #endif;
 
-#ifndef FLUX_RLE
-#def FLUX_RLE 1;
+#ifndef FLUX_STANDARD_MEMORY
+#import <memory.fx>;
+#endif;
+
+#ifndef FLUX_STANDARD_RLE
+#def FLUX_STANDARD_RLE 1;
+
+using standard::memory;
 
 namespace standard
 {
-    namespace rle
-    {
-        // Encode a byte buffer using RLE.
-        // Output format: [count byte][value byte] pairs, count 1-255.
-        // Returns heap-allocated encoded buffer. Caller must free.
-        // out_size receives the number of bytes written.
-        def encode(byte* input, int input_len, int* out_size) -> byte*
-        {
-            int max_out, out_pos, in_pos, run;
-            byte current;
-            byte* output;
+	namespace rle
+	{
+		///  -------------------------------------------------------------------
+		  Byte RLE — worst-case size helpers
+		  -------------------------------------------------------------------
+		///
 
-            if (input == 0 | input_len <= 0)
-            {
-                *out_size = 0;
-                return (byte*)0;
-            };
+		// Returns the worst-case encoded size for src_len raw bytes.
+		// Every byte could be a lone literal: 1 overhead + 1 data = 2 bytes per input byte.
+		def rle_encode_size(byte* src, int src_len) -> int
+		{
+			return src_len * 2;
+		};
 
-            // Worst case: every byte is unique -> 2 bytes per input byte
-            max_out = input_len * 2;
-            output = (byte*)fmalloc((u64)max_out);
-            if (output == 0)
-            {
-                *out_size = 0;
-                return (byte*)0;
-            };
+		// Scans an encoded stream and returns the exact decoded byte count.
+		def rle_decode_size(byte* src, int src_len) -> int
+		{
+			int i, total;
+			byte ctrl, count;
+			while (i < src_len)
+			{
+				ctrl = src[i];
+				i++;
+				if (ctrl < 128)
+				{
+					// Literal run: ctrl+1 bytes follow.
+					count = ctrl + 1;
+					total += (int)count;
+					i     += (int)count;
+				}
+				else if (ctrl > 128)
+				{
+					// Repeat run: next byte repeated (256-ctrl+1) times.
+					total += (int)(256 - (int)ctrl + 1);
+					i++;
+				};
+				// ctrl == 128 is a no-op escape in standard PackBits; skip.
+			};
+			return total;
+		};
 
-            while (in_pos < input_len)
-            {
-                current = input[in_pos];
-                run = 1;
 
-                while (in_pos + run < input_len & input[in_pos + run] == current & run < 255)
-                {
-                    run = run + 1;
-                };
+		///  -------------------------------------------------------------------
+		  Byte RLE — encode
+		  -------------------------------------------------------------------
+		///
 
-                output[out_pos]     = (byte)run;
-                output[out_pos + 1] = current;
-                out_pos = out_pos + 2;
-                in_pos  = in_pos + run;
-            };
+		def rle_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+		{
+			int  i, out, run_start, run_len, lit_start, lit_len, j;
+			byte cur;
+			out = 0;
+			i   = 0;
+			while (i < src_len)
+			{
+				cur     = src[i];
+				run_len = 0;
+				// Count matching bytes from i, up to 128.
+				while (i + run_len < src_len & run_len < 128)
+				{
+					if (src[i + run_len] != cur) { break; };
+					run_len++;
+				};
+				if (run_len >= 2)
+				{
+					// Emit a repeat run: count byte = 256 - run_len + 1, then the byte.
+					// run_len in [2..128] maps to ctrl byte [255..129], never hitting 128 (no-op).
+					if (out + 2 > dst_cap) { return -1; };
+					dst[out] = (byte)(256 - run_len + 1);
+					out++;
+					dst[out] = cur;
+					out++;
+					i += run_len;
+				}
+				else
+				{
+					// Accumulate a literal run starting at i.
+					lit_start = i;
+					lit_len   = 0;
+					while (i + lit_len < src_len & lit_len < 128)
+					{
+						// Stop if a repeat run of >=2 is starting.
+						if (i + lit_len + 1 < src_len)
+						{
+							if (src[i + lit_len] == src[i + lit_len + 1])
+							{
+								if (lit_len > 0) { break; };
+							};
+						};
+						lit_len++;
+					};
+					if (lit_len == 0) { lit_len = 1; };
+					if (out + 1 + lit_len > dst_cap) { return -1; };
+					dst[out] = (byte)(lit_len - 1);
+					out++;
+					j = 0;
+					while (j < lit_len)
+					{
+						dst[out] = src[lit_start + j];
+						out++;
+						j++;
+					};
+					i += lit_len;
+				};
+			};
+			return out;
+		};
 
-            *out_size = out_pos;
-            return output;
-        };
 
-        // Decode an RLE-encoded buffer produced by encode().
-        // Returns heap-allocated decoded buffer. Caller must free.
-        // out_size receives the number of bytes written.
-        def decode(byte* input, int input_len, int* out_size) -> byte*
-        {
-            int decoded_len, pos, in_pos, out_pos, run;
-            byte val;
-            byte* output;
+		///  -------------------------------------------------------------------
+		  Byte RLE — decode
+		  -------------------------------------------------------------------
+		///
 
-            if (input == 0 | input_len <= 0)
-            {
-                *out_size = 0;
-                return (byte*)0;
-            };
+		def rle_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+		{
+			int  i, out, count, j;
+			byte ctrl, val;
+			i   = 0;
+			out = 0;
+			while (i < src_len)
+			{
+				ctrl = src[i];
+				i++;
+				if (ctrl < 128)
+				{
+					// Literal run: copy ctrl+1 bytes verbatim.
+					count = (int)ctrl + 1;
+					if (out + count > dst_cap) { return -1; };
+					j = 0;
+					while (j < count)
+					{
+						dst[out] = src[i];
+						out++;
+						i++;
+						j++;
+					};
+				}
+				else if (ctrl > 128)
+				{
+					// Repeat run: repeat next byte (256-ctrl+1) times.
+					count = 256 - (int)ctrl + 1;
+					val   = src[i];
+					i++;
+					if (out + count > dst_cap) { return -1; };
+					j = 0;
+					while (j < count)
+					{
+						dst[out] = val;
+						out++;
+						j++;
+					};
+				};
+				// ctrl == 128: no-op, skip.
+			};
+			return out;
+		};
 
-            // First pass: calculate decoded size
-            while (pos < input_len)
-            {
-                decoded_len = decoded_len + ((int)input[pos] & 0xFF);
-                pos = pos + 2;
-            };
 
-            output = (byte*)fmalloc((u64)decoded_len + 1);
-            if (output == 0)
-            {
-                *out_size = 0;
-                return (byte*)0;
-            };
+		///  -------------------------------------------------------------------
+		  Generic RLE — element-level encode / decode
+		  -------------------------------------------------------------------
+		///
 
-            // Second pass: expand runs
-            while (in_pos < input_len)
-            {
-                run    = (int)input[in_pos] & 0xFF;
-                val    = input[in_pos + 1];
-                in_pos = in_pos + 2;
+		// Encodes n elements from src into parallel run arrays.
+		// dst_vals must hold at least dst_cap elements of elem_size bytes each.
+		// dst_counts must hold at least dst_cap ints.
+		// Returns number of runs written, or -1 if dst_cap exceeded.
+		def rle_encode_generic(void* src, int n, int elem_size,
+		                       void* dst_vals, int* dst_counts, int dst_cap) -> int
+		{
+			byte* s      = (byte*)src;
+			byte* dv     = (byte*)dst_vals;
+			int   i = 1, runs, run_len;
+			if (n == 0) { return 0; };
+			runs    = 0;
+			run_len = 1;
+			while (i <= n)
+			{
+				if (i < n & mem_equals((void*)(s + (i - 1) * elem_size),
+				                       (void*)(s + i       * elem_size),
+				                       elem_size))
+				{
+					run_len++;
+				}
+				else
+				{
+					if (runs >= dst_cap) { return -1; };
+					// Copy representative element into dst_vals.
+					mem_copy((void*)(dv + runs * elem_size),
+					         (void*)(s + (i - run_len) * elem_size),
+					         elem_size);
+					dst_counts[runs] = run_len;
+					runs++;
+					run_len = 1;
+				};
+				i++;
+			};
+			return runs;
+		};
 
-                for (int r; r < run; r = r + 1)
-                {
-                    output[out_pos] = val;
-                    out_pos = out_pos + 1;
-                };
-            };
+		// Reconstructs element sequence from parallel run arrays into dst.
+		// dst must be large enough to hold the sum of all counts * elem_size bytes.
+		// Returns number of elements written, or -1 if dst_cap (in elements) exceeded.
+		def rle_decode_generic(void* src_vals, int* src_counts, int n_runs,
+		                       int elem_size, void* dst, int dst_cap) -> int
+		{
+			byte* sv  = (byte*)src_vals;
+			byte* d   = (byte*)dst;
+			int   i, j, out, count;
+			out = 0;
+			while (i < n_runs)
+			{
+				count = src_counts[i];
+				if (out + count > dst_cap) { return -1; };
+				j = 0;
+				while (j < count)
+				{
+					mem_copy((void*)(d + out * elem_size),
+					         (void*)(sv + i * elem_size),
+					         elem_size);
+					out++;
+					j++;
+				};
+				i++;
+			};
+			return out;
+		};
 
-            output[out_pos] = (byte)0;
-            *out_size = out_pos;
-            return output;
-        };
-
-        // Encode a null-terminated string into a human-readable RLE string.
-        // Output format: "3A2B1C" etc.
-        // Returns heap-allocated string. Caller must free.
-        def encode_str(byte* input) -> byte*
-        {
-            int input_len, max_out, out_pos, in_pos, run, count_len, k;
-            byte current;
-            byte* output;
-            byte[21] count_buf;
-
-            if (input == 0 | input[0] == 0)
-            {
-                byte* empty = (byte*)fmalloc((u64)1);
-                if (empty != 0) { empty[0] = (byte)0; };
-                return empty;
-            };
-
-            input_len = standard::strings::strlen(input);
-
-            // Worst case: each char unique -> 21 digit count + 1 char per input byte + null
-            max_out = input_len * 22;
-            output = (byte*)fmalloc((u64)max_out);
-            if (output == 0)
-            {
-                return (byte*)0;
-            };
-
-            while (in_pos < input_len)
-            {
-                current = input[in_pos];
-                run = 1;
-
-                while (in_pos + run < input_len & input[in_pos + run] == current)
-                {
-                    run = run + 1;
-                };
-
-                // Write count digits
-                count_len = (int)standard::strings::i32str(run, count_buf);
-                for (k = 0; k < count_len; k = k + 1)
-                {
-                    output[out_pos] = count_buf[k];
-                    out_pos = out_pos + 1;
-                };
-
-                // Write the character
-                output[out_pos] = current;
-                out_pos = out_pos + 1;
-
-                in_pos = in_pos + run;
-            };
-
-            output[out_pos] = (byte)0;
-            return output;
-        };
-
-        // Decode a human-readable RLE string produced by encode_str().
-        // Input format: "3A2B1C" etc.
-        // Returns heap-readable string. Caller must free.
-        def decode_str(byte* input) -> byte*
-        {
-            int input_len, decoded_len, pos, in_pos, out_pos, run;
-            byte val;
-            byte* output;
-
-            if (input == 0 | input[0] == 0)
-            {
-                byte* empty = (byte*)fmalloc((u64)1);
-                if (empty != 0) { empty[0] = (byte)0; };
-                return empty;
-            };
-
-            input_len = standard::strings::strlen(input);
-
-            // First pass: calculate decoded length
-            while (pos < input_len)
-            {
-                run = 0;
-                while (pos < input_len & input[pos] >= (byte)48 & input[pos] <= (byte)57)
-                {
-                    run = run * 10 + ((int)input[pos] - 48);
-                    pos = pos + 1;
-                };
-                decoded_len = decoded_len + run;
-                pos = pos + 1; // skip value byte
-            };
-
-            output = (byte*)fmalloc((u64)decoded_len + 1);
-            if (output == 0)
-            {
-                return (byte*)0;
-            };
-
-            // Second pass: expand
-            while (in_pos < input_len)
-            {
-                run = 0;
-                while (in_pos < input_len & input[in_pos] >= (byte)48 & input[in_pos] <= (byte)57)
-                {
-                    run = run * 10 + ((int)input[in_pos] - 48);
-                    in_pos = in_pos + 1;
-                };
-
-                val    = input[in_pos];
-                in_pos = in_pos + 1;
-
-                for (int r; r < run; r = r + 1)
-                {
-                    output[out_pos] = val;
-                    out_pos = out_pos + 1;
-                };
-            };
-
-            output[out_pos] = (byte)0;
-            return output;
-        };
-    };
+	};
 };
 
 #endif;

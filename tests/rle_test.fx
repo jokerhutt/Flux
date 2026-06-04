@@ -1,192 +1,281 @@
-// rle_test.fx - Tests for standard::rle
+// rle_test.fx
+//
+// Tests exercised:
+//
+//   1.  rle_encode_size          - worst-case bound >= actual encoded size
+//   2.  rle_decode_size          - exact decoded size matches original
+//   3.  rle_encode / rle_decode  - round-trip: all-same, all-different, mixed,
+//                                  single byte, empty-like (n=1), long repeat
+//   4.  rle_encode dst_cap limit - returns -1 when dst too small
+//   5.  rle_decode dst_cap limit - returns -1 when dst too small
+//   6.  rle_encode_generic       - int runs round-trip
+//   7.  rle_decode_generic       - reconstructs original from runs
+//   8.  rle_encode_generic cap   - returns -1 when dst_cap exceeded
 
-#import "standard.fx";
-#import "random.fx";
-#import "rle.fx";
+#import <standard.fx>, <rle.fx>;
 
 using standard::io::console,
-      standard::strings,
-      standard::random,
       standard::rle;
 
-def check(noopstr name, bool result) -> void
+// ============================================================================
+// Helper
+// ============================================================================
+
+def check(bool ok, noopstr name) -> bool
 {
-    if (result)
-    {
-        print("PASS: \0");
-        println(name);
-    }
-    else
-    {
-        print("FAIL: \0");
-        println(name);
-    };
-    return;
+	print("  \0");
+	print(name);
+	if (ok) { print(" : PASS\n\0"); }
+	else    { print(" : FAIL\n\0"); };
+	return ok;
 };
 
-def main(int argc, byte** argv) -> int
+def bytes_equal(byte* a, byte* b, int n) -> bool
 {
-    byte* enc, dec, bin_enc, bin_dec, capped_enc, null_enc, null_dec;
-    int enc_size, dec_size;
-    byte[6] bin_input;
-    byte[260] long_run;
-    int i;
-    PCG32* rng;
-    int buf_size, rt_enc_size, rt_dec_size, mismatch, j;
-    byte* rt_buf, rt_enc, rt_dec;
-    int run_buf_size, run_pos, run_len, run_val_i;
-    byte run_val;
-    byte* run_buf, run_enc, run_dec;
-    int run_enc_size, run_dec_size, run_mismatch, k;
+	int i;
+	while (i < n)
+	{
+		if (a[i] != b[i]) { return false; };
+		i++;
+	};
+	return true;
+};
 
-    // =====================================================================
-    // encode_str / decode_str tests
-    // =====================================================================
+// ============================================================================
+// TEST 1 - rle_encode_size
+// ============================================================================
 
-    enc = encode_str("AAABBC\0");
-    check("encode_str basic\0", strcmp(enc, "3A2B1C\0") == 0);
-    ffree(enc);
+def test_encode_size() -> bool
+{
+	print("\n[TEST 1] rle_encode_size\n\0");
+	bool ok = true;
 
-    enc = encode_str("ABC\0");
-    check("encode_str no runs\0", strcmp(enc, "1A1B1C\0") == 0);
-    ffree(enc);
+	byte[8] src = [0xAA, 0xAA, 0xAA, 0xBB, 0xCC, 0xCC, 0xDD, 0xDD];
+	int worst   = rle_encode_size(@src[0], 8);
+	ok = check(worst >= 8, "worst >= input len       \0") & ok;
+	ok = check(worst <= 16, "worst <= 2x input len   \0") & ok;
 
-    enc = encode_str("FFFFF\0");
-    check("encode_str all same\0", strcmp(enc, "5F\0") == 0);
-    ffree(enc);
+	return ok;
+};
 
-    enc = encode_str("X\0");
-    check("encode_str single char\0", strcmp(enc, "1X\0") == 0);
-    ffree(enc);
+// ============================================================================
+// TEST 2 - rle_decode_size
+// ============================================================================
 
-    enc = encode_str("AABBBCCCC\0");
-    dec = decode_str(enc);
-    check("encode_str/decode_str round-trip\0", strcmp(dec, "AABBBCCCC\0") == 0);
-    ffree(enc);
-    ffree(dec);
+def test_decode_size() -> bool
+{
+	print("\n[TEST 2] rle_decode_size\n\0");
+	bool ok = true;
 
-    dec = decode_str("3A2B1C\0");
-    check("decode_str basic\0", strcmp(dec, "AAABBC\0") == 0);
-    ffree(dec);
+	byte[8]  src  = [0xAA, 0xAA, 0xAA, 0xBB, 0xCC, 0xCC, 0xDD, 0xDD];
+	byte[32] enc;
+	int enc_len   = rle_encode(@src[0], 8, @enc[0], 32);
+	int dec_size  = rle_decode_size(@enc[0], enc_len);
+	ok = check(dec_size == 8, "decoded size == original \0") & ok;
 
-    dec = decode_str("10A\0");
-    check("decode_str multi-digit count\0", strcmp(dec, "AAAAAAAAAA\0") == 0);
-    ffree(dec);
+	return ok;
+};
 
-    // =====================================================================
-    // Binary encode / decode tests
-    // =====================================================================
+// ============================================================================
+// TEST 3 - rle_encode / rle_decode round-trips
+// ============================================================================
 
-    bin_input[0] = (byte)0xAA;
-    bin_input[1] = (byte)0xAA;
-    bin_input[2] = (byte)0xAA;
-    bin_input[3] = (byte)0xBB;
-    bin_input[4] = (byte)0xCC;
-    bin_input[5] = (byte)0xCC;
+def test_roundtrip() -> bool
+{
+	print("\n[TEST 3] rle_encode / rle_decode round-trips\n\0");
+	bool ok = true;
 
-    bin_enc = encode(bin_input, 6, @enc_size);
-    check("encode binary size\0",     enc_size == 6);
-    check("encode binary count[0]\0", (int)bin_enc[0] == 3);
-    check("encode binary value[0]\0", bin_enc[1] == (byte)0xAA);
-    check("encode binary count[1]\0", (int)bin_enc[2] == 1);
-    check("encode binary value[1]\0", bin_enc[3] == (byte)0xBB);
-    check("encode binary count[2]\0", (int)bin_enc[4] == 2);
-    check("encode binary value[2]\0", bin_enc[5] == (byte)0xCC);
+	byte[256] enc, dec;
+	int enc_len, dec_len;
 
-    bin_dec = decode(bin_enc, enc_size, @dec_size);
-    check("decode binary size\0",    dec_size == 6);
-    check("decode binary byte[0]\0", bin_dec[0] == (byte)0xAA);
-    check("decode binary byte[1]\0", bin_dec[1] == (byte)0xAA);
-    check("decode binary byte[2]\0", bin_dec[2] == (byte)0xAA);
-    check("decode binary byte[3]\0", bin_dec[3] == (byte)0xBB);
-    check("decode binary byte[4]\0", bin_dec[4] == (byte)0xCC);
-    check("decode binary byte[5]\0", bin_dec[5] == (byte)0xCC);
+	// All same bytes
+	byte[8] same = [0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42];
+	enc_len = rle_encode(@same[0],  8, @enc[0], 64);
+	dec_len = rle_decode(@enc[0], enc_len, @dec[0], 64);
+	ok = check(dec_len == 8 & bytes_equal(@dec[0], @same[0], 8), "all-same round-trip      \0") & ok;
 
-    ffree(bin_enc);
-    ffree(bin_dec);
+	// All different bytes
+	byte[8] diff = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+	enc_len = rle_encode(@diff[0], 8, @enc[0], 64);
+	dec_len = rle_decode(@enc[0], enc_len, @dec[0], 64);
+	ok = check(dec_len == 8 & bytes_equal(@dec[0], @diff[0], 8), "all-different round-trip \0") & ok;
 
-    // Run cap at 255
-    for (i = 0; i < 260; i = i + 1)
-    {
-        long_run[i] = (byte)0x41;
-    };
+	// Mixed
+	byte[10] mix = [0xAA, 0xAA, 0xBB, 0xCC, 0xCC, 0xCC, 0xDD, 0xEE, 0xEE, 0xFF];
+	enc_len = rle_encode(@mix[0], 10, @enc[0], 64);
+	dec_len = rle_decode(@enc[0], enc_len, @dec[0], 64);
+	ok = check(dec_len == 10 & bytes_equal(@dec[0], @mix[0], 10), "mixed round-trip         \0") & ok;
 
-    capped_enc = encode(long_run, 260, @enc_size);
-    check("encode run cap size\0",     enc_size == 4);
-    check("encode run cap count[0]\0", ((int)capped_enc[0] & 0xFF) == 255);
-    check("encode run cap count[1]\0", ((int)capped_enc[2] & 0xFF) == 5);
-    ffree(capped_enc);
+	// Single byte
+	byte[1] single = [0x7F];
+	enc_len = rle_encode(@single[0], 1, @enc[0], 64);
+	dec_len = rle_decode(@enc[0], enc_len, @dec[0], 64);
+	ok = check(dec_len == 1 & dec[0] == 0x7F, "single byte round-trip   \0") & ok;
 
-    // Empty string guards
-    null_enc = encode_str("\0");
-    check("encode_str empty string\0", null_enc != 0 & null_enc[0] == (byte)0);
-    ffree(null_enc);
+	// Long repeat (128 of the same byte — max run)
+	byte[128] longrep;
+	int li;
+	while (li < 128) { longrep[li] = 0xAB; li++; };
+	enc_len = rle_encode(@longrep[0], 128, @enc[0], 256);
+	dec_len = rle_decode(@enc[0], enc_len, @dec[0], 256);
+	ok = check(dec_len == 128 & bytes_equal(@dec[0], @longrep[0], 128), "128-byte repeat round-trip\0") & ok;
 
-    null_dec = decode_str("\0");
-    check("decode_str empty string\0", null_dec != 0 & null_dec[0] == (byte)0);
-    ffree(null_dec);
+	return ok;
+};
 
-    // =====================================================================
-    // Round-trip fuzz: random high-entropy data (few natural runs)
-    // =====================================================================
+// ============================================================================
+// TEST 4 - rle_encode returns -1 when dst_cap too small
+// ============================================================================
 
-    rng = (PCG32*)fmalloc((u64)sizeof(PCG32) / 8);
-    pcg32_init(rng);
-    buf_size = 1024;
-    rt_buf = (byte*)fmalloc((u64)buf_size);
-    random_bytes(rng, rt_buf, (u64)buf_size);
+def test_encode_cap() -> bool
+{
+	print("\n[TEST 4] rle_encode cap limit\n\0");
+	bool ok = true;
 
-    rt_enc = encode(rt_buf, buf_size, @rt_enc_size);
-    rt_dec = decode(rt_enc, rt_enc_size, @rt_dec_size);
+	byte[8] src = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+	byte[4] tiny;
+	int r = rle_encode(@src[0], 8, @tiny[0], 4);
+	ok = check(r == -1, "returns -1 when cap too small\0") & ok;
 
-    check("round-trip size match (random)\0", rt_dec_size == buf_size);
+	return ok;
+};
 
-    mismatch = 0;
-    for (j = 0; j < buf_size; j = j + 1)
-    {
-        if (rt_dec[j] != rt_buf[j])
-        {
-            mismatch = 1;
-        };
-    };
-    check("round-trip byte match (random)\0", mismatch == 0);
+// ============================================================================
+// TEST 5 - rle_decode returns -1 when dst_cap too small
+// ============================================================================
 
-    ffree(rt_buf);
-    ffree(rt_enc);
-    ffree(rt_dec);
+def test_decode_cap() -> bool
+{
+	print("\n[TEST 5] rle_decode cap limit\n\0");
+	bool ok = true;
 
-    // =====================================================================
-    // Round-trip fuzz: random run-length data (many natural runs)
-    // =====================================================================
+	byte[8]  src = [0xAA, 0xAA, 0xAA, 0xAA, 0xBB, 0xBB, 0xBB, 0xBB];
+	byte[32] enc;
+	byte[4]  tiny;
+	int enc_len = rle_encode(@src[0], 8, @enc[0], 32);
+	int r       = rle_decode(@enc[0], enc_len, @tiny[0], 4);
+	ok = check(r == -1, "returns -1 when cap too small\0") & ok;
 
-    run_buf_size = 1024;
-    run_buf = (byte*)fmalloc((u64)run_buf_size);
+	return ok;
+};
 
-    // Fill with a simple repeating pattern of runs instead of random
-    for (k = 0; k < run_buf_size; k = k + 1)
-    {
-        run_buf[k] = (byte)(k / 16); // 16-byte runs of each value
-    };
+// ============================================================================
+// TEST 6 - rle_encode_generic (int arrays)
+// ============================================================================
 
-    run_enc = encode(run_buf, run_buf_size, @run_enc_size);
-    run_dec = decode(run_enc, run_enc_size, @run_dec_size);
+def test_generic_encode() -> bool
+{
+	print("\n[TEST 6] rle_encode_generic\n\0");
+	bool ok = true;
 
-    check("round-trip size match (run data)\0", run_dec_size == run_buf_size);
+	int[10] src     = [1, 1, 1, 2, 3, 3, 4, 4, 4, 4];
+	int[10] vals, counts;
+	int runs = rle_encode_generic(@src[0], 10, sizeof(int) / 8,
+	                              @vals[0], @counts[0], 10);
 
-    run_mismatch = 0;
-    for (k = 0; k < run_buf_size; k = k + 1)
-    {
-        if (run_dec[k] != run_buf[k])
-        {
-            run_mismatch = 1;
-        };
-    };
-    check("round-trip byte match (run data)\0", run_mismatch == 0);
+	// Should produce 4 runs: (1,3), (2,1), (3,2), (4,4)
+	ok = check(runs == 4,          "4 runs produced         \0") & ok;
+	ok = check(vals[0]   == 1 & counts[0] == 3, "run 0: 1 x3 \0") & ok;
+	ok = check(vals[1]   == 2 & counts[1] == 1, "run 1: 2 x1 \0") & ok;
+	ok = check(vals[2]   == 3 & counts[2] == 2, "run 2: 3 x2 \0") & ok;
+	ok = check(vals[3]   == 4 & counts[3] == 4, "run 3: 4 x4 \0") & ok;
 
-    ffree(long(run_buf));
-    ffree(long(run_enc));
-    ffree(long(run_dec));
+	// All unique — n runs == n elements
+	int[5]  uniq  = [10, 20, 30, 40, 50];
+	int[5]  uvals, ucounts;
+	int uruns = rle_encode_generic(@uniq[0], 5, sizeof(int) / 8,
+	                               @uvals[0], @ucounts[0], 5);
+	ok = check(uruns == 5, "all-unique: n runs == n  \0") & ok;
 
-    ffree(long(rng));
-    return 0;
+	// All same — 1 run
+	int[6]  same = [7, 7, 7, 7, 7, 7];
+	int[6]  svals, scounts;
+	int sruns = rle_encode_generic(@same[0], 6, sizeof(int) / 8,
+	                               @svals[0], @scounts[0], 6);
+	ok = check(sruns == 1 & scounts[0] == 6, "all-same: 1 run of 6    \0") & ok;
+
+	return ok;
+};
+
+// ============================================================================
+// TEST 7 - rle_decode_generic round-trip
+// ============================================================================
+
+def test_generic_decode() -> bool
+{
+	print("\n[TEST 7] rle_decode_generic\n\0");
+	bool ok = true;
+
+	int[10] src    = [1, 1, 1, 2, 3, 3, 4, 4, 4, 4];
+	int[10] vals, counts, dec;
+	int runs = rle_encode_generic(@src[0], 10, sizeof(int) / 8,
+	                              @vals[0], @counts[0], 10);
+	int out  = rle_decode_generic(@vals[0], @counts[0], runs,
+	                              sizeof(int) / 8, @dec[0], 10);
+	int i;
+	bool match = true;
+	while (i < 10)
+	{
+		if (dec[i] != src[i]) { match = false; };
+		i++;
+	};
+	ok = check(out == 10 & match, "round-trip matches original\0") & ok;
+
+	return ok;
+};
+
+// ============================================================================
+// TEST 8 - rle_encode_generic cap limit
+// ============================================================================
+
+def test_generic_cap() -> bool
+{
+	print("\n[TEST 8] rle_encode_generic cap limit\n\0");
+	bool ok = true;
+
+	// 5 unique values need 5 run slots — cap of 2 should fail.
+	int[5]  src    = [1, 2, 3, 4, 5];
+	int[2]  vals, counts;
+	int r = rle_encode_generic(@src[0], 5, sizeof(int) / 8,
+	                           @vals[0], @counts[0], 2);
+	ok = check(r == -1, "returns -1 when cap too small\0") & ok;
+
+	return ok;
+};
+
+// ============================================================================
+// Main
+// ============================================================================
+
+def main() -> int
+{
+	print("=== Flux RLE Library Test ===\n\0");
+
+	bool t1 = test_encode_size();
+	bool t2 = test_decode_size();
+	bool t3 = test_roundtrip();
+	bool t4 = test_encode_cap();
+	bool t5 = test_decode_cap();
+	bool t6 = test_generic_encode();
+	bool t7 = test_generic_decode();
+	bool t8 = test_generic_cap();
+
+	print("\n========================================\n\0");
+	print("Results:\n\0");
+
+	print("  Test 1  (encode size)         : \0"); if (t1) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 2  (decode size)         : \0"); if (t2) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 3  (round-trip)          : \0"); if (t3) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 4  (encode cap limit)    : \0"); if (t4) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 5  (decode cap limit)    : \0"); if (t5) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 6  (generic encode)      : \0"); if (t6) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 7  (generic decode)      : \0"); if (t7) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+	print("  Test 8  (generic cap limit)   : \0"); if (t8) { print("PASS\n\0"); } else { print("FAIL\n\0"); };
+
+	bool all = t1 & t2 & t3 & t4 & t5 & t6 & t7 & t8;
+	print("========================================\n\0");
+	if (all)  { print("ALL TESTS PASSED\n\0"); };
+	if (!all) { print("ONE OR MORE TESTS FAILED\n\0"); };
+
+	return 0;
 };

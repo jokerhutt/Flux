@@ -4,11 +4,11 @@
 // Simple wrapper around C's stdio.h functions
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <..\types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_IO_FILE
-#import "io.fx";
+#import <..\io.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_FFI_FIO

@@ -3379,6 +3379,9 @@ class CoercionContext:
         # so we must check base_type first, not just is_signed.
         if spec.base_type == DataType.UINT:
             return True
+        if spec.base_type == DataType.BYTE:
+            # byte is always unsigned
+            return True
         if spec.base_type == DataType.DATA:
             # DATA covers both signed (i32, i64) and unsigned (u32, u64, byte)
             # Use is_signed to disambiguate: unsigned only when not signed

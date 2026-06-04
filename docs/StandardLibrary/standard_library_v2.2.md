@@ -1,7 +1,7 @@
 # Flux Standard Library Documentation
 
-Version: 2.1
-Date: May 2026
+Version: 2.2
+Date: June 2026
 
 ---
 
@@ -58,8 +58,10 @@ Date: May 2026
    - [raytracing.fx](#raytracingfx)
    - [raycasting.fx](#raycastingfx)
    - [datautils.fx](#datautilsfx)
-9. [Import Guidelines](#import-guidelines)
-10. [Platform Support](#platform-support)
+9. [Security](#security)
+   - [shadowstack.fx](#shadowstackfx)
+10. [Import Guidelines](#import-guidelines)
+11. [Platform Support](#platform-support)
 
 ---
 
@@ -128,6 +130,7 @@ stdlib/
   `----/ raytracing.fx            # Physically-based path tracer
   `----/ raycasting.fx            # 2.5D tile raycaster (Wolfenstein-style)
   `----/ datautils.fx             # Low-level byte writer utilities
+  `----/runtime/shadowstack.fx    # Opt-in shadow stack protection (Windows x86-64)
 ```
 
 ---
@@ -3894,6 +3897,150 @@ Vec3 position = vec3(1.0, 2.0, 3.0);
 
 ---
 
+## Security
+
+### shadowstack.fx
+
+**Purpose**: Opt-in per-function shadow stack protection against stack smashing attacks
+
+**Namespace**: `standard::runtime::shadow_stack`
+
+**Guard macro**: `FLUX_SHADOW_STACK_IMPL`
+
+**Platform**: Windows x86-64 only (current)
+
+#### Activation
+
+Define `FLUX_SHADOW_STACK` before importing `standard.fx`. The runtime will automatically initialize the shadow stack page on startup and tear it down on exit.
+
+```flux
+#def FLUX_SHADOW_STACK 1;
+#import "standard.fx";
+```
+
+#### Design
+
+The shadow stack maintains a separately allocated, non-executable memory page holding `FSSFrame` records. Each record stores a saved return address (XOR'd with a per-process canary) and a canary value. Protection is opt-in per function via contracts — the compiler never injects code automatically.
+
+The canary is seeded at startup from two hardware entropy sources (RDTSC and `QueryPerformanceCounter`) XOR'd with a constant, ensuring a unique value every run.
+
+#### FSSFrame
+
+```flux
+struct FSSFrame
+{
+    u64 canary,     // Random canary XOR'd with the saved return address
+        saved_ra,   // Return address captured at frame entry (XOR'd with canary)
+        saved_rsp;  // Canary copy used for secondary verification
+};
+```
+
+#### Globals
+
+| Global | Type | Description |
+|--------|------|-------------|
+| `FSS_BASE` | `FSSFrame*` | Pointer to the shadow page |
+| `FSS_TOP` | `u64` | Current push index (grows upward) |
+| `FSS_CAP` | `u64` | Maximum frames the page can hold (170) |
+| `FSS_CANARY` | `u64` | Process-lifetime random canary seed |
+
+#### Core API
+
+```flux
+def fss_init() -> bool
+```
+Allocates the shadow page via `VirtualAlloc` and seeds `FSS_CANARY`. Called automatically by `FRTStartup`. Returns `false` if allocation fails.
+
+```flux
+def fss_push(u64 ra, u64 rsp) -> u64
+```
+Pushes a frame. `ra` is stored XOR'd with `FSS_CANARY`. Returns the slot index.
+
+```flux
+def fss_verify(u64 slot, u64 ra, u64 rsp) -> bool
+```
+Verifies a previously pushed frame. Checks the canary field, decodes and compares the return address, and validates `rsp`. Returns `false` if any check fails.
+
+```flux
+def fss_pop() -> void
+```
+Pops and zeroes the top frame so it cannot be replayed.
+
+```flux
+def fss_abort() -> void
+```
+Prints a fatal diagnostic and terminates immediately via `ExitProcess(1)`. Declared `noreturn`.
+
+```flux
+def fss_teardown() -> void
+```
+Frees the shadow page. Called automatically by `FRTStartup` on exit.
+
+#### Contracts
+
+The primary programmer interface. Apply to any function handling untrusted input or performing buffer manipulation.
+
+```flux
+def vulnerable(byte* buf, int len) -> void : FSS_Protect_Frame
+{
+    // ...
+} : FSS_Cleanup_Frame;
+```
+
+**`FSS_Protect_Frame`** (pre-contract, injected at function entry):
+- Declares `__fss_canary_local` on the protected function's own stack frame
+- Captures the return address from `8(%rbp)`
+- Pushes both into the shadow stack via `fss_push`
+- Sets `__fss_frame_active = true`
+
+**`FSS_Cleanup_Frame`** (post-contract, injected before every `return`):
+- Re-captures the return address from `8(%rbp)`
+- Calls `fss_verify` to check the return address matches the saved shadow frame
+- Checks `__fss_canary_local == FSS_CANARY` to detect physical stack overflows
+- On success: calls `fss_pop()`
+- On failure: calls `fss_abort()` — process terminates immediately, no further execution
+
+Because `FSS_Protect_Frame` is a pre-contract, `__fss_canary_local` is declared before any user-defined locals in the function. On x86-64 where the stack grows downward and buffers overflow upward, the canary naturally sits above user buffers — a linear overflow will hit it before reaching the return address.
+
+#### Detection Vectors
+
+| Attack | Detected By |
+|--------|-------------|
+| Linear buffer overflow reaching the canary | `__fss_canary_local == FSS_CANARY` check |
+| Return address overwrite | `fss_verify` return address comparison |
+| Direct `FSS_CANARY` global tampering | `fss_verify` canary field check |
+
+#### Example
+
+```flux
+#def FLUX_SHADOW_STACK 1;
+#import "standard.fx";
+using standard::io::console;
+
+def parse_input(byte* buf, int len) -> bool : FSS_Protect_Frame
+{
+    // Buffer operations on untrusted input...
+    return true;
+} : FSS_Cleanup_Frame;
+
+def main() -> int
+{
+    byte[64] buf;
+    parse_input(@buf[0], 64);
+    return 0;
+};
+```
+
+#### Notes
+
+- `FLUX_SHADOW_STACK` must be defined before `#import "standard.fx"`
+- The shadow page holds up to 170 frames; deeply recursive protected functions will hit this limit
+- Windows x86-64 only; requires a frame pointer (`%rbp`) to be present
+- `FSS_CANARY` is a process-lifetime global — direct writes to it from any code path are also detected
+- Future: per-call canary randomization via `fss_rdtsc() ^^ FSS_CANARY` for stronger per-invocation protection
+
+---
+
 ## Platform Support
 
 ### Supported Platforms
@@ -4050,6 +4197,9 @@ Preprocessor definitions set automatically at compile time:
 
 ## Version History
 
+**Version 2.2** (June 2026)
+- `shadowstack.fx` added: opt-in per-function shadow stack protection for Windows x86-64
+
 **Version 2.1** (May 2026)
 - Documentation updated to better reflect library contents
 - `net_windows.fx` clarified: full networking now lives in `socket_object_raw.fx` under `standard::sockets`; `net_windows.fx` is a thin glue file
@@ -4089,4 +4239,4 @@ This documentation describes the Flux Standard Library as part of the Flux progr
 
 ---
 
-*This documentation reflects the Flux standard library as of v2.1, May 2026. For the most up-to-date information, refer to the official Flux language repository and Discord community.*
+*This documentation reflects the Flux standard library as of v2.2, June 2026. For the most up-to-date information, refer to the official Flux language repository and Discord community.*

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import sys
 from pathlib import Path
@@ -49,6 +50,8 @@ class FXPreprocessor:
         self.lib_dirs: List[str] = []
         # Maps each output line index (0-based) -> (filename, local_line_number 1-based)
         self.line_map: List[tuple] = []
+        # Stack of directories for the files currently being processed (for local imports)
+        self._dir_stack: List[Path] = []
 
         if compiler_constants:
             self.constants.update(compiler_constants)
@@ -146,55 +149,136 @@ class FXPreprocessor:
 
         return ''.join(result)
     
-    def _resolve_path(self, filepath: str) -> Optional[Path]:
-        """Resolve import path"""
-        path = Path(filepath)
-        
-        # If it exists as given, return it
-        if path.exists():
-            return path
-        
-        # Try relative to current directory
+    # ------------------------------------------------------------------
+    # Import resolution -- three distinct search domains
+    # ------------------------------------------------------------------
+
+    def _resolve_path_local(self, filepath: str) -> Optional[Path]:
+        """Resolve a local import (#import "file.fx").
+        Search order:
+          1. Relative to the importing file's directory (top of _dir_stack).
+          2. Relative to the initial source file's directory.
+          3. CWD.
+          4. Any directories added via #dir.
+        """
+        locations: List[Path] = []
+
+        # 1. Relative to the currently-processing file's directory
+        if self._dir_stack:
+            locations.append(self._dir_stack[-1] / filepath)
+
+        # 2. Relative to the root source file's directory
+        root_dir = Path(self.source_file).resolve().parent
+        locations.append(root_dir / filepath)
+
+        # 3. CWD
+        locations.append(Path.cwd() / filepath)
+
+        # 4. Extra dirs from #dir
+        for lib_dir in self.lib_dirs:
+            locations.append(Path(lib_dir) / filepath)
+
+        for loc in locations:
+            if loc.exists():
+                return loc.resolve()
+        return None
+
+    def _resolve_path_stdlib(self, filepath: str) -> Optional[Path]:
+        """Resolve a stdlib import (#import <file.fx>).
+        Only the stdlib trees under FLUXC_SRCDIR are searched.
+        """
         cwd = FLUXC_SRCDIR
-        
-        # Common locations to check
         locations = [
-            filepath,
             cwd / "src" / "stdlib" / filepath,
             cwd / "src" / "stdlib" / "runtime" / filepath,
             cwd / "src" / "stdlib" / "functions" / filepath,
             cwd / "src" / "stdlib" / "builtins" / filepath,
-            cwd / "src" / "stdlib" / "utility" / filepath
+            cwd / "src" / "stdlib" / "utility" / filepath,
         ]
-        
-        # Search all package subfolders under CWD/.fpm/packages/ recursively
-        fpm_packages_dir = Path.cwd() / ".fpm" / "packages"
-        if fpm_packages_dir.is_dir():
-            for package_dir in sorted(fpm_packages_dir.iterdir()):
-                if package_dir.is_dir():
-                    # Direct match inside the package root
-                    locations.append(package_dir / filepath)
-                    # Also search all subdirectories within the package recursively
-                    for sub_dir in sorted(package_dir.rglob("*")):
-                        if sub_dir.is_dir():
-                            locations.append(sub_dir / filepath)
-        
-        # Also search any directories added via #dir
-        for lib_dir in self.lib_dirs:
-            locations.append(Path(lib_dir) / filepath)
-        
-        for location in locations:
-            loc_path = Path(location)
-            if loc_path.exists():
-                return loc_path
-        
+        for loc in locations:
+            if Path(loc).exists():
+                return Path(loc).resolve()
         return None
+
+    def _resolve_path(self, filepath: str) -> Optional[Path]:
+        """Legacy resolver used internally (e.g. for the root source file).
+        Searches local, stdlib, and package trees in order.
+        """
+        path = Path(filepath)
+        if path.exists():
+            return path.resolve()
+
+        result = self._resolve_path_local(filepath)
+        if result:
+            return result
+        result = self._resolve_path_stdlib(filepath)
+        if result:
+            return result
+        return self._resolve_path_stdlib(filepath)
     
-    def _process_file(self, filepath: str):
-        """Process a file and its imports"""
-        resolved_path = self._resolve_path(filepath)
+    def _process_package(self, package_name: str):
+        """Resolve and import a package by name via #package.
+        Reads .fpm/packages/<name>/package.json, finds the entrypoint,
+        and processes it with the package directory on the dir stack so
+        relative imports inside the package resolve correctly.
+        """
+        fpm_packages_dir = Path.cwd() / ".fpm" / "packages"
+        package_dir = fpm_packages_dir / package_name
+        if not package_dir.is_dir():
+            raise FileNotFoundError(
+                f"[PREPROCESSOR] Package '{package_name}' not found in {fpm_packages_dir}"
+            )
+
+        manifest_path = package_dir / "package.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(
+                f"[PREPROCESSOR] Package '{package_name}' is missing package.json"
+            )
+
+        with open(manifest_path, 'r', encoding='utf-8') as f:
+            manifest = json.load(f)
+
+        # Support both {"entrypoint": "..."} at top level and nested under "entries"
+        entries = manifest.get("entries", manifest)
+        entrypoint = entries.get("entrypoint")
+        if not entrypoint:
+            raise KeyError(
+                f"[PREPROCESSOR] Package '{package_name}' package.json has no 'entrypoint' field"
+            )
+
+        entrypoint_path = (package_dir / entrypoint).resolve()
+        if not entrypoint_path.exists():
+            raise FileNotFoundError(
+                f"[PREPROCESSOR] Package '{package_name}' entrypoint '{entrypoint}' not found"
+            )
+
+        # Check if already processed (guard by absolute path)
+        abs_path = str(entrypoint_path)
+        if abs_path in self.processed_files:
+            return
+
+        print(f"[PREPROCESSOR] Package import: {package_name} -> {entrypoint}")
+
+        # Push the package directory so the entrypoint's local imports resolve within it
+        self._dir_stack.append(package_dir)
+        self._process_file(str(entrypoint_path), resolver=self._resolve_path_local)
+        self._dir_stack.pop()
+
+    def _process_file(self, filepath: str, resolver=None):
+        """Process a file and its imports.
+        resolver: callable(filepath)->Optional[Path] to use instead of _resolve_path.
+        """
+        if resolver is None:
+            resolver = self._resolve_path
+        resolved_path = resolver(filepath)
         
         if not resolved_path:
+            # Check if it looks like a stdlib file used with "" instead of <>
+            if resolver.__name__ == "_resolve_path_local" and self._resolve_path_stdlib(filepath):
+                print(f'[PREPROCESSOR] Could not find local import: {filepath}', flush=True)
+                print(f'#import "{filepath}";', flush=True)
+                print(f'--------^', flush=True)
+                print(f'#import <{filepath}>; // try this', flush=True)
             raise FileNotFoundError(f"Could not find import: {filepath}")
         
         # Avoid circular imports
@@ -206,29 +290,32 @@ class FXPreprocessor:
         print(f"[PREPROCESSOR] Processing: {filepath}")
         
         # Read the file and strip comments immediately
-        content = _read_source_file(resolved_path)
+        file_content = _read_source_file(resolved_path)
         
         # Strip all comments before processing
-        content = self._strip_comments(content)
+        file_content = self._strip_comments(file_content)
         
         # Enforce semicolons on directives before processing
-        for lineno, raw_line in enumerate(content.splitlines(), start=1):
+        for lineno, raw_line in enumerate(file_content.splitlines(), start=1):
             s = raw_line.strip()
-            if s.startswith("#import") or s.startswith("#warn") or s.startswith("#stop") or s.startswith("#def") or s.startswith("#dir"):
+            if s.startswith("#import") or s.startswith("#package") or s.startswith("#warn") or s.startswith("#stop") or s.startswith("#def") or s.startswith("#dir"):
                 if not s.endswith(';'):
                     directive = s.split()[0]
                     raise SyntaxError(f"[PREPROCESSOR] {directive} directive missing semicolon in {filepath} at line {lineno}")
         
         # Process line by line, tracking current file and local line number
-        lines = content.splitlines()
+        lines = file_content.splitlines()
         prev_current_file = getattr(self, '_current_file', None)
         prev_current_lines = getattr(self, '_current_lines', None)
         self._current_file = str(resolved_path)
         self._current_lines = lines
+        # Push this file's directory onto the stack so nested local imports resolve correctly
+        self._dir_stack.append(resolved_path.parent)
         i = 0
         while i < len(lines):
             self._current_local_lineno = i + 1  # 1-based
             i = self._process_line(lines, i)
+        self._dir_stack.pop()
         self._current_file = prev_current_file
         self._current_lines = prev_current_lines
     
@@ -302,28 +389,62 @@ class FXPreprocessor:
                 constant_name = parts[1]
                 return self._process_conditional_block(lines, i, constant_name, True)
         
-        # Check for import
+        # Check for #package
+        if stripped.startswith("#package"):
+            if not stripped.rstrip().endswith(';'):
+                raise SyntaxError(f"[PREPROCESSOR] #package directive missing semicolon at line {i + 1}")
+            rest = stripped[len('#package'):].rstrip(';').strip()
+            package_names = [p.strip() for p in rest.split(',') if p.strip()]
+            for pkg_name in package_names:
+                self._process_package(pkg_name)
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
+            return i + 1
+
+                # Check for import
         if stripped.startswith("#import"):
             if not stripped.rstrip().endswith(';'):
                 raise SyntaxError(f"[PREPROCESSOR] #import directive missing semicolon at line {i + 1}")
-            # Extract all quoted filenames
-            import_files = []
-            
-            # Find all quoted strings in the line (comments already stripped)
-            start_idx = line.find('"')
-            while start_idx != -1:
-                end_idx = line.find('"', start_idx + 1)
-                if end_idx != -1:
-                    import_file = line[start_idx + 1:end_idx].strip()
-                    import_files.append(import_file)
-                    start_idx = line.find('"', end_idx + 1)
+            # Determine import kind and extract filenames.
+            #
+            #   #import "file.fx";          -- local: resolve relative to importing file / root dir / CWD
+            #   #import <file.fx>;          -- stdlib: search only stdlib trees
+            #   #import @"pkg/file.fx";     -- package: search only .fpm/packages tree
+            #
+            # Multiple imports on one line are supported for all forms.
+
+            rest = line[line.index('#import') + len('#import'):].rstrip(';').strip()
+
+            # Parse each token from left to right
+            j = 0
+            while j < len(rest):
+                c = rest[j]
+
+                # Stdlib import: <...>
+                if c == '<':
+                    j += 1
+                    end = rest.find('>', j)
+                    if end == -1:
+                        raise SyntaxError(f"[PREPROCESSOR] Unterminated <> in #import at line {i + 1}")
+                    std_path = rest[j:end].strip()
+                    print(f"[PREPROCESSOR] Stdlib import: {std_path}")
+                    self._process_file(std_path, resolver=self._resolve_path_stdlib)
+                    j = end + 1
+
+                # Local import: "..."
+                elif c == '"':
+                    j += 1
+                    end = rest.find('"', j)
+                    if end == -1:
+                        raise SyntaxError(f"[PREPROCESSOR] Unterminated \"\" in #import at line {i + 1}")
+                    local_path = rest[j:end].strip()
+                    print(f"[PREPROCESSOR] Local import: {local_path}")
+                    self._process_file(local_path, resolver=self._resolve_path_local)
+                    j = end + 1
+
                 else:
-                    break
-            
-            # Process each import file in order
-            for import_file in import_files:
-                self._process_file(import_file)
-            
+                    j += 1
+
             self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
             self.output_lines.append('')
             return i + 1

@@ -43,7 +43,7 @@ const bool _fltused = true;
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <..\types.fx>;
 #endif;
 
 #ifdef __WINDOWS__
@@ -57,11 +57,11 @@ global i64 WIN_STDOUT_HANDLE;
 using standard::memory::allocators::stdheap;
 
 // DO NOT MODIFY THIS LINE
-#import "string_utilities.fx";
+#import <..\utility\string_utilities.fx>;
 // DO NOT MODIFY THIS LINE
 
 #ifndef FLUX_STANDARD_SYSTEM
-#import "sys.fx";
+#import <..\sys.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_TIMING
@@ -69,7 +69,7 @@ using standard::memory::allocators::stdheap;
 #endif;
 
 #ifndef FLUX_STANDARD_IO
-#import "io.fx";
+#import <..\io.fx>;
 #endif;
 
 // ---------------------------
@@ -80,8 +80,8 @@ using standard::memory::allocators::stdheap;
 // ---------------------------
 //
 // Import raw functions & builtins
-#import "string_object_raw.fx";  // Deprecated from direct use in runtime
-#import "file_object_raw.fx";    // "
+#import <..\builtins\string_object_raw.fx>;  // Deprecated from direct use in runtime
+#import <..\builtins\file_object_raw.fx>;    // "
 //#import "socket_object_raw.fx";  // "
 //
 
