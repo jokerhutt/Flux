@@ -3040,7 +3040,26 @@ class FluxParser:
                     t.is_array = True
                     t.array_dimensions = array_dimensions
                     t.array_size = array_size
-
+                # Build element type spec from the resolved alias base type
+                if not t.array_element_type:
+                    t.array_element_type = TypeSystem(
+                        base_type=t.base_type,
+                        is_signed=t.is_signed,
+                        is_const=t.is_const,
+                        is_volatile=t.is_volatile,
+                        bit_width=t.bit_width,
+                        alignment=t.alignment,
+                        endianness=t.endianness,
+                        is_array=False,
+                        array_size=None,
+                        array_dimensions=None,
+                        array_element_type=None,
+                        is_pointer=False,
+                        pointer_depth=0,
+                        custom_typename=t.custom_typename,
+                        storage_class=t.storage_class,
+                    )
+                    
             # Apply use-site pointers (add depth)
             if pointer_depth > 0:
                 t.is_pointer = True
@@ -3053,7 +3072,30 @@ class FluxParser:
             bit_width = self._default_byte_width
             alignment = alignment if alignment is not None else bit_width
 
-        # No alias: return what we parsed normally
+        # No alias: return what we parsed normally.
+        # When this is an array type, build an element TypeSystem so that
+        # array element loads carry the correct signedness metadata through
+        # to arithmetic (preventing sext where zext is required).
+        elem_type_spec = None
+        if is_array:
+            elem_type_spec = TypeSystem(
+                base_type=base_type,
+                is_signed=is_signed,
+                is_const=is_const,
+                is_volatile=is_volatile,
+                bit_width=bit_width,
+                alignment=alignment,
+                endianness=endianness,
+                is_array=False,
+                array_size=None,
+                array_dimensions=None,
+                array_element_type=None,
+                is_pointer=False,
+                pointer_depth=0,
+                custom_typename=custom_typename,
+                storage_class=storage_class
+            )
+
         return TypeSystem(
             base_type=base_type,
             is_signed=is_signed,
@@ -3067,7 +3109,7 @@ class FluxParser:
             is_array=is_array,
             array_size=array_size,
             array_dimensions=array_dimensions,
-            array_element_type=None,
+            array_element_type=elem_type_spec,
             is_pointer=pointer_depth > 0,
             pointer_depth=pointer_depth,
             custom_typename=custom_typename,

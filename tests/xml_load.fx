@@ -1,19 +1,20 @@
 // Author: Karac V. Thweatt
-// xml_load.fx - Load a .xml file, parse it, close it, and time each phase.
+// xml_load.fx - Load a .xml file, parse it, walk the tree, build a round-trip, and time each phase.
 
-#import "standard.fx";
-#import "allocators.fx";
-#import "ffifio.fx";
-#import "xml.fx";
-#import "timing.fx";
+#import <standard.fx>;
+#import <collections.fx>;
+#import <xml.fx>;
+#import <timing.fx>;
 
 using standard::io::console,
-      standard::io::file,
       standard::strings,
       standard::time,
-      standard::memory::allocators::stdarena,
-      standard::threading,
+      standard::io::file,
       xml;
+
+// ============================================================================
+// Timing helpers (same style as json_load.fx)
+// ============================================================================
 
 def print_ms(i64 ns) -> void
 {
@@ -51,132 +52,339 @@ def print_mbs(i64 bytes, i64 ns) -> void
     return;
 };
 
-// Walk element tree and count total nodes and max depth reached.
-def count_nodes(XMLNode* node, int depth, int* total, int* max_depth) -> void
+// ============================================================================
+// Tree walking helpers
+// ============================================================================
+
+// Print a null-terminated byte string safely (guards null pointer).
+def print_safe(byte* s) -> void
 {
-    XMLNode* child;
-    size_t   i, n;
-    *total = *total + 1;
-    if (depth > *max_depth) { *max_depth = depth; };
-    if (node.type != XML_ELEMENT) { return; };
-    n = node.children.len;
-    i = 0;
-    do
+    if ((u64)s == 0) { print("(null)\0"); return; };
+    print(s);
+    return;
+};
+
+// Recursively count all nodes in the tree.
+def count_nodes(XmlNode* n) -> int
+{
+    int    total, i;
+    size_t nc;
+    if ((u64)n == 0) { return 0; };
+    total = 1;
+    nc    = xml_child_count(n);
+    while ((size_t)i < nc)
     {
-        if (i >= n) { break; };
-        child = (XMLNode*)node.children.get(i);
-        if ((u64)child != 0) { count_nodes(@child, depth + 1, total, max_depth); };
+        total += count_nodes(xml_child(n, (size_t)i));
         i++;
+    };
+    return total;
+};
+
+// Recursively find the maximum depth of the tree.
+def max_depth(XmlNode* n, int depth) -> int
+{
+    int    best, child_depth, i;
+    size_t nc;
+    if ((u64)n == 0) { return depth; };
+    best = depth;
+    nc   = xml_child_count(n);
+    while ((size_t)i < nc)
+    {
+        child_depth = max_depth(xml_child(n, (size_t)i), depth + 1);
+        if (child_depth > best) { best = child_depth; };
+        i++;
+    };
+    return best;
+};
+
+// Count only XML_ELEMENT nodes.
+def count_elements(XmlNode* n) -> int
+{
+    int    total, i;
+    size_t nc;
+    if ((u64)n == 0) { return 0; };
+    total = (n.type == XML_ELEMENT) ? 1 : 0;
+    nc    = xml_child_count(n);
+    while ((size_t)i < nc)
+    {
+        total += count_elements(xml_child(n, (size_t)i));
+        i++;
+    };
+    return total;
+};
+
+// Count only XML_TEXT nodes.
+def count_text_nodes(XmlNode* n) -> int
+{
+    int    total, i;
+    size_t nc;
+    if ((u64)n == 0) { return 0; };
+    total = (n.type == XML_TEXT) ? 1 : 0;
+    nc    = xml_child_count(n);
+    while ((size_t)i < nc)
+    {
+        total += count_text_nodes(xml_child(n, (size_t)i));
+        i++;
+    };
+    return total;
+};
+
+// Count total attributes across all elements in tree.
+def count_attrs(XmlNode* n) -> int
+{
+    int    total, i;
+    size_t nc;
+    if ((u64)n == 0) { return 0; };
+    total = (int)xml_attr_count(n);
+    nc    = xml_child_count(n);
+    while ((size_t)i < nc)
+    {
+        total += count_attrs(xml_child(n, (size_t)i));
+        i++;
+    };
+    return total;
+};
+
+// Print the root element and its direct element children with tag, attr count, child count.
+def print_tree_summary(XmlNode* root) -> void
+{
+    int    i;
+    size_t nc;
+    XmlNode* child;
+    byte[64] num_buf;
+
+    if ((u64)root == 0) { return; };
+
+    print("  Root element:  <\0");
+    print_safe(root.tag);
+    print(">  attrs=\0");
+    i32str((int)xml_attr_count(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("  children=\0");
+    i32str((int)xml_child_count(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
+
+    nc = xml_child_count(root);
+    i  = 0;
+    while ((size_t)i < nc & i < 8)
+    {
+        child = xml_child(root, (size_t)i);
+        if ((u64)child != 0 & child.type == XML_ELEMENT)
+        {
+            print("    <\0");
+            print_safe(child.tag);
+            print(">  attrs=\0");
+            i32str((int)xml_attr_count(child), @num_buf[0]);
+            print(@num_buf[0]);
+            print("  children=\0");
+            i32str((int)xml_child_count(child), @num_buf[0]);
+            print(@num_buf[0]);
+            print("\n\0");
+        };
+        i++;
+    };
+    if ((size_t)i < nc)
+    {
+        print("    ... (\0");
+        i32str((int)nc - i, @num_buf[0]);
+        print(@num_buf[0]);
+        print(" more children not shown)\n\0");
     };
     return;
 };
 
+// ============================================================================
+// Builder test: construct a small XML document and serialize it
+// ============================================================================
+
+def test_builder(Arena* a) -> void
+{
+    XmlNode* root, catalog, book, title_node, author_node, title_text, author_text;
+    byte*    out;
+    byte[64] num_buf;
+
+    print("\n--- Builder test ---\n\0");
+
+    root = xml_new_element(a, "catalog\0");
+    if ((u64)root == 0) { print("  ERROR: could not create root element\n\0"); return; };
+
+    xml_set_attr(root, a, "version\0", "1.0\0");
+    xml_set_attr(root, a, "generated\0", "xml.fx\0");
+
+    // First book
+    book = xml_new_element(a, "book\0");
+    xml_set_attr(book, a, "id\0", "bk001\0");
+    xml_set_attr(book, a, "lang\0", "en\0");
+
+    title_node  = xml_new_element(a, "title\0");
+    title_text  = xml_new_text(a, "The Flux Programming Language\0");
+    xml_append_child(title_node, a, title_text);
+    xml_append_child(book, a, title_node);
+
+    author_node = xml_new_element(a, "author\0");
+    author_text = xml_new_text(a, "Karac V. Thweatt\0");
+    xml_append_child(author_node, a, author_text);
+    xml_append_child(book, a, author_node);
+
+    xml_append_child(root, a, book);
+
+    // Second book
+    book = xml_new_element(a, "book\0");
+    xml_set_attr(book, a, "id\0", "bk002\0");
+    xml_set_attr(book, a, "lang\0", "en\0");
+
+    title_node  = xml_new_element(a, "title\0");
+    title_text  = xml_new_text(a, "Systems Programming with Flux & LLVM\0");
+    xml_append_child(title_node, a, title_text);
+    xml_append_child(book, a, title_node);
+
+    author_node = xml_new_element(a, "author\0");
+    author_text = xml_new_text(a, "Karac V. Thweatt\0");
+    xml_append_child(author_node, a, author_text);
+    xml_append_child(book, a, author_node);
+
+    xml_append_child(root, a, book);
+
+    // Verify tree
+    print("  Elements built:  \0");
+    i32str(count_elements(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
+    print("  Total attrs:     \0");
+    i32str(count_attrs(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
+
+    // Serialize
+    out = xml_serialize(root, a, 512);
+    if ((u64)out == 0)
+    {
+        print("  ERROR: serialization failed\n\0");
+        return;
+    };
+
+    print("  Serialized output:\n\0");
+    print(out);
+    print("\n\0");
+    return;
+};
+
+// ============================================================================
+// Round-trip test: parse source, serialize, check output is non-empty
+// ============================================================================
+
+def test_roundtrip(byte* src, Arena* a) -> void
+{
+    XmlNode* root;
+    byte*    out;
+    byte[256] errmsg;
+    byte[64]  num_buf;
+    int       out_len;
+
+    print("\n--- Round-trip test ---\n\0");
+
+    root = xml_parse(src, a, @errmsg[0]);
+    if ((u64)root == 0)
+    {
+        print("  ERROR: parse failed: \0");
+        print(@errmsg[0]);
+        print("\n\0");
+        return;
+    };
+
+    out = xml_serialize(root, a, 4096);
+    if ((u64)out == 0)
+    {
+        print("  ERROR: serialization failed\n\0");
+        return;
+    };
+
+    out_len = 0;
+    while (out[out_len] != 0) { out_len++; };
+
+    print("  Re-serialized length: \0");
+    i32str(out_len, @num_buf[0]);
+    print(@num_buf[0]);
+    print(" bytes\n\0");
+    print("  PASS: round-trip produced output\n\0");
+    return;
+};
+
+// ============================================================================
+// Main parse-and-report (mirrors json_load.fx structure)
+// ============================================================================
+
 def parse_and_report(byte* buf, int buf_len) -> int
 {
-    XMLNode        root();
-    Arena          arena;
-    XMLParser      p(buf, buf_len, @arena);
-    byte[64]       num_buf;
-    byte[4096]     ser_buf;
-    size_t         node_cap;
-    int            total_nodes, max_depth, ser_len;
-    byte*          first_child_tag;
-    XMLNode*       first_child;
+    Arena arena;
+    XmlNode*        root;
+    byte[256]       errmsg;
+    byte[64]        num_buf;
+    byte[512]       text_buf;
+    size_t          arena_cap;
 
-    // Single arena: worst case ~1 node per 4 bytes of source, 2x headroom,
-    // plus source size for string/attr data.
-    node_cap = (size_t)((buf_len / 4 + 1) * (sizeof(XMLNode) / sizeof(byte)) * 2)
-             + (size_t)buf_len + 1;
-    arena_init_sized(@arena, node_cap);
+    arena_cap = (size_t)(buf_len * 3 + 65536);
+    stdarena::arena_init_sized(@arena, arena_cap);
 
-    p.parse(@root);
+    root = xml_parse(buf, @arena, @errmsg[0]);
 
-    if (!p.ok())
+    if ((u64)root == 0)
     {
-        print("ERROR: XML parse failed\n\0");
-        arena_destroy(@arena);
+        print("ERROR: XML parse failed: \0");
+        print(@errmsg[0]);
+        print("\n\0");
+        stdarena::arena_destroy(@arena);
         return 1;
     };
 
-    // Root info.
-    print("Root type:     \0");
-    if (root.is_element())
-    {
-        print("element\n\0");
-        print("Root tag:      \0");
-        if ((u64)root.tag != 0)
-        {
-            // tag_len bytes — not null-terminated in zero-copy mode.
-            // Write manually from tag pointer.
-            ser_len = 0;
-            do
-            {
-                if (ser_len >= root.tag_len) { break; };
-                ser_buf[ser_len] = root.tag[ser_len];
-                ser_len = ser_len + 1;
-            };
-            ser_buf[ser_len] = '\x00';
-            print(@ser_buf[0]);
-        }
-        elif ((u64)root.tag == 0) { print("(none)\0"); };
-        print("\n\0");
+    print("Parse OK.\n\n\0");
 
-        print("Attributes:    \0");
-        i32str((int)root.attr_count(), @num_buf[0]);
-        print(@num_buf[0]);
-        print("\n\0");
+    // Tree statistics
+    print("--- Tree statistics ---\n\0");
 
-        print("Direct children: \0");
-        i32str((int)root.child_count(), @num_buf[0]);
-        print(@num_buf[0]);
-        print("\n\0");
+    print("  Total nodes:     \0");
+    i32str(count_nodes(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
 
-        // First child element tag.
-        first_child = (XMLNode*)root.children.get(0);
-        if ((u64)first_child != 0 & first_child.type == XML_ELEMENT)
-        {
-            print("First child:   \0");
-            ser_len = 0;
-            do
-            {
-                if (ser_len >= first_child.tag_len) { break; };
-                ser_buf[ser_len] = first_child.tag[ser_len];
-                ser_len = ser_len + 1;
-            };
-            ser_buf[ser_len] = '\x00';
-            print(@ser_buf[0]);
-            print("\n\0");
-        };
+    print("  Elements:        \0");
+    i32str(count_elements(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
 
-        // Walk tree.
-        total_nodes = 0;
-        max_depth   = 0;
-        count_nodes(@root, 0, @total_nodes, @max_depth);
-        print("Total nodes:   \0");
-        i32str(total_nodes, @num_buf[0]);
-        print(@num_buf[0]);
-        print("\n\0");
-        print("Max depth:     \0");
-        i32str(max_depth, @num_buf[0]);
-        print(@num_buf[0]);
-        print("\n\0");
+    print("  Text nodes:      \0");
+    i32str(count_text_nodes(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
 
-        // Round-trip serialize root into fixed buffer sample.
-        ser_len = serialize(@root, @ser_buf[0], 0, 4096);
-        print("Serialized (first 200 chars):\n  \0");
-        ser_buf[200] = '\x00';
-        print(@ser_buf[0]);
-        print("\n\0");
-    }
-    elif (root.is_text())    { print("text\n\0");    }
-    elif (root.is_comment()) { print("comment\n\0"); }
-    elif (root.is_cdata())   { print("cdata\n\0");   }
-    elif (root.is_pi())      { print("pi\n\0");      }
-    elif (root.is_doctype()) { print("doctype\n\0"); };
+    print("  Total attrs:     \0");
+    i32str(count_attrs(root), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
 
-    arena_destroy(@arena);
+    print("  Max depth:       \0");
+    i32str(max_depth(root, 0), @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\n\0");
+
+    // Root element summary
+    print("--- Tree summary ---\n\0");
+    print_tree_summary(root);
+
+    // Round-trip
+    test_roundtrip(buf, @arena);
+
+    // Builder test (uses the same arena)
+    test_builder(@arena);
+
+    stdarena::arena_destroy(@arena);
     return 0;
 };
+
+// ============================================================================
+// Entry point
+// ============================================================================
 
 def main() -> int
 {
@@ -188,12 +396,12 @@ def main() -> int
 
     t_start = time_now();
 
-    print("Opening test.xml...\n\0");
+    print("Opening sample.xml...\n\0");
 
-    fh = fopen("test.xml\0", "rb\0");
+    fh = fopen("sample.xml\0", "rb\0");
     if ((u64)fh == 0)
     {
-        print("ERROR: Could not open test.xml\n\0");
+        print("ERROR: Could not open sample.xml\n\0");
         return 1;
     };
 
@@ -204,7 +412,7 @@ def main() -> int
     print("File size: \0");
     i32str(file_size, @num_buf[0]);
     print(@num_buf[0]);
-    print(" bytes\n\0");
+    print(" bytes\n\n\0");
 
     buf = (byte*)fmalloc((u64)file_size + 1);
     if ((u64)buf == 0)
@@ -220,7 +428,6 @@ def main() -> int
 
     t_after_load = time_now();
 
-    // Pass bytes_read directly — no strlen in parser.
     result = parse_and_report(buf, bytes_read);
 
     t_after_parse = time_now();
@@ -231,12 +438,10 @@ def main() -> int
     parse_ns = t_after_parse - t_after_load;
     total_ns = t_after_parse - t_start;
 
-    print("\n\0");
+    print("\n--- Timing ---\n\0");
     print("Load:  \0"); print_ms(load_ns);  print(" | \0"); print_mbs((i64)bytes_read, load_ns);  print("\n\0");
     print("Parse: \0"); print_ms(parse_ns); print(" | \0"); print_mbs((i64)bytes_read, parse_ns); print("\n\0");
     print("Total: \0"); print_ms(total_ns); print(" | \0"); print_mbs((i64)bytes_read, total_ns); print("\n\0");
-
-    system("pause");
 
     return result;
 };

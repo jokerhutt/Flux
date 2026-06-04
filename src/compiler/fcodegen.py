@@ -1619,9 +1619,16 @@ class CodegenVisitor:
                         expr_spec = TypeResolver.resolve_type_spec(node.expression.name, module)
                         if expr_spec is not None and hasattr(expr_spec, 'is_signed'):
                             source_unsigned = not expr_spec.is_signed
-                    if source_unsigned or node.target_type.base_type == DataType.UINT or (
-                            node.target_type.custom_typename and
-                            node.target_type.custom_typename.startswith('u')):
+                    target_unsigned = (
+                        source_unsigned
+                        or node.target_type.base_type == DataType.UINT
+                        or node.target_type.base_type == DataType.BYTE
+                        or (node.target_type.base_type == DataType.DATA
+                            and not getattr(node.target_type, 'is_signed', True))
+                        or (node.target_type.custom_typename and
+                            node.target_type.custom_typename.startswith('u'))
+                    )
+                    if target_unsigned:
                         result = builder.zext(source_val, target_llvm_type)
                     else:
                         result = builder.sext(source_val, target_llvm_type)
