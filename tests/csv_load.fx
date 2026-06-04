@@ -1,15 +1,18 @@
 // Author: Karac V. Thweatt
-// json_load.fx - Load a .json file, parse it, close it, and time each phase.
 
-#import <standard.fx>, <json.fx>, <timing.fx>;
+// csv_load.fx - Load sample.csv and benchmark parse speed.
+
+#import <standard.fx>;
+#import <ffifio.fx>;
+#import <csv.fx>;
+#import <timing.fx>;
 
 using standard::io::console,
       standard::io::file,
       standard::strings,
-      standard::time,
-      standard::memory::allocators::stdarena,
-      standard::threading,
-      json;
+      standard::time;
+
+using csv;
 
 def print_ms(i64 ns) -> void
 {
@@ -25,7 +28,6 @@ def print_ms(i64 ns) -> void
     i64str(us, @buf[0]);
     print(@buf[0]);
     print(" ms\0");
-    return;
 };
 
 def print_mbs(i64 bytes, i64 ns) -> void
@@ -44,73 +46,25 @@ def print_mbs(i64 bytes, i64 ns) -> void
     i64str(mbs_frac, @buf[0]);
     print(@buf[0]);
     print(" MB/s\0");
-    return;
-};
-
-def parse_and_report(byte* buf, int buf_len) -> int
-{
-    JSONNode       root();
-    Arena          arena;
-    JSONParser p(buf, buf_len, @arena);
-    byte[64]       num_buf;
-    size_t         node_cap;
-
-    // Single arena covers nodes and strings.
-    // node_cap: worst case ~1 node per 3 bytes of source, 2x headroom, plus string data.
-    node_cap = (size_t)((buf_len / 3 + 1) * (sizeof(JSONNode) / sizeof(byte)) * 2)
-             + (size_t)buf_len + 1;
-    arena_init_sized(@arena, node_cap);
-
-    p.parse(@root);
-
-    if (!p.ok())
-    {
-        print("ERROR: JSON parse failed\n\0");
-        arena_destroy(@arena);
-        return 1;
-    };
-
-    print("Root type: \0");
-    if      (root.is_null())   { print("null\n\0");   }
-    elif    (root.is_bool())   { print("bool\n\0");   }
-    elif    (root.is_int())    { print("int\n\0");    }
-    elif    (root.is_float())  { print("float\n\0");  }
-    elif    (root.is_string()) { print("string\n\0"); }
-    elif    (root.is_array())
-    {
-        print("array, length: \0");
-        i32str((int)root.array_len(), @num_buf[0]);
-        print(@num_buf[0]);
-        print("\n\0");
-    }
-    elif    (root.is_object())
-    {
-        print("object, keys: \0");
-        i32str((int)root.object_len(), @num_buf[0]);
-        print(@num_buf[0]);
-        print("\n\0");
-    };
-
-    arena_destroy(@arena);
-    return 0;
 };
 
 def main() -> int
 {
     void*    fh;
-    int      file_size, bytes_read, result;
+    int      file_size, bytes_read;
     byte*    buf;
     byte[64] num_buf;
+    CsvTable table;
     i64      t_start, t_after_load, t_after_parse, load_ns, parse_ns, total_ns;
 
     t_start = time_now();
 
-    print("Opening test.json...\n\0");
+    print("Opening sample.csv...\n\0");
 
-    fh = fopen("test.json\0", "rb\0");
+    fh = fopen("sample.csv\0", "rb\0");
     if ((u64)fh == 0)
     {
-        print("ERROR: Could not open test.json\n\0");
+        print("ERROR: Could not open sample.csv\n\0");
         return 1;
     };
 
@@ -137,12 +91,31 @@ def main() -> int
 
     t_after_load = time_now();
 
-    // Pass bytes_read directly -- no strlen in the parser.
-    result = parse_and_report(buf, bytes_read);
+    if (!csv_parse_buf(buf, bytes_read, ',', @table))
+    {
+        print("ERROR: CSV parse failed\n\0");
+        ffree((u64)buf);
+        return 1;
+    };
 
     t_after_parse = time_now();
 
     ffree((u64)buf);
+
+    print("Rows:    \0");
+    i32str(table.count, @num_buf[0]);
+    print(@num_buf[0]);
+    print("\n\0");
+
+    if (table.count > 0)
+    {
+        print("Columns: \0");
+        i32str(table.rows[0].count, @num_buf[0]);
+        print(@num_buf[0]);
+        print("\n\0");
+    };
+
+    csv_free(@table);
 
     load_ns  = t_after_load  - t_start;
     parse_ns = t_after_parse - t_after_load;
@@ -153,5 +126,5 @@ def main() -> int
     print("Parse: \0"); print_ms(parse_ns); print(" | \0"); print_mbs((i64)bytes_read, parse_ns); print("\n\0");
     print("Total: \0"); print_ms(total_ns); print(" | \0"); print_mbs((i64)bytes_read, total_ns); print("\n\0");
 
-    return result;
+    return 0;
 };

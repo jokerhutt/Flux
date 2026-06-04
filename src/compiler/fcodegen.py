@@ -1489,9 +1489,11 @@ class CodegenVisitor:
         _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
         _is_arr = getattr(_ts, 'is_array', False) if _ts else False
         if (not _is_arr and _depth <= 1 and
+                isinstance(array_val, (ir.AllocaInstr, ir.GlobalVariable)) and
                 isinstance(array_val.type, ir.PointerType) and
                 isinstance(array_val.type.pointee, ir.PointerType) and
-                not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
+                not isinstance(array_val.type.pointee.pointee, ir.ArrayType) and
+                not isinstance(array_val.type.pointee.pointee, ir.PointerType)):
             array_val = builder.load(array_val, name="ptr_loaded_for_inc")
         index_val = self.visit(node.index, builder, module)
         if index_val.type != ir.IntType(32):
@@ -3236,9 +3238,11 @@ class CodegenVisitor:
         _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
         _is_arr = getattr(_ts, 'is_array', False) if _ts else False
         if (not _is_arr and _depth <= 1 and
+                isinstance(array_val, (ir.AllocaInstr, ir.GlobalVariable)) and
                 isinstance(array_val.type, ir.PointerType) and
                 isinstance(array_val.type.pointee, ir.PointerType) and
-                not isinstance(array_val.type.pointee.pointee, ir.ArrayType)):
+                not isinstance(array_val.type.pointee.pointee, ir.ArrayType) and
+                not isinstance(array_val.type.pointee.pointee, ir.PointerType)):
             array_val = builder.load(array_val, name="ptr_loaded_for_access")
         if isinstance(node.index, RangeExpression):
             start_val = self.visit(node.index.start, builder, module)
@@ -5242,7 +5246,13 @@ class CodegenVisitor:
                     call_instr.tail = "musttail"
                 builder.ret_void()
             else:
-                raise RuntimeError(f"Function '{node.name}' must end with return statement {_src_loc_with_source(node, module)}")
+                # If the current block is empty it was never branched to — all
+                # reachable paths already returned via other blocks.  Emit
+                # unreachable so LLVM can discard the dead block cleanly.
+                if len(builder.block.instructions) == 0:
+                    builder.unreachable()
+                else:
+                    raise RuntimeError(f"Function '{node.name}' must end with return statement {_src_loc_with_source(node, module)}")
 
         return func
 
@@ -5869,7 +5879,10 @@ class CodegenVisitor:
                 if isinstance(func.function_type.return_type, ir.VoidType):
                     method_builder.ret_void()
                 else:
-                    raise RuntimeError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement")
+                    if len(method_builder.block.instructions) == 0:
+                        method_builder.unreachable()
+                    else:
+                        raise RuntimeError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement")
         finally:
             module.symbol_table.exit_scope()
             module.symbol_table.current_namespace = saved_namespace
