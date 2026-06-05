@@ -49,19 +49,19 @@
 //
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_RANDOM
-#import "random.fx";
+#import <random.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_AUTOGRAD

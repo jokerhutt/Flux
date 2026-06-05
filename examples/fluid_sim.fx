@@ -13,7 +13,7 @@
    - set_bnd deferred to end of lin_solve iteration loop
 ///
 
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <threading.fx>;
 
 using standard::math,
       standard::system::windows,

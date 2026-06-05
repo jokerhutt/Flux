@@ -57,7 +57,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_TIME
-#import <timing.fx>;
+#import <runtime\timing.fx>;
 #endif;
 
 #ifndef FLUX_DATETIME

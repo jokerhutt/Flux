@@ -1,6 +1,6 @@
 // Author: Karac V. Thweatt
 
-#import "bigint.fx";
+#import <bigint.fx>;
 
 #ifndef FLUX_DECIMALS
 #def FLUX_DECIMALS 1;

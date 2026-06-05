@@ -49,23 +49,23 @@
 // Dependencies: autograd.fx, random.fx, math.fx, memory.fx, types.fx
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_RANDOM
-#import "random.fx";
+#import <random.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_AUTOGRAD
-#import "autograd.fx";
+#import <autograd.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_NEURALNET

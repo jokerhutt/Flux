@@ -47,7 +47,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import <memory.fx>;
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_RLE

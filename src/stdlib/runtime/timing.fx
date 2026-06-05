@@ -12,11 +12,11 @@
 #def FLUX_STANDARD_TIME 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <..\types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_SYSTEM
-#import "sys.fx";
+#import <..\sys.fx>;
 #endif;
 
 // ============ PLATFORM FFI ============

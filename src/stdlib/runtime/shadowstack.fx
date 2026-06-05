@@ -23,7 +23,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <memory.fx>;
 #endif;
 
 // ============================================================================

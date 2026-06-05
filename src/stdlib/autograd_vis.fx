@@ -28,23 +28,23 @@
 // Dependencies: autograd.fx, opengl.fx, windows.fx, types.fx, memory.fx, math.fx
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_AUTOGRAD
-#import "autograd.fx";
+#import <autograd.fx>;
 #endif;
 
 #ifndef __OPENGL__
-#import "opengl.fx";
+#import <opengl.fx>;
 #endif;
 
 #ifndef FLUX_AUTOGRAD_VIS

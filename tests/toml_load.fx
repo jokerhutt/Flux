@@ -45,10 +45,8 @@ def print_mbs(i64 bytes, i64 ns) -> void
 
 def print_indent(int depth) -> void
 {
-    byte[3] sp;
+    byte[3] sp = [' ', ' ', 0];
     int i;
-    sp[0] = ' '; sp[1] = ' '; sp[2] = 0;
-    i = 0;
     while (i < depth) { print(@sp[0]); i++; };
 };
 
@@ -56,10 +54,8 @@ def print_val(TomlVal* v, int depth) -> void;
 
 def print_table(TomlTable* t, int depth) -> void
 {
-    byte[2] nl;
+    byte[2]  nl = ['\n',0];
     int i;
-    nl[0] = '\n'; nl[1] = 0;
-    i = 0;
     while (i < t.count)
     {
         print_indent(depth);
@@ -74,8 +70,7 @@ def print_table(TomlTable* t, int depth) -> void
 def print_val(TomlVal* v, int depth) -> void
 {
     byte[64] buf;
-    byte[2]  nl;
-    nl[0] = '\n'; nl[1] = 0;
+    byte[2]  nl = ['\n',0];
     if ((u64)v == 0) { print("(null)"); return; };
     if (v.type == TOML_STRING)
     {

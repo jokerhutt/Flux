@@ -82,35 +82,35 @@
 //
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_VECTORS
-#import "vectors.fx";
+#import <vectors.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATRICES
-#import "matrices.fx";
+#import <matrices.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_ALLOCATORS
-#import "allocators.fx";
+#import <runtime\allocators.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_THREADING
-#import "threading.fx";
+#import <runtime\threading.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_SYSTEM
-#import "sys.fx";
+#import <sys.fx>;
 #endif;
 
 #ifndef FLUX_RAYCASTING

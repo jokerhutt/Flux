@@ -1,7 +1,7 @@
 // Author: Karac V. Thweatt
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_BIG_INTEGERS

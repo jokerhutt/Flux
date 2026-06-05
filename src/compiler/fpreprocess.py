@@ -270,6 +270,10 @@ class FXPreprocessor:
         """
         if resolver is None:
             resolver = self._resolve_path
+        # Normalize path separators to the OS convention so that Windows-style
+        # backslash paths in source files (e.g. runtime\runtime.fx) resolve
+        # correctly on both Windows and Unix.
+        filepath = filepath.replace('\\', os.sep).replace('/', os.sep)
         resolved_path = resolver(filepath)
         
         if not resolved_path:

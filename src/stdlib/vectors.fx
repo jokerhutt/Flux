@@ -1,17 +1,17 @@
 // Author: Karac V. Thweatt
 
-// redvectors.fx - 3D and 4D Vector Mathematics Library
+// vectors.fx - 3D and 4D Vector Mathematics Library
 
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_VECTORS

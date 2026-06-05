@@ -44,6 +44,27 @@
         "flux-types": ">=1.0.0"
       }
     },
+    "flux-csv": {
+      "version": "1.0.0",
+      "entry": "csv.fx",
+      "path": "",
+      "description": "CSV parsing and utilities",
+      "dependencies": {
+        "flux-allocators": ">=1.0.7",
+        "flux-ffifio": ">=1.0.0",
+        "flux-standard": ">=1.0.0"
+      }
+    },
+    "flux-datetime": {
+      "version": "1.0.0",
+      "entry": "datetime.fx",
+      "path": "",
+      "description": "Date and time formatting and utilities",
+      "dependencies": {
+        "flux-timing": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
+    },
     "flux-decimal": {
       "version": "1.0.1",
       "entry": "decimal.fx",
@@ -251,7 +272,8 @@
       "path": "",
       "description": "Run-length encoding compression",
       "dependencies": {
-        "flux-string-utilities": ">=1.0.3"
+        "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0"
       }
     },
     "flux-standard": {
@@ -411,17 +433,17 @@
       "path": "runtime",
       "description": "Flux runtime core",
       "dependencies": {
+        "flux-file": ">=1.0.1",
+        "flux-string": ">=1.0.4",
         "flux-exceptions": ">=1.0.0",
         "flux-ffifio": ">=1.0.0",
-        "flux-file": ">=1.0.1",
         "flux-io": ">=1.0.1",
         "flux-memory": ">=1.0.2",
         "flux-shadowstack": ">=1.0.0",
-        "flux-string": ">=1.0.4",
-        "flux-string-utilities": ">=1.0.3",
         "flux-sys": ">=1.0.0",
         "flux-timing": ">=1.0.2",
-        "flux-types": ">=1.0.0"
+        "flux-types": ">=1.0.0",
+        "flux-string-utilities": ">=1.0.3"
       }
     },
     "flux-shadowstack": {
@@ -431,6 +453,15 @@
       "description": "Stack protection",
       "dependencies": {
         "flux-memory": ">=1.0.2",
+        "flux-types": ">=1.0.0"
+      }
+    },
+    "flux-encodings": {
+      "version": "1.0.0",
+      "entry": "encodings.fx",
+      "path": "",
+      "description": "Base 32/58/64, hex, and url encoding/decoding",
+      "dependencies": {
         "flux-types": ">=1.0.0"
       }
     },
@@ -485,6 +516,16 @@
       "path": "utility",
       "description": "String manipulation utilities",
       "dependencies": {}
+    },
+    "flux-xml": {
+      "version": "1.0.0",
+      "entry": "xml.fx",
+      "path": "",
+      "description": "XML parsing and utilities",
+      "dependencies": {
+        "flux-allocators": ">=1.0.7",
+        "flux-standard": ">=1.0.0"
+      }
     }
   }
 }

@@ -4,11 +4,11 @@
 // Provides object-oriented interface to C stdio file operations
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <..\types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_FFI_FIO
-#import "ffifio.fx";
+#import <..\runtime\ffifio.fx>;
 #endif;
 
 #ifdef FLUX_STANDARD_FFI_FIO

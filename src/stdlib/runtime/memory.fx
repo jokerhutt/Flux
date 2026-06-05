@@ -7,7 +7,7 @@
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <..\types.fx>;
 #endif;
 
 #ifdef __WINDOWS__

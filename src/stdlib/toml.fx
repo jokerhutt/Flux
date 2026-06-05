@@ -109,7 +109,7 @@ namespace toml
     {
         byte* p;
         int   i;
-        p = (byte*)fmalloc((size_t)(n + 1));
+        p = (byte*)fmalloc(n + 1);
         if ((u64)p == 0) { return (byte*)0; };
         i = 0;
         while (i < n) { p[i] = s[i]; i++; };
@@ -144,7 +144,7 @@ namespace toml
         TomlArray* a;
         a = (TomlArray*)fmalloc(sizeof(TomlArray) / 8);
         if ((u64)a == 0) { return (TomlArray*)0; };
-        a.items    = (void**)fmalloc((size_t)64);
+        a.items    = (void**)fmalloc(64);
         a.count    = 0;
         a.capacity = 8;
         return a;
@@ -157,7 +157,7 @@ namespace toml
         if (a.count >= a.capacity)
         {
             new_cap = a.capacity * 2;
-            nb      = (void**)fmalloc((size_t)(new_cap * 8));
+            nb      = (void**)fmalloc(new_cap * 8);
             if ((u64)nb == 0) { return false; };
             i = 0;
             while (i < a.count) { nb[i] = a.items[i]; i++; };
@@ -179,8 +179,8 @@ namespace toml
         TomlTable* t;
         t = (TomlTable*)fmalloc(sizeof(TomlTable) / 8);
         if ((u64)t == 0) { return (TomlTable*)0; };
-        t.keys     = (byte**)fmalloc((size_t)64);
-        t.vals     = (void**)fmalloc((size_t)64);
+        t.keys     = (byte**)fmalloc(64);
+        t.vals     = (void**)fmalloc(64);
         t.count    = 0;
         t.capacity = 8;
         t.error    = (byte*)0;
@@ -193,8 +193,8 @@ namespace toml
         void** nv;
         int    new_cap, i;
         new_cap = t.capacity * 2;
-        nk = (byte**)fmalloc((size_t)(new_cap * 8));
-        nv = (void**)fmalloc((size_t)(new_cap * 8));
+        nk = (byte**)fmalloc(new_cap * 8);
+        nv = (void**)fmalloc(new_cap * 8);
         if ((u64)nk == 0 | (u64)nv == 0) { return false; };
         i = 0;
         while (i < t.count) { nk[i] = t.keys[i]; nv[i] = t.vals[i]; i++; };
@@ -510,7 +510,7 @@ namespace toml
         int   cap, out;
         byte  c;
         cap = p.len - p.pos + 1;
-        buf = (byte*)fmalloc((size_t)cap);
+        buf = (byte*)fmalloc(cap);
         if ((u64)buf == 0) { return (byte*)0; };
         out = 0;
         while (p.pos < p.len)
@@ -570,7 +570,7 @@ namespace toml
         elif (p.pos + 1 < p.len & p.src[p.pos] == '\r' & p.src[p.pos + 1] == '\n')
         { p.line++; p.pos = p.pos + 2; };
         cap = p.len - p.pos + 1;
-        buf = (byte*)fmalloc((size_t)cap);
+        buf = (byte*)fmalloc(cap);
         if ((u64)buf == 0) { return (byte*)0; };
         out = 0;
         while (p.pos < p.len)
@@ -637,7 +637,7 @@ namespace toml
         elif (p.pos + 1 < p.len & p.src[p.pos] == '\r' & p.src[p.pos + 1] == '\n')
         { p.line++; p.pos = p.pos + 2; };
         cap = p.len - p.pos + 1;
-        buf = (byte*)fmalloc((size_t)cap);
+        buf = (byte*)fmalloc(cap);
         if ((u64)buf == 0) { return (byte*)0; };
         out = 0;
         while (p.pos < p.len)
@@ -1080,8 +1080,8 @@ namespace toml
     def toml_parse(byte* src, int len, TomlTable* out) -> bool
     {
         _Parser p;
-        out.keys     = (byte**)fmalloc((size_t)64);
-        out.vals     = (void**)fmalloc((size_t)64);
+        out.keys     = (byte**)fmalloc(64);
+        out.vals     = (void**)fmalloc(64);
         out.count    = 0;
         out.capacity = 8;
         out.error    = (byte*)0;

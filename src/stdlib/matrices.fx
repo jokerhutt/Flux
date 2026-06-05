@@ -13,11 +13,11 @@
 // Dependencies: standard::vectors (VecN, vecN_* functions)
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_VECTORS
-#import "vectors.fx";
+#import <vectors.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATRICES

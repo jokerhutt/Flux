@@ -3,11 +3,11 @@
 // redcrypto.fx - Cryptography Library
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_BIG_INTEGERS
-#import "bigint.fx";
+#import <bigint.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_CRYPTO

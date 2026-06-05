@@ -12,15 +12,15 @@
 // ===========
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_SOCKETS
-#import "socket_object_raw.fx";
+#import <builtins\socket_object_raw.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_TLS

@@ -1,6 +1,6 @@
 # Flux Standard Library Documentation
 
-Version: 2.2
+Version: 2.3
 Date: June 2026
 
 ---
@@ -58,9 +58,10 @@ Date: June 2026
    - [raytracing.fx](#raytracingfx)
    - [raycasting.fx](#raycastingfx)
    - [datautils.fx](#datautilsfx)
-   - [search.fx](#searchfx)
-   - [sorting.fx](#sortingfx)
-   - [rle.fx](#rlefx)
+   - [datetime.fx](#datetimefx)
+   - [xml.fx](#xmlfx)
+   - [csv.fx](#csvfx)
+   - [encodings.fx](#encodingsfx)
 9. [Security](#security)
    - [shadowstack.fx](#shadowstackfx)
 10. [Import Guidelines](#import-guidelines)
@@ -133,6 +134,10 @@ stdlib/
   `----/ raytracing.fx            # Physically-based path tracer
   `----/ raycasting.fx            # 2.5D tile raycaster (Wolfenstein-style)
   `----/ datautils.fx             # Low-level byte writer utilities
+  `----/ datetime.fx              # Calendar date/time, duration, ISO 8601 parsing/formatting
+  `----/ xml.fx                   # XML parse, build, and serialize (arena-backed)
+  `----/ csv.fx                   # CSV parse, write, and cleanup (RFC 4180)
+  `----/ encoding.fx              # Hex, Base32, Base58, Base64, Base64URL, URL percent-encoding
   `----/runtime/shadowstack.fx    # Opt-in shadow stack protection (Windows x86-64)
 ```
 
@@ -3757,224 +3762,495 @@ def fill_buf(byte* buf, int len, byte val) -> void
 
 ---
 
-### search.fx
+### datetime.fx
 
-**Purpose**: Generic search algorithms over arrays
+**Purpose**: Calendar date and time library
 
-**Namespace**: `standard::search`
+**Namespace**: `standard::datetime`
 
-**Guard macro**: `FLUX_STANDARD_SEARCH`
+**Guard macro**: `FLUX_DATETIME`
+
+**Dependencies**: `types.fx`, `timing.fx`
+
+**Description**:  
+Provides calendar arithmetic, wall-clock access, epoch conversion, formatting, and ISO 8601 parsing. All allocation is on the caller's stack; no heap use. Cross-platform: uses `GetSystemTimeAsFileTime`/`GetLocalTime` on Windows and `clock_gettime` on Linux/macOS.
+
+#### Structures
+
+```flux
+struct DateTime
+{
+    i32 year;
+    i32 month;    // 1-12
+    i32 day;      // 1-31
+    i32 hour;     // 0-23
+    i32 minute;   // 0-59
+    i32 second;   // 0-59
+    i32 ms;       // 0-999
+};
+
+struct Date    { i32 year, month, day; };
+struct TimeOfDay { i32 hour, minute, second, ms; };
+struct Duration  { i64 total_ms; };   // signed millisecond interval
+```
+
+#### Wall-Clock Access
+
+```flux
+def dt_now_utc()   -> DateTime   // Current UTC time
+def dt_now_local() -> DateTime   // Current local time (platform TZ)
+```
+
+#### Epoch Conversion (Unix epoch = 1970-01-01 00:00:00 UTC)
+
+```flux
+def dt_from_unix_ms(i64 ms)         -> DateTime
+def dt_to_unix_ms(DateTime* dt)     -> i64
+def dt_from_unix_sec(i64 s)         -> DateTime
+def dt_to_unix_sec(DateTime* dt)    -> i64
+```
+
+#### Arithmetic
+
+```flux
+def dt_add_ms(DateTime* dt, i64 ms)           -> DateTime
+def dt_add_days(DateTime* dt, i64 days)        -> DateTime
+def dt_diff_ms(DateTime* a, DateTime* b)       -> i64   // a - b
+def dt_diff_days(DateTime* a, DateTime* b)     -> i64
+```
+
+#### Predicates
+
+```flux
+def dt_is_leap(int year)                       -> bool
+def dt_day_of_week(DateTime* dt)               -> int   // 0=Sun .. 6=Sat
+def dt_day_of_year(DateTime* dt)               -> int   // 1..366
+def dt_days_in_month(int year, int month)      -> int
+```
+
+#### Comparison
+
+```flux
+def dt_cmp(DateTime* a, DateTime* b)  -> int    // <0 a<b, 0 equal, >0 a>b
+def dt_eq(DateTime* a, DateTime* b)   -> bool
+def dt_lt(DateTime* a, DateTime* b)   -> bool
+```
+
+#### Formatting
+
+All format functions write into a caller-supplied buffer and return the number of characters written (excluding the null terminator), or `0` if `cap` is insufficient.
+
+```flux
+def dt_format_iso(DateTime* dt, byte* buf, int cap)     -> int
+    // "YYYY-MM-DDTHH:MM:SS.mmmZ"  — requires cap >= 25
+
+def dt_format_date(DateTime* dt, byte* buf, int cap)    -> int
+    // "YYYY-MM-DD"                 — requires cap >= 11
+
+def dt_format_time(DateTime* dt, byte* buf, int cap)    -> int
+    // "HH:MM:SS.mmm"               — requires cap >= 13
+
+def dt_format_rfc1123(DateTime* dt, byte* buf, int cap) -> int
+    // "Mon, 02 Jan 2006 15:04:05 GMT" — requires cap >= 30
+```
+
+#### Parsing
+
+```flux
+def dt_parse_iso(byte* s, DateTime* out) -> bool
+```
+
+Accepts:
+- `"YYYY-MM-DD"`
+- `"YYYY-MM-DDTHH:MM:SS"`
+- `"YYYY-MM-DDTHH:MM:SSZ"`
+- `"YYYY-MM-DDTHH:MM:SS.mmm"`
+- `"YYYY-MM-DDTHH:MM:SS.mmmZ"`
+
+Returns `false` if the string is malformed or out-of-range.
+
+#### Duration Helpers
+
+```flux
+def dur_from_ms(i64 ms)       -> Duration
+def dur_seconds(Duration* d)  -> i64    // total seconds (truncated)
+def dur_minutes(Duration* d)  -> i64    // total minutes (truncated)
+def dur_hours(Duration* d)    -> i64    // total hours (truncated)
+def dur_days(Duration* d)     -> i64    // total days (truncated)
+
+// Remainder parts (always non-negative):
+def dur_ms_part(Duration* d)  -> i64    // 0-999
+def dur_sec_part(Duration* d) -> i64    // 0-59
+def dur_min_part(Duration* d) -> i64    // 0-59
+def dur_hr_part(Duration* d)  -> i64    // 0-23
+```
+
+**Example**:
+```flux
+#import "standard.fx";
+#import "datetime.fx";
+using standard::datetime;
+
+def main() -> int
+{
+    DateTime now;
+    byte[25] buf;
+    now = dt_now_utc();
+    dt_format_iso(@now, @buf[0], 25);
+    println(@buf[0]);
+    return 0;
+};
+```
+
+---
+
+### xml.fx
+
+**Purpose**: XML parse, build, and serialize library
+
+**Namespace**: `xml`
+
+**Guard macro**: `FLUX_XML`
+
+**Dependencies**: `standard.fx`, `allocators.fx`
+
+**Description**:  
+A recursive descent XML parser and serializer backed entirely by an `Arena` allocator. The caller owns one `Arena` and passes it into every API call; a single `arena_destroy()` releases the entire document tree. UTF-8 source is assumed; no BOM handling. Namespace prefixes are kept verbatim (no resolution).
+
+#### Node Type Constants
+
+```flux
+const int XML_ELEMENT = 0;   // Element node (has tag, attrs, children)
+const int XML_TEXT    = 1;   // Text content node
+const int XML_COMMENT = 2;   // <!-- ... --> comment
+const int XML_PI      = 3;   // <?target data?> processing instruction
+const int XML_CDATA   = 4;   // <![CDATA[...]]> section
+```
+
+Maximum nesting depth: `XML_MAX_DEPTH` (default 256).
+
+#### Structures
+
+```flux
+struct XmlAttr
+{
+    byte* name, value;
+};
+
+struct XmlAttrList
+{
+    XmlAttr* buf;
+    size_t   len, cap;
+};
+
+struct XmlChildren
+{
+    void*  buf;
+    size_t len, cap;
+};
+
+struct XmlNode
+{
+    int         type;      // XML_ELEMENT | XML_TEXT | XML_COMMENT | XML_PI | XML_CDATA
+    byte*       tag;       // Element tag name or PI target; null for text/comment/CDATA
+    byte*       text;      // Text content, comment body, PI data, or CDATA content
+    XmlAttrList attrs;
+    XmlChildren children;
+    XmlNode*    parent;
+};
+```
+
+#### Parsing
+
+```flux
+def xml_parse(byte* src, int len, Arena* a) -> XmlNode*
+    // Parse src (len bytes of UTF-8 XML) using arena a.
+    // Returns the root element, or null on parse error / OOM.
+```
+
+Entity references decoded: `&amp;` `&lt;` `&gt;` `&apos;` `&quot;` `&#NNN;` `&#xHH;`.  
+DTD declarations (`<!DOCTYPE ...`) are skipped.
+
+#### Node Accessors
+
+```flux
+def xml_child_count(XmlNode* n)               -> size_t
+def xml_child(XmlNode* n, size_t i)           -> XmlNode*
+def xml_attr_count(XmlNode* n)                -> size_t
+def xml_attr(XmlNode* n, byte* name)          -> byte*    // null if not found
+def xml_first_child_tag(XmlNode* n, byte* tag) -> XmlNode* // null if not found
+```
+
+#### Building
+
+```flux
+def xml_new_element(Arena* a, byte* tag)                        -> XmlNode*
+def xml_new_text(Arena* a, byte* text)                          -> XmlNode*
+def xml_new_comment(Arena* a, byte* text)                       -> XmlNode*
+def xml_new_pi(Arena* a, byte* target, byte* data)              -> XmlNode*
+def xml_new_cdata(Arena* a, byte* text)                         -> XmlNode*
+def xml_set_attr(XmlNode* n, Arena* a, byte* name, byte* value) -> bool
+def xml_append_child(XmlNode* parent, Arena* a, XmlNode* child) -> bool
+```
+
+#### Serialization
+
+```flux
+def xml_serialize(XmlNode* node, Arena* a, int init_cap) -> byte*
+    // Serialize with "<?xml version="1.0" encoding="UTF-8"?>" declaration.
+    // init_cap is the initial buffer guess in bytes (512 is a safe default).
+    // Returns a null-terminated arena-owned string, or null on OOM.
+
+def xml_serialize_fragment(XmlNode* node, Arena* a, int init_cap) -> byte*
+    // Serialize without the XML declaration (useful for fragments).
+```
+
+Output uses 2-space indentation. Attribute values and text content are XML-escaped (`<`, `>`, `&`, `"`, `'`). Elements with no children emit a self-closing tag (`/>`).
+
+**Example**:
+```flux
+#import "standard.fx";
+#import "allocators.fx";
+#import "xml.fx";
+using standard::memory::allocators::stdarena;
+using xml;
+
+def main() -> int
+{
+    Arena    a;
+    XmlNode* root;
+    XmlNode* child;
+    byte*    out;
+
+    stdarena::init(@a, 65536);
+    root  = xml_new_element(@a, "root\0");
+    child = xml_new_element(@a, "item\0");
+    xml_set_attr(child, @a, "id\0", "1\0");
+    xml_append_child(child, @a, xml_new_text(@a, "Hello\0"));
+    xml_append_child(root,  @a, child);
+    out = xml_serialize(root, @a, 512);
+    println(out);
+    stdarena::destroy(@a);
+    return 0;
+};
+```
+
+---
+
+### csv.fx
+
+**Purpose**: CSV parse and write library
+
+**Namespace**: `csv`
+
+**Guard macro**: `FLUX_CSV`
+
+**Dependencies**: `standard.fx`, `ffifio.fx`, `allocators.fx`
+
+**Description**:  
+RFC 4180 compliant CSV parser and serializer. Supports configurable delimiters, quoted fields (double-quote escape `""`), and CRLF/LF/CR line endings. All field strings are individually heap-allocated (`fmalloc`); call `csv_free` when done.
+
+#### Structures
+
+```flux
+struct CsvRow
+{
+    byte** fields;   // Array of null-terminated field strings (heap-owned)
+    int    count;    // Number of fields in this row
+    int    capacity;
+};
+
+struct CsvTable
+{
+    CsvRow** rows;   // Array of row pointers (heap-owned)
+    int      count;  // Number of rows
+    int      capacity;
+};
+```
+
+#### Parsing
+
+```flux
+def csv_parse_buf(byte* buf, int len, byte delim, CsvTable* out) -> bool
+    // Parse a CSV buffer already in memory.
+    // delim is typically ','.  Returns false on allocation failure.
+
+def csv_parse_file(byte* path, byte delim, CsvTable* out) -> bool
+    // Read a file from disk, then call csv_parse_buf.
+    // Returns false if the file cannot be opened or an allocation fails.
+```
+
+#### Field Access
+
+```flux
+def csv_field(CsvTable* t, int row, int col) -> byte*
+    // Return the field at (row, col), both zero-based.
+    // Returns a null pointer if either index is out of range.
+```
+
+#### Writing
+
+```flux
+def csv_write_file(byte* path, CsvTable* t, byte delim) -> bool
+    // Serialize the table back to a file.
+    // Fields are automatically quoted when they contain the delimiter,
+    // a double-quote, CR, or LF.  Returns false if the file cannot be opened.
+```
+
+#### Cleanup
+
+```flux
+def csv_free(CsvTable* t) -> void
+    // Release every field string, every CsvRow, and the row-pointer array.
+    // Does not free the CsvTable struct itself (it may be stack-allocated).
+```
+
+**Example**:
+```flux
+#import "standard.fx";
+#import "csv.fx";
+using csv;
+
+def main() -> int
+{
+    CsvTable t;
+    byte*    name;
+    byte*    score;
+
+    if (!csv_parse_file("scores.csv\0", ',', @t)) { return 1; };
+
+    // Skip header row; iterate data rows.
+    int r = 1;
+    while (r < t.count)
+    {
+        name  = csv_field(@t, r, 0);
+        score = csv_field(@t, r, 1);
+        if ((u64)name != 0 & (u64)score != 0)
+        {
+            print(name);
+            print(": \0");
+            println(score);
+        };
+        r++;
+    };
+
+    csv_free(@t);
+    return 0;
+};
+```
+
+---
+
+### encodings.fx
+
+**Purpose**: Binary-to-text encoding and URL percent-encoding
+
+**Namespace**: `standard::encoding`
+
+**Guard macro**: `FLUX_STANDARD_ENCODING`
 
 **Dependencies**: `types.fx`
 
-#### Overview
+**Description**:  
+Stack-only (no heap allocation) encode/decode routines for Hex, Base32, Base58, Base64, Base64 URL-safe, and URL percent-encoding. All functions return the number of bytes written to `dst`, or `-1` if `dst_cap` is insufficient or the input is malformed. Use the `*_len` helpers to compute safe upper bounds before calling encode/decode.
 
-Provides linear, binary, and interpolation search over typed arrays. Every algorithm has a plain variant (uses `==` / `<` / `<=` operators) and a `_cmp` variant that accepts a comparator function pointer with signature `def{}* cmp(void*, void*) -> int` returning negative, zero, or positive.
-
-#### API
+#### Hex
 
 ```flux
-// Linear scan — unsorted arrays, O(n)
-def search_linear<T>(T* arr, int n, T key) -> int
-def search_linear_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+def hex_encode_len(int src_len) -> int
+    // Returns 2 * src_len.
 
-// Binary search — sorted ascending, O(log n)
-// Returns any matching index, or -1.
-def search_binary<T>(T* arr, int n, T key) -> int
-def search_binary_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+def hex_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+    // Lowercase hex output (0-9, a-f).
 
-// First (lowest) index of key, or -1.
-def search_binary_first<T>(T* arr, int n, T key) -> int
-def search_binary_first_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
+def hex_encode_upper(byte* src, int src_len, byte* dst, int dst_cap) -> int
+    // Uppercase hex output (0-9, A-F).
 
-// Last (highest) index of key, or -1.
-def search_binary_last<T>(T* arr, int n, T key) -> int
-def search_binary_last_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
-
-// Index of first element >= key, or n if all < key.
-def search_lower_bound<T>(T* arr, int n, T key) -> int
-def search_lower_bound_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
-
-// Index of first element > key, or n if all <= key.
-def search_upper_bound<T>(T* arr, int n, T key) -> int
-def search_upper_bound_cmp<T>(T* arr, int n, void* key, void* cmp) -> int
-
-// Interpolation search — uniformly distributed sorted data.
-// O(log log n) average, O(n) worst case.
-// T must support arithmetic (integer or float types).
-def search_interpolation<T>(T* arr, int n, T key) -> int
+def hex_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+    // src_len must be even. Returns -1 on invalid hex character.
 ```
 
-`cmp(a, b)` receives pointers to elements and must return `< 0` if `*a < *b`, `0` if equal, `> 0` if `*a > *b`.
+#### Base32 (RFC 4648, alphabet A-Z 2-7)
 
-**Example**:
 ```flux
-#import "search.fx";
-using standard::search;
+def base32_encode_len(int src_len, bool pad) -> int
+def base32_decode_len(int src_len) -> int
 
-int[8] data = [1, 3, 5, 7, 9, 11, 13, 15];
-int idx = search_binary<int>(@data[0], 8, 9);   // returns 4
-int lb  = search_lower_bound<int>(@data[0], 8, 6); // returns 3 (first >= 6)
+def base32_encode(byte* src, int src_len, byte* dst, int dst_cap, bool pad) -> int
+    // pad=true appends '=' padding to a multiple of 8.
+
+def base32_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+    // Case-insensitive; padding characters are skipped.
 ```
 
----
+#### Base58 (Bitcoin alphabet)
 
-### sorting.fx
-
-**Purpose**: Generic sorting algorithms for typed arrays
-
-**Namespace**: `standard::sorting`
-
-**Guard macro**: `FLUX_STANDARD_SORTING`
-
-**Dependencies**: `types.fx`, `memory.fx`
-
-#### Overview
-
-Provides a suite of comparison-based and non-comparison sorting algorithms. Plain variants use the built-in `<` / `<=` / `>` operators; `_cmp` variants accept a comparator pointer with signature `def{}* cmp(void*, void*) -> int`.
-
-Merge sort and radix sort require a caller-supplied scratch buffer of `n` elements. No allocations are performed internally.
-
-#### Algorithm Summary
-
-| Function | Algorithm | Stable | Time (avg) | Extra memory |
-|---|---|---|---|---|
-| `sort_insertion<T>` | Insertion sort | Yes | O(n²) | O(1) |
-| `sort_insertion_cmp<T>` | Insertion sort | Yes | O(n²) | O(1) |
-| `sort_shell<T>` | Shell sort (Ciura gaps) | No | O(n log² n) | O(1) |
-| `sort_heap<T>` | Heapsort | No | O(n log n) | O(1) |
-| `sort_heap_cmp<T>` | Heapsort | No | O(n log n) | O(1) |
-| `sort_quick<T>` | Quicksort (median-of-three) | No | O(n log n) | O(log n) stack |
-| `sort_quick_cmp<T>` | Quicksort | No | O(n log n) | O(log n) stack |
-| `sort_merge<T>` | Bottom-up mergesort | Yes | O(n log n) | O(n) scratch |
-| `sort_merge_cmp<T>` | Bottom-up mergesort | Yes | O(n log n) | O(n) scratch |
-| `sort_radix_u32` | LSD radix (base-256) | Yes | O(n) | O(n) scratch |
-| `sort_radix_u64` | LSD radix (base-256) | Yes | O(n) | O(n) scratch |
-
-#### API
+Alphabet: `123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz`
 
 ```flux
-def sort_insertion<T>(T* arr, int n) -> void
-def sort_insertion_cmp<T>(T* arr, int n, void* cmp) -> void
+def base58_encode_len(int src_len) -> int
 
-def sort_shell<T>(T* arr, int n) -> void
-
-def sort_heap<T>(T* arr, int n) -> void
-def sort_heap_cmp<T>(T* arr, int n, void* cmp) -> void
-
-def sort_quick<T>(T* arr, int n) -> void
-def sort_quick_cmp<T>(T* arr, int n, void* cmp) -> void
-
-// scratch must point to n elements of type T
-def sort_merge<T>(T* arr, int n, T* scratch) -> void
-def sort_merge_cmp<T>(T* arr, int n, T* scratch, void* cmp) -> void
-
-// scratch must point to n u32 / u64 elements respectively
-def sort_radix_u32(u32* arr, int n, u32* scratch) -> void
-def sort_radix_u64(u64* arr, int n, u64* scratch) -> void
-
-// Predicates
-def is_sorted<T>(T* arr, int n) -> bool
-def is_sorted_cmp<T>(T* arr, int n, void* cmp) -> bool
+def base58_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+def base58_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
 ```
 
-Quicksort automatically falls back to insertion sort for partitions of 16 or fewer elements. Stack depth is bounded to O(log n) by always pushing the larger partition last.
+#### Base64 (RFC 4648 standard)
 
-**Example**:
 ```flux
-#import "sorting.fx";
-using standard::sorting;
+def base64_encode_len(int src_len, bool pad) -> int
+def base64_decode_len(int src_len) -> int
 
-int[6] data = [5, 3, 8, 1, 9, 2];
-sort_quick<int>(@data[0], 6);
-// data is now [1, 2, 3, 5, 8, 9]
+def base64_encode(byte* src, int src_len, byte* dst, int dst_cap, bool pad) -> int
+    // Standard alphabet (A-Z a-z 0-9 + /). pad=true appends '='.
 
-u32[4] udata = [300, 100, 400, 200];
-u32[4] scratch;
-sort_radix_u32(@udata[0], 4, @scratch[0]);
-
-bool ok = is_sorted<int>(@data[0], 6);  // true
+def base64_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+    // Padding characters and standard alphabet accepted.
 ```
 
----
+#### Base64 URL-safe (RFC 4648 §5)
 
-### rle.fx
-
-**Purpose**: Run-length encoding (byte-level PackBits and generic element-level)
-
-**Namespace**: `standard::rle`
-
-**Guard macro**: `FLUX_STANDARD_RLE`
-
-**Dependencies**: `types.fx`, `memory.fx`
-
-#### Overview
-
-Provides two independent RLE subsystems:
-
-- **Byte RLE** — PackBits-style encoding/decoding of raw byte buffers. Variable-length output. Useful for compressing repetitive binary data, pixel arrays, or serialized records.
-- **Generic RLE** — Element-level encoding into parallel value/count arrays for any fixed-width element type. Uses `mem_equals` for comparison and `mem_copy` for copying.
-
-#### PackBits Format
-
-A control byte precedes each run:
-
-| Control byte | Meaning |
-|---|---|
-| `0`–`127` | Literal run: the next `ctrl + 1` bytes are copied verbatim |
-| `128` | No-op escape; skipped by decoder |
-| `129`–`255` | Repeat run: the next byte is repeated `256 - ctrl + 1` times |
-
-Maximum run per pair: 128 bytes literal or 128 bytes repeat.
-
-#### Byte RLE API
+Uses `-` instead of `+` and `_` instead of `/`.
 
 ```flux
-// Worst-case encoded size for src_len bytes (= src_len * 2).
-def rle_encode_size(byte* src, int src_len) -> int
-
-// Exact decoded byte count by scanning an encoded stream.
-def rle_decode_size(byte* src, int src_len) -> int
-
-// Encode src into dst. Returns bytes written, or -1 if dst_cap insufficient.
-def rle_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
-
-// Decode src into dst. Returns bytes written, or -1 if dst_cap insufficient.
-def rle_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+def base64url_encode(byte* src, int src_len, byte* dst, int dst_cap, bool pad) -> int
+def base64url_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
 ```
 
-#### Generic RLE API
+#### URL Percent-Encoding (RFC 3986)
+
+Unreserved characters (`A-Z a-z 0-9 - _ . ~`) pass through unchanged. All other bytes are encoded as `%XX` (uppercase hex). `+` is **not** used for spaces; space encodes as `%20`.
 
 ```flux
-// Encode n elements from src into parallel run arrays.
-// dst_vals holds one representative element per run (elem_size bytes each).
-// dst_counts holds the run length for each run.
-// Returns number of runs written, or -1 if dst_cap exceeded.
-def rle_encode_generic(void* src, int n, int elem_size,
-                       void* dst_vals, int* dst_counts, int dst_cap) -> int
+def url_encode_len(byte* src, int src_len) -> int
+    // Returns src_len * 3 (worst-case upper bound).
 
-// Reconstruct element sequence from parallel run arrays into dst.
-// Returns number of elements written, or -1 if dst_cap (in elements) exceeded.
-def rle_decode_generic(void* src_vals, int* src_counts, int n_runs,
-                       int elem_size, void* dst, int dst_cap) -> int
+def url_encode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+def url_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
+    // '+' is decoded as '+', not space.
+    // Returns -1 on malformed %XX sequences.
 ```
 
 **Example**:
 ```flux
-#import "rle.fx";
-using standard::rle;
+#import "standard.fx";
+#import "encodings.fx";
+using standard::encoding;
 
-// Byte RLE
-byte[12] src = [0xAA, 0xAA, 0xAA, 0x01, 0x02, 0x03];
-int cap = rle_encode_size(@src[0], 6);
-byte* enc = (byte*)fmalloc(cap / sizeof(byte));
-int enc_len = rle_encode(@src[0], 6, enc, cap);
+def main() -> int
+{
+    byte[6]  src    = ['H','e','l','l','o','!'];
+    byte[16] enc;
+    byte[6]  dec;
+    int      enc_len, dec_len;
 
-byte* dec = (byte*)fmalloc(6);
-rle_decode(enc, enc_len, dec, 6);
+    enc_len = base64_encode(@src[0], 6, @enc[0], 16, true);
+    // enc_len == 8, enc == "SGVsbG8h"
 
-ffree(enc);
-ffree(dec);
+    dec_len = base64_decode(@enc[0], enc_len, @dec[0], 6);
+    // dec_len == 6, dec == "Hello!"
+
+    return 0;
+};
 ```
 
 ---
@@ -4081,14 +4357,17 @@ Extended libraries must be imported explicitly:
 // 2.5D raycaster
 #import "raycasting.fx";
 
-// Search algorithms
-#import "search.fx";
+// DateTime / calendar
+#import "datetime.fx";
 
-// Sorting algorithms
-#import "sorting.fx";
+// XML (arena-backed)
+#import "xml.fx";
 
-// Run-length encoding
-#import "rle.fx";
+// CSV (RFC 4180)
+#import "csv.fx";
+
+// Binary-to-text encodings
+#import "encodings.fx";
 ```
 
 ### Namespace Usage
@@ -4271,7 +4550,7 @@ def main() -> int
 - The shadow page holds up to 170 frames; deeply recursive protected functions will hit this limit
 - Windows x86-64 only; requires a frame pointer (`%rbp`) to be present
 - `FSS_CANARY` is a process-lifetime global — direct writes to it from any code path are also detected
-- Per-call canary randomization via `fss_rdtsc() ^^ FSS_CANARY` for stronger per-invocation protection
+- Future: per-call canary randomization via `fss_rdtsc() ^^ FSS_CANARY` for stronger per-invocation protection
 
 ---
 
@@ -4431,11 +4710,14 @@ Preprocessor definitions set automatically at compile time:
 
 ## Version History
 
+**Version 2.3** (June 2026)
+- `datetime.fx` added: calendar date/time, duration arithmetic, wall-clock access, ISO 8601 / RFC 1123 formatting and parsing (`standard::datetime`)
+- `xml.fx` added: arena-backed recursive descent XML parser, builder, and serializer with entity decoding and pretty-print output (`xml` namespace)
+- `csv.fx` added: RFC 4180 CSV parser and writer with configurable delimiter, quoted-field support, and `csv_free` cleanup (`csv` namespace)
+- `encodings.fx` added: stack-only Hex, Base32, Base58, Base64, Base64URL, and URL percent-encoding routines (`standard::encoding`)
+
 **Version 2.2** (June 2026)
 - `shadowstack.fx` added: opt-in per-function shadow stack protection for Windows x86-64
-- `search.fx` added: generic linear, binary (first/last/any), lower/upper bound, and interpolation search with plain and comparator variants
-- `sorting.fx` added: insertion, shell, heap, quicksort, mergesort, radix (u32/u64) with plain and comparator variants; `is_sorted` predicates
-- `rle.fx` added: PackBits-style byte RLE encode/decode and generic element-level RLE with parallel value/count arrays
 
 **Version 2.1** (May 2026)
 - Documentation updated to better reflect library contents
@@ -4476,4 +4758,4 @@ This documentation describes the Flux Standard Library as part of the Flux progr
 
 ---
 
-*This documentation reflects the Flux standard library as of v2.2, June 2026. For the most up-to-date information, refer to the official Flux language repository and Discord community.*
+*This documentation reflects the Flux standard library as of v2.3, June 2026. For the most up-to-date information, refer to the official Flux language repository and Discord community.*

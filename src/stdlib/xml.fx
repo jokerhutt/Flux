@@ -28,18 +28,13 @@
 //
 // Dependencies: standard::types, standard::memory (allocators)
 
-#ifndef FLUX_STANDARD
-#import <standard.fx>;
-#endif;
-
 #ifndef FLUX_STANDARD_ALLOCATORS
-#import <allocators.fx>;
+#import <runtime\allocators.fx>;
+using standard::memory::allocators::stdarena;
 #endif;
 
 #ifndef FLUX_XML
 #def FLUX_XML 1;
-
-using standard::memory::allocators::stdarena;
 
 namespace xml
 {

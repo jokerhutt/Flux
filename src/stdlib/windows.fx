@@ -3,11 +3,11 @@
 // Flux Windows GUI Library
 // Provides clean wrapper around Win32 API for window creation and management
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 using standard::math;

@@ -3,11 +3,11 @@
 // Flux OpenGL Library
 // Provides OpenGL context setup and rendering helpers via Win32 WGL
 #ifndef __WIN32_INTERFACE__
-#import "windows.fx";
+#import <windows.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATRICES
-#import "matrices.fx";
+#import <matrices.fx>;
 #endif;
 
 #ifndef __OPENGL__

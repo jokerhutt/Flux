@@ -47,11 +47,11 @@ const bool _fltused = true;
 #endif;
 
 #ifdef __WINDOWS__
-global i64 WIN_STDOUT_HANDLE;
+i64 WIN_STDOUT_HANDLE;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <memory.fx>;
 #endif;
 
 using standard::memory::allocators::stdheap;
@@ -65,7 +65,7 @@ using standard::memory::allocators::stdheap;
 #endif;
 
 #ifndef FLUX_STANDARD_TIMING
-#import "timing.fx";
+#import <timing.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_IO
@@ -75,7 +75,7 @@ using standard::memory::allocators::stdheap;
 // ---------------------------
 //
 // Import runtime helpers
-#import "ffifio.fx";             // FFI-based File Input/Output (CRT)
+#import <ffifio.fx>;             // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
 //
@@ -90,7 +90,7 @@ using standard::memory::allocators::stdheap;
 //#endif;
 
 #ifdef FLUX_SHADOW_STACK
-#import "shadowstack.fx";
+#import <shadowstack.fx>;
 #endif;
 
 extern

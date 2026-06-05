@@ -1389,7 +1389,7 @@ def _scan_imports(fx_path: Path) -> list[str]:
     """
     import re
     filenames = []
-    pattern = re.compile(r'#import\s+((?:"[^"]+"\s*,\s*)*"[^"]+")')
+    pattern = re.compile(r'#import\s+((?:(?:"[^"]+"|<[^>]+>)\s*,\s*)*(?:"[^"]+"|<[^>]+>))')
     try:
         text = fx_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -1421,7 +1421,8 @@ def _scan_imports(fx_path: Path) -> list[str]:
             continue
         m = pattern.search(stripped)
         if m:
-            for fn in re.findall(r'"([^"]+)"', m.group(1)):
+            for match in re.findall(r'"([^"]+)"|<([^>]+)>', m.group(1)):
+                fn = match[0] or match[1]
                 filenames.append(fn)
     return filenames
 def _build_filename_to_package_map(packages: dict) -> dict[str, str]:
@@ -1577,6 +1578,16 @@ def cmd_fixdeps(args, registry: dict, installed: dict):
         for fx_path in fx_files:
             if fx_path.exists():
                 for fn in _scan_imports(fx_path):
+                    # Resolve relative paths (e.g. "../types.fx") against the
+                    # importing file's directory, then express the result relative
+                    # to src_root so it matches the bare filenames in fn_to_pkg.
+                    if fn.startswith("..") or fn.startswith("./"):
+                        try:
+                            resolved = (fx_path.parent / fn).resolve()
+                            fn = str(resolved.relative_to(src_root.resolve()))
+                            fn = fn.replace("\\", "/")
+                        except ValueError:
+                            pass  # outside src_root -- keep as-is, will be unknown
                     imported_filenames.add(fn)
             else:
                 print(f"  WARNING: Source file not found, skipping scan: {fx_path}")
@@ -1597,6 +1608,11 @@ def cmd_fixdeps(args, registry: dict, installed: dict):
         unknown_imports: list[str] = []
         for fn in sorted(imported_filenames):
             dep_pkg_name = fn_to_pkg.get(fn)
+            if dep_pkg_name is None:
+                # Fall back to bare filename in case the resolved relative path
+                # includes subdirectory prefixes not present in the package map
+                # (e.g. "builtins/file_object_raw.fx" -> "file_object_raw.fx").
+                dep_pkg_name = fn_to_pkg.get(fn.split("/")[-1])
             if dep_pkg_name is None:
                 unknown_imports.append(fn)
                 continue

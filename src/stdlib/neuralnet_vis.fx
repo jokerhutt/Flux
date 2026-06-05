@@ -30,19 +30,19 @@
 // Dependencies: opengl.fx, windows.fx, math.fx, types.fx, memory.fx
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <runtime\memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef __OPENGL__
-#import "opengl.fx";
+#import <opengl.fx>;
 #endif;
 
 #ifndef FLUX_NN_VIS

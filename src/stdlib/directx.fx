@@ -3,11 +3,11 @@
 // Flux DirectX 11 Library
 // Provides Direct3D 11 context setup and rendering helpers via DXGI / D3D11
 #ifndef __WIN32_INTERFACE__
-#import "windows.fx";
+#import <windows.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATRICES
-#import "matrices.fx";
+#import <matrices.fx>;
 #endif;
 
 #ifndef __DIRECTX__

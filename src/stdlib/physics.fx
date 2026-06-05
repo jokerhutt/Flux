@@ -32,19 +32,19 @@
 //
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_VECTORS
-#import "vectors.fx";
+#import <vectors.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATRICES
-#import "matrices.fx";
+#import <matrices.fx>;
 #endif;
 
 #ifndef FLUX_PHYSICS

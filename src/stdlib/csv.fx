@@ -87,7 +87,7 @@ namespace csv
         if (row.count >= row.capacity)
         {
             new_cap = row.capacity * 2;
-            nb      = (byte**)fmalloc((size_t)(new_cap * 8));
+            nb      = (byte**)fmalloc(new_cap * 8);
             if ((u64)nb == 0) { return false; };
             i = 0;
             while (i < row.count)
@@ -101,7 +101,7 @@ namespace csv
         };
 
         // Copy field bytes into a fresh null-terminated string.
-        field = (byte*)fmalloc((size_t)(len + 1));
+        field = (byte*)fmalloc(len + 1);
         if ((u64)field == 0) { return false; };
         i = 0;
         while (i < len) { field[i] = src[i]; i++; };
@@ -123,7 +123,7 @@ namespace csv
         if (t.count >= t.capacity)
         {
             new_cap = t.capacity * 2;
-            nb      = (CsvRow**)fmalloc((size_t)(new_cap * 8));
+            nb      = (CsvRow**)fmalloc(new_cap * 8);
             if ((u64)nb == 0) { return (CsvRow*)0; };
             i = 0;
             while (i < t.count) { nb[i] = t.rows[i]; i++; };
@@ -133,9 +133,9 @@ namespace csv
         };
 
         // Allocate and initialise the new row.
-        row = (CsvRow*)fmalloc((size_t)24);
+        row = (CsvRow*)fmalloc(24);
         if ((u64)row == 0) { return (CsvRow*)0; };
-        row.fields   = (byte**)fmalloc((size_t)64);
+        row.fields   = (byte**)fmalloc(64);
         if ((u64)row.fields == 0) { ffree((u64)row); return (CsvRow*)0; };
         row.count    = 0;
         row.capacity = 8;
@@ -160,11 +160,11 @@ namespace csv
 
         // Scratch buffer for assembling unescaped field contents.
         byte*   scratch;
-        scratch = (byte*)fmalloc((size_t)(len + 1));
+        scratch = (byte*)fmalloc(len + 1);
         if ((u64)scratch == 0) { return false; };
 
         // Initialise table.
-        out.rows     = (CsvRow**)fmalloc((size_t)64);
+        out.rows     = (CsvRow**)fmalloc(64);
         if ((u64)out.rows == 0) { ffree((u64)scratch); return false; };
         out.count    = 0;
         out.capacity = 8;
@@ -287,7 +287,7 @@ namespace csv
         file_size = get_file_size(path);
         if (file_size <= 0) { return false; };
 
-        buf = (byte*)fmalloc((size_t)(file_size + 1));
+        buf = (byte*)fmalloc(file_size + 1);
         if ((u64)buf == 0) { return false; };
 
         if (read_file(path, buf, file_size) != file_size)

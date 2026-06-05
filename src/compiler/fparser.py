@@ -214,12 +214,29 @@ class ParseError(Exception):
 
         # Suggestion line: only for cases where the fix is a simple symbol insertion.
         #   • END_OF_PREV_LINE_TYPES (SEMICOLON, COMMA): append the symbol at the end.
+        #     Special case: if got LEFT_BRACKET, the user wrote C-style `type varname[N]`
+        #     instead of Flux-style `type[N] varname` -- rewrite the suggestion accordingly.
         #   • RETURN_ARROW: insert '->' at the caret column in the source line.
         suggestion = ''
         fix_sym = _TOKEN_SYMBOL_MAP.get(self.expected_type) if self.expected_type is not None else None
         if fix_sym is not None:
             if self.expected_type in self._END_OF_PREV_LINE_TYPES:
-                suggestion = src_line + fix_sym + '  // try this'
+                # Detect C-array syntax: expected ';' but got '[', meaning the user
+                # wrote `type varname[N];` instead of `type[N] varname;`
+                if (self.expected_type == TokenType.SEMICOLON
+                        and self.token is not None
+                        and self.token.type == TokenType.LEFT_BRACKET
+                        and self.prev_token is not None):
+                    import re as _re
+                    raw = raw_line.rstrip()
+                    m = _re.match(r'^(\s*)(\S+)\s+(\S+?)(\[\d+\])(;?)$', raw)
+                    if m:
+                        _indent, _typ, _varname, _brackets, _semi = m.groups()
+                        suggestion = f'{_indent}{_typ}{_brackets} {_varname};  // try this'
+                    else:
+                        suggestion = src_line + fix_sym + '  // try this'
+                else:
+                    suggestion = src_line + fix_sym + '  // try this'
             elif self.expected_type == TokenType.RETURN_ARROW:
                 suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
 
