@@ -228,6 +228,18 @@ def !!realloc(void* ptr, size_t new_size) -> void*
 #endif; //  /LINUX
 
 #ifdef __MACOS__
+extern
+{
+    def !!
+        malloc(size_t size) -> void*,
+        free(void* ptr) -> void,
+        calloc(size_t count, size_t size) -> void*,
+        realloc(void* ptr, size_t new_size) -> void*,
+        mmap(u64, size_t, int, int, int, i64) -> u64,
+        munmap(u64, size_t)                   -> int;
+};
+
+///
 def !!malloc(size_t size) -> void*
 {
     size_t total;
@@ -296,6 +308,7 @@ def !!realloc(void* ptr, size_t new_size) -> void*
     free(ptr);
     return new_ptr;
 };
+///
 #endif; //  /MACOS
 
 #ifdef __WINDOWS__
