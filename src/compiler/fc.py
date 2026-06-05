@@ -159,6 +159,9 @@ class FluxCompiler:
         # Initialize predefined_macros as empty dict
         self.predefined_macros = {}
         
+        # Default to False; set correctly by _configure_target_triple
+        self.is_arm64 = False
+        
         # Store config platform for DOS detection
         self.cfg_platform = config.get('operating_system', '')
 
@@ -185,16 +188,19 @@ class FluxCompiler:
                         self.module_triple = "arm64-apple-macosx11.0.0"
                         self.module.triple = self.module_triple
                         self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
+                        self.is_arm64 = True
                         return
                     else:
                         self.module_triple = "x86_64-apple-macosx10.15.0"
                         self.module.triple = self.module_triple
                         self.module.data_layout = "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+                        self.is_arm64 = False
                         return
                 except:
                     self.module_triple = "arm64-apple-macosx11.0.0"  # Default to ARM64
                     self.module.triple = self.module_triple
                     self.module.data_layout = "e-m:o-i64:64-i128:128-n32:64-S128"
+                    self.is_arm64 = True
                     return
             else:  # Linux and others
                 if self.cfg_platform == "DOS":
@@ -205,9 +211,20 @@ class FluxCompiler:
                     self.module.data_layout = "e-m:e-p:16:16-i64:32-f80:32-n8:16:32:64-S16"
                     self.is_dos_target = True
                 else:
-                    self.module_triple = "x86_64-pc-linux-gnu"
-                    self.module.triple = self.module_triple
-                    self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+                    try:
+                        linux_arch = subprocess.check_output(["uname", "-m"], text=True).strip()
+                    except Exception:
+                        linux_arch = "x86_64"
+                    if linux_arch in ("aarch64", "arm64"):
+                        self.module_triple = "aarch64-linux-gnu"
+                        self.module.triple = self.module_triple
+                        self.module.data_layout = "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128"
+                        self.is_arm64 = True
+                    else:
+                        self.module_triple = "x86_64-pc-linux-gnu"
+                        self.module.triple = self.module_triple
+                        self.module.data_layout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
+                        self.is_arm64 = False
             
         debugger(self.debug_levels, [4,5,6,7,8], [f"Target platform: {self.platform}",
                                               f"Module triple: {self.module_triple}"])
@@ -360,14 +377,17 @@ class FluxCompiler:
                             "-relocation-model=static",         # Static relocation (no PIC)
                             "-tail-dup-size=3",                 # Tail duplication threshold
                             "-tailcallopt",                     # Enable tail call optimization
-                            "-x86-asm-syntax=intel",            # Intel syntax assembly
-                            "-x86-use-base-pointer",            # Use base pointer
-                            "-no-x86-call-frame-opt",           # Disable call frame optimization (smaller)
                             "-disable-verify",                  # Disable verification for speed
                             str(ll_file),
                             "-o",
                             str(obj_file)
                         ]
+                        if not self.is_arm64:
+                            command_line[-3:-3] = [
+                                "-x86-asm-syntax=intel",            # Intel syntax assembly
+                                "-x86-use-base-pointer",            # Use base pointer
+                                "-no-x86-call-frame-opt",           # Disable call frame optimization (smaller)
+                            ]
                     case "clang":
                         command_line = [
                             compiler_path,
@@ -482,21 +502,25 @@ class FluxCompiler:
                     "-enable-tail-merge",         # Merge similar tail code
                     "-disable-verify",            # Disable verification for speed
                     "-filetype=asm",              # Assembly file output
-                    "-no-x86-call-frame-opt",     # Disable call frame optimization (smaller)
                     "-optimize-regalloc",         # Optimize register allocation
                     "-relocation-model=static",   # Static relocation (no PIC)
                     "-tail-dup-size=3",           # Tail duplication threshold
                     "-tailcallopt",               # Enable tail call optimization
-                    "-x86-asm-syntax=att",        # ATT syntax assembly
-                    "-x86-use-base-pointer",      # Use base pointer
                     str(ll_file),
                     "-o",
                     str(asm_file)                 # Output to assembly file
                 ]
 
-                # If user/config didn't specify march/mcpu, fall back to x86-64/native
+                if not self.is_arm64:
+                    cmd[-3:-3] = [
+                        "-no-x86-call-frame-opt",     # Disable call frame optimization (smaller)
+                        "-x86-asm-syntax=att",        # ATT syntax assembly
+                        "-x86-use-base-pointer",      # Use base pointer
+                    ]
+
+                # If user/config didn't specify march/mcpu, fall back to native architecture
                 if not any(f.startswith('-march=') for f in cmd):
-                    cmd.insert(2, '--march=x86-64')
+                    cmd.insert(2, '--march=aarch64' if self.is_arm64 else '--march=x86-64')
                 
                 if not any(f.startswith('-mcpu=') for f in cmd):
                     cmd.insert(3, '-mcpu=native')
@@ -517,7 +541,7 @@ class FluxCompiler:
                         self.logger.log_data(LogLevel.TRACE, "Generated Assembly", asm_content, "llc")
                     
                     # Assemble to object file
-                    as_cmd = ["as", "--64", str(asm_file), "-o", str(obj_file)]
+                    as_cmd = ["as"] + (["--64"] if not self.is_arm64 else []) + [str(asm_file), "-o", str(obj_file)]
                     self.logger.debug(f"Running: {' '.join(as_cmd)}", "as")
                     
                     as_result = subprocess.run(as_cmd, check=True, capture_output=True, text=True)
@@ -731,13 +755,13 @@ class FluxCompiler:
                     "--section-start", ".rodata=0x500000",  # Read-only data address
                     "--section-start", ".data=0x600000",    # Data section address
                     "--section-start", ".bss=0x700000",     # BSS section address
-                    "-dynamic-linker", "/lib64/ld-linux-x86-64.so.2",
+                    "-dynamic-linker", "/lib/ld-linux-aarch64.so.1" if self.is_arm64 else "/lib64/ld-linux-x86-64.so.2",
                     "-e", "_start",                         # Entry point
                     str(obj_file),
                     # Library search paths
-                    "-L/usr/lib/x86_64-linux-gnu",
+                    "-L/usr/lib/aarch64-linux-gnu" if self.is_arm64 else "-L/usr/lib/x86_64-linux-gnu",
                     "-L/usr/lib",
-                    "-L/lib/x86_64-linux-gnu",
+                    "-L/lib/aarch64-linux-gnu" if self.is_arm64 else "-L/lib/x86_64-linux-gnu",
                     "-L/lib",
                     # Runtime dependencies -- Enable if you want them in your code.
                     #"/usr/lib/x86_64-linux-gnu/Scrt1.o",        # Startup code

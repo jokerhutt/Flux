@@ -39,6 +39,13 @@ def _detect_triple(sys_name: str) -> str:
         except Exception:
             return "arm64-apple-macosx11.0.0"
         return "x86_64-apple-macosx10.15.0"
+    import subprocess
+    try:
+        linux_arch = subprocess.check_output(["uname", "-m"], text=True).strip()
+    except Exception:
+        linux_arch = "x86_64"
+    if linux_arch in ("aarch64", "arm64"):
+        return "aarch64-linux-gnu"
     return "x86_64-pc-linux-gnu"
 
 
