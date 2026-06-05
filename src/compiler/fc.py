@@ -241,6 +241,8 @@ class FluxCompiler:
 
         # --march
         march = self.llc_config.get('march') or config.get('architecture', '').strip()
+        if self.is_arm64 and march and march.lower() not in ('none', 'aarch64', 'arm64'):
+            march = 'aarch64'
         if march and march.lower() != 'none':
             flags.append(f"-march={march}")
         
