@@ -1,7 +1,7 @@
 // fide.fx - Flux IDE
 
-#import "standard.fx", "windows.fx";
-#import "../../tests/editor_core.fx";
+#import <standard.fx>, <windows.fx>;
+#import "editor_core.fx";
 
 using standard::io::console,
       standard::math,
@@ -20,39 +20,39 @@ using standard::io::console,
 #def CLR_LINENO_BG 0x00272920;
 #def CLR_LINENO_FG 0x00807C75;
 
-global UINT CF_TEXT            = 1;
-global UINT GMEM_MOVEABLE      = 0x0002;
-global UINT WM_MOUSEWHEEL      = 0x020A;
-global UINT WM_PAINT           = 0x000F;
-global DWORD DWMWA_DARK        = 20;
-global int   FW_NORMAL         = 400;
-global DWORD ANSI_CHARSET        = 0,
-             OUT_DEFAULT_PRECIS  = 0,
-             CLIP_DEFAULT_PRECIS = 0,
-             DEFAULT_QUALITY     = 0,
-             FIXED_PITCH         = 1,
-             FF_MODERN           = 0x30;
-global int   SB_VERT        = 1,
-             SB_HORZ        = 0,
-             SB_THUMBTRACK  = 5,
-             SB_LINEDOWN    = 1,
-             SB_LINEUP      = 0,
-             SB_PAGEDOWN    = 3,
-             SB_PAGEUP      = 2,
-             SB_LINERIGHT   = 1,
-             SB_LINELEFT    = 0,
-             SB_PAGERIGHT   = 3,
-             SB_PAGELEFT    = 2;
-global UINT  SIF_RANGE     = 0x0001,
-             SIF_PAGE      = 0x0002,
-             SIF_POS       = 0x0004,
-             SIF_TRACKPOS  = 0x0010,
-             SIF_ALL       = 0x0017;
-global UINT  ETO_OPAQUE    = 0x0002;
-global DWORD SRCCOPY       = 0x00CC0020;
-global int   TRANSPARENT_MODE = 1,
-             OPAQUE_MODE      = 2;
-global int   LINENO_WIDTH  = 52;
+UINT CF_TEXT            = 1;
+UINT GMEM_MOVEABLE      = 0x0002;
+UINT WM_MOUSEWHEEL      = 0x020A;
+UINT WM_PAINT           = 0x000F;
+DWORD DWMWA_DARK        = 20;
+int   FW_NORMAL         = 400;
+DWORD ANSI_CHARSET        = 0,
+      OUT_DEFAULT_PRECIS  = 0,
+      CLIP_DEFAULT_PRECIS = 0,
+      DEFAULT_QUALITY     = 0,
+      FIXED_PITCH         = 1,
+      FF_MODERN           = 0x30;
+int   SB_VERT        = 1,
+      SB_HORZ        = 0,
+      SB_THUMBTRACK  = 5,
+      SB_LINEDOWN    = 1,
+      SB_LINEUP      = 0,
+      SB_PAGEDOWN    = 3,
+      SB_PAGEUP      = 2,
+      SB_LINERIGHT   = 1,
+      SB_LINELEFT    = 0,
+      SB_PAGERIGHT   = 3,
+      SB_PAGELEFT    = 2;
+UINT  SIF_RANGE     = 0x0001,
+      SIF_PAGE      = 0x0002,
+      SIF_POS       = 0x0004,
+      SIF_TRACKPOS  = 0x0010,
+      SIF_ALL       = 0x0017;
+UINT  ETO_OPAQUE    = 0x0002;
+DWORD SRCCOPY       = 0x00CC0020;
+int   TRANSPARENT_MODE = 1,
+      OPAQUE_MODE      = 2;
+int   LINENO_WIDTH  = 52;
 
 // ============================================================================
 // SCROLLINFO / TEXTMETRIC

@@ -64,6 +64,7 @@ Flux is in active development. The syntax and grammar will not change. The [stan
 - Base compiler ✅
 - An LSP ✅
 - A Package Manager (FPM) ✅
+- [Online Compiler](https://uttcex.net/flux/ide)
 
 **What's being built:**
 - Standard Library (expanding the existing)

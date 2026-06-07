@@ -181,42 +181,42 @@ namespace standard
 
         def i64str(i64 value, byte* buffer) -> i64
         {
-            if (value == 0)
+            if (value == (i64)0)
             {
                 buffer[0] = (byte)48; // '0'
                 buffer[1] = (byte)0;  // null terminator
                 return 1;
             };
             
-            i64 is_negative = 0;
-            if (value < 0)
+            i64 is_negative = (i64)0;
+            if (value < (i64)0)
             {
-                is_negative = 1;
+                is_negative = (i64)1;
                 value = -value;
             };
             
             // Convert to string in reverse
-            i64 pos = 0;
+            i64 pos = (i64)0;
             byte[32] temp;
             
-            while (value > 0)
+            while (value > (i64)0)
             {
-                temp[pos] = (byte)((value % 10) + 48); // Convert digit to ASCII
-                value = value / 10;
+                temp[pos] = (byte)((value % (i64)10) + (i64)48); // Convert digit to ASCII
+                value = value / (i64)10;
                 pos++;
             };
             
             // Add negative sign if needed
             i64 write_pos = 0;
-            if (is_negative == 1)
+            if (is_negative == (i64)1)
             {
                 buffer[0] = (byte)45; // '-'
-                write_pos = 1;
+                write_pos = (i64)1;
             };
             
             // Copy reversed string to buffer
-            i64 i = pos - 1;
-            while (i >= 0)
+            i64 i = pos - (i64)1;
+            while (i >= (i64)0)
             {
                 buffer[write_pos] = temp[i];
                 write_pos++;
@@ -261,28 +261,28 @@ namespace standard
 
         def u32str(u32 value, byte* buffer) -> u32
         {
-            if (value == 0)
+            if (value == (u32)0)
             {
                 buffer[0] = (byte)48; // '0'
                 buffer[1] = (byte)0;  // null terminator
-                return 1;
+                return (u32)1;
             };
             
             // Convert to string in reverse
-            u32 pos = 0;
+            u32 pos = (u32)0;
             byte[32] temp;
             
-            while (value > 0)
+            while (value > (u32)0)
             {
-                temp[pos] = (byte)((value % 10) + 48);
-                value = value / 10;
+                temp[pos] = (byte)((value % (u32)10) + (u32)48);
+                value = value / (u32)10;
                 pos++;
             };
             
             // Copy reversed string to buffer
-            u32 write_pos = 0;
+            u32 write_pos = (u32)0;
             u32 i = pos;  // Start at pos, not pos - 1
-            while (i > 0)  // Check i > 0 instead of i >= 0
+            while (i > (u32)0)  // Check i > 0 instead of i >= 0
             {
                 i--;  // Decrement first
                 buffer[write_pos] = temp[i];
@@ -295,30 +295,30 @@ namespace standard
 
         def u64str(u64 value, byte* buffer) -> u64
         {
-            if (value == 0)
+            if (value == (u64)0)
             {
                 buffer[0] = (byte)48; // '0'
                 buffer[1] = (byte)0;  // null terminator
-                return 1;
+                return (u64)1;
             };
             
             // Convert to string in reverse
-            u64 pos = 0;
+            u64 pos = (u64)0;
             byte[32] temp;
             
             // Use != 0 instead of > 0 to avoid signed comparison issues
-            while (value != 0)
+            while (value != (u64)0)
             {
-                temp[pos] = (byte)((value % 10) + 48); // Convert digit to ASCII
-                value = value / 10;
+                temp[pos] = (byte)((value % (u64)10) + (u64)48); // Convert digit to ASCII
+                value = value / (u64)10;
                 pos++;
             };
             
             // Copy reversed string to buffer
-            u64 write_pos = 0;
+            u64 write_pos = (u64)0;
             u64 remaining = pos;  // Track how many digits remain
 
-            while (remaining != 0)
+            while (remaining != (u64)0)
             {
                 remaining--;  // Decrement BEFORE using as index
                 buffer[write_pos] = temp[remaining];
@@ -429,7 +429,7 @@ namespace standard
             // Check for sign
             if (str[i] == 45)  // '-'
             {
-                sign = -1;
+                sign = (i64)-1;
                 i++;
             }
             elif (str[i] == 43)  // '+'
@@ -445,7 +445,7 @@ namespace standard
                 // Check if character is a digit
                 if (c >= 48 & c <= 57)
                 {
-                    digit = (c - 48);
+                    digit = (i64)(c - 48);
                     result = result * 10 + digit;
                 }
                 else
@@ -492,7 +492,7 @@ namespace standard
                 // Check if character is a digit
                 if (c >= 48 & c <= 57)
                 {
-                    digit = (c - 48);
+                    digit = (u64)(c - 48);
                     result = result * 10 + digit;
                 }
                 else
@@ -554,7 +554,7 @@ namespace standard
             
             // Calculate fractional part with rounding
             float scaled_frac = fractional * (float)frac_multiplier;
-            i32 frac_part = (scaled_frac + 0.5);
+            i32 frac_part = (i32)(scaled_frac + 0.5);
             
             // Handle overflow from rounding (e.g., 0.999 becomes 1.00)
             if (frac_part >= frac_multiplier)
@@ -687,32 +687,32 @@ namespace standard
             };
             
             // Extract integer part
-            i64 int_part = value;
+            i64 int_part = (i64)value;
             
             // Extract fractional part
             double fractional = value - double(int_part);
             
             // Multiply fractional by 10^precision without helper function
-            i64 frac_multiplier = 1;
+            i64 frac_multiplier = (i64)1;
             i32 j = 0;
             while (j < precision)
             {
-                frac_multiplier = frac_multiplier * 10;
+                frac_multiplier = frac_multiplier * (i64)10;
                 j++;
             };
             
             // Calculate fractional part with rounding
             double scaled_frac = fractional * double(frac_multiplier);
-            i64 frac_part = (scaled_frac + double(0.5));
+            i64 frac_part = (i64)(scaled_frac + double(0.5));
             
             // Handle overflow from rounding (e.g., 0.999 becomes 1.00)
             if (frac_part >= frac_multiplier)
             {
-                int_part = int_part + 1;
-                frac_part = 0;
+                int_part = int_part + (i64)1;
+                frac_part = (i64)0;
                 
                 // If int_part became 10, 100, etc., adjust
-                if (int_part % 10 == 0 & precision > 0)
+                if (int_part % (i64)10 == (i64)0 & precision > 0)
                 {
                     // Simple adjustment for common cases
                     // Full general solution would be more complex
@@ -720,7 +720,7 @@ namespace standard
             };
             
             // Convert integer part to string
-            if (int_part == 0)
+            if (int_part == (i64)0)
             {
                 buffer[write_pos] = (byte)48; // '0'
                 write_pos = write_pos + 1;
@@ -732,10 +732,10 @@ namespace standard
                 i32 temp_pos = 0;
                 i64 temp_int = int_part;
                 
-                while (temp_int > 0)
+                while (temp_int > (i64)0)
                 {
-                    int_temp[temp_pos] = (byte)((temp_int % 10) + 48);
-                    temp_int = temp_int / 10;
+                    int_temp[temp_pos] = (byte)((temp_int % (i64)10) + (i64)48);
+                    temp_int = temp_int / (i64)10;
                     temp_pos++;
                 };
                 
@@ -756,7 +756,7 @@ namespace standard
                 write_pos = write_pos + 1;
                 
                 // Convert fractional part to string with leading zeros
-                if (frac_part == 0)
+                if (frac_part == (i64)0)
                 {
                     i32 m = 0;
                     while (m < precision)
@@ -773,10 +773,10 @@ namespace standard
                     i32 frac_digits = 0;
                     i64 temp_frac = frac_part;
                     
-                    while (temp_frac > 0)
+                    while (temp_frac > (i64)0)
                     {
-                        frac_temp[frac_digits] = (byte)((temp_frac % 10) + 48);
-                        temp_frac = temp_frac / 10;
+                        frac_temp[frac_digits] = (byte)((temp_frac % (i64)10) + (i64)48);
+                        temp_frac = temp_frac / (i64)10;
                         frac_digits++;
                     };
                     
@@ -1099,7 +1099,7 @@ namespace standard
                 int len = 0;
                 while (src[len] != 0) { len = len + 1; };
                 
-                byte* dest = fmalloc(len + 1);
+                byte* dest = fmalloc((u64)len + 1);
                 if (dest == 0)
                 {
                     return (byte*)0;
@@ -1116,7 +1116,7 @@ namespace standard
             // Copy n characters (allocates new buffer with null terminator)
             def copy_n(byte* src, int n) -> byte*
             {
-                byte* dest = fmalloc(n + 1);
+                byte* dest = fmalloc((u64)n + 1);
                 if (dest == 0)
                 {
                     return (byte*)0;
@@ -1134,7 +1134,7 @@ namespace standard
             // Extract substring (allocates new buffer)
             def substring(byte* str, int start, int length) -> byte*
             {
-                byte* result = fmalloc(length + 1);
+                byte* result = fmalloc((u64)length + 1);
                 if (result == 0)
                 {
                     return (byte*)0;
@@ -1158,7 +1158,7 @@ namespace standard
                 int len2 = 0;
                 while (s2[len2] != 0) { len2 = len2 + 1; };
                 
-                byte* result = fmalloc(len1 + len2 + 1);
+                byte* result = fmalloc((u64)len1 + len2 + 1);
                 if (result == 0)
                 {
                     return (byte*)0;
@@ -1343,7 +1343,7 @@ namespace standard
             while (replace[replace_len] != 0) { replace_len = replace_len + 1; };
             
             int new_len = str_len - find_len + replace_len;
-            byte* result = fmalloc(new_len + 1);
+            byte* result = fmalloc((u64)new_len + 1);
             if (result == 0)
             {
                 return (byte*)0;
@@ -1426,6 +1426,89 @@ namespace standard
                 };
                 return true;
             };
+        };
+
+        // ===== F-STRING APPEND HELPERS =====
+        // Append a value into buf at *pos, advance *pos, return chars written.
+        // Called by the compiler for f-string interpolation on all platforms.
+
+        def fstr_append(i16 value, byte* buf, int* pos) -> int
+        {
+            byte[8] tmp;
+            int n = (int)i16str(value, @tmp[0]);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(i32 value, byte* buf, int* pos) -> int
+        {
+            byte[32] tmp;
+            int n = i32str(value, @tmp[0]);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(i64 value, byte* buf, int* pos) -> int
+        {
+            byte[32] tmp;
+            int n = (int)i64str(value, @tmp[0]);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(u16 value, byte* buf, int* pos) -> int
+        {
+            byte[8] tmp;
+            int n = (int)u16str(value, @tmp[0]);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(u32 value, byte* buf, int* pos) -> int
+        {
+            byte[32] tmp;
+            int n = (int)u32str(value, @tmp[0]);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(u64 value, byte* buf, int* pos) -> int
+        {
+            byte[32] tmp;
+            int n = (int)u64str(value, @tmp[0]);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(float value, byte* buf, int* pos) -> int
+        {
+            byte[32] tmp;
+            int n = float2str(value, @tmp[0], 6);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(double value, byte* buf, int* pos) -> int
+        {
+            byte[32] tmp;
+            int n = dbl2str(value, @tmp[0], 14);
+            int i;
+            while (i < n) { buf[*pos] = tmp[i]; *pos = *pos + 1; i++; };
+            return n;
+        };
+
+        def fstr_append(byte* value, byte* buf, int* pos) -> int
+        {
+            int i;
+            while (value[i] != 0) { buf[*pos] = value[i]; *pos = *pos + 1; i++; };
+            return i;
         };
     };
 };

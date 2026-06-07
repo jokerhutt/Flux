@@ -18,7 +18,7 @@
 //
 
 #ifndef FLUX_STANDARD_TYPES
-#import <..\types.fx>;
+#import "types.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_ALLOCATORS
@@ -36,11 +36,33 @@ extern
 #endif;
 
 #ifdef __LINUX__
-extern
+def !!heap_mmap(size_t bytes) -> u64
 {
-    def !!
-        mmap(u64, size_t, int, int, int, i64) -> u64,
-        munmap(u64, size_t)                   -> int;
+    u64 result;
+    volatile asm
+    {
+        movq $$9, %rax
+        xorq %rdi, %rdi
+        movq $1, %rsi
+        movq $$3, %rdx
+        movq $$0x22, %r10
+        movq $$-1, %r8
+        xorq %r9, %r9
+        syscall
+        movq %rax, $0
+    } : "=r"(result) : "r"(bytes) : "rax", "rdi", "rsi", "rdx", "r10", "r8", "r9", "r11", "memory";
+    return result;
+};
+
+def !!heap_munmap(u64 ptr, size_t bytes) -> void
+{
+    volatile asm
+    {
+        movq $$11, %rax
+        movq $0, %rdi
+        movq $1, %rsi
+        syscall
+    } : : "r"(ptr), "r"(bytes) : "rax", "rdi", "rsi", "r11", "memory";
 };
 #endif;
 
@@ -147,9 +169,9 @@ namespace standard
                     return VirtualAlloc(0, bytes, 0x3000, 0x04);
                     #endif;
                     #ifdef __LINUX__
-                    u64* p = mmap(0, bytes, 3, 0x22, -1, 0);
-                    switch ((size_t)p == (size_t)U64MAXVAL) { case (1) { return (u64)0; } default {}; };
-                    return (u64)p;
+                    u64 p = heap_mmap(bytes);
+                    switch (p == (u64)U64MAXVAL) { case (1) { return (u64)0; } default {}; };
+                    return p;
                     #endif;
                     #ifdef __MACOS__
                     u64* p = mmap(0, bytes, 3, 0x1002, -1, 0);
@@ -164,7 +186,7 @@ namespace standard
                     VirtualFree(ptr, 0, (u32)0x8000);
                     #endif;
                     #ifdef __LINUX__
-                    munmap(ptr, bytes);
+                    heap_munmap(ptr, bytes);
                     #endif;
                     #ifdef __MACOS__
                     munmap(ptr, bytes);

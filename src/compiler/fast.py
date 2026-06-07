@@ -1547,7 +1547,7 @@ class ContractDef(Statement):
     params: List[str] = field(default_factory=list)  # param names for parameterized contracts
 
     def __repr__(self) -> str:
-        params_str = f'({', '.join(self.params)})' if self.params else ''
+        params_str = '(' + ', '.join(params) + ')' if params else ''
         return f"contract {self.name}{params_str} {{ {self.body} }}"
 
 

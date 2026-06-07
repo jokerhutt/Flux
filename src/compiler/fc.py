@@ -505,7 +505,7 @@ class FluxCompiler:
                     "-disable-verify",            # Disable verification for speed
                     "-filetype=asm",              # Assembly file output
                     "-optimize-regalloc",         # Optimize register allocation
-                    "-relocation-model=static",   # Static relocation (no PIC)
+                    "-relocation-model=pic",      # PIC relocation for dynamic linking
                     "-tail-dup-size=3",           # Tail duplication threshold
                     "-tailcallopt",               # Enable tail call optimization
                     str(ll_file),
@@ -673,6 +673,8 @@ class FluxCompiler:
                     if config['linker'] == "lld-link":
                         self.logger.step(f"Falling back to clang...", LogLevel.INFO, "linker")
                         try:
+                            ## Clang link missing things like 64MB stack limit
+                            ## and config-based entrypoint
                             result = subprocess.run(
                                 f"clang {str(obj_file)} -o build\\{output_dir}\\{output_bin} "
                                 "-fuse-ld=lld-link "
@@ -690,10 +692,10 @@ class FluxCompiler:
                                 "-Wl,/LTCG "
                                 "-Wl,/MERGE:.rdata=.text "
                                 #"-Wl,/ALIGN:16 "
-                                "-Wl,/ENTRY:FRTStartup "  # Use CRT startup for compatibility
+                                "-Wl,/ENTRY:FRTStartup " ## NEEDS TO USE ENTRYPOINT FROM CONFIG
                                 "-Wl,/SUBSYSTEM:CONSOLE "
                                 # Link only necessary libraries:
-                                "-lkernel32 -lntdll "  # Windows kernel functions (CreateFile, ReadFile, etc.)
+                                "-lkernel32 -lntdll -ldwmapi "  # Windows kernel functions (CreateFile, ReadFile, etc.)
                                 "-lucrt "  # Modern C runtime (strlen, fopen, etc.)
                                 "-lWs2_32 "
                                 "-luser32 "

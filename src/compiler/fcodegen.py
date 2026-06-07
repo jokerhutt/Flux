@@ -2271,11 +2271,17 @@ class CodegenVisitor:
             output_part = parts[0].strip()
             if output_part:
                 for constraint, var_name in re.findall(r'"([^"]+)"\s*\(([^)]+)\)', output_part):
+                    # Normalise: bare "r"/"a"/"b" in output section gets "=" prefix.
+                    if not constraint.startswith(('=', '+')):
+                        constraint = '=' + constraint
+                    var_ptr = None
                     if module.symbol_table.get_llvm_value(var_name) is not None:
-                        output_operands.append(module.symbol_table.get_llvm_value(var_name))
+                        var_ptr = module.symbol_table.get_llvm_value(var_name)
                     elif var_name in module.globals:
-                        output_operands.append(module.globals[var_name])
-                    output_constraints.append(constraint)
+                        var_ptr = module.globals[var_name]
+                    if var_ptr is not None:
+                        output_operands.append(var_ptr)
+                        output_constraints.append(constraint)
             input_part = parts[1].strip()
             if input_part:
                 for constraint, var_name in re.findall(r'"([^"]+)"\s*\(([^)]+)\)', input_part):
@@ -2297,32 +2303,45 @@ class CodegenVisitor:
                 clobber_list = re.findall(r'"([^"]+)"', clobber_part)
         final_input_operands = input_operands[:]
         final_constraints    = input_constraints[:]
+        # Reg outputs go first in constraint string; returned as asm call value.
+        # Memory outputs (=m/+m) are passed as pointer args.
         for output_op, output_constraint in zip(output_operands, output_constraints):
-            if output_constraint.startswith('=m'):
+            if output_constraint.startswith(('=m', '+m')):
                 final_input_operands.insert(0, output_op)
-                final_constraints.insert(0, output_constraint.replace('=m', '+m'))
-            elif output_constraint.startswith(('=x', '=f')):
-                # XMM / float register output: the return type carries the output,
-                # no input operand slot is consumed by an = output constraint.
-                final_constraints.insert(0, output_constraint)
+                final_constraints.insert(0, output_constraint if output_constraint.startswith('+m') else output_constraint.replace('=m', '+m'))
             else:
                 final_constraints.insert(0, output_constraint)
         final_constraints.extend(f"~{{{c}}}" for c in clobber_list)
         constraint_str = ','.join(final_constraints)
         input_types = [op.type for op in final_input_operands]
-        has_reg_out = any(c.startswith(('=r', '=a', '=b', '=x', '=f')) for c in output_constraints)
-        if has_reg_out and output_operands:
-            out_type = output_operands[0].type
-            if isinstance(out_type, ir.PointerType):
-                out_type = out_type.pointee
-            fn_type = ir.FunctionType(out_type, input_types)
+        # Determine return type from register output operands
+        reg_output_ops = [(op, c) for op, c in zip(output_operands, output_constraints)
+                         if not c.startswith(('=m', '+m'))]
+        if reg_output_ops:
+            if len(reg_output_ops) == 1:
+                out_ptr = reg_output_ops[0][0]
+                out_type = out_ptr.type.pointee if isinstance(out_ptr.type, ir.PointerType) else out_ptr.type
+                fn_type = ir.FunctionType(out_type, input_types)
+            else:
+                # Multiple register outputs: LLVM returns a struct
+                out_types = []
+                for out_ptr, _ in reg_output_ops:
+                    t = out_ptr.type.pointee if isinstance(out_ptr.type, ir.PointerType) else out_ptr.type
+                    out_types.append(t)
+                fn_type = ir.FunctionType(ir.LiteralStructType(out_types), input_types)
         else:
             fn_type = ir.FunctionType(ir.VoidType(), input_types)
         inline_asm = ir.InlineAsm(fn_type, asm, constraint_str, node.is_volatile)
-        result = builder.call(inline_asm, final_input_operands)
-        if has_reg_out and output_operands:
-            builder.store(result, output_operands[0])
-        return result
+        asm_result = builder.call(inline_asm, final_input_operands)
+        # Store register output(s) back into the target variables
+        if reg_output_ops:
+            if len(reg_output_ops) == 1:
+                builder.store(asm_result, reg_output_ops[0][0])
+            else:
+                for idx, (out_ptr, _) in enumerate(reg_output_ops):
+                    val = builder.extract_value(asm_result, idx)
+                    builder.store(val, out_ptr)
+        return asm_result
 
     def visit_ArrayLiteral(self, node, builder, module):
         if node.is_string:
@@ -2686,68 +2705,91 @@ class CodegenVisitor:
         buffer = builder.alloca(buffer_type, name="fstring_buffer")
         pos_ptr = builder.alloca(ir.IntType(32), name="fstring_pos")
         builder.store(ir.Constant(ir.IntType(32), 0), pos_ptr)
-        sprintf_fn = module.globals.get('sprintf')
-        if sprintf_fn is None:
-            sprintf_type = ir.FunctionType(ir.IntType(32),
-                [ir.PointerType(ir.IntType(8)), ir.PointerType(ir.IntType(8))], var_arg=True)
-            sprintf_fn = ir.Function(module, sprintf_type, 'sprintf')
-            sprintf_fn.linkage = 'external'
+        i32 = ir.IntType(32)
+        i8p = ir.PointerType(ir.IntType(8))
         for part in node.parts:
             pos = builder.load(pos_ptr, name="current_pos")
-            dest_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), pos], name="dest")
+            dest_ptr = builder.gep(buffer, [ir.Constant(i32, 0), pos], name="dest")
             if isinstance(part, str):
                 clean = part[2:] if part.startswith('f"') else part
                 clean = clean[:-1] if clean.endswith('"') else clean
                 src_val = self.visit(ArrayLiteral.from_string(clean), builder, module)
                 for i in range(len(clean)):
-                    char_ptr = builder.gep(src_val, [ir.Constant(ir.IntType(32), i)])
+                    char_ptr = builder.gep(src_val, [ir.Constant(i32, i)])
                     char_val = builder.load(char_ptr)
-                    dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(ir.IntType(32), i)])
+                    dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(i32, i)])
                     builder.store(char_val, dest_char_ptr)
-                builder.store(builder.add(pos, ir.Constant(ir.IntType(32), len(clean))), pos_ptr)
+                builder.store(builder.add(pos, ir.Constant(i32, len(clean))), pos_ptr)
             elif isinstance(part, Literal) and part.type == DataType.CHAR:
                 src_val = self.visit(part, builder, module)
                 if isinstance(src_val.type, ir.PointerType):
                     str_len = len(part.value)
                     for i in range(str_len):
-                        char_ptr = builder.gep(src_val, [ir.Constant(ir.IntType(32), i)])
+                        char_ptr = builder.gep(src_val, [ir.Constant(i32, i)])
                         char_val = builder.load(char_ptr)
-                        dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(ir.IntType(32), i)])
+                        dest_char_ptr = builder.gep(dest_ptr, [ir.Constant(i32, i)])
                         builder.store(char_val, dest_char_ptr)
-                    builder.store(builder.add(pos, ir.Constant(ir.IntType(32), str_len)), pos_ptr)
+                    builder.store(builder.add(pos, ir.Constant(i32, str_len)), pos_ptr)
             else:
                 val = self.visit(part, builder, module)
-                if isinstance(val.type, ir.IntType):
-                    fmt_str = "%llu" if _is_unsigned(val) else "%lld"
-                elif isinstance(val.type, (ir.FloatType, ir.DoubleType)):
-                    fmt_str = "%f"
-                elif (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.IntType) and val.type.pointee.width == 8):
-                    fmt_str = "%s"
-                elif (isinstance(val.type, ir.PointerType) and isinstance(val.type.pointee, ir.ArrayType) and
-                      isinstance(val.type.pointee.element, ir.IntType) and val.type.pointee.element.width == 8):
-                    fmt_str = "%s"
-                    zero = ir.Constant(ir.IntType(32), 0)
+                # Decay array pointer to i8*
+                if (isinstance(val.type, ir.PointerType) and
+                        isinstance(val.type.pointee, ir.ArrayType) and
+                        isinstance(val.type.pointee.element, ir.IntType) and
+                        val.type.pointee.element.width == 8):
+                    zero = ir.Constant(i32, 0)
                     val = builder.gep(val, [zero, zero], name="str_decay")
+                # Determine which fstr_append overload to call
+                if isinstance(val.type, ir.FloatType):
+                    fn_name = "standard__strings__fstr_append__3__floatE1__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                    fn_type = ir.FunctionType(i32, [ir.FloatType(), i8p, ir.PointerType(i32)])
+                elif isinstance(val.type, ir.DoubleType):
+                    fn_name = "standard__strings__fstr_append__3__doubleE1__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                    fn_type = ir.FunctionType(i32, [ir.DoubleType(), i8p, ir.PointerType(i32)])
+                elif isinstance(val.type, ir.PointerType):
+                    fn_name = "standard__strings__fstr_append__3__byteE1_ptr1__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                    fn_type = ir.FunctionType(i32, [i8p, i8p, ir.PointerType(i32)])
+                elif isinstance(val.type, ir.IntType):
+                    unsigned = _is_unsigned(val)
+                    width = val.type.width
+                    if unsigned:
+                        if width <= 16:
+                            val = builder.zext(val, ir.IntType(16))
+                            fn_name = "standard__strings__fstr_append__3__dataE1_ubits16__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                            fn_type = ir.FunctionType(i32, [ir.IntType(16), i8p, ir.PointerType(i32)])
+                        elif width <= 32:
+                            val = builder.zext(val, i32)
+                            fn_name = "standard__strings__fstr_append__3__dataE1_ubits32__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                            fn_type = ir.FunctionType(i32, [i32, i8p, ir.PointerType(i32)])
+                        else:
+                            val = builder.zext(val, ir.IntType(64))
+                            fn_name = "standard__strings__fstr_append__3__dataE1_ubits64__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                            fn_type = ir.FunctionType(i32, [ir.IntType(64), i8p, ir.PointerType(i32)])
+                    else:
+                        if width <= 16:
+                            val = builder.sext(val, ir.IntType(16))
+                            fn_name = "standard__strings__fstr_append__3__dataE1_sbits16__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                            fn_type = ir.FunctionType(i32, [ir.IntType(16), i8p, ir.PointerType(i32)])
+                        elif width <= 32:
+                            val = builder.sext(val, i32)
+                            fn_name = "standard__strings__fstr_append__3__dataE1_sbits32__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                            fn_type = ir.FunctionType(i32, [i32, i8p, ir.PointerType(i32)])
+                        else:
+                            val = builder.sext(val, ir.IntType(64))
+                            fn_name = "standard__strings__fstr_append__3__dataE1_sbits64__byteE1_ptr1__intE1_ptr1__ret_intE1"
+                            fn_type = ir.FunctionType(i32, [ir.IntType(64), i8p, ir.PointerType(i32)])
                 else:
-                    fmt_str = "%p"
-                fmt_bytes = (fmt_str + "\x00").encode('ascii')
-                fmt_array_ty = ir.ArrayType(ir.IntType(8), len(fmt_bytes))
-                fmt_gv = ir.GlobalVariable(module, ir.Constant(fmt_array_ty, bytearray(fmt_bytes)).type,
-                                           name=f".fstring_fmt_{id(part)}")
-                fmt_gv.linkage = 'internal'; fmt_gv.global_constant = True
-                fmt_gv.initializer = ir.Constant(fmt_array_ty, bytearray(fmt_bytes))
-                zero = ir.Constant(ir.IntType(32), 0)
-                fmt_ptr = builder.gep(fmt_gv, [zero, zero])
-                if isinstance(val.type, ir.IntType) and val.type.width < 64:
-                    val = builder.zext(val, ir.IntType(64)) if _is_unsigned(val) else builder.sext(val, ir.IntType(64))
-                elif isinstance(val.type, ir.FloatType):
-                    val = builder.fpext(val, ir.DoubleType())
-                chars_written = builder.call(sprintf_fn, [dest_ptr, fmt_ptr, val])
-                builder.store(builder.add(pos, chars_written), pos_ptr)
+                    continue
+                conv_fn = module.globals.get(fn_name)
+                if conv_fn is None:
+                    conv_fn = ir.Function(module, fn_type, fn_name)
+                zero32 = ir.Constant(i32, 0)
+                buf_ptr = builder.gep(buffer, [zero32, zero32], name="fstr_buf_ptr")
+                builder.call(conv_fn, [val, buf_ptr, pos_ptr])
         final_pos = builder.load(pos_ptr)
-        null_ptr = builder.gep(buffer, [ir.Constant(ir.IntType(32), 0), final_pos])
+        null_ptr = builder.gep(buffer, [ir.Constant(i32, 0), final_pos])
         builder.store(ir.Constant(ir.IntType(8), 0), null_ptr)
-        zero = ir.Constant(ir.IntType(32), 0)
+        zero = ir.Constant(i32, 0)
         return builder.gep(buffer, [zero, zero], name="fstring_result")
 
     def visit_FunctionCall(self, node, builder, module):
