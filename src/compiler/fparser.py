@@ -1375,13 +1375,52 @@ class FluxParser:
                     out.append(stmt)
             return out
 
-        # For void functions there are no return values to wrap, so just
-        # append the contract statements at the end of the body directly.
+        # For void functions there are no return values to wrap, but we still
+        # need to inject the contract statements before every bare return;
+        # as well as at the implicit fall-through end of the body.
         is_void = (
             hasattr(return_type, 'base_type') and return_type.base_type == DataType.VOID
         ) or str(return_type) == 'void'
         if is_void:
-            body.statements = body.statements + copy.deepcopy(post_stmts)
+            def _rewrite_void_stmts(stmts):
+                out = []
+                for stmt in stmts:
+                    if isinstance(stmt, ReturnStatement) and stmt.value is None:
+                        # Inject contract code before the bare return;
+                        out.extend(copy.deepcopy(post_stmts))
+                        out.append(stmt)
+                    elif isinstance(stmt, Block):
+                        out.append(Block(_rewrite_void_stmts(stmt.statements)))
+                    elif isinstance(stmt, IfStatement):
+                        stmt.then_block = Block(_rewrite_void_stmts(stmt.then_block.statements))
+                        if stmt.else_block is not None:
+                            stmt.else_block = Block(_rewrite_void_stmts(stmt.else_block.statements))
+                        stmt.elif_blocks = [
+                            (cond, Block(_rewrite_void_stmts(blk.statements)))
+                            for cond, blk in stmt.elif_blocks
+                        ]
+                        out.append(stmt)
+                    elif isinstance(stmt, (ForLoop, ForInLoop, WhileLoop, DoLoop, DoWhileLoop)):
+                        stmt.body = Block(_rewrite_void_stmts(stmt.body.statements))
+                        out.append(stmt)
+                    elif isinstance(stmt, SwitchStatement):
+                        stmt.cases = [
+                            type(c)(c.value, Block(_rewrite_void_stmts(c.body.statements)))
+                            if hasattr(c, 'body') else c
+                            for c in stmt.cases
+                        ]
+                        out.append(stmt)
+                    elif isinstance(stmt, TryBlock):
+                        stmt.try_body = Block(_rewrite_void_stmts(stmt.try_body.statements))
+                        stmt.catch_blocks = [
+                            (exc_type, exc_name, Block(_rewrite_void_stmts(blk.statements)))
+                            for exc_type, exc_name, blk in stmt.catch_blocks
+                        ]
+                        out.append(stmt)
+                    else:
+                        out.append(stmt)
+                return out
+            body.statements = _rewrite_void_stmts(body.statements) + copy.deepcopy(post_stmts)
         else:
             body.statements = _rewrite_stmts(body.statements)
         return body

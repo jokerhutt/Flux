@@ -47,11 +47,11 @@ const bool _fltused = true;
 #endif;
 
 #ifdef __WINDOWS__
-i64 WIN_STDOUT_HANDLE;
+global i64 WIN_STDOUT_HANDLE;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import <memory.fx>;
+#import "memory.fx";
 #endif;
 
 using standard::memory::allocators::stdheap;
@@ -65,7 +65,7 @@ using standard::memory::allocators::stdheap;
 #endif;
 
 #ifndef FLUX_STANDARD_TIMING
-#import <timing.fx>;
+#import "timing.fx";
 #endif;
 
 #ifndef FLUX_STANDARD_IO
@@ -75,7 +75,7 @@ using standard::memory::allocators::stdheap;
 // ---------------------------
 //
 // Import runtime helpers
-#import <ffifio.fx>;             // FFI-based File Input/Output (CRT)
+#import "ffifio.fx";             // FFI-based File Input/Output (CRT)
 //
 // ---------------------------
 //
@@ -88,10 +88,6 @@ using standard::memory::allocators::stdheap;
 //#ifndef FLUX_STANDARD_COLLECTIONS
 //#import "collections.fx";
 //#endif;
-
-#ifdef FLUX_SHADOW_STACK
-#import <shadowstack.fx>;
-#endif;
 
 extern
 {
@@ -139,43 +135,23 @@ def !!atexit(void* fn) -> int
 #ifdef __MACOS__
 def !!exit(int code) -> void
 {
-    #ifdef __ARCH_ARM64__
-    volatile asm
-    {
-        mov x0, $0
-        mov x16, $$1
-        svc #0x80
-    } : : "r"(code) : "x0", "x16", "memory";
-    #endif;
-    #ifdef __ARCH_X86_64__
     volatile asm
     {
         movl $0, %edi
         movq $$0x2000001, %rax
         syscall
     } : : "r"(code) : "edi", "rax", "memory";
-    #endif;
     noreturn;
 };
 
 def !!abort() -> void
 {
-    #ifdef __ARCH_ARM64__
-    volatile asm
-    {
-        mov x0, $$134
-        mov x16, $$1
-        svc #0x80
-    } : : : "x0", "x16", "memory";
-    #endif;
-    #ifdef __ARCH_X86_64__
     volatile asm
     {
         movq $$0x2000001, %rax
         movq $$134, %rdi
         syscall
     } : : : "rax", "rdi", "memory";
-    #endif;
     noreturn;
 };
 
@@ -185,6 +161,11 @@ def !!atexit(void* fn) -> int
 };
 #endif;
 
+
+
+#ifdef FLUX_SHADOW_STACK
+#import "shadowstack.fx";
+#endif;
 
 
 // >Mains
@@ -386,7 +367,20 @@ def !!FRTStartup() -> int
     // Initialize the Flux standard heap allocator
     // For reference, see runtime/redallocators.fx
     standard::memory::allocators::stdheap::table_init();
+
+#ifdef FLUX_SHADOW_STACK
+    if (!fss_init())
+    {
+        standard::io::console::print("WARNING: shadow stack allocation failed, continuing unprotected\n\0");
+    };
+#endif; // FLUX_SHADOW_STACK
+
     int return_code = main__0__ret_intE1();
+
+#ifdef FLUX_SHADOW_STACK
+    fss_teardown();
+#endif; // FLUX_SHADOW_STACK
+
     if (return_code != 0)
     {
         // Handle error

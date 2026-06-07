@@ -9,7 +9,7 @@
 //
 // Wall-clock access:
 //   dt_now_utc()    -> DateTime   current UTC time
-//   dt_now_local()  -> DateTime   current local time (platform TZ)
+//   dt_now_loc()    -> DateTime   current local time (platform TZ)
 //
 // Epoch conversion (Unix epoch = 1970-01-01 00:00:00 UTC):
 //   dt_from_unix_ms(i64 ms) -> DateTime
@@ -314,7 +314,7 @@ namespace standard
             return dt_from_unix_ms(unix_ms);
         };
 
-        def dt_now_local() -> DateTime
+        def dt_now_loc() -> DateTime
         {
             // Linux: no direct struct localtime via syscall without libc.
             // Return UTC as a safe fallback; callers needing TZ should use
@@ -333,7 +333,7 @@ namespace standard
             return dt_from_unix_ms(unix_ms);
         };
 
-        def dt_now_local() -> DateTime
+        def dt_now_loc() -> DateTime
         {
             return dt_now_utc();
         };
