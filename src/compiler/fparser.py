@@ -264,6 +264,7 @@ class FluxParser:
         self._object_init_params = {}  # object_name -> __init parameter count (excluding 'this')
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
         self._template_constraints = {}  # name -> {param_name -> [allowed_type_spec_strings]}
+        self._template_relations = {}   # name -> [(lhs_names, compat: bool, rhs_names)]
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
         self._template_structs = {}               # name -> (param_names, StructDef AST)
@@ -1569,6 +1570,7 @@ class FluxParser:
             return name
         template_params = []
         _func_constraints = {}  # param_name -> list of TypeSystem (allowed types)
+        _func_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
         if self.expect(TokenType.LESS_THAN):
             with self._lookahead():
                 is_template = False
@@ -1576,6 +1578,7 @@ class FluxParser:
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
                     # Skip optional constraint clause: ': type (| type)*'
+                    # or relation entry: ('&' IDENTIFIER)* ('~'|'!~') IDENTIFIER ('&' IDENTIFIER)*
                     if self.expect(TokenType.COLON):
                         self.advance()
                         # Skip tokens until we hit COMMA or GREATER_THAN, tracking
@@ -1594,6 +1597,30 @@ class FluxParser:
                                 break
                             else:
                                 self.advance()
+                    else:
+                        # Skip optional '&' IDENTIFIER chain and '~'/'!~' relation
+                        while self.expect(TokenType.LOGICAL_AND):
+                            self.advance()
+                            if self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                        if self.expect(TokenType.TIE):
+                            self.advance()
+                            if self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                                while self.expect(TokenType.LOGICAL_AND):
+                                    self.advance()
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                        elif self.expect(TokenType.NOT):
+                            self.advance()
+                            if self.expect(TokenType.TIE):
+                                self.advance()
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                                    while self.expect(TokenType.LOGICAL_AND):
+                                        self.advance()
+                                        if self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
                         if not self.expect(TokenType.IDENTIFIER):
@@ -1616,14 +1643,46 @@ class FluxParser:
                                     break
                                 else:
                                     self.advance()
+                        else:
+                            while self.expect(TokenType.LOGICAL_AND):
+                                self.advance()
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                            if self.expect(TokenType.TIE):
+                                self.advance()
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                                    while self.expect(TokenType.LOGICAL_AND):
+                                        self.advance()
+                                        if self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
+                            elif self.expect(TokenType.NOT):
+                                self.advance()
+                                if self.expect(TokenType.TIE):
+                                    self.advance()
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                                        while self.expect(TokenType.LOGICAL_AND):
+                                            self.advance()
+                                            if self.expect(TokenType.IDENTIFIER):
+                                                self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
 
             if is_template:
                 self.advance()  # consume '<'
-                _pname = self.consume(TokenType.IDENTIFIER).value
-                template_params.append(_pname)
+                # Helper: parse one side of a relation: IDENTIFIER ('&' IDENTIFIER)*
+                def _parse_id_list():
+                    names = [self.consume(TokenType.IDENTIFIER).value]
+                    while self.expect(TokenType.LOGICAL_AND):
+                        self.advance()
+                        names.append(self.consume(TokenType.IDENTIFIER).value)
+                    return names
+                # Parse first entry: param decl or relation
+                _first_id = self.consume(TokenType.IDENTIFIER).value
                 if self.expect(TokenType.COLON):
+                    # Type constraint
+                    template_params.append(_first_id)
                     self.advance()
                     _allowed = []
                     _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
@@ -1634,12 +1693,27 @@ class FluxParser:
                         _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
                         _ts = self.type_spec()
                         _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
-                    _func_constraints[_pname] = _allowed
+                    _func_constraints[_first_id] = _allowed
+                elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                    # Relation entry: lhs_list ~ rhs_list  or  lhs_list !~ rhs_list
+                    lhs = [_first_id]
+                    while self.expect(TokenType.LOGICAL_AND):
+                        self.advance()
+                        lhs.append(self.consume(TokenType.IDENTIFIER).value)
+                    compat = True
+                    if self.expect(TokenType.NOT):
+                        self.advance()
+                        compat = False
+                    self.consume(TokenType.TIE)
+                    rhs = _parse_id_list()
+                    _func_relations.append((lhs, compat, rhs))
+                else:
+                    template_params.append(_first_id)
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    _pname = self.consume(TokenType.IDENTIFIER).value
-                    template_params.append(_pname)
+                    _next_id = self.consume(TokenType.IDENTIFIER).value
                     if self.expect(TokenType.COLON):
+                        template_params.append(_next_id)
                         self.advance()
                         _allowed = []
                         _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
@@ -1650,7 +1724,21 @@ class FluxParser:
                             _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
                             _ts = self.type_spec()
                             _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
-                        _func_constraints[_pname] = _allowed
+                        _func_constraints[_next_id] = _allowed
+                    elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        lhs = [_next_id]
+                        while self.expect(TokenType.LOGICAL_AND):
+                            self.advance()
+                            lhs.append(self.consume(TokenType.IDENTIFIER).value)
+                        compat = True
+                        if self.expect(TokenType.NOT):
+                            self.advance()
+                            compat = False
+                        self.consume(TokenType.TIE)
+                        rhs = _parse_id_list()
+                        _func_relations.append((lhs, compat, rhs))
+                    else:
+                        template_params.append(_next_id)
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() can detect and defer
@@ -1883,6 +1971,8 @@ class FluxParser:
             self._template_functions[name] = (template_params, func_def)
             if _func_constraints:
                 self._template_constraints[name] = _func_constraints
+            if _func_relations:
+                self._template_relations[name] = _func_relations
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const,
@@ -2778,6 +2868,13 @@ class FluxParser:
                                     self._template_constraints[ns_mangled] = _centry
                                 if ns_scoped not in self._template_constraints:
                                     self._template_constraints[ns_scoped] = _centry
+                            # Propagate relations under the qualified names too
+                            if bare_name in self._template_relations:
+                                _rentry = self._template_relations[bare_name]
+                                if ns_mangled not in self._template_relations:
+                                    self._template_relations[ns_mangled] = _rentry
+                                if ns_scoped not in self._template_relations:
+                                    self._template_relations[ns_scoped] = _rentry
                     elif isinstance(func, list):
                         for f in func:
                             functions.append(f)
@@ -3534,6 +3631,10 @@ class FluxParser:
             tok = self.current_token
 
             # Must start with a recognised receiver token or an IDENTIFIER (struct name)
+            # Optionally preceded by '~' for a tied-type receiver: ~byte*.func()
+            if tok.type == TokenType.TIE:
+                self.advance()
+                tok = self.current_token
             if tok.type in self._TYPE_FUNC_RECEIVER_TOKENS:
                 self.advance()
             elif tok.type == TokenType.IDENTIFIER:
@@ -3681,6 +3782,11 @@ class FluxParser:
         tok = self.current_token
 
         # --- Receiver ---
+        # Optional leading '~' marks a tied-type receiver: ~byte*.func()
+        recv_is_tied = False
+        if self.expect(TokenType.TIE):
+            recv_is_tied = True
+            self.advance()
         recv_tok = self.current_token
         type_name = self._type_func_receiver_type_name(recv_tok)
         if type_name is None:
@@ -3720,6 +3826,7 @@ class FluxParser:
             return name
         template_params = []
         _typefunc_constraints = {}  # param_name -> list of (TypeSystem, source_text)
+        _typefunc_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
         if self.expect(TokenType.LESS_THAN):
             with self._lookahead():
                 is_template = False
@@ -3727,6 +3834,7 @@ class FluxParser:
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
                     # Skip optional constraint clause: ': type (| type)*'
+                    # or relation entry: ('&' IDENTIFIER)* ('~'|'!~') IDENTIFIER ('&' IDENTIFIER)*
                     if self.expect(TokenType.COLON):
                         self.advance()
                         depth = 0
@@ -3743,6 +3851,29 @@ class FluxParser:
                                 break
                             else:
                                 self.advance()
+                    else:
+                        while self.expect(TokenType.LOGICAL_AND):
+                            self.advance()
+                            if self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                        if self.expect(TokenType.TIE):
+                            self.advance()
+                            if self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                                while self.expect(TokenType.LOGICAL_AND):
+                                    self.advance()
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                        elif self.expect(TokenType.NOT):
+                            self.advance()
+                            if self.expect(TokenType.TIE):
+                                self.advance()
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                                    while self.expect(TokenType.LOGICAL_AND):
+                                        self.advance()
+                                        if self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
                         if not self.expect(TokenType.IDENTIFIER):
@@ -3764,13 +3895,42 @@ class FluxParser:
                                     break
                                 else:
                                     self.advance()
+                        else:
+                            while self.expect(TokenType.LOGICAL_AND):
+                                self.advance()
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                            if self.expect(TokenType.TIE):
+                                self.advance()
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                                    while self.expect(TokenType.LOGICAL_AND):
+                                        self.advance()
+                                        if self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
+                            elif self.expect(TokenType.NOT):
+                                self.advance()
+                                if self.expect(TokenType.TIE):
+                                    self.advance()
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                                        while self.expect(TokenType.LOGICAL_AND):
+                                            self.advance()
+                                            if self.expect(TokenType.IDENTIFIER):
+                                                self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
             if is_template:
                 self.advance()  # consume '<'
-                _pname = self.consume(TokenType.IDENTIFIER).value
-                template_params.append(_pname)
+                def _parse_id_list_tf():
+                    names = [self.consume(TokenType.IDENTIFIER).value]
+                    while self.expect(TokenType.LOGICAL_AND):
+                        self.advance()
+                        names.append(self.consume(TokenType.IDENTIFIER).value)
+                    return names
+                _first_id = self.consume(TokenType.IDENTIFIER).value
                 if self.expect(TokenType.COLON):
+                    template_params.append(_first_id)
                     self.advance()
                     _allowed = []
                     _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
@@ -3781,12 +3941,26 @@ class FluxParser:
                         _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
                         _ts = self.type_spec()
                         _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
-                    _typefunc_constraints[_pname] = _allowed
+                    _typefunc_constraints[_first_id] = _allowed
+                elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                    lhs = [_first_id]
+                    while self.expect(TokenType.LOGICAL_AND):
+                        self.advance()
+                        lhs.append(self.consume(TokenType.IDENTIFIER).value)
+                    compat = True
+                    if self.expect(TokenType.NOT):
+                        self.advance()
+                        compat = False
+                    self.consume(TokenType.TIE)
+                    rhs = _parse_id_list_tf()
+                    _typefunc_relations.append((lhs, compat, rhs))
+                else:
+                    template_params.append(_first_id)
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    _pname = self.consume(TokenType.IDENTIFIER).value
-                    template_params.append(_pname)
+                    _next_id = self.consume(TokenType.IDENTIFIER).value
                     if self.expect(TokenType.COLON):
+                        template_params.append(_next_id)
                         self.advance()
                         _allowed = []
                         _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
@@ -3797,7 +3971,21 @@ class FluxParser:
                             _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
                             _ts = self.type_spec()
                             _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
-                        _typefunc_constraints[_pname] = _allowed
+                        _typefunc_constraints[_next_id] = _allowed
+                    elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        lhs = [_next_id]
+                        while self.expect(TokenType.LOGICAL_AND):
+                            self.advance()
+                            lhs.append(self.consume(TokenType.IDENTIFIER).value)
+                        compat = True
+                        if self.expect(TokenType.NOT):
+                            self.advance()
+                            compat = False
+                        self.consume(TokenType.TIE)
+                        rhs = _parse_id_list_tf()
+                        _typefunc_relations.append((lhs, compat, rhs))
+                    else:
+                        template_params.append(_next_id)
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() inside params/return type defers them.
@@ -3814,15 +4002,20 @@ class FluxParser:
         return_type = self.type_spec()
 
         receiver_ts = self._type_func_receiver_type_spec(type_name, recv_pointer_depth)
+        if recv_is_tied:
+            receiver_ts.is_tied = True
 
         # Derive the canonical type name used for mangling.
         # byte* and "" both map to 'string' so they share the same type func namespace.
+        # A leading '~' marks a tied-type receiver, prefixed with 'tied_'.
         if recv_pointer_depth > 0 and type_name == 'byte':
             effective_type_name = 'string'
         elif recv_pointer_depth > 0:
             effective_type_name = type_name + '_ptr' * recv_pointer_depth
         else:
             effective_type_name = type_name
+        if recv_is_tied:
+            effective_type_name = 'tied_' + effective_type_name
 
         # Prototype if ';' follows immediately after return type
         if self.expect(TokenType.SEMICOLON):
@@ -3836,6 +4029,8 @@ class FluxParser:
                 self._template_functions[mangled_base] = (template_params, synthetic_fd)
                 if _typefunc_constraints:
                     self._template_constraints[mangled_base] = _typefunc_constraints
+                if _typefunc_relations:
+                    self._template_relations[mangled_base] = _typefunc_relations
                 return None
             return TypeFuncDef(
                 type_name=effective_type_name,
@@ -3860,6 +4055,8 @@ class FluxParser:
             self._template_functions[mangled_base] = (template_params, synthetic_fd)
             if _typefunc_constraints:
                 self._template_constraints[mangled_base] = _typefunc_constraints
+            if _typefunc_relations:
+                self._template_relations[mangled_base] = _typefunc_relations
             return None
 
         return TypeFuncDef(
@@ -5182,12 +5379,6 @@ class FluxParser:
             self.advance()
             operand = self.unary_expression()
             return UnaryOp(Operator.DECREMENT, operand).set_location(tok.line, tok.column)
-        elif self.expect(TokenType.TIE):
-            # Ownershipt
-            tok = self.current_token
-            self.advance()
-            operand = self.unary_expression()
-            return TieExpression(operand).set_location(tok.line, tok.column)
         else:
             return self.postfix_expression()
     
@@ -5522,6 +5713,57 @@ class FluxParser:
                         f"[{allowed_strs}]"
                     )
 
+        # Check relation constraints (T~U, T!~U, T&U~V, etc.)
+        _relations_list = self._template_relations.get(func_name)
+        if _relations_list is None:
+            for _rk, _rv in self._template_relations.items():
+                if func_name.endswith('__' + _rk) or func_name == _rk:
+                    _relations_list = _rv
+                    break
+        if _relations_list:
+            # Build param_name -> concrete TypeSystem mapping for relation checks
+            _param_to_ts = {}
+            for i, pname in enumerate(template_params):
+                if arg_type_specs is not None and i < len(arg_type_specs):
+                    _param_to_ts[pname] = arg_type_specs[i]
+            def _types_compatible(a_ts, b_ts):
+                # Pointer vs non-pointer is always incompatible
+                if a_ts.is_pointer != b_ts.is_pointer:
+                    return False
+                # Both pointer: pointer depth must match
+                if a_ts.is_pointer and a_ts.pointer_depth != b_ts.pointer_depth:
+                    return False
+                # Width must match (0 means unresolved/default — treat as wildcard)
+                aw = a_ts.bit_width or 0
+                bw = b_ts.bit_width or 0
+                if aw and bw and aw != bw:
+                    return False
+                return True
+            for lhs_names, compat, rhs_names in _relations_list:
+                for lname in lhs_names:
+                    for rname in rhs_names:
+                        lts = _param_to_ts.get(lname)
+                        rts = _param_to_ts.get(rname)
+                        if lts is None or rts is None:
+                            continue
+                        is_compat = _types_compatible(lts, rts)
+                        if compat and not is_compat:
+                            lmangle = self._type_system_to_mangle_str(lts)
+                            rmangle = self._type_system_to_mangle_str(rts)
+                            self.error(
+                                f"Relation constraint '{lname}~{rname}' violated: "
+                                f"'{lmangle}' and '{rmangle}' are not compatible "
+                                f"(pointer mismatch or width mismatch)"
+                            )
+                        elif not compat and is_compat:
+                            lmangle = self._type_system_to_mangle_str(lts)
+                            rmangle = self._type_system_to_mangle_str(rts)
+                            self.error(
+                                f"Relation constraint '{lname}!~{rname}' violated: "
+                                f"'{lmangle}' and '{rmangle}' must be incompatible "
+                                f"but are compatible"
+                            )
+
         # Build mangled name: func__tmpl__T1__T2
         mangled = func_name + '__tmpl__' + '__'.join(arg_type_names)
 
@@ -5684,7 +5926,7 @@ class FluxParser:
 
     def postfix_expression(self) -> Expression:
         """
-        postfix_expression -> primary_expression (postfix_operator)*
+        postfix_expression -> ('~')? primary_expression (postfix_operator)*
         postfix_operator -> '[' expression ']'
                          | '(' argument_list? ')'
                          | '.' IDENTIFIER        # Field access for structs
@@ -5692,7 +5934,17 @@ class FluxParser:
                          | '++'
                          | '--'
         """
+        # '~' (tie/move) binds to the primary before any postfix operators,
+        # so ~x.f(...) parses as (~x).f(...) not ~(x.f(...)).
+        tie_tok = None
+        if self.expect(TokenType.TIE):
+            tie_tok = self.current_token
+            self.advance()
+
         expr = self.primary_expression()
+
+        if tie_tok is not None:
+            expr = TieExpression(expr).set_location(tie_tok.line, tie_tok.column)
         
         # Handle explicit template call: foo<int>(args) or foo<i32>(args)
         # Check before the main postfix loop so <type> is consumed before '('
@@ -5998,6 +6250,10 @@ class FluxParser:
                                 _its = _dtm.get(_arg.type)
                                 if _its is not None:
                                     _inferred[_ptn] = _its
+                            elif isinstance(_arg, StringLiteral):
+                                # A string literal is byte* (pointer to i8).
+                                _inferred[_ptn] = TypeSystem(base_type=DataType.BYTE, is_signed=True,
+                                                             bit_width=8, is_pointer=True, pointer_depth=1)
                         if len(_inferred) == len(_tmpl_params):
                             _tnames = [self._type_system_to_mangle_str(_inferred[p]) for p in _tmpl_params]
                             _tspecs = [_inferred[p] for p in _tmpl_params]
@@ -6044,9 +6300,39 @@ class FluxParser:
                             _recv_tname = str(_recv_ts.base_type.value) + '_ptr' * _recv_pdepth
                         else:
                             _recv_tname = str(_recv_ts.base_type.value)
+                        if getattr(_recv_ts, 'is_tied', False):
+                            _recv_tname = 'tied_' + _recv_tname
                         _candidate = f"__typefunc__{_recv_tname}__{member}"
                         if _candidate in self._template_functions:
                             _tfunc_key = _candidate
+                        elif _candidate not in self._template_functions:
+                            # Also try without tied_ prefix as fallback
+                            _untied = f"__typefunc__{_recv_tname.removeprefix('tied_')}__{member}"
+                            if _untied in self._template_functions:
+                                _tfunc_key = _untied
+                elif isinstance(expr, TieExpression) and isinstance(getattr(expr, 'operand', None), Identifier):
+                    # ~x.member — receiver is a tied variable being moved
+                    _recv_ts = self.symbol_table.get_type_spec(expr.operand.name)
+                    if _recv_ts is not None:
+                        _recv_pdepth = getattr(_recv_ts, 'pointer_depth', 0)
+                        if _recv_ts.custom_typename:
+                            _recv_tname = _recv_ts.custom_typename
+                        elif _recv_pdepth > 0 and getattr(_recv_ts, 'base_type', None) == DataType.BYTE:
+                            _recv_tname = 'string'
+                        elif _recv_pdepth > 0:
+                            _recv_tname = str(_recv_ts.base_type.value) + '_ptr' * _recv_pdepth
+                        else:
+                            _recv_tname = str(_recv_ts.base_type.value)
+                        # Always use tied_ prefix for a TieExpression receiver
+                        _recv_tname = 'tied_' + _recv_tname
+                        _candidate = f"__typefunc__{_recv_tname}__{member}"
+                        if _candidate in self._template_functions:
+                            _tfunc_key = _candidate
+                        else:
+                            # Fallback: untied type function
+                            _untied = f"__typefunc__{_recv_tname.removeprefix('tied_')}__{member}"
+                            if _untied in self._template_functions:
+                                _tfunc_key = _untied
                 elif isinstance(expr, (StringLiteral, FStringLiteral)):
                     # String/f-string/i-string literal receiver — always type 'string'
                     _candidate = f"__typefunc__string__{member}"
