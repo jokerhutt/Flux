@@ -3710,26 +3710,94 @@ class FluxParser:
             func_name = self.consume(TokenType.IDENTIFIER).value
 
         # --- Optional template parameter list: byte.my_func<T, U>(...) ---
+        # Supports optional per-param constraints: byte.my_func<T: int | float>(...) ---
+        def _ts_repr_simple_tf(ts):
+            name = ts.custom_typename if ts.custom_typename else (ts.base_type.value if hasattr(ts.base_type, 'value') else str(ts.base_type))
+            if ts.is_pointer:
+                name += '*' * ts.pointer_depth
+            if ts.is_array:
+                name += '[]'
+            return name
         template_params = []
+        _typefunc_constraints = {}  # param_name -> list of (TypeSystem, source_text)
         if self.expect(TokenType.LESS_THAN):
             with self._lookahead():
                 is_template = False
                 self.advance()  # consume '<'
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
+                    # Skip optional constraint clause: ': type (| type)*'
+                    if self.expect(TokenType.COLON):
+                        self.advance()
+                        depth = 0
+                        while not self.expect(TokenType.EOF):
+                            if self.expect(TokenType.LESS_THAN):
+                                depth += 1
+                                self.advance()
+                            elif self.expect(TokenType.GREATER_THAN):
+                                if depth == 0:
+                                    break
+                                depth -= 1
+                                self.advance()
+                            elif self.expect(TokenType.COMMA) and depth == 0:
+                                break
+                            else:
+                                self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
                         if not self.expect(TokenType.IDENTIFIER):
                             break
                         self.advance()
+                        if self.expect(TokenType.COLON):
+                            self.advance()
+                            depth = 0
+                            while not self.expect(TokenType.EOF):
+                                if self.expect(TokenType.LESS_THAN):
+                                    depth += 1
+                                    self.advance()
+                                elif self.expect(TokenType.GREATER_THAN):
+                                    if depth == 0:
+                                        break
+                                    depth -= 1
+                                    self.advance()
+                                elif self.expect(TokenType.COMMA) and depth == 0:
+                                    break
+                                else:
+                                    self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
             if is_template:
                 self.advance()  # consume '<'
-                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                _pname = self.consume(TokenType.IDENTIFIER).value
+                template_params.append(_pname)
+                if self.expect(TokenType.COLON):
+                    self.advance()
+                    _allowed = []
+                    _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                    _ts = self.type_spec()
+                    _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
+                    while self.expect(TokenType.LOGICAL_OR):
+                        self.advance()
+                        _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                        _ts = self.type_spec()
+                        _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
+                    _typefunc_constraints[_pname] = _allowed
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                    _pname = self.consume(TokenType.IDENTIFIER).value
+                    template_params.append(_pname)
+                    if self.expect(TokenType.COLON):
+                        self.advance()
+                        _allowed = []
+                        _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                        _ts = self.type_spec()
+                        _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
+                        while self.expect(TokenType.LOGICAL_OR):
+                            self.advance()
+                            _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                            _ts = self.type_spec()
+                            _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
+                        _typefunc_constraints[_pname] = _allowed
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() inside params/return type defers them.
@@ -3766,6 +3834,8 @@ class FluxParser:
                 synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
                                            return_type, Block([]), is_prototype=True)
                 self._template_functions[mangled_base] = (template_params, synthetic_fd)
+                if _typefunc_constraints:
+                    self._template_constraints[mangled_base] = _typefunc_constraints
                 return None
             return TypeFuncDef(
                 type_name=effective_type_name,
@@ -3788,6 +3858,8 @@ class FluxParser:
             synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
                                        return_type, body)
             self._template_functions[mangled_base] = (template_params, synthetic_fd)
+            if _typefunc_constraints:
+                self._template_constraints[mangled_base] = _typefunc_constraints
             return None
 
         return TypeFuncDef(
@@ -5429,8 +5501,23 @@ class FluxParser:
                 # allowed_specs is a list of (TypeSystem, source_text) tuples
                 if not any(_ts_matches(concrete_ts, a_ts) for a_ts, _ in allowed_specs):
                     allowed_strs = ' | '.join(a_src for _, a_src in allowed_specs)
+                    # Produce a readable name for the function in the error message.
+                    # __typefunc__string__f  -> i-string
+                    # __typefunc__string__X  -> "".X  (generic string type func)
+                    # __typefunc__TYPE__NAME -> TYPE.NAME
+                    # everything else        -> func_name as-is
+                    if func_name.startswith('__typefunc__'):
+                        _inner = func_name[len('__typefunc__'):]
+                        _recv, _, _meth = _inner.partition('__')
+                        _ISTR_METHODS = {'f', 'format'}
+                        if _recv == 'string' and _meth in _ISTR_METHODS:
+                            _display_name = 'i-string'
+                        else:
+                            _display_name = f'"{_recv}".{_meth}' if _recv == 'string' else f'{_recv}.{_meth}'
+                    else:
+                        _display_name = func_name
                     self.error(
-                        f"Template parameter '{param_name}' of '{func_name}' was instantiated "
+                        f"Template parameter '{param_name}' of '{_display_name}' was instantiated "
                         f"with type '{arg_type_names[i]}', which does not satisfy the constraint "
                         f"[{allowed_strs}]"
                     )
@@ -5782,7 +5869,8 @@ class FluxParser:
                             _saved_tok2 = self.current_token
                             self.current_token = tok
                             self.error(
-                                f"Template parameter '{param_tname}' of '{expr.name}' refused: argument types conflict ('{prev_name}' vs '{new_name}')"
+                                f"Template parameter '{param_tname}' of '{expr.name}' cannot be "
+                                f"inferred: argument types conflict ('{prev_name}' vs '{new_name}')"
                             )
                             self.current_token = _saved_tok2
                     else:
@@ -5913,7 +6001,10 @@ class FluxParser:
                         if len(_inferred) == len(_tmpl_params):
                             _tnames = [self._type_system_to_mangle_str(_inferred[p]) for p in _tmpl_params]
                             _tspecs = [_inferred[p] for p in _tmpl_params]
+                            _saved_tok_tf = self.current_token
+                            self.current_token = type('_Tok', (), {'line': tok.line, 'column': tok.column + 1})()
                             _mname = self._resolve_template_call(_tfk, _tnames, _tspecs)
+                            self.current_token = _saved_tok_tf
                             expr = FunctionCall(_mname, [expr.object] + list(args)).set_location(tok.line, tok.column)
                         else:
                             expr = MethodCall(expr.object, expr.member, args).set_location(tok.line, tok.column)

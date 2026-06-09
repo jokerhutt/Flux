@@ -1,14 +1,16 @@
 #import <standard.fx>;
-
+ 
 using standard::io::console;
 
-def foo<T: "" | byte*>(T x, T y) -> T
+byte* z = "f";
+
+i"".i"{}":{z}<T: "">(T x) -> ""
 {
-    return f"{x}, {y}";
+    return _ + i", W{}rld!":{x;};
 };
 
 def main() -> int
 {
-    print(foo(5, "World!"));
+    println(i"Hello":{}.i"{}":{z}(0));
     return 0;
 };
