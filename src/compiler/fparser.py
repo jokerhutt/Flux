@@ -3413,6 +3413,29 @@ class FluxParser:
         # Named struct: IDENTIFIER handled separately in _is_type_func_def
     })
 
+    def _resolve_fstring_name(self, node) -> str:
+        """
+        Attempt to resolve an FStringLiteral to a plain string at parse time.
+        Used to get compile-time method names like f"{z}" where z is a known global.
+        Returns the resolved string, or falls back to str(node) if unresolvable.
+        """
+        parts = []
+        for part in node.parts:
+            if isinstance(part, str):
+                clean = part[2:] if part.startswith('f"') else part
+                clean = clean[:-1] if clean.endswith('"') else clean
+                parts.append(clean)
+            elif isinstance(part, Identifier):
+                # Look up in _comptime_strings (populated for byte* string-literal globals)
+                val = self._comptime_strings.get(part.name)
+                if val is not None:
+                    parts.append(val)
+                else:
+                    return str(node)  # unresolvable
+            else:
+                return str(node)  # unresolvable
+        return ''.join(parts)
+
     def _is_type_func_def(self) -> bool:
         """
         Lookahead predicate: returns True when the current position begins a
@@ -3590,7 +3613,11 @@ class FluxParser:
         self.consume(TokenType.DOT)
 
         if self.expect(TokenType.F_STRING):
-            func_name = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+            _fname_fsl = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+            func_name = self._resolve_fstring_name(_fname_fsl)
+            # If unresolvable at parse time, keep as FStringLiteral for codegen
+            if func_name == str(_fname_fsl):
+                func_name = _fname_fsl
         elif self.expect(TokenType.STRING_LITERAL):
             func_name = self.current_token.value
             self.advance()
@@ -5743,6 +5770,8 @@ class FluxParser:
                 self.advance()
                 if self.expect(TokenType.F_STRING):
                     member = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+                    # Resolve f-string member name at parse time if possible
+                    member = self._resolve_fstring_name(member)
                 elif self.expect(TokenType.STRING_LITERAL):
                     member = self.current_token.value
                     self.advance()
