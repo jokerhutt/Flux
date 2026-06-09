@@ -14,8 +14,7 @@ struct TestStru
 
 TestStru.my_tstru_func<T>(T y) -> TestStru
 {
-    TestStru result = {_.x - y};
-    return result;
+    return {_.x - y};
 };
 
 def main() -> int

@@ -4988,6 +4988,12 @@ class CodegenVisitor:
                      if hasattr(func.type, 'return_type')
                      else func.type.pointee.return_type)
         _suppress = isinstance(_ret_type, (ir.IdentifiedStructType, ir.LiteralStructType))
+        # Seed struct_type on a bare StructLiteral return value from the function's
+        # return type so visit_StructLiteral has the required type context.
+        from fast import StructLiteral as _StructLiteral
+        if isinstance(node.value, _StructLiteral) and node.value.struct_type is None:
+            if isinstance(_ret_type, ir.IdentifiedStructType):
+                node.value.struct_type = _ret_type.name
         if _suppress:
             self._in_member_access = True
         try:
