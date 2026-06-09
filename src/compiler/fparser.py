@@ -5768,6 +5768,11 @@ class FluxParser:
                         _candidate = f"__typefunc__{_recv_tname}__{member}"
                         if _candidate in self._template_functions:
                             _tfunc_key = _candidate
+                elif isinstance(expr, (StringLiteral, FStringLiteral)):
+                    # String/f-string/i-string literal receiver — always type 'string'
+                    _candidate = f"__typefunc__string__{member}"
+                    if _candidate in self._template_functions:
+                        _tfunc_key = _candidate
                 if self.expect(TokenType.LESS_THAN):
                     obj_name = expr.name if isinstance(expr, Identifier) else None
                     qualified = f"{obj_name}.{member}" if obj_name else None

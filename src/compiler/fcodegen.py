@@ -2835,7 +2835,9 @@ class CodegenVisitor:
         null_ptr = builder.gep(buffer, [ir.Constant(i32, 0), final_pos])
         builder.store(ir.Constant(ir.IntType(8), 0), null_ptr)
         zero = ir.Constant(i32, 0)
-        return builder.gep(buffer, [zero, zero], name="fstring_result")
+        _result = builder.gep(buffer, [zero, zero], name="fstring_result")
+        _result._is_typefunc_string = True
+        return _result
 
     def visit_FunctionCall(self, node, builder, module):
         from fast import FunctionPointerCall, Identifier, TieExpression
