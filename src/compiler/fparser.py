@@ -263,6 +263,7 @@ class FluxParser:
         self._namespace_stack = []  # Track current namespace path for symbol registration
         self._object_init_params = {}  # object_name -> __init parameter count (excluding 'this')
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
+        self._template_constraints = {}  # name -> {param_name -> [allowed_type_spec_strings]}
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
         self._template_structs = {}               # name -> (param_names, StructDef AST)
@@ -1554,29 +1555,102 @@ class FluxParser:
             self.error("Expected function name (identifier or string literal)")
         
         # Parse optional template parameter list: def name<T, U>(...)
-        # Use lookahead to confirm this is actually a template list (all IDENTIFIERs)
-        # before consuming anything, to avoid misreading comparison operators.
+        # Supports optional per-param constraints: def name<T: type1 | type2, U>(...)
+        # Use lookahead to confirm this is actually a template list (all IDENTIFIERs,
+        # with optional ': ...' constraint clauses) before consuming anything, to
+        # avoid misreading comparison operators.
+        def _ts_repr_simple(ts):
+            """Produce a readable source-like string for a TypeSystem (for constraint error messages)."""
+            name = ts.custom_typename if ts.custom_typename else (ts.base_type.value if hasattr(ts.base_type, 'value') else str(ts.base_type))
+            if ts.is_pointer:
+                name += '*' * ts.pointer_depth
+            if ts.is_array:
+                name += '[]'
+            return name
         template_params = []
+        _func_constraints = {}  # param_name -> list of TypeSystem (allowed types)
         if self.expect(TokenType.LESS_THAN):
             with self._lookahead():
                 is_template = False
                 self.advance()  # consume '<'
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
+                    # Skip optional constraint clause: ': type (| type)*'
+                    if self.expect(TokenType.COLON):
+                        self.advance()
+                        # Skip tokens until we hit COMMA or GREATER_THAN, tracking
+                        # bracket depth so nested angle brackets don't confuse us.
+                        depth = 0
+                        while not self.expect(TokenType.EOF):
+                            if self.expect(TokenType.LESS_THAN):
+                                depth += 1
+                                self.advance()
+                            elif self.expect(TokenType.GREATER_THAN):
+                                if depth == 0:
+                                    break
+                                depth -= 1
+                                self.advance()
+                            elif self.expect(TokenType.COMMA) and depth == 0:
+                                break
+                            else:
+                                self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
                         if not self.expect(TokenType.IDENTIFIER):
                             break
                         self.advance()
+                        # Skip optional constraint clause for this param too
+                        if self.expect(TokenType.COLON):
+                            self.advance()
+                            depth = 0
+                            while not self.expect(TokenType.EOF):
+                                if self.expect(TokenType.LESS_THAN):
+                                    depth += 1
+                                    self.advance()
+                                elif self.expect(TokenType.GREATER_THAN):
+                                    if depth == 0:
+                                        break
+                                    depth -= 1
+                                    self.advance()
+                                elif self.expect(TokenType.COMMA) and depth == 0:
+                                    break
+                                else:
+                                    self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
 
             if is_template:
                 self.advance()  # consume '<'
-                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                _pname = self.consume(TokenType.IDENTIFIER).value
+                template_params.append(_pname)
+                if self.expect(TokenType.COLON):
+                    self.advance()
+                    _allowed = []
+                    _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                    _ts = self.type_spec()
+                    _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
+                    while self.expect(TokenType.LOGICAL_OR):
+                        self.advance()
+                        _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                        _ts = self.type_spec()
+                        _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
+                    _func_constraints[_pname] = _allowed
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                    _pname = self.consume(TokenType.IDENTIFIER).value
+                    template_params.append(_pname)
+                    if self.expect(TokenType.COLON):
+                        self.advance()
+                        _allowed = []
+                        _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                        _ts = self.type_spec()
+                        _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
+                        while self.expect(TokenType.LOGICAL_OR):
+                            self.advance()
+                            _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                            _ts = self.type_spec()
+                            _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
+                        _func_constraints[_pname] = _allowed
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() can detect and defer
@@ -1807,6 +1881,8 @@ class FluxParser:
                                    is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
                                    is_recursive, is_inline)
             self._template_functions[name] = (template_params, func_def)
+            if _func_constraints:
+                self._template_constraints[name] = _func_constraints
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const,
@@ -2695,6 +2771,13 @@ class FluxParser:
                                 self._template_functions[ns_mangled] = tmpl_entry
                             if ns_scoped not in self._template_functions:
                                 self._template_functions[ns_scoped] = tmpl_entry
+                            # Propagate constraints under the qualified names too
+                            if bare_name in self._template_constraints:
+                                _centry = self._template_constraints[bare_name]
+                                if ns_mangled not in self._template_constraints:
+                                    self._template_constraints[ns_mangled] = _centry
+                                if ns_scoped not in self._template_constraints:
+                                    self._template_constraints[ns_scoped] = _centry
                     elif isinstance(func, list):
                         for f in func:
                             functions.append(f)
@@ -5303,6 +5386,55 @@ class FluxParser:
                 f"type argument(s), got {len(arg_type_names)}"
             )
 
+        # Enforce template constraints if any were declared for this function.
+        # Also check under qualified names (the constraints dict may be keyed by the
+        # bare name or a namespace-qualified variant).
+        _constraint_key = func_name
+        _constraints_map = self._template_constraints.get(_constraint_key)
+        if _constraints_map is None:
+            # Try stripping namespace prefix to find the bare-name entry
+            for _ck, _cv in self._template_constraints.items():
+                if func_name.endswith('__' + _ck) or func_name == _ck:
+                    _constraints_map = _cv
+                    break
+        if _constraints_map:
+            for i, param_name in enumerate(template_params):
+                if param_name not in _constraints_map:
+                    continue
+                allowed_specs = _constraints_map[param_name]
+                # Get the concrete TypeSystem for this param
+                concrete_ts = None
+                if arg_type_specs is not None and i < len(arg_type_specs):
+                    concrete_ts = arg_type_specs[i]
+                if concrete_ts is None:
+                    continue
+                # Check if concrete_ts matches any allowed spec
+                def _ts_matches(concrete, allowed):
+                    """Return True if concrete TypeSystem matches the allowed TypeSystem."""
+                    # Compare structural identity on the fields that define a type
+                    if concrete.base_type != allowed.base_type:
+                        return False
+                    if concrete.is_pointer != allowed.is_pointer:
+                        return False
+                    if concrete.pointer_depth != allowed.pointer_depth:
+                        return False
+                    if concrete.is_array != allowed.is_array:
+                        return False
+                    if concrete.custom_typename != allowed.custom_typename:
+                        return False
+                    # bit_width: 0 means unspecified/default — treat 0 as wildcard
+                    if allowed.bit_width and concrete.bit_width and concrete.bit_width != allowed.bit_width:
+                        return False
+                    return True
+                # allowed_specs is a list of (TypeSystem, source_text) tuples
+                if not any(_ts_matches(concrete_ts, a_ts) for a_ts, _ in allowed_specs):
+                    allowed_strs = ' | '.join(a_src for _, a_src in allowed_specs)
+                    self.error(
+                        f"Template parameter '{param_name}' of '{func_name}' was instantiated "
+                        f"with type '{arg_type_names[i]}', which does not satisfy the constraint "
+                        f"[{allowed_strs}]"
+                    )
+
         # Build mangled name: func__tmpl__T1__T2
         mangled = func_name + '__tmpl__' + '__'.join(arg_type_names)
 
@@ -5520,6 +5652,9 @@ class FluxParser:
                 self.expect(TokenType.LEFT_PAREN)):
             tok = self.current_token
             self.consume(TokenType.LEFT_PAREN)
+            # Advance tok by one column so constraint errors point at the argument,
+            # not the opening paren.
+            tok = type('_Tok', (), {'line': tok.line, 'column': tok.column + 1})()
             args = []
             if not self.expect(TokenType.RIGHT_PAREN):
                 args = self.argument_list()
@@ -5632,6 +5767,10 @@ class FluxParser:
                         DataType.BYTE:   TypeSystem(base_type=DataType.BYTE),
                     }
                     inferred_ts = _dt_map.get(arg.type)
+                elif isinstance(arg, StringLiteral):
+                    # A string literal is a byte* (pointer to i8).
+                    inferred_ts = TypeSystem(base_type=DataType.BYTE, is_signed=True,
+                                            bit_width=8, is_pointer=True, pointer_depth=1)
 
                 if inferred_ts is not None and param_tname is not None:
                     inferred[param_tname] = inferred_ts
@@ -5648,7 +5787,10 @@ class FluxParser:
                 if any(tn in template_param_names for tn in type_names):
                     expr = FunctionCall(expr.name, args).set_location(tok.line, tok.column)
                 else:
+                    _saved_tok = self.current_token
+                    self.current_token = tok
                     mangled = self._resolve_template_call(expr.name, type_names, type_specs)
+                    self.current_token = _saved_tok
                     expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
             else:
                 # Inference incomplete.  If we are inside a template body and every

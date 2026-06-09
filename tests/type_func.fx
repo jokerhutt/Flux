@@ -1,16 +1,35 @@
 #import <standard.fx>;
  
 using standard::io::console;
-
-byte* z = "f";
-
-i"".i"{}":{z}<T>(T x) -> ""
+ 
+byte.my_byte_func<T>(T x) -> byte
 {
-    return _ + i", W{}rld!":{x;};
+    return _ - x;
+};
+
+"".my_str_func() -> ""
+{
+    return _ + ", World!";
+};
+
+struct TestStru
+{
+    int x;
+};
+
+TestStru.my_tstru_func<T>(T y) -> TestStru
+{
+    return {_.x - y};
 };
 
 def main() -> int
 {
-    println(i"Hello":{}.i"{}":{z}(0));
+    byte a = 100;
+    TestStru t = {100};
+    println("Hello".my_str_func());
+    a = a.my_byte_func(3);
+    t = t.my_tstru_func(2);
+    println([a, "\0"]);
+    println([t.x, "\0"]);
     return 0;
 };
