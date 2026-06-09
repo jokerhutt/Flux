@@ -3470,7 +3470,7 @@ class FluxParser:
             self.advance()
 
             # Then an identifier or string literal (the function name)
-            if not self.expect(TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.F_STRING):
+            if not self.expect(TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.F_STRING, TokenType.I_STRING):
                 return False
             self.advance()
 
@@ -3612,10 +3612,12 @@ class FluxParser:
 
         self.consume(TokenType.DOT)
 
-        if self.expect(TokenType.F_STRING):
-            _fname_fsl = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+        if self.expect(TokenType.F_STRING, TokenType.I_STRING):
+            if self.expect(TokenType.F_STRING):
+                _fname_fsl = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+            else:
+                _fname_fsl = self.parse_i_string(self.consume(TokenType.I_STRING).value)
             func_name = self._resolve_fstring_name(_fname_fsl)
-            # If unresolvable at parse time, keep as FStringLiteral for codegen
             if func_name == str(_fname_fsl):
                 func_name = _fname_fsl
         elif self.expect(TokenType.STRING_LITERAL):
@@ -5768,10 +5770,12 @@ class FluxParser:
                 # Member access - could be struct field or object method/member
                 tok = self.current_token
                 self.advance()
-                if self.expect(TokenType.F_STRING):
-                    member = self.parse_f_string(self.consume(TokenType.F_STRING).value)
-                    # Resolve f-string member name at parse time if possible
-                    member = self._resolve_fstring_name(member)
+                if self.expect(TokenType.F_STRING, TokenType.I_STRING):
+                    if self.expect(TokenType.F_STRING):
+                        _mfsl = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+                    else:
+                        _mfsl = self.parse_i_string(self.consume(TokenType.I_STRING).value)
+                    member = self._resolve_fstring_name(_mfsl)
                 elif self.expect(TokenType.STRING_LITERAL):
                     member = self.current_token.value
                     self.advance()

@@ -4,13 +4,13 @@ using standard::io::console;
 
 byte* z = "f";
 
-i"".f"{z}"<T>(T x) -> ""
+i"".i"{}":{z}<T>(T x) -> ""
 {
-    return _ + f", W{x}rld!";
+    return _ + i", W{}rld!":{x;};
 };
 
 def main() -> int
 {
-    println(i"Hello":{}.f"{z}"(0));
+    println(i"Hello":{}.i"{}":{z}(0));
     return 0;
 };
