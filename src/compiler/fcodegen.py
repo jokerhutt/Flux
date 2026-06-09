@@ -3206,14 +3206,17 @@ class CodegenVisitor:
         else:
             obj_ptr = self.visit(node.object, builder, module)
         if not isinstance(obj_ptr.type, ir.PointerType):
-            raise ValueError(f"Method call internal error, expected alloca pointer, got: {obj_ptr.type}")
+            # Could be a non-pointer primitive value — try type func dispatch
+            return self._dispatch_type_func_call(node, obj_ptr, builder, module)
         slot_pointee = obj_ptr.type.pointee
         if isinstance(slot_pointee, ir.IdentifiedStructType):
             this_ptr = obj_ptr
         elif isinstance(slot_pointee, ir.PointerType) and isinstance(slot_pointee.pointee, ir.IdentifiedStructType):
             this_ptr = builder.load(obj_ptr, name=f"{var_name}_load" if var_name else "obj_load")
         else:
-            raise ValueError(f"Cannot determine object type for method call: {obj_ptr.type}")
+            # Not an object/struct pointer — try type func dispatch using the alloca'd value
+            loaded = builder.load(obj_ptr, name="typefunc_recv_load")
+            return self._dispatch_type_func_call(node, loaded, builder, module)
         struct_ty = this_ptr.type.pointee
         obj_type_name = None
         if hasattr(module, "_struct_types"):
@@ -3228,7 +3231,9 @@ class CodegenVisitor:
             arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
             func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
         if func is None:
-            raise NameError(f"Unknown method: {method_func_name}")
+            # No object method found — try type func on the struct type name
+            loaded = builder.load(obj_ptr, name="typefunc_struct_recv_load") if isinstance(slot_pointee, ir.IdentifiedStructType) else this_ptr
+            return self._dispatch_type_func_call(node, loaded, builder, module, override_type_name=obj_type_name)
 
         # Enforce private method access restriction
         if hasattr(module, '_private_methods'):
@@ -3260,7 +3265,151 @@ class CodegenVisitor:
             args.append(arg_val)
         return builder.call(func, args)
 
-    def visit_FunctionPointerCall(self, node, builder, module):
+    @staticmethod
+    def _llvm_type_to_flux_type_name(llvm_type: ir.Type, module) -> Optional[str]:
+        """
+        Derive the canonical Flux type-name string from an LLVM type, for use
+        in type function lookup.  Returns None if the type is not recognised.
+        """
+        _INT_WIDTH_MAP = {
+            1:  'bool',
+            8:  'byte',
+            16: 'int',   # data{16} — not common but map to closest
+            32: 'int',
+            64: 'long',
+        }
+        if isinstance(llvm_type, ir.IntType):
+            # Distinguish bool (i1) from byte (i8) from int (i32) etc.
+            # Check _flux_type_names on module for the original Flux name when available.
+            return _INT_WIDTH_MAP.get(llvm_type.width, f'data{llvm_type.width}')
+        if isinstance(llvm_type, ir.FloatType):
+            return 'float'
+        if isinstance(llvm_type, ir.DoubleType):
+            return 'double'
+        if isinstance(llvm_type, ir.PointerType):
+            # byte* is used for strings
+            if isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
+                return 'string'
+            # Other pointers — try to match named struct
+            if isinstance(llvm_type.pointee, ir.IdentifiedStructType):
+                name = llvm_type.pointee.name
+                if hasattr(module, '_struct_types') and name in module._struct_types:
+                    return name
+        if isinstance(llvm_type, ir.IdentifiedStructType):
+            name = llvm_type.name
+            if hasattr(module, '_struct_types') and name in module._struct_types:
+                return name
+        return None
+
+    def _dispatch_type_func_call(self, node, recv_val: ir.Value, builder, module,
+                                  override_type_name: Optional[str] = None):
+        """
+        Emit a call to a type function.
+
+        ``node`` is a MethodCall node.
+        ``recv_val`` is the already-loaded receiver LLVM value (not a pointer).
+        ``override_type_name`` allows callers to supply the Flux type name when
+        it is already known (e.g. for named struct types).
+        """
+        type_name = override_type_name
+        if type_name is None:
+            type_name = self._llvm_type_to_flux_type_name(recv_val.type, module)
+        if type_name is None:
+            raise NameError(
+                f"No type function '{node.method_name}' found and cannot determine "
+                f"receiver type for method call [{node.source_line}:{node.source_col}]"
+            )
+
+        mangled = f"__typefunc__{type_name}__{node.method_name}"
+        func = module.globals.get(mangled)
+        if func is None and hasattr(module, '_function_overloads') and mangled in module._function_overloads:
+            arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
+            func = TypeResolver.resolve_function(module, mangled, "", arg_vals)
+        if func is None:
+            raise NameError(
+                f"No type function '{node.method_name}' defined for type '{type_name}' "
+                f"[{node.source_line}:{node.source_col}]"
+            )
+
+        args = [recv_val]
+        for i, arg_expr in enumerate(node.arguments):
+            arg_val = self.visit(arg_expr, builder, module)
+            expected_type = func.args[i + 1].type
+            if arg_val.type != expected_type:
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
+                    builder, module, arg_val, expected_type, i, node)
+            args.append(arg_val)
+        return builder.call(func, args)
+
+    def visit_TypeFuncCall(self, node, builder, module):
+        """
+        Emit code for an explicit TypeFuncCall node.
+        Evaluates the receiver, then calls the mangled type function.
+        """
+        recv_val = self.visit(node.receiver, builder, module)
+        # If the receiver came back as a pointer (alloca), load it
+        if isinstance(recv_val.type, ir.PointerType) and not isinstance(recv_val.type.pointee, ir.IdentifiedStructType):
+            recv_val = builder.load(recv_val, name="typefunc_recv")
+
+        mangled = f"__typefunc__{node.type_name}__{node.func_name}"
+        func = module.globals.get(mangled)
+        if func is None and hasattr(module, '_function_overloads') and mangled in module._function_overloads:
+            arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
+            func = TypeResolver.resolve_function(module, mangled, "", arg_vals)
+        if func is None:
+            raise NameError(
+                f"No type function '{node.func_name}' defined for type '{node.type_name}' "
+                f"[{node.source_line}:{node.source_col}]"
+            )
+
+        args = [recv_val]
+        for i, arg_expr in enumerate(node.arguments):
+            arg_val = self.visit(arg_expr, builder, module)
+            expected_type = func.args[i + 1].type
+            if arg_val.type != expected_type:
+                arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
+                    builder, module, arg_val, expected_type, i, node)
+            args.append(arg_val)
+        return builder.call(func, args)
+
+    def visit_TypeFuncDef(self, node, builder, module):
+        """
+        Lower a TypeFuncDef to an LLVM function.
+
+        The function is named  ``__typefunc__<type_name>__<func_name>`` and
+        receives ``_`` as its first (implicit) parameter, whose type is the
+        receiver type.  All other parameters follow in declaration order.
+        """
+        from fast import Parameter, FunctionDef, Block
+
+        receiver_param = Parameter(
+            name='_',
+            type_spec=node.receiver_type_spec,
+        )
+        all_params = [receiver_param] + list(node.parameters)
+
+        mangled_base = f"__typefunc__{node.type_name}__{node.func_name}"
+
+        synthetic = FunctionDef(
+            name=mangled_base,
+            parameters=all_params,
+            return_type=node.return_type,
+            body=node.body,
+            is_const=node.is_const,
+            is_volatile=node.is_volatile,
+            is_prototype=node.is_prototype,
+            no_mangle=False,
+            is_variadic=False,
+            calling_conv=node.calling_conv,
+            is_recursive=False,
+            is_inline=node.is_inline,
+        )
+        synthetic.source_line = node.source_line
+        synthetic.source_col  = node.source_col
+
+        return self.visit_FunctionDef(synthetic, builder, module)
+
+
         from fast import Literal, FunctionCall, FStringLiteral as _FStringLiteral, Stringify as _Stringify
         # If the callee is an f-string literal (e.g. f"{x} {y}"()), resolve its
         # name at compile time and redirect to a plain named FunctionCall —

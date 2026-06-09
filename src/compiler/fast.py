@@ -1553,6 +1553,74 @@ class ContractDef(Statement):
 
 # Program root
 @dataclass
+class TypeFuncDef(ASTNode):
+    """
+    Type function definition.
+
+    Defines a method on a built-in/literal type or a named struct type.
+
+    Syntax:
+        TYPE_OR_LITERAL.func_name(params) -> return_type { body };
+
+    Within the body, ``_`` is an implicit first parameter that holds the
+    receiver value (the left-hand side of the dot).
+
+    ``type_name`` is the canonical string that identifies the receiver type,
+    e.g. ``"byte"``, ``"int"``, ``"string"``, ``"MyStruct"``.
+    ``func_name`` is the unqualified function name.
+    ``parameters`` does NOT include the implicit ``_`` parameter; that is
+    added automatically during lowering.
+    ``return_type`` is the TypeSystem for the declared return type.
+    ``body`` is the Block (may be empty for a prototype).
+    ``receiver_type_spec`` is the TypeSystem of the receiver (used to build
+    the implicit ``_`` parameter).
+    ``is_prototype`` is True when the body is omitted (ends with ``;`` after
+    the return type).
+    """
+    type_name: str
+    func_name: str
+    parameters: List['Parameter']
+    return_type: 'TypeSystem'
+    body: 'Block'
+    receiver_type_spec: 'TypeSystem'
+    is_prototype: bool = False
+    calling_conv: Optional[str] = None
+    is_const: bool = False
+    is_volatile: bool = False
+    is_inline: bool = False
+
+    @staticmethod
+    def mangle(type_name: str, func_name: str) -> str:
+        """Return the internal mangled name for a type function."""
+        return f"__typefunc__{type_name}__{func_name}"
+
+
+@dataclass
+class TypeFuncCall(Expression):
+    """
+    Call to a type function.
+
+    Emitted by the parser when it sees ``expr.func_name(args)`` and the
+    receiver ``expr`` resolves to a built-in / literal / named-struct type
+    that has a matching type function registered.
+
+    ``receiver`` is the expression whose value becomes ``_`` in the body.
+    ``type_name`` is the canonical receiver type name (same key used in
+    TypeFuncDef).
+    ``func_name`` is the unqualified function name.
+    ``arguments`` are the explicit arguments (NOT including the receiver).
+    """
+    receiver: 'Expression'
+    type_name: str
+    func_name: str
+    arguments: List['Expression'] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        s = ', '.join(str(a) for a in self.arguments)
+        return f"({self.receiver}).{self.func_name}({s})"
+
+
+@dataclass
 class Program(ASTNode):
     symbol_table: 'SymbolTable'  # Forward reference since SymbolTable is in ftypesys
     statements: List[Statement] = field(default_factory=list)

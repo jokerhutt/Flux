@@ -5521,7 +5521,10 @@ class StructTypeHandler:
             field_idx = [f[0] for f in source_vtable.fields].index(field_name)
             field_val = builder.extract_value(actual_source, field_idx,
                                               name=f"src_field_{field_name}")
-            # Widen to the full integer
+            # Widen to the full integer — float/double must be bitcast to int first
+            if isinstance(field_val.type, (ir.FloatType, ir.DoubleType)):
+                field_val = builder.bitcast(field_val, ir.IntType(bit_width),
+                                            name=f"src_bits_{field_name}")
             field_wide = builder.zext(field_val, wide_int_type,
                                       name=f"src_wide_{field_name}")
             # Shift so this field's MSB lands at the right position

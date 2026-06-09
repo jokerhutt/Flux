@@ -904,6 +904,8 @@ class FluxParser:
             return self.noreturn_statement()
         elif self.expect(TokenType.LEFT_BRACE):
             return self.block_statement()
+        elif self._is_type_func_def():
+            return self.type_func_def()
         elif self.is_variable_declaration():
             return self.variable_declaration_statement()
         elif self.expect(TokenType.UNSIGNED):
@@ -3354,6 +3356,285 @@ class FluxParser:
                              TokenType.COMMA, TokenType.LEFT_BRACKET, TokenType.FROM,
                              TokenType.ADDRESS_ASSIGN)
 
+    # ------------------------------------------------------------------
+    # Type function definitions
+    # ------------------------------------------------------------------
+
+    # Tokens that may begin the "receiver" of a type function definition.
+    # These are all the primitive type keywords plus literal tokens plus
+    # STRING_LITERAL (for the "" receiver).
+    _TYPE_FUNC_RECEIVER_TOKENS = frozenset({
+        # Type keywords
+        TokenType.BYTE,
+        TokenType.SINT,
+        TokenType.UINT,
+        TokenType.SLONG,
+        TokenType.ULONG,
+        TokenType.FLOAT_KW,
+        TokenType.DOUBLE_KW,
+        TokenType.BOOL_KW,
+        # TRUE/FALSE used as bool null literals
+        TokenType.TRUE,
+        TokenType.FALSE,
+        # Numeric literal null forms (0, 0u, 0l, 0ul, 0f, 0d)
+        TokenType.SINT_LITERAL,
+        TokenType.UINT_LITERAL,
+        TokenType.SLONG_LITERAL,
+        TokenType.ULONG_LITERAL,
+        TokenType.FLOAT,
+        TokenType.DOUBLE,
+        # char type keyword / char literal
+        TokenType.CHAR,
+        # String literal null form ("")
+        TokenType.STRING_LITERAL,
+        # Named struct: IDENTIFIER handled separately in _is_type_func_def
+    })
+
+    def _is_type_func_def(self) -> bool:
+        """
+        Lookahead predicate: returns True when the current position begins a
+        type function definition of the form
+
+            RECEIVER.func_name([params]) -> return_type { body } ;
+            RECEIVER.func_name([params]) -> return_type ;          (prototype)
+
+        where RECEIVER is a type keyword, literal, or named struct identifier.
+        The lookahead never consumes tokens.
+        """
+        with self._lookahead():
+            tok = self.current_token
+
+            # Must start with a recognised receiver token or an IDENTIFIER (struct name)
+            if tok.type in self._TYPE_FUNC_RECEIVER_TOKENS:
+                self.advance()
+            elif tok.type == TokenType.IDENTIFIER:
+                # Could be a named struct type used as receiver.
+                # We'll accept if it is followed by '.' IDENTIFIER '('
+                self.advance()
+            else:
+                return False
+
+            # Must be followed by '.'
+            if not self.expect(TokenType.DOT):
+                return False
+            self.advance()
+
+            # Then an identifier (the function name)
+            if not self.expect(TokenType.IDENTIFIER):
+                return False
+            self.advance()
+
+            # Skip optional template parameter list: <T, U, ...>
+            if self.expect(TokenType.LESS_THAN):
+                self.advance()  # consume '<'
+                depth_t = 1
+                while depth_t > 0 and not self.expect(TokenType.EOF):
+                    if self.expect(TokenType.LESS_THAN):
+                        depth_t += 1
+                    elif self.expect(TokenType.GREATER_THAN):
+                        depth_t -= 1
+                        if depth_t == 0:
+                            break
+                    self.advance()
+                if not self.expect(TokenType.GREATER_THAN):
+                    return False
+                self.advance()  # consume '>'
+
+            # Then '('
+            if not self.expect(TokenType.LEFT_PAREN):
+                return False
+            self.advance()
+
+            # Scan past the parameter list (balanced parentheses)
+            depth = 1
+            while depth > 0 and not self.expect(TokenType.EOF):
+                if self.expect(TokenType.LEFT_PAREN):
+                    depth += 1
+                elif self.expect(TokenType.RIGHT_PAREN):
+                    depth -= 1
+                    if depth == 0:
+                        break
+                self.advance()
+            if not self.expect(TokenType.RIGHT_PAREN):
+                return False
+            self.advance()  # consume ')'
+
+            # Must be followed by '->'
+            return self.expect(TokenType.RETURN_ARROW)
+
+    @staticmethod
+    def _type_func_receiver_type_name(tok: 'Token') -> Optional[str]:
+        """
+        Return the canonical type-name string for a type-function receiver
+        token, or None if the token is not a recognised receiver.
+
+        The type name is used to build the mangled function name
+        ``__typefunc__<type_name>__<func_name>``.
+        """
+        _KW_MAP = {
+            TokenType.BYTE:       'byte',
+            TokenType.SINT:       'int',
+            TokenType.UINT:       'uint',
+            TokenType.SLONG:      'long',
+            TokenType.ULONG:      'ulong',
+            TokenType.FLOAT_KW:   'float',
+            TokenType.DOUBLE_KW:  'double',
+            TokenType.BOOL_KW:    'bool',
+            TokenType.TRUE:       'bool',
+            TokenType.FALSE:      'bool',
+            TokenType.SINT_LITERAL:  'int',
+            TokenType.UINT_LITERAL:  'uint',
+            TokenType.SLONG_LITERAL: 'long',
+            TokenType.ULONG_LITERAL: 'ulong',
+            TokenType.FLOAT:      'float',
+            TokenType.DOUBLE:     'double',
+            TokenType.STRING_LITERAL: 'string',
+        }
+        if tok.type in _KW_MAP:
+            return _KW_MAP[tok.type]
+        if tok.type == TokenType.CHAR:
+            # 'char' keyword has value 'char'; char literals have a single char value
+            if tok.value == 'char':
+                return 'char'
+            # Single-char literal used as null receiver for char type funcs
+            return 'char'
+        # IDENTIFIER: named struct type
+        if tok.type == TokenType.IDENTIFIER:
+            return tok.value
+        return None
+
+    @staticmethod
+    def _type_func_receiver_type_spec(type_name: str) -> 'TypeSystem':
+        """
+        Build a TypeSystem for the implicit ``_`` parameter of a type
+        function, given the canonical type-name string.
+        """
+        _BUILTIN_MAP = {
+            'byte':   DataType.BYTE,
+            'int':    DataType.SINT,
+            'uint':   DataType.UINT,
+            'long':   DataType.SLONG,
+            'ulong':  DataType.ULONG,
+            'float':  DataType.FLOAT,
+            'double': DataType.DOUBLE,
+            'bool':   DataType.BOOL,
+            'char':   DataType.CHAR,
+        }
+        if type_name in _BUILTIN_MAP:
+            return TypeSystem(base_type=_BUILTIN_MAP[type_name])
+        if type_name == 'string':
+            # String is byte* in Flux
+            ts = TypeSystem(base_type=DataType.BYTE, pointer_depth=1)
+            return ts
+        # Named struct/object type
+        return TypeSystem(base_type=DataType.DATA, custom_typename=type_name)
+
+    def type_func_def(self) -> 'TypeFuncDef':
+        """
+        Parse a type function definition.
+
+        Syntax:
+            RECEIVER.func_name([params]) -> return_type { body } ;
+            RECEIVER.func_name([params]) -> return_type ;          (prototype)
+
+        The receiver establishes the type that the function extends.  Within
+        the body ``_`` is an implicit first parameter holding the receiver value.
+        """
+        tok = self.current_token
+
+        # --- Receiver ---
+        recv_tok = self.current_token
+        type_name = self._type_func_receiver_type_name(recv_tok)
+        if type_name is None:
+            self.error("Expected a type keyword, literal, or struct name as type function receiver")
+        self.advance()  # consume receiver token
+
+        self.consume(TokenType.DOT)
+
+        func_name = self.consume(TokenType.IDENTIFIER).value
+
+        # --- Optional template parameter list: byte.my_func<T, U>(...) ---
+        template_params = []
+        if self.expect(TokenType.LESS_THAN):
+            with self._lookahead():
+                is_template = False
+                self.advance()  # consume '<'
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        is_template = True
+            if is_template:
+                self.advance()  # consume '<'
+                template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    template_params.append(self.consume(TokenType.IDENTIFIER).value)
+                self.consume(TokenType.GREATER_THAN)
+
+        # Expose template param names so type_spec() inside params/return type defers them.
+        _prev_active = self._active_template_params
+        self._active_template_params = set(template_params) if template_params else _prev_active
+
+        self.consume(TokenType.LEFT_PAREN)
+        parameters = []
+        if not self.expect(TokenType.RIGHT_PAREN):
+            parameters = self.parameter_list()
+        self.consume(TokenType.RIGHT_PAREN)
+
+        self.consume(TokenType.RETURN_ARROW)
+        return_type = self.type_spec()
+
+        receiver_ts = self._type_func_receiver_type_spec(type_name)
+
+        # Prototype if ';' follows immediately after return type
+        if self.expect(TokenType.SEMICOLON):
+            self.advance()
+            self._active_template_params = _prev_active
+            if template_params:
+                mangled_base = f"__typefunc__{type_name}__{func_name}"
+                receiver_param = Parameter(name='_', type_spec=receiver_ts)
+                synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
+                                           return_type, Block([]), is_prototype=True)
+                self._template_functions[mangled_base] = (template_params, synthetic_fd)
+                return None
+            return TypeFuncDef(
+                type_name=type_name,
+                func_name=func_name,
+                parameters=parameters,
+                return_type=return_type,
+                body=Block([]),
+                receiver_type_spec=receiver_ts,
+                is_prototype=True,
+            ).set_location(tok.line, tok.column)
+
+        body = self.block()
+        self.consume(TokenType.SEMICOLON)
+
+        self._active_template_params = _prev_active
+
+        if template_params:
+            mangled_base = f"__typefunc__{type_name}__{func_name}"
+            receiver_param = Parameter(name='_', type_spec=receiver_ts)
+            synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
+                                       return_type, body)
+            self._template_functions[mangled_base] = (template_params, synthetic_fd)
+            return None
+
+        return TypeFuncDef(
+            type_name=type_name,
+            func_name=func_name,
+            parameters=parameters,
+            return_type=return_type,
+            body=body,
+            receiver_type_spec=receiver_ts,
+            is_prototype=False,
+        ).set_location(tok.line, tok.column)
+
     def variable_declaration_statement(self) -> Union[Statement, List[Statement]]:
         """
         variable_declaration_statement -> variable_declaration ';'
@@ -3454,6 +3735,9 @@ class FluxParser:
                 # Optionally: Type name from source!; suppresses invalidation of source.
                 self.advance()
                 source_expr = self.expression()
+                # If the source is a bare struct literal, supply the type context from the declaration
+                if isinstance(source_expr, StructLiteral) and source_expr.struct_type is None and type_spec.custom_typename:
+                    source_expr.struct_type = type_spec.custom_typename
                 # Create StructRecast with the type from type_spec
                 if type_spec.custom_typename:
                     from fast import StructRecast, Identifier
@@ -5355,8 +5639,49 @@ class FluxParser:
                     
                 elif isinstance(expr, MemberAccess):
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
-                    method_name = f"{{obj_type}}.{expr.member}"
-                    expr = MethodCall(expr.object, expr.member, args).set_location(tok.line, tok.column)
+                    # If tagged as a type function template, infer T and instantiate.
+                    _tfk = getattr(expr, '_typefunc_template_key', None)
+                    if _tfk and _tfk in self._template_functions:
+                        _tmpl_params, _tmpl_fd = self._template_functions[_tfk]
+                        _inferred = {}
+                        _decl_params = _tmpl_fd.parameters[1:]  # skip implicit '_'
+                        for _i, _dp in enumerate(_decl_params):
+                            if _i >= len(args):
+                                break
+                            _pts = _dp.type_spec
+                            _ptn = (_pts.custom_typename if _pts and _pts.custom_typename
+                                    else (str(_pts.base_type) if _pts else None))
+                            if _ptn not in _tmpl_params:
+                                continue
+                            _arg = args[_i]
+                            if isinstance(_arg, Identifier):
+                                _its = self.symbol_table.get_type_spec(_arg.name)
+                                if _its is not None:
+                                    _inferred[_ptn] = _its
+                            elif isinstance(_arg, Literal):
+                                _dtm = {
+                                    DataType.SINT:   TypeSystem(base_type=DataType.SINT,  is_signed=True),
+                                    DataType.UINT:   TypeSystem(base_type=DataType.UINT),
+                                    DataType.SLONG:  TypeSystem(base_type=DataType.SLONG, is_signed=True),
+                                    DataType.ULONG:  TypeSystem(base_type=DataType.ULONG),
+                                    DataType.FLOAT:  TypeSystem(base_type=DataType.FLOAT),
+                                    DataType.DOUBLE: TypeSystem(base_type=DataType.DOUBLE),
+                                    DataType.BYTE:   TypeSystem(base_type=DataType.BYTE),
+                                    DataType.BOOL:   TypeSystem(base_type=DataType.BOOL),
+                                    DataType.CHAR:   TypeSystem(base_type=DataType.CHAR,  is_signed=True),
+                                }
+                                _its = _dtm.get(_arg.type)
+                                if _its is not None:
+                                    _inferred[_ptn] = _its
+                        if len(_inferred) == len(_tmpl_params):
+                            _tnames = [self._type_system_to_mangle_str(_inferred[p]) for p in _tmpl_params]
+                            _tspecs = [_inferred[p] for p in _tmpl_params]
+                            _mname = self._resolve_template_call(_tfk, _tnames, _tspecs)
+                            expr = FunctionCall(_mname, [expr.object] + list(args)).set_location(tok.line, tok.column)
+                        else:
+                            expr = MethodCall(expr.object, expr.member, args).set_location(tok.line, tok.column)
+                    else:
+                        expr = MethodCall(expr.object, expr.member, args).set_location(tok.line, tok.column)
                 else:
                     raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
             elif self.expect(TokenType.DOT):
@@ -5367,10 +5692,22 @@ class FluxParser:
 
                 # Handle templated method call: obj.method<T>(args)
                 # Build the qualified key that was registered in object_def
+                # Also check for type function templates registered under the mangled key.
+                _tfunc_key = None
+                if isinstance(expr, Identifier):
+                    _recv_ts = self.symbol_table.get_type_spec(expr.name)
+                    if _recv_ts is not None:
+                        _recv_tname = (_recv_ts.custom_typename
+                                       if _recv_ts.custom_typename
+                                       else str(_recv_ts.base_type))
+                        _candidate = f"__typefunc__{_recv_tname}__{member}"
+                        if _candidate in self._template_functions:
+                            _tfunc_key = _candidate
                 if self.expect(TokenType.LESS_THAN):
                     obj_name = expr.name if isinstance(expr, Identifier) else None
                     qualified = f"{obj_name}.{member}" if obj_name else None
-                    if qualified and qualified in self._template_functions:
+                    _tmpl_key = qualified if (qualified and qualified in self._template_functions) else _tfunc_key
+                    if _tmpl_key and _tmpl_key in self._template_functions:
                         self.advance()  # consume '<'
                         type_names = []
                         type_specs = []
@@ -5388,13 +5725,23 @@ class FluxParser:
                         if not self.expect(TokenType.RIGHT_PAREN):
                             args = self.argument_list()
                         self.consume(TokenType.RIGHT_PAREN)
-                        mangled = self._resolve_template_call(qualified, type_names, type_specs)
-                        expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
+                        mangled = self._resolve_template_call(_tmpl_key, type_names, type_specs)
+                        expr = FunctionCall(mangled, ([expr] + list(args)) if _tmpl_key and _tmpl_key.startswith('__typefunc__') else args).set_location(tok.line, tok.column)
                         continue
 
-                # Create MemberAccess node - codegen will determine if it's
-                # StructFieldAccess or object member based on type
-                expr = MemberAccess(expr, member).set_location(tok.line, tok.column)
+                # Implicit template type func call: a.my_func(args) where my_func is
+                # a type function template — infer T from argument types at parse time.
+                if _tfunc_key and self.expect(TokenType.LEFT_PAREN):
+                    _prev_expr = expr
+                    expr = MemberAccess(expr, member).set_location(tok.line, tok.column)
+                    # Fall through to the LEFT_PAREN handler which creates MethodCall;
+                    # template instantiation will be triggered there via _tfunc_key.
+                    # Store the key on the MemberAccess so the call handler can find it.
+                    expr._typefunc_template_key = _tfunc_key
+                else:
+                    # Create MemberAccess node - codegen will determine if it's
+                    # StructFieldAccess or object member based on type
+                    expr = MemberAccess(expr, member).set_location(tok.line, tok.column)
             elif self.expect(TokenType.INCREMENT):
                 # Postfix increment - but not if ++ begins a registered custom operator
                 tok = self.current_token
