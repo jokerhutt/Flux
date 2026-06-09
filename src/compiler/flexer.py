@@ -59,7 +59,7 @@ class TokenType(Enum):
     SIZEOF = auto()       # builtin: sizeof()
     TYPEOF = auto()       # builtin: typeof()
     AND = auto()          # keyword: and
-    AS = auto()           # "        
+    AS = auto()           # "        as
     ASM = auto()          # "        asm
     ASM_BLOCK = auto()    # {inline assembly code}
     AUTO = auto()         # "        auto
@@ -240,6 +240,7 @@ class TokenType(Enum):
     SEMICOLON = auto()      # ;
     COMMA = auto()          # ,
     DOT = auto()            # .
+    BACKSLASH = auto()      # \
 
     # Special
     EOF = auto()
@@ -353,7 +354,8 @@ single_char_tokens = {
     ',': TokenType.COMMA,
     '.': TokenType.DOT,
     '~': TokenType.TIE,
-    '$': TokenType.STRINGIFY
+    '$': TokenType.STRINGIFY,
+    '\\': TokenType.BACKSLASH
 }
 
 _TOKEN_TYPE_TO_STR: dict = {
@@ -711,6 +713,21 @@ class FluxLexer:
                 brace_count = 1
                 
                 while self.current_char() and brace_count > 0:
+                    if self.current_char() == '"':
+                        # Closing quote before '}' — unterminated interpolation.
+                        err_line   = self.line
+                        err_col    = self.column  # 1-based, pointing at the '"'
+                        src_lines  = self.source.splitlines()
+                        raw_line   = src_lines[err_line - 1].rstrip('\n') if 1 <= err_line <= len(src_lines) else ''
+                        dash_count = max(0, err_col - 1)
+                        caret_line = '-' * dash_count + '^ } expected here'
+                        suggestion = raw_line[:dash_count] + '}' + raw_line[dash_count:] + '  // try this'
+                        raise ValueError(
+                            f"Parse error: Expected RIGHT_BRACE, got DOUBLE_QUOTE at {err_line}:{err_col}\n"
+                            f"{raw_line}\n"
+                            f"{caret_line}\n"
+                            f"{suggestion}"
+                        )
                     if self.current_char() == '{':
                         brace_count += 1
                     elif self.current_char() == '}':

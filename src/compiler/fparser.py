@@ -110,13 +110,14 @@ _TOKEN_SYMBOL_MAP = {
     TokenType.DOT:                '.',
     TokenType.RETURN_ARROW:       '->',
     TokenType.SCOPE:              '::',
+    TokenType.BACKSLASH:          '\\',
 }
 
 _SYMBOL_MANGLE = {
     '%': 'pct',  '+': 'plus', '-': 'minus', '*': 'mul',
     '/': 'div',  '<': 'lt',   '>': 'gt',    '=': 'eq',
     '&': 'amp',  '|': 'pipe', '^': 'xor',   '!': 'not',
-    '?': 'qst',  '@': 'at',   '~': 'tilde',
+    '?': 'qst',  '@': 'at',   '~': 'tilde', '\\': 'bslash',
 }
 
 class ParseError(Exception):
@@ -238,6 +239,10 @@ class ParseError(Exception):
                 else:
                     suggestion = src_line + fix_sym + '  // try this'
             elif self.expected_type == TokenType.RETURN_ARROW:
+                suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
+            elif (self.expected_type == TokenType.ASSIGN
+                    and self.token is not None
+                    and self.token.type == TokenType.LEFT_BRACE):
                 suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
 
         if suggestion:
@@ -3468,7 +3473,15 @@ class FluxParser:
 
                 # Sugar: if the type is a known object with exactly one __init param,
                 # rewrite `ObjType name = expr` as a constructor call `ObjType name(expr)`
-                if (raw_type_identifier is not None and
+                # Skip the sugar when the RHS is itself a custom operator call or any
+                # FunctionCall whose name is registered as returning this object type —
+                # in that case init_expr already produces the object value directly.
+                _is_custom_op_result = (
+                    isinstance(init_expr, FunctionCall) and
+                    init_expr.name in self._custom_operators.values()
+                )
+                if (not _is_custom_op_result and
+                        raw_type_identifier is not None and
                         raw_type_identifier in self._object_init_params and
                         self._object_init_params[raw_type_identifier] == 1):
                     constructor_name = f"{raw_type_identifier}.__init"
@@ -3483,6 +3496,11 @@ class FluxParser:
                 if (isinstance(init_expr, StringLiteral) and
                         type_spec.is_pointer and type_spec.base_type == DataType.BYTE):
                     self._comptime_strings[name] = init_expr.value
+            elif self.expect(TokenType.LEFT_BRACE):
+                self.error(
+                    f"Expected {TokenType.ASSIGN.name}, got {TokenType.LEFT_BRACE.name}",
+                    expected_type=TokenType.ASSIGN,
+                )
             else:
                 initializers.append(None)
             

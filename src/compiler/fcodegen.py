@@ -2935,7 +2935,32 @@ class CodegenVisitor:
                         _ptrs.append(_alloca)
                     if _ok:
                         return builder.call(_func, _ptrs, name="op_overload_result")
-        func = TypeResolver.resolve_function(module, node.name, current_ns, arg_vals)
+        # Build a parallel arg_vals list for overload resolution that undoes __expr
+        # auto-promotion.  When an argument came from __expr (marked _from_expr_method)
+        # and the source identifier's alloca holds an object struct, substitute a
+        # synthetic value whose type is the struct type so that overload resolution
+        # can match object-typed parameters rather than the __expr return type.
+        from fast import Identifier as _Identifier
+        resolve_arg_vals = list(arg_vals)
+        for _ri, (_rarg, _rval) in enumerate(zip(node.arguments, arg_vals)):
+            if not getattr(_rval, '_from_expr_method', False):
+                continue
+            if not isinstance(_rarg, _Identifier):
+                continue
+            _raw = module.symbol_table.get_llvm_value(_rarg.name)
+            if _raw is None or not isinstance(_raw.type, ir.PointerType):
+                continue
+            _pt = _raw.type.pointee
+            if isinstance(_pt, ir.IdentifiedStructType):
+                _struct_t = _pt
+            elif isinstance(_pt, ir.PointerType) and isinstance(_pt.pointee, ir.IdentifiedStructType):
+                _struct_t = _pt.pointee
+            else:
+                continue
+            # Substitute a typed undef so overload resolution sees %"ObjType"
+            # instead of the __expr return type (e.g. i8*).
+            resolve_arg_vals[_ri] = ir.Constant(_struct_t, ir.Undefined)
+        func = TypeResolver.resolve_function(module, node.name, current_ns, resolve_arg_vals)
         if func is None and hasattr(module, '_struct_types') and node.name in module._struct_types:
             struct_type = module._struct_types[node.name]
             tmp = builder.alloca(struct_type, name=f"{node.name}_tmp")
@@ -2980,7 +3005,7 @@ class CodegenVisitor:
             f"[{node.source_line}:{node.source_col}]")
 
     def _funcall_generate(self, node, builder, module, func, arg_vals):
-        from fast import Literal, FunctionCall
+        from fast import Literal, FunctionCall, Identifier
         is_method_call = '.' in node.name
         parameter_offset = 1 if is_method_call else 0
         processed_args = []
@@ -3038,6 +3063,39 @@ class CodegenVisitor:
                                     f"inside the object to enable expression-context usage. "
                                     f"[{node.source_line}:{node.source_col}]"
                                 )
+                # If this argument was produced by __expr auto-promotion but the
+                # parameter expects the object's own struct type (by value or by
+                # pointer), undo the promotion and pass the struct directly.
+                # This happens when a custom operator or function takes an object
+                # parameter and the object has __expr() defined.
+                if (getattr(arg_val, '_from_expr_method', False) and
+                        isinstance(node.arguments[i], Identifier)):
+                    raw_ptr = module.symbol_table.get_llvm_value(node.arguments[i].name)
+                    if raw_ptr is not None and isinstance(raw_ptr.type, ir.PointerType):
+                        alloca_pointee = raw_ptr.type.pointee
+                        # Determine the struct type the alloca holds
+                        if isinstance(alloca_pointee, ir.IdentifiedStructType):
+                            struct_type = alloca_pointee
+                        elif (isinstance(alloca_pointee, ir.PointerType) and
+                              isinstance(alloca_pointee.pointee, ir.IdentifiedStructType)):
+                            struct_type = alloca_pointee.pointee
+                        else:
+                            struct_type = None
+                        if struct_type is not None:
+                            # Parameter expects struct by value
+                            if expected == struct_type:
+                                if isinstance(alloca_pointee, ir.IdentifiedStructType):
+                                    arg_val = builder.load(raw_ptr, name=f"arg{i}_obj_val")
+                                else:
+                                    inner_ptr = builder.load(raw_ptr, name=f"arg{i}_obj_ptr")
+                                    arg_val = builder.load(inner_ptr, name=f"arg{i}_obj_val")
+                            # Parameter expects pointer to struct
+                            elif (isinstance(expected, ir.PointerType) and
+                                  expected.pointee == struct_type):
+                                if isinstance(alloca_pointee, ir.IdentifiedStructType):
+                                    arg_val = raw_ptr
+                                else:
+                                    arg_val = builder.load(raw_ptr, name=f"arg{i}_obj_ptr")
                 arg_val = FunctionTypeHandler.convert_argument_to_parameter_type(
                     builder, module, arg_val, expected, i, node)
             processed_args.append(arg_val)
