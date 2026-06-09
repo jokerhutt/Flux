@@ -5773,7 +5773,20 @@ class FluxParser:
                                             bit_width=8, is_pointer=True, pointer_depth=1)
 
                 if inferred_ts is not None and param_tname is not None:
-                    inferred[param_tname] = inferred_ts
+                    if param_tname in inferred:
+                        # A previous argument already fixed this param — check consistency.
+                        prev_ts = inferred[param_tname]
+                        prev_name = self._type_system_to_mangle_str(prev_ts)
+                        new_name  = self._type_system_to_mangle_str(inferred_ts)
+                        if prev_name != new_name:
+                            _saved_tok2 = self.current_token
+                            self.current_token = tok
+                            self.error(
+                                f"Template parameter '{param_tname}' of '{expr.name}' refused: argument types conflict ('{prev_name}' vs '{new_name}')"
+                            )
+                            self.current_token = _saved_tok2
+                    else:
+                        inferred[param_tname] = inferred_ts
 
             # Only proceed with implicit instantiation if every template param was resolved
             # to a *concrete* type. If any inferred TypeSystem maps a param back to itself

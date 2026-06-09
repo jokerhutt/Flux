@@ -2,13 +2,13 @@
 
 using standard::io::console;
 
-def foo<T: "" | byte*>(T x) -> T
+def foo<T: "" | byte*>(T x, T y) -> T
 {
-    return f"{x}, World!";
+    return f"{x}, {y}";
 };
 
 def main() -> int
 {
-    print(foo("Hello"));
+    print(foo(5, "World!"));
     return 0;
 };
