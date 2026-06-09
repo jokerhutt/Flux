@@ -1929,7 +1929,11 @@ class FluxParser:
                 self.advance()
                 if self.expect(TokenType.ADDRESS_OF):
                     self.consume(TokenType.ADDRESS_OF, "Expected '@' for function address")
-                    func_name = self.consume(TokenType.IDENTIFIER).value
+                    if self.expect(TokenType.STRING_LITERAL):
+                        func_name = self.current_token.value
+                        self.advance()
+                    else:
+                        func_name = self.consume(TokenType.IDENTIFIER).value
                     expr = Identifier(func_name)
                     # Support member access chains: @item.fn, @obj.member.fn, etc.
                     while self.expect(TokenType.DOT):
@@ -2951,6 +2955,19 @@ class FluxParser:
         else:
             base_type = base_type_result
 
+        # "" as a type means byte* (string).  The sentinel __string__ was set
+        # by base_type; resolve it to pointer_depth=1 with no custom typename.
+        if custom_typename == '__string__':
+            custom_typename = None
+            return TypeSystem(
+                base_type=DataType.BYTE,
+                is_pointer=True,
+                pointer_depth=1,
+                is_const=is_const,
+                is_volatile=is_volatile,
+                storage_class=storage_class,
+            )
+
         # Template struct/object instantiation: MyStruct<int> or MyObj<T, U>
         # After parsing a custom typename, check if '<' follows and it names a template struct or object.
         if custom_typename is not None and self.expect(TokenType.LESS_THAN):
@@ -3227,6 +3244,10 @@ class FluxParser:
             # This allows syntax like: struct* ptr or struct MyStruct
             self.advance()
             return DataType.STRUCT
+        elif self.expect(TokenType.STRING_LITERAL) and self.current_token.value == '':
+            # "" used as a type specifier means the string (byte*) type.
+            self.advance()
+            return [DataType.BYTE, '__string__']
         elif self.expect(TokenType.OBJECT):
             self.error("Objects cannot be used as types in struct members.")
         elif self.expect(TokenType.IDENTIFIER):
@@ -3385,8 +3406,10 @@ class FluxParser:
         TokenType.DOUBLE,
         # char type keyword / char literal
         TokenType.CHAR,
-        # String literal null form ("")
+        # String literal null form ("") or f-string/i-string form (f"", i"")
         TokenType.STRING_LITERAL,
+        TokenType.F_STRING,
+        TokenType.I_STRING,
         # Named struct: IDENTIFIER handled separately in _is_type_func_def
     })
 
@@ -3414,13 +3437,17 @@ class FluxParser:
             else:
                 return False
 
+            # Skip any pointer stars: byte*.func(), int**.func(), etc.
+            while self.expect(TokenType.MULTIPLY):
+                self.advance()
+
             # Must be followed by '.'
             if not self.expect(TokenType.DOT):
                 return False
             self.advance()
 
-            # Then an identifier (the function name)
-            if not self.expect(TokenType.IDENTIFIER):
+            # Then an identifier or string literal (the function name)
+            if not self.expect(TokenType.IDENTIFIER, TokenType.STRING_LITERAL, TokenType.F_STRING):
                 return False
             self.advance()
 
@@ -3489,14 +3516,12 @@ class FluxParser:
             TokenType.FLOAT:      'float',
             TokenType.DOUBLE:     'double',
             TokenType.STRING_LITERAL: 'string',
+            TokenType.F_STRING:      'string',
+            TokenType.I_STRING:      'string',
         }
         if tok.type in _KW_MAP:
             return _KW_MAP[tok.type]
         if tok.type == TokenType.CHAR:
-            # 'char' keyword has value 'char'; char literals have a single char value
-            if tok.value == 'char':
-                return 'char'
-            # Single-char literal used as null receiver for char type funcs
             return 'char'
         # IDENTIFIER: named struct type
         if tok.type == TokenType.IDENTIFIER:
@@ -3504,10 +3529,11 @@ class FluxParser:
         return None
 
     @staticmethod
-    def _type_func_receiver_type_spec(type_name: str) -> 'TypeSystem':
+    def _type_func_receiver_type_spec(type_name: str, pointer_depth: int = 0) -> 'TypeSystem':
         """
         Build a TypeSystem for the implicit ``_`` parameter of a type
-        function, given the canonical type-name string.
+        function, given the canonical type-name string and pointer depth.
+        pointer_depth > 0 means the receiver is a pointer (e.g. byte* receiver).
         """
         _BUILTIN_MAP = {
             'byte':   DataType.BYTE,
@@ -3520,13 +3546,19 @@ class FluxParser:
             'bool':   DataType.BOOL,
             'char':   DataType.CHAR,
         }
+        if type_name == 'string' or (type_name == 'byte' and pointer_depth >= 1):
+            # byte* / string — i8*
+            depth = max(1, pointer_depth)
+            return TypeSystem(base_type=DataType.BYTE, pointer_depth=depth, is_pointer=True)
         if type_name in _BUILTIN_MAP:
+            if pointer_depth > 0:
+                return TypeSystem(base_type=_BUILTIN_MAP[type_name],
+                                  pointer_depth=pointer_depth, is_pointer=True)
             return TypeSystem(base_type=_BUILTIN_MAP[type_name])
-        if type_name == 'string':
-            # String is byte* in Flux
-            ts = TypeSystem(base_type=DataType.BYTE, pointer_depth=1)
-            return ts
         # Named struct/object type
+        if pointer_depth > 0:
+            return TypeSystem(base_type=DataType.DATA, custom_typename=type_name,
+                              pointer_depth=pointer_depth, is_pointer=True)
         return TypeSystem(base_type=DataType.DATA, custom_typename=type_name)
 
     def type_func_def(self) -> 'TypeFuncDef':
@@ -3549,9 +3581,21 @@ class FluxParser:
             self.error("Expected a type keyword, literal, or struct name as type function receiver")
         self.advance()  # consume receiver token
 
+        # Consume any pointer stars after the base type: byte*.func(), int**.func()
+        recv_pointer_depth = 0
+        while self.expect(TokenType.MULTIPLY):
+            recv_pointer_depth += 1
+            self.advance()
+
         self.consume(TokenType.DOT)
 
-        func_name = self.consume(TokenType.IDENTIFIER).value
+        if self.expect(TokenType.F_STRING):
+            func_name = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+        elif self.expect(TokenType.STRING_LITERAL):
+            func_name = self.current_token.value
+            self.advance()
+        else:
+            func_name = self.consume(TokenType.IDENTIFIER).value
 
         # --- Optional template parameter list: byte.my_func<T, U>(...) ---
         template_params = []
@@ -3589,21 +3633,30 @@ class FluxParser:
         self.consume(TokenType.RETURN_ARROW)
         return_type = self.type_spec()
 
-        receiver_ts = self._type_func_receiver_type_spec(type_name)
+        receiver_ts = self._type_func_receiver_type_spec(type_name, recv_pointer_depth)
+
+        # Derive the canonical type name used for mangling.
+        # byte* and "" both map to 'string' so they share the same type func namespace.
+        if recv_pointer_depth > 0 and type_name == 'byte':
+            effective_type_name = 'string'
+        elif recv_pointer_depth > 0:
+            effective_type_name = type_name + '_ptr' * recv_pointer_depth
+        else:
+            effective_type_name = type_name
 
         # Prototype if ';' follows immediately after return type
         if self.expect(TokenType.SEMICOLON):
             self.advance()
             self._active_template_params = _prev_active
             if template_params:
-                mangled_base = f"__typefunc__{type_name}__{func_name}"
+                mangled_base = f"__typefunc__{effective_type_name}__{func_name}"
                 receiver_param = Parameter(name='_', type_spec=receiver_ts)
                 synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
                                            return_type, Block([]), is_prototype=True)
                 self._template_functions[mangled_base] = (template_params, synthetic_fd)
                 return None
             return TypeFuncDef(
-                type_name=type_name,
+                type_name=effective_type_name,
                 func_name=func_name,
                 parameters=parameters,
                 return_type=return_type,
@@ -3618,7 +3671,7 @@ class FluxParser:
         self._active_template_params = _prev_active
 
         if template_params:
-            mangled_base = f"__typefunc__{type_name}__{func_name}"
+            mangled_base = f"__typefunc__{effective_type_name}__{func_name}"
             receiver_param = Parameter(name='_', type_spec=receiver_ts)
             synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
                                        return_type, body)
@@ -3626,7 +3679,7 @@ class FluxParser:
             return None
 
         return TypeFuncDef(
-            type_name=type_name,
+            type_name=effective_type_name,
             func_name=func_name,
             parameters=parameters,
             return_type=return_type,
@@ -5688,7 +5741,13 @@ class FluxParser:
                 # Member access - could be struct field or object method/member
                 tok = self.current_token
                 self.advance()
-                member = self.consume(TokenType.IDENTIFIER).value
+                if self.expect(TokenType.F_STRING):
+                    member = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+                elif self.expect(TokenType.STRING_LITERAL):
+                    member = self.current_token.value
+                    self.advance()
+                else:
+                    member = self.consume(TokenType.IDENTIFIER).value
 
                 # Handle templated method call: obj.method<T>(args)
                 # Build the qualified key that was registered in object_def
@@ -5697,9 +5756,15 @@ class FluxParser:
                 if isinstance(expr, Identifier):
                     _recv_ts = self.symbol_table.get_type_spec(expr.name)
                     if _recv_ts is not None:
-                        _recv_tname = (_recv_ts.custom_typename
-                                       if _recv_ts.custom_typename
-                                       else str(_recv_ts.base_type))
+                        _recv_pdepth = getattr(_recv_ts, 'pointer_depth', 0)
+                        if _recv_ts.custom_typename:
+                            _recv_tname = _recv_ts.custom_typename
+                        elif _recv_pdepth > 0 and getattr(_recv_ts, 'base_type', None) == DataType.BYTE:
+                            _recv_tname = 'string'
+                        elif _recv_pdepth > 0:
+                            _recv_tname = str(_recv_ts.base_type.value) + '_ptr' * _recv_pdepth
+                        else:
+                            _recv_tname = str(_recv_ts.base_type.value)
                         _candidate = f"__typefunc__{_recv_tname}__{member}"
                         if _candidate in self._template_functions:
                             _tfunc_key = _candidate

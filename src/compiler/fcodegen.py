@@ -1206,12 +1206,14 @@ class CodegenVisitor:
             if isinstance(lhs.type, ir.PointerType):
                 pointee = lhs.type.pointee
                 if (not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
-                        and not getattr(lhs, '_from_expr_method', False)):
+                        and not getattr(lhs, '_from_expr_method', False)
+                        and not getattr(lhs, '_is_typefunc_string', False)):
                     lhs = builder.load(lhs, name="auto_deref_lhs")
             if isinstance(rhs.type, ir.PointerType):
                 pointee = rhs.type.pointee
                 if (not isinstance(pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
-                        and not getattr(rhs, '_from_expr_method', False)):
+                        and not getattr(rhs, '_from_expr_method', False)
+                        and not getattr(rhs, '_is_typefunc_string', False)):
                     rhs = builder.load(rhs, name="auto_deref_rhs")
         else:
             lhs_is_int_type = isinstance(lhs.type, ir.IntType)
@@ -1227,17 +1229,29 @@ class CodegenVisitor:
                     ArrayTypeHandler.is_array_or_array_pointer(rhs)):
                 return ArrayTypeHandler.concatenate(builder, module, lhs, rhs, node.operator)
 
-        # i8* + i8* — both sides came from __expr() or are raw byte pointers.
-        # auto_deref was suppressed above for __expr results, so the pointers
-        # are still live here. Route to the standard string concat function.
-        if (node.operator == Operator.ADD and
-                getattr(lhs, '_from_expr_method', False) and
-                getattr(rhs, '_from_expr_method', False)):
-            concat_name = "standard__strings__manip__concat__2__byteE1_ptr1__byteE1_ptr1__ret_byteE1_ptr1"
-            concat_func = module.globals.get(concat_name)
-            if concat_func is not None:
-                return builder.call(concat_func, [lhs, rhs], name="str_concat")
-
+        # i8* + i8* — string concatenation.
+        # Fires when either side is explicitly a string value (_from_expr_method or
+        # _is_typefunc_string — the latter is set on the _ parameter of string type funcs).
+        if node.operator == Operator.ADD:
+            _lhs_str = (getattr(lhs, '_from_expr_method', False) or
+                        getattr(lhs, '_is_typefunc_string', False))
+            _rhs_str = (getattr(rhs, '_from_expr_method', False) or
+                        getattr(rhs, '_is_typefunc_string', False))
+            if _lhs_str or _rhs_str:
+                concat_name = "standard__strings__manip__concat__2__byteE1_ptr1__byteE1_ptr1__ret_byteE1_ptr1"
+                concat_func = module.globals.get(concat_name)
+                if concat_func is not None:
+                    def _to_i8ptr(v, nm):
+                        if (isinstance(v.type, ir.PointerType) and
+                                isinstance(v.type.pointee, ir.ArrayType) and
+                                isinstance(v.type.pointee.element, ir.IntType) and
+                                v.type.pointee.element.width == 8):
+                            zero = ir.Constant(ir.IntType(32), 0)
+                            return builder.gep(v, [zero, zero], name=nm)
+                        return v
+                    lhs = _to_i8ptr(lhs, "lhs_str_decay")
+                    rhs = _to_i8ptr(rhs, "rhs_str_decay")
+                    return builder.call(concat_func, [lhs, rhs], name="str_concat")
         # Pointer arithmetic
         lhs_ptr = isinstance(lhs.type, ir.PointerType)
         rhs_ptr = isinstance(rhs.type, ir.PointerType)
@@ -2632,6 +2646,11 @@ class CodegenVisitor:
                     gvar = module.globals.get(expr.name + _sfx)
                     if gvar is not None:
                         break
+            # Also try the symbol table's llvm_value for variables not yet in module.globals
+            if gvar is None and hasattr(module, 'symbol_table'):
+                _st_entry = module.symbol_table.lookup_any(expr.name)
+                if _st_entry is not None and hasattr(_st_entry, 'llvm_value'):
+                    gvar = _st_entry.llvm_value
             if gvar is not None and hasattr(gvar, 'initializer') and gvar.initializer is not None:
                 init = gvar.initializer
                 if hasattr(init, 'constant'):
@@ -2658,6 +2677,32 @@ class CodegenVisitor:
                             # Decode as latin-1 for the same reason as the bytearray
                             # branch above: 1:1 byte→codepoint, never raises.
                             return raw.rstrip(b'\x00').decode('latin-1')
+                # byte* global (e.g. byte* z = "f") — initializer is a GEP/bitcast
+                # pointing at a string constant global. Parse the IR text of the
+                # initializer to find the referenced @.str.* global name, then
+                # read its byte array initializer.
+                import re as _re
+                _init_ir = str(init)
+                _ref_names = _re.findall(r'@"?([^"\s,)]+)"?', _init_ir)
+                for _rname in _ref_names:
+                    _gv = module.globals.get(_rname)
+                    if _gv is None:
+                        continue
+                    if not (hasattr(_gv, 'initializer') and _gv.initializer is not None):
+                        continue
+                    _bi = _gv.initializer
+                    if hasattr(_bi, 'constant'):
+                        _bv = _bi.constant
+                        if isinstance(_bv, (bytearray, bytes)):
+                            return _bv.rstrip(b'\x00').decode('latin-1')
+                        if isinstance(_bv, list):
+                            _rp = []
+                            for _e in _bv:
+                                _ev = getattr(_e, 'constant', None)
+                                if _ev is None: break
+                                _rp.append(_ev)
+                            else:
+                                return bytes(int(b) & 0xFF for b in _rp).rstrip(b'\x00').decode('latin-1')
         if isinstance(expr, SizeOf) and isinstance(expr.target, TypeSystem):
             llvm_type = TypeSystem.get_llvm_type(expr.target, module, include_array=True)
             if isinstance(llvm_type, ir.IntType):
@@ -3214,9 +3259,21 @@ class CodegenVisitor:
         elif isinstance(slot_pointee, ir.PointerType) and isinstance(slot_pointee.pointee, ir.IdentifiedStructType):
             this_ptr = builder.load(obj_ptr, name=f"{var_name}_load" if var_name else "obj_load")
         else:
-            # Not an object/struct pointer — try type func dispatch using the alloca'd value
-            loaded = builder.load(obj_ptr, name="typefunc_recv_load")
-            return self._dispatch_type_func_call(node, loaded, builder, module)
+            # Not an object/struct pointer — try type func dispatch.
+            # If the receiver was a variable (Identifier), obj_ptr is an alloca so load once.
+            # If it was a literal or expression, obj_ptr is already the value — don't load.
+            if var_name is not None:
+                recv = builder.load(obj_ptr, name="typefunc_recv_load")
+            else:
+                recv = obj_ptr
+            # Decay [N x i8]* to i8* so string literals are recognised as 'string'
+            if (isinstance(recv.type, ir.PointerType) and
+                    isinstance(recv.type.pointee, ir.ArrayType) and
+                    isinstance(recv.type.pointee.element, ir.IntType) and
+                    recv.type.pointee.element.width == 8):
+                zero = ir.Constant(ir.IntType(32), 0)
+                recv = builder.gep(recv, [zero, zero], name="typefunc_str_decay")
+            return self._dispatch_type_func_call(node, recv, builder, module)
         struct_ty = this_ptr.type.pointee
         obj_type_name = None
         if hasattr(module, "_struct_types"):
@@ -3320,7 +3377,24 @@ class CodegenVisitor:
                 f"receiver type for method call [{node.source_line}:{node.source_col}]"
             )
 
-        mangled = f"__typefunc__{type_name}__{node.method_name}"
+        # Resolve f-string method names at compile time
+        from fast import FStringLiteral as _FSL
+        method_name = node.method_name
+        if isinstance(method_name, _FSL):
+            parts = []
+            for part in method_name.parts:
+                if isinstance(part, str):
+                    clean = part[2:] if part.startswith('f"') else part
+                    clean = clean[:-1] if clean.endswith('"') else clean
+                    parts.append(clean)
+                else:
+                    try:
+                        parts.append(str(self._fstring_eval_ct(part, method_name, builder, module)))
+                    except (ValueError, NotImplementedError) as e:
+                        raise ValueError(f"f-string type function call name cannot be evaluated at compile time: {e}") from e
+            method_name = ''.join(parts)
+
+        mangled = f"__typefunc__{type_name}__{method_name}"
         func = module.globals.get(mangled)
         if func is None and hasattr(module, '_function_overloads') and mangled in module._function_overloads:
             arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
@@ -3347,9 +3421,6 @@ class CodegenVisitor:
         Evaluates the receiver, then calls the mangled type function.
         """
         recv_val = self.visit(node.receiver, builder, module)
-        # If the receiver came back as a pointer (alloca), load it
-        if isinstance(recv_val.type, ir.PointerType) and not isinstance(recv_val.type.pointee, ir.IdentifiedStructType):
-            recv_val = builder.load(recv_val, name="typefunc_recv")
 
         mangled = f"__typefunc__{node.type_name}__{node.func_name}"
         func = module.globals.get(mangled)
@@ -3380,7 +3451,24 @@ class CodegenVisitor:
         receives ``_`` as its first (implicit) parameter, whose type is the
         receiver type.  All other parameters follow in declaration order.
         """
-        from fast import Parameter, FunctionDef, Block
+        from fast import Parameter, FunctionDef, Block, FStringLiteral as _FSL
+        # Resolve f-string func names at compile time, same as visit_FunctionDef.
+        if isinstance(node.func_name, _FSL):
+            parts = []
+            for part in node.func_name.parts:
+                if isinstance(part, str):
+                    clean = part[2:] if part.startswith('f"') else part
+                    clean = clean[:-1] if clean.endswith('"') else clean
+                    parts.append(clean)
+                else:
+                    try:
+                        parts.append(str(self._fstring_eval_ct(part, node.func_name, builder, module)))
+                    except (ValueError, NotImplementedError) as e:
+                        raise ValueError(
+                            f"f-string type function name cannot be evaluated at compile time "
+                            f"[{node.source_line}:{node.source_col}]: {e}"
+                        ) from e
+            node.func_name = ''.join(parts)
 
         receiver_param = Parameter(
             name='_',
@@ -5447,6 +5535,12 @@ class CodegenVisitor:
             if param_type_spec is not None:
                 alloca._flux_type_spec = param_type_spec
             param_with_metadata = TypeSystem.attach_type_metadata(param, type_spec=param_type_spec)
+            # Tag the _ parameter of string type funcs so that '+' routes to concat.
+            if (param_name == '_' and param_type_spec is not None and
+                    getattr(param_type_spec, 'pointer_depth', 0) >= 1 and
+                    getattr(param_type_spec, 'base_type', None) == DataType.BYTE):
+                param_with_metadata._is_typefunc_string = True
+                alloca._is_typefunc_string = True
             builder.store(param_with_metadata, alloca)
             module.symbol_table.define(
                 param_name,
@@ -6547,6 +6641,8 @@ class CodegenVisitor:
                 ret_val = builder.load(ptr, name=node.name)
                 if hasattr(ptr, '_flux_type_spec'):
                     ret_val._flux_type_spec = ptr._flux_type_spec
+                if getattr(ptr, '_is_typefunc_string', False):
+                    ret_val._is_typefunc_string = True
                 if IdentifierTypeHandler.is_volatile(node.name, builder):
                     ret_val.volatile = True
                 # Attach type metadata to loaded value from multiple sources

@@ -1644,7 +1644,7 @@ class VariableTypeHandler:
             return VariableTypeHandler._eval_const_expr(initial_value, module)
         
         elif isinstance(initial_value, StringLiteral):
-            return ArrayTypeHandler.create_global_string_initializer(initial_value.value, llvm_type)
+            return ArrayTypeHandler.create_global_string_initializer(initial_value.value, llvm_type, module)
         
         elif isinstance(initial_value, ArrayLiteral):
             # Check if target is an integer (bitfield packing) or an array
@@ -2448,7 +2448,8 @@ class ArrayTypeHandler:
         return slice_ptr
     
     @staticmethod
-    def create_global_string_initializer(string_value: str, llvm_type: ir.Type) -> Optional[ir.Constant]:
+    def create_global_string_initializer(string_value: str, llvm_type: ir.Type,
+                                          module: ir.Module = None) -> Optional[ir.Constant]:
         """Create a compile-time constant initializer for a global string."""
         if isinstance(llvm_type, ir.ArrayType) and isinstance(llvm_type.element, ir.IntType) and llvm_type.element.width == 8:
             
@@ -2461,7 +2462,27 @@ class ArrayTypeHandler:
             while len(char_values) < llvm_type.count:
                 char_values.append(ir.Constant(ir.IntType(8), 0))
             return ir.Constant(llvm_type, char_values)
-        
+
+        # byte* / i8* target — create a string array global and return a GEP to it.
+        if (isinstance(llvm_type, ir.PointerType) and
+                isinstance(llvm_type.pointee, ir.IntType) and
+                llvm_type.pointee.width == 8 and
+                module is not None):
+            string_bytes = (string_value + '\x00').encode('latin-1')
+            str_arr_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+            str_const = ir.Constant(str_arr_ty, bytearray(string_bytes))
+            import hashlib as _hl
+            _gname = f'.str.gsi.{_hl.md5(string_bytes).hexdigest()[:8]}'
+            if _gname not in module.globals:
+                _gv = ir.GlobalVariable(module, str_arr_ty, name=_gname)
+                _gv.linkage = 'internal'
+                _gv.global_constant = True
+                _gv.initializer = str_const
+            else:
+                _gv = module.globals[_gname]
+            zero = ir.Constant(ir.IntType(32), 0)
+            return _gv.gep([zero, zero])
+
         return None
 
     @staticmethod
