@@ -265,6 +265,8 @@ class FluxParser:
         self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
         self._template_constraints = {}  # name -> {param_name -> [allowed_type_spec_strings]}
         self._template_relations = {}   # name -> [(lhs_names, compat: bool, rhs_names)]
+        self._template_defaults = {}    # name -> {param_name -> TypeSystem}
+        self._template_no_default = {}  # name -> set of param_names that must be supplied
         self._emitted_template_instances = set()  # mangled names already instantiated
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
         self._template_structs = {}               # name -> (param_names, StructDef AST)
@@ -1569,12 +1571,19 @@ class FluxParser:
                 name += '[]'
             return name
         template_params = []
-        _func_constraints = {}  # param_name -> list of TypeSystem (allowed types)
+        _func_constraints = {}  # param_name -> list of (TypeSystem, source_text)
         _func_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
+        _func_defaults = {}     # param_name -> TypeSystem (the default type)
+        _func_no_default = set()  # param_names marked <!+
         if self.expect(TokenType.LESS_THAN):
             with self._lookahead():
                 is_template = False
                 self.advance()  # consume '<'
+                # Accept optional <!+ prefix on first entry
+                if self.expect(TokenType.NOT):
+                    self.advance()
+                    if self.expect(TokenType.PLUS):
+                        self.advance()
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
                     # Skip optional constraint clause: ': type (| type)*'
@@ -1623,6 +1632,11 @@ class FluxParser:
                                             self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
+                        # Accept optional <!+ prefix on subsequent entries
+                        if self.expect(TokenType.NOT):
+                            self.advance()
+                            if self.expect(TokenType.PLUS):
+                                self.advance()
                         if not self.expect(TokenType.IDENTIFIER):
                             break
                         self.advance()
@@ -1678,24 +1692,66 @@ class FluxParser:
                         self.advance()
                         names.append(self.consume(TokenType.IDENTIFIER).value)
                     return names
-                # Parse first entry: param decl or relation
-                _first_id = self.consume(TokenType.IDENTIFIER).value
-                if self.expect(TokenType.COLON):
-                    # Type constraint
-                    template_params.append(_first_id)
-                    self.advance()
-                    _allowed = []
-                    _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
-                    _ts = self.type_spec()
-                    _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
-                    while self.expect(TokenType.LOGICAL_OR):
+                # Helper: parse a param entry with optional <!+ prefix and constraint with optional + default
+                def _parse_param_entry(param_name):
+                    if self.expect(TokenType.COLON):
+                        template_params.append(param_name)
                         self.advance()
+                        _allowed = []
+                        _default_ts = None
+                        _saw_default = False
+                        _default_tok = None
+                        # parse first alternative
+                        _is_default = self.expect(TokenType.PLUS)
+                        if _is_default:
+                            _default_tok = self.current_token
+                            self.advance()
+                            _saw_default = True
                         _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
                         _ts = self.type_spec()
                         _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
-                    _func_constraints[_first_id] = _allowed
-                elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
-                    # Relation entry: lhs_list ~ rhs_list  or  lhs_list !~ rhs_list
+                        if _is_default:
+                            _default_ts = _ts
+                        while self.expect(TokenType.LOGICAL_OR):
+                            self.advance()
+                            _is_default = self.expect(TokenType.PLUS)
+                            if _is_default:
+                                if _default_tok is None:
+                                    _default_tok = self.current_token
+                                self.advance()
+                                _saw_default = True
+                            _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                            _ts = self.type_spec()
+                            _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
+                            if _is_default:
+                                _default_ts = _ts
+                        _func_constraints[param_name] = _allowed
+                        if _saw_default:
+                            if param_name in _func_no_default:
+                                _saved_err_tok = self.current_token
+                                if _default_tok is not None:
+                                    self.current_token = _default_tok
+                                self.error(
+                                    f"Template parameter '{param_name}' is marked '!+' (no default) "
+                                    f"but a default type was supplied with '+'"
+                                )
+                                self.current_token = _saved_err_tok
+                            _func_defaults[param_name] = _default_ts
+                    else:
+                        template_params.append(param_name)
+                # Parse first entry: optional <!+ prefix, then param decl or relation
+                _no_default_first = False
+                if self.expect(TokenType.NOT):
+                    self.advance()
+                    self.consume(TokenType.PLUS)
+                    _no_default_first = True
+                _first_id = self.consume(TokenType.IDENTIFIER).value
+                if _no_default_first:
+                    _func_no_default.add(_first_id)
+                if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
+                    _parse_param_entry(_first_id)
+                else:
+                    # Relation entry
                     lhs = [_first_id]
                     while self.expect(TokenType.LOGICAL_AND):
                         self.advance()
@@ -1707,25 +1763,19 @@ class FluxParser:
                     self.consume(TokenType.TIE)
                     rhs = _parse_id_list()
                     _func_relations.append((lhs, compat, rhs))
-                else:
-                    template_params.append(_first_id)
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    _next_id = self.consume(TokenType.IDENTIFIER).value
-                    if self.expect(TokenType.COLON):
-                        template_params.append(_next_id)
+                    _no_default_next = False
+                    if self.expect(TokenType.NOT):
                         self.advance()
-                        _allowed = []
-                        _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
-                        _ts = self.type_spec()
-                        _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
-                        while self.expect(TokenType.LOGICAL_OR):
-                            self.advance()
-                            _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
-                            _ts = self.type_spec()
-                            _allowed.append((_ts, _src or _ts_repr_simple(_ts)))
-                        _func_constraints[_next_id] = _allowed
-                    elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        self.consume(TokenType.PLUS)
+                        _no_default_next = True
+                    _next_id = self.consume(TokenType.IDENTIFIER).value
+                    if _no_default_next:
+                        _func_no_default.add(_next_id)
+                    if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
+                        _parse_param_entry(_next_id)
+                    else:
                         lhs = [_next_id]
                         while self.expect(TokenType.LOGICAL_AND):
                             self.advance()
@@ -1737,8 +1787,6 @@ class FluxParser:
                         self.consume(TokenType.TIE)
                         rhs = _parse_id_list()
                         _func_relations.append((lhs, compat, rhs))
-                    else:
-                        template_params.append(_next_id)
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() can detect and defer
@@ -1973,6 +2021,10 @@ class FluxParser:
                 self._template_constraints[name] = _func_constraints
             if _func_relations:
                 self._template_relations[name] = _func_relations
+            if _func_defaults:
+                self._template_defaults[name] = _func_defaults
+            if _func_no_default:
+                self._template_no_default[name] = _func_no_default
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const,
@@ -2875,6 +2927,19 @@ class FluxParser:
                                     self._template_relations[ns_mangled] = _rentry
                                 if ns_scoped not in self._template_relations:
                                     self._template_relations[ns_scoped] = _rentry
+                            # Propagate defaults and no_default under the qualified names too
+                            if bare_name in self._template_defaults:
+                                _dentry = self._template_defaults[bare_name]
+                                if ns_mangled not in self._template_defaults:
+                                    self._template_defaults[ns_mangled] = _dentry
+                                if ns_scoped not in self._template_defaults:
+                                    self._template_defaults[ns_scoped] = _dentry
+                            if bare_name in self._template_no_default:
+                                _ndentry = self._template_no_default[bare_name]
+                                if ns_mangled not in self._template_no_default:
+                                    self._template_no_default[ns_mangled] = _ndentry
+                                if ns_scoped not in self._template_no_default:
+                                    self._template_no_default[ns_scoped] = _ndentry
                     elif isinstance(func, list):
                         for f in func:
                             functions.append(f)
@@ -3827,10 +3892,17 @@ class FluxParser:
         template_params = []
         _typefunc_constraints = {}  # param_name -> list of (TypeSystem, source_text)
         _typefunc_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
+        _typefunc_defaults = {}     # param_name -> TypeSystem (the default type)
+        _typefunc_no_default = set()  # param_names marked <!+
         if self.expect(TokenType.LESS_THAN):
             with self._lookahead():
                 is_template = False
                 self.advance()  # consume '<'
+                # Accept optional <!+ prefix on first entry
+                if self.expect(TokenType.NOT):
+                    self.advance()
+                    if self.expect(TokenType.PLUS):
+                        self.advance()
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
                     # Skip optional constraint clause: ': type (| type)*'
@@ -3876,6 +3948,11 @@ class FluxParser:
                                             self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
+                        # Accept optional <!+ prefix on subsequent entries
+                        if self.expect(TokenType.NOT):
+                            self.advance()
+                            if self.expect(TokenType.PLUS):
+                                self.advance()
                         if not self.expect(TokenType.IDENTIFIER):
                             break
                         self.advance()
@@ -3928,21 +4005,63 @@ class FluxParser:
                         self.advance()
                         names.append(self.consume(TokenType.IDENTIFIER).value)
                     return names
-                _first_id = self.consume(TokenType.IDENTIFIER).value
-                if self.expect(TokenType.COLON):
-                    template_params.append(_first_id)
-                    self.advance()
-                    _allowed = []
-                    _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
-                    _ts = self.type_spec()
-                    _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
-                    while self.expect(TokenType.LOGICAL_OR):
+                def _parse_param_entry_tf(param_name):
+                    if self.expect(TokenType.COLON):
+                        template_params.append(param_name)
                         self.advance()
+                        _allowed = []
+                        _default_ts = None
+                        _saw_default = False
+                        _default_tok = None
+                        _is_default = self.expect(TokenType.PLUS)
+                        if _is_default:
+                            _default_tok = self.current_token
+                            self.advance()
+                            _saw_default = True
                         _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
                         _ts = self.type_spec()
                         _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
-                    _typefunc_constraints[_first_id] = _allowed
-                elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        if _is_default:
+                            _default_ts = _ts
+                        while self.expect(TokenType.LOGICAL_OR):
+                            self.advance()
+                            _is_default = self.expect(TokenType.PLUS)
+                            if _is_default:
+                                if _default_tok is None:
+                                    _default_tok = self.current_token
+                                self.advance()
+                                _saw_default = True
+                            _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
+                            _ts = self.type_spec()
+                            _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
+                            if _is_default:
+                                _default_ts = _ts
+                        _typefunc_constraints[param_name] = _allowed
+                        if _saw_default:
+                            if param_name in _typefunc_no_default:
+                                _saved_err_tok = self.current_token
+                                if _default_tok is not None:
+                                    self.current_token = _default_tok
+                                self.error(
+                                    f"Template parameter '{param_name}' is marked '!+' (no default) "
+                                    f"but a default type was supplied with '+'"
+                                )
+                                self.current_token = _saved_err_tok
+                            _typefunc_defaults[param_name] = _default_ts
+                    else:
+                        template_params.append(param_name)
+                # Parse first entry
+                _no_default_first = False
+                if self.expect(TokenType.NOT):
+                    self.advance()
+                    self.consume(TokenType.PLUS)
+                    _no_default_first = True
+                _first_id = self.consume(TokenType.IDENTIFIER).value
+                if _no_default_first:
+                    _typefunc_no_default.add(_first_id)
+                if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
+                    _parse_param_entry_tf(_first_id)
+                else:
                     lhs = [_first_id]
                     while self.expect(TokenType.LOGICAL_AND):
                         self.advance()
@@ -3954,25 +4073,19 @@ class FluxParser:
                     self.consume(TokenType.TIE)
                     rhs = _parse_id_list_tf()
                     _typefunc_relations.append((lhs, compat, rhs))
-                else:
-                    template_params.append(_first_id)
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    _next_id = self.consume(TokenType.IDENTIFIER).value
-                    if self.expect(TokenType.COLON):
-                        template_params.append(_next_id)
+                    _no_default_next = False
+                    if self.expect(TokenType.NOT):
                         self.advance()
-                        _allowed = []
-                        _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
-                        _ts = self.type_spec()
-                        _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
-                        while self.expect(TokenType.LOGICAL_OR):
-                            self.advance()
-                            _src = '""' if self.expect(TokenType.STRING_LITERAL) else None
-                            _ts = self.type_spec()
-                            _allowed.append((_ts, _src or _ts_repr_simple_tf(_ts)))
-                        _typefunc_constraints[_next_id] = _allowed
-                    elif self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        self.consume(TokenType.PLUS)
+                        _no_default_next = True
+                    _next_id = self.consume(TokenType.IDENTIFIER).value
+                    if _no_default_next:
+                        _typefunc_no_default.add(_next_id)
+                    if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
+                        _parse_param_entry_tf(_next_id)
+                    else:
                         lhs = [_next_id]
                         while self.expect(TokenType.LOGICAL_AND):
                             self.advance()
@@ -3984,8 +4097,6 @@ class FluxParser:
                         self.consume(TokenType.TIE)
                         rhs = _parse_id_list_tf()
                         _typefunc_relations.append((lhs, compat, rhs))
-                    else:
-                        template_params.append(_next_id)
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() inside params/return type defers them.
@@ -4031,6 +4142,10 @@ class FluxParser:
                     self._template_constraints[mangled_base] = _typefunc_constraints
                 if _typefunc_relations:
                     self._template_relations[mangled_base] = _typefunc_relations
+                if _typefunc_defaults:
+                    self._template_defaults[mangled_base] = _typefunc_defaults
+                if _typefunc_no_default:
+                    self._template_no_default[mangled_base] = _typefunc_no_default
                 return None
             return TypeFuncDef(
                 type_name=effective_type_name,
@@ -4057,6 +4172,10 @@ class FluxParser:
                 self._template_constraints[mangled_base] = _typefunc_constraints
             if _typefunc_relations:
                 self._template_relations[mangled_base] = _typefunc_relations
+            if _typefunc_defaults:
+                self._template_defaults[mangled_base] = _typefunc_defaults
+            if _typefunc_no_default:
+                self._template_no_default[mangled_base] = _typefunc_no_default
             return None
 
         return TypeFuncDef(
@@ -6132,6 +6251,22 @@ class FluxParser:
             # to a *concrete* type. If any inferred TypeSystem maps a param back to itself
             # (e.g. inferred["T"] = TypeSystem(custom_typename="T")), the variable was
             # declared inside a template body and its type is still abstract -- skip.
+            # Fill in defaults for any unresolved params before the completeness check.
+            _defaults_map = self._template_defaults.get(expr.name) or {}
+            _no_default_set = self._template_no_default.get(expr.name) or set()
+            for _p in template_param_names:
+                if _p not in inferred and _p in _defaults_map:
+                    inferred[_p] = _defaults_map[_p]
+            # Check <!+ params are resolved
+            for _p in _no_default_set:
+                if _p not in inferred:
+                    _saved_tok3 = self.current_token
+                    self.current_token = tok
+                    self.error(
+                        f"Template parameter '{_p}' of '{expr.name}' has no default "
+                        f"and could not be inferred — it must be supplied explicitly"
+                    )
+                    self.current_token = _saved_tok3
             if len(inferred) == len(template_param_names):
                 type_names = [self._type_system_to_mangle_str(inferred[p]) for p in template_param_names]
                 type_specs = [inferred[p] for p in template_param_names]

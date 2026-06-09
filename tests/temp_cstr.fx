@@ -2,15 +2,15 @@
  
 using standard::io::console;
 
-~byte*.f<T: "", U: "", T ~ U>(T x, U y) -> ""
+byte* z = "f";
+
+i"".i"{}":{z}<!+T: "", !+U: "", T ~ U>(T x, U y) -> ""
 {
-    return _ + f"{x} {y}";
+    return _ + i"{} {}":{x; y;};
 };
 
 def main() -> int
 {
-    ~byte* x = "Hello";
-    byte* y = ~x.f(",", "World!");
-    println(y);
+    println(i"Hello":{}.i"{}":{z}(",", "World!"));
     return 0;
 };
