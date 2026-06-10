@@ -388,8 +388,28 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
     def _is_explicit_override(m):
         return isinstance(m, FunctionDef) and getattr(m, '_is_override', False)
 
+    def _is_no_override(m):
+        return isinstance(m, FunctionDef) and getattr(m, '_no_override', False)
+
     child_override_keys = {sig_key(m) for m in child_methods
                            if _is_explicit_override(m) or _has_body(m)}
+
+    # Build a map of sig_key -> method for no-override enforcement
+    inherited_no_override_keys = {}
+    for candidates in inherited_map.values():
+        for m in candidates:
+            if _is_no_override(m):
+                inherited_no_override_keys[sig_key(m)] = m
+
+    # Error if child tries to win a signature the parent sealed with !+
+    for k in child_override_keys:
+        if k in inherited_no_override_keys:
+            method_name = k[0]
+            sig_str = ', '.join(k[1]) if k[1] else ''
+            error_fn(
+                f"Override error: method '{method_name}({sig_str})' is marked no-override "
+                f"in a parent of '{child_name}'"
+            )
 
     final_inherited = []
     for k, candidates in inherited_map.items():
@@ -2900,7 +2920,12 @@ class FluxParser:
                 
                 while not self.expect(TokenType.RIGHT_BRACE):
                     _is_override = False
-                    if self.expect(TokenType.PLUS) and self.peek().type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
+                    _no_override = False
+                    if self.expect(TokenType.NOT) and self.peek().type == TokenType.PLUS and self.peek(2).type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
+                        _no_override = True
+                        self.advance()  # consume '!'
+                        self.advance()  # consume '+'
+                    elif self.expect(TokenType.PLUS) and self.peek().type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
                         _is_override = True
                         self.advance()  # consume '+'
                     if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
@@ -2922,15 +2947,18 @@ class FluxParser:
                             stub._is_template_method = True
                             stub.is_private = is_private
                             stub._is_override = _is_override
+                            stub._no_override = _no_override
                             methods.append(stub)
                         elif isinstance(method, list):
                             for m in method:
                                 m.is_private = is_private
                                 m._is_override = _is_override
+                                m._no_override = _no_override
                                 methods.append(m)
                         else:
                             method.is_private = is_private
                             method._is_override = _is_override
+                            method._no_override = _no_override
                             methods.append(method)
                     elif self.expect(TokenType.OBJECT):
                         nested_obj_result = self.object_def()
@@ -2971,7 +2999,12 @@ class FluxParser:
             else:
                 # Regular member (defaults to public)
                 _is_override = False
-                if self.expect(TokenType.PLUS) and self.peek().type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
+                _no_override = False
+                if self.expect(TokenType.NOT) and self.peek().type == TokenType.PLUS and self.peek(2).type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
+                    _no_override = True
+                    self.advance()  # consume '!'
+                    self.advance()  # consume '+'
+                elif self.expect(TokenType.PLUS) and self.peek().type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
                     _is_override = True
                     self.advance()  # consume '+'
                 if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
@@ -2992,13 +3025,16 @@ class FluxParser:
                                            Block([]), is_prototype=True)
                         stub._is_template_method = True
                         stub._is_override = _is_override
+                        stub._no_override = _no_override
                         methods.append(stub)
                     elif isinstance(method, list):
                         for m in method:
                             m._is_override = _is_override
+                            m._no_override = _no_override
                         methods.extend(method)
                     else:
                         method._is_override = _is_override
+                        method._no_override = _no_override
                         methods.append(method)
                 elif self.expect(TokenType.OBJECT):
                     nested_obj_result = self.object_def()

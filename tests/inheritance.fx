@@ -9,7 +9,7 @@ object A
     def __expr() -> A*   { return this; };
     def __exit() -> void {};
 
-    def add5() -> void { this.x += 5; };
+    !+def add5() -> void { this.x += 5; };
 };
 
 object B : A
@@ -19,7 +19,7 @@ object B : A
     def __expr() -> A*   { return this; };
     def __exit() -> void {};
 
-    def add5() -> void {};
+    +def add5() -> void {};
 };
 
 def main() -> int
