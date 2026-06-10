@@ -120,138 +120,34 @@ _SYMBOL_MANGLE = {
     '?': 'qst',  '@': 'at',   '~': 'tilde', '\\': 'bslash',
 }
 
-class ParseError(Exception):
-    """Exception raised when parsing fails"""
+# Tokens that can begin a primary expression.  Used by binary-level parsers to
+# detect a spurious token or missing operator mid-expression rather than letting
+# the error bubble up as a misleading "expected ';'" at statement level.
+# LEFT_BRACE is excluded - it legitimately follows expressions in statement contexts.
+# COLON is excluded - it appears in ternary and for-in contexts above expression level.
+_EXPRESSION_START_TOKENS = {
+    TokenType.IDENTIFIER,
+    TokenType.SINT_LITERAL,
+    TokenType.UINT_LITERAL,
+    TokenType.SLONG_LITERAL,
+    TokenType.ULONG_LITERAL,
+    TokenType.FLOAT,
+    TokenType.DOUBLE,
+    TokenType.CHAR,
+    TokenType.STRING_LITERAL,
+    TokenType.F_STRING,
+    TokenType.I_STRING,
+    TokenType.TRUE,
+    TokenType.FALSE,
+    TokenType.VOID,
+    TokenType.THIS,
+    TokenType.NO_INIT,
+    TokenType.LEFT_PAREN,
+    TokenType.LEFT_BRACKET,
+    TokenType.ELLIPSIS,
+}
 
-    # Token types where the missing token belongs at the END of the previous
-    # line, not at the start of wherever the parser noticed it was absent.
-    _END_OF_PREV_LINE_TYPES = {TokenType.SEMICOLON, TokenType.COMMA}
-
-    def __init__(self, message: str, token: Optional[Token] = None,
-                 source_lines: Optional[List[str]] = None,
-                 expected_type=None, prev_token: Optional[Token] = None,
-                 line_map=None, annotation: str = ""):
-        self.message = message
-        self.token = token
-        self.source_lines = source_lines
-        self.expected_type = expected_type  # TokenType or None
-        self.prev_token = prev_token
-        self.line_map = line_map or []
-        self.annotation = annotation
-        super().__init__(self._format())
-
-    def _format(self) -> str:
-        if self.token is None:
-            self.display_line = None
-            self.display_col  = None
-            return self.message
-
-        line_no = self.token.line
-        col    = self.token.column  # 1-based
-
-        if not self.source_lines:
-            self.display_line = line_no
-            self.display_col  = col
-            return f"{self.message} at {line_no}:{col}"
-
-        # For tokens like ';' that should appear at the end of the previous
-        # statement, point to the end of that line instead of the start of the
-        # current (wrong) token - but only when the offending token is actually
-        # on a different line than the previous token.
-        show_line_no = line_no
-        show_col = col
-        if (self.expected_type in self._END_OF_PREV_LINE_TYPES
-                and self.prev_token is not None
-                and self.prev_token.line < line_no
-                and 1 <= self.prev_token.line <= len(self.source_lines)):
-            show_line_no = self.prev_token.line
-            prev_src = self.source_lines[show_line_no - 1].rstrip('\n')
-            show_col = len(prev_src) + 1  # one past the last real character
-
-        # Header now uses the resolved show_line_no/show_col, not the raw token position
-        display_line_no = self.line_map[show_line_no - 1][1] if self.line_map and 1 <= show_line_no <= len(self.line_map) else show_line_no
-        # Store the fully-resolved coordinates so callers (e.g. the LSP server)
-        # can use them directly without re-parsing the formatted message string.
-        self.display_line = display_line_no
-        self.display_col  = show_col
-        header = f"{self.message} at {display_line_no}:{show_col}"
-
-        if not (1 <= show_line_no <= len(self.source_lines)):
-            return header
-
-        raw_line = self.source_lines[show_line_no - 1].rstrip('\n')
-
-        # Expand tabs to 4 spaces and adjust show_col to match the expanded line.
-        # Tabs before the caret shift the visual column, so we must track how many
-        # extra spaces each tab added up to (but not including) the caret position.
-        TAB_WIDTH = 4
-        expanded = ''
-        expanded_col = 1  # visual column of the caret after expansion (1-based)
-        for i, ch in enumerate(raw_line):
-            col_in_raw = i + 1  # 1-based position in the original line
-            if ch == '\t':
-                # How many spaces this tab expands to
-                spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
-                expanded += ' ' * spaces
-                if col_in_raw < show_col:
-                    expanded_col += spaces  # tab counts as `spaces` visual columns
-            else:
-                expanded += ch
-                if col_in_raw < show_col:
-                    expanded_col += 1  # regular character counts as 1 visual column
-
-        src_line = expanded
-        # In the semicolon-redirect case show_col was set to one past the end of
-        # the raw line, so the caret should land after the last visible character
-        # of the *expanded* line rather than using the raw column arithmetic.
-        if show_col > len(raw_line):
-            dash_count = len(src_line)
-        else:
-            dash_count = max(0, expanded_col - 1)
-        hint = ''
-        if self.expected_type is not None:
-            sym = _TOKEN_SYMBOL_MAP.get(self.expected_type)
-            hint = f' {sym} expected here' if sym else f' {self.expected_type.name} expected here'
-        caret_line = '-' * dash_count + '^' + hint
-
-        # Suggestion line: only for cases where the fix is a simple symbol insertion.
-        #   • END_OF_PREV_LINE_TYPES (SEMICOLON, COMMA): append the symbol at the end.
-        #     Special case: if got LEFT_BRACKET, the user wrote C-style `type varname[N]`
-        #     instead of Flux-style `type[N] varname` -- rewrite the suggestion accordingly.
-        #   • RETURN_ARROW: insert '->' at the caret column in the source line.
-        suggestion = ''
-        fix_sym = _TOKEN_SYMBOL_MAP.get(self.expected_type) if self.expected_type is not None else None
-        if fix_sym is not None:
-            if self.expected_type in self._END_OF_PREV_LINE_TYPES:
-                # Detect C-array syntax: expected ';' but got '[', meaning the user
-                # wrote `type varname[N];` instead of `type[N] varname;`
-                if (self.expected_type == TokenType.SEMICOLON
-                        and self.token is not None
-                        and self.token.type == TokenType.LEFT_BRACKET
-                        and self.prev_token is not None):
-                    import re as _re
-                    raw = raw_line.rstrip()
-                    m = _re.match(r'^(\s*)(\S+)\s+(\S+?)(\[\d+\])(;?)$', raw)
-                    if m:
-                        _indent, _typ, _varname, _brackets, _semi = m.groups()
-                        suggestion = f'{_indent}{_typ}{_brackets} {_varname};  // try this'
-                    else:
-                        suggestion = src_line + fix_sym + '  // try this'
-                else:
-                    suggestion = src_line + fix_sym + '  // try this'
-            elif self.expected_type == TokenType.RETURN_ARROW:
-                suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
-            elif (self.expected_type == TokenType.ASSIGN
-                    and self.token is not None
-                    and self.token.type == TokenType.LEFT_BRACE):
-                suggestion = src_line[:dash_count] + fix_sym + ' ' + src_line[dash_count:].lstrip() + '  // try this'
-
-        if suggestion:
-            return f"{header}\n{src_line}\n{caret_line}\n{suggestion}"
-        if self.annotation:
-            return f"{header}\n{src_line}\n{self.annotation}\n{caret_line}"
-        return f"{header}\n{src_line}\n{caret_line}"
-
+from ferrors import FluxParseError, FluxSyntaxError, FluxWarning, ParseError, emit_warning
 
 def _resolve_inheritance(child_name, base_names, child_members, child_methods, parsed_objects, error_fn):
     """
@@ -339,7 +235,7 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
                     f"Inheritance conflict: member '{m.name}' is defined in both "
                     f"'{prev_origin}' and '{origin}', inherited by '{child_name}'"
                 )
-            # Same origin (diamond) — silently skip duplicate
+            # Same origin (diamond) - silently skip duplicate
         else:
             seen_members[m.name] = origin
             dedup_inherited.append(m)
@@ -359,7 +255,7 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
     # 4. Build merged method list
     # ------------------------------------------------------------------ #
     def sig_key(method):
-        """(name, tuple of param type reprs) — mirrors the mangler's key."""
+        """(name, tuple of param type reprs) - mirrors the mangler's key."""
         param_types = tuple(
             repr(p.type_spec) for p in method.parameters if p.name != 'this'
         )
@@ -376,7 +272,7 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
         k = sig_key(m)
         if k not in inherited_map:
             inherited_map[k] = []
-        # Deduplicate by object identity (diamond — same FunctionDef object)
+        # Deduplicate by object identity (diamond - same FunctionDef object)
         if not any(existing is m for existing in inherited_map[k]):
             inherited_map[k].append(m)
 
@@ -635,38 +531,11 @@ class FluxParser:
     
     def error(self, message: str, expected_type=None, prev_token=None, annotation: str = "") -> None:
         """Raise a parse error with current token context"""
-        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token, self._line_map, annotation)
+        raise FluxParseError(message, self.current_token, self._source_lines, expected_type, prev_token, self._line_map, annotation)
 
     def warn(self, message: str) -> None:
         """Emit a non-fatal compiler warning to stderr with source location context."""
-        tok = self.current_token
-        if tok is not None:
-            line_no = tok.line
-            col = tok.column
-            header = f"Warning: {message} at {line_no}:{col}"
-            if self._source_lines and 1 <= line_no <= len(self._source_lines):
-                raw_line = self._source_lines[line_no - 1].rstrip('\n')
-                TAB_WIDTH = 4
-                expanded = ''
-                expanded_col = 1
-                for i, ch in enumerate(raw_line):
-                    col_in_raw = i + 1
-                    if ch == '\t':
-                        spaces = TAB_WIDTH - (len(expanded) % TAB_WIDTH)
-                        expanded += ' ' * spaces
-                        if col_in_raw < col:
-                            expanded_col += spaces
-                    else:
-                        expanded += ch
-                        if col_in_raw < col:
-                            expanded_col += 1
-                dash_count = max(0, expanded_col - 1)
-                caret_line = '-' * dash_count + '^'
-                print(f"{header}\n{expanded}\n{caret_line}", file=sys.stderr)
-            else:
-                print(header, file=sys.stderr)
-        else:
-            print(f"Warning: {message}", file=sys.stderr)
+        emit_warning(message, self.current_token, self._source_lines, self._line_map)
 
     def advance(self) -> Token:
         """Move to the next token"""
@@ -733,7 +602,7 @@ class FluxParser:
             self.consume(TokenType.TIE)
             self.consume(TokenType.ASSIGN)
             return "!~="
-        # BACKTICK branch — !`< !`<= !`> !`>=
+        # BACKTICK branch - !`< !`<= !`> !`>=
         self.consume(TokenType.BACKTICK)
         if self.expect(TokenType.LESS_EQUAL):
             self.advance()
@@ -747,7 +616,7 @@ class FluxParser:
         elif self.expect(TokenType.GREATER_THAN):
             self.advance()
             return "!`>"
-        self.error("Unknown constraint operator after '!`'")
+        self.error("Unknown constraint operator after '!`'", TokenType.GREATER_THAN)
 
     def _skip_relconstraint_op(self) -> None:
         """Advance past the tokens of a relational constraint operator (lookahead use)."""
@@ -766,7 +635,12 @@ class FluxParser:
     def consume(self, expected_type: TokenType, message: str = None) -> Token:
         """Consume a token of the expected type or raise error"""
         if not self.expect(expected_type):
-            msg = message or f"Expected {expected_type.name}, got {self.current_token.type.name if self.current_token else 'EOF'}"
+            from ferrors import _TOKEN_SYMBOL_MAP as _tsm
+            exp_sym = _tsm.get(expected_type, expected_type.name)
+            got_tok = self.current_token
+            got_sym = _tsm.get(got_tok.type, got_tok.type.name) if got_tok else 'EOF'
+            got_val = f" {got_tok.value}" if got_tok and got_tok.value not in (got_sym, '') else ''
+            msg = message or f"Unexpected {got_val.strip() or got_sym}, expected {exp_sym}"
             prev = self.tokens[self.position - 1] if self.position > 0 else None
             self.error(msg, expected_type, prev)
         token = self.current_token
@@ -933,7 +807,7 @@ class FluxParser:
                 op_token_types.append(TokenType.IDENTIFIER)
                 op_token_values.append(self.current_token.value)
             elif self.current_token.type not in _TOKEN_SYMBOL_MAP:
-                self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol")
+                self.error(f"Token '{self.current_token.value}' cannot be part of an operator symbol", TokenType.IDENTIFIER)
             else:
                 op_token_types.append(self.current_token.type)
                 op_token_values.append(None)
@@ -1071,9 +945,8 @@ class FluxParser:
                     statements.extend(stmt)
                 elif stmt:
                     statements.append(stmt)
-            except ParseError as e:
-                error_msg = f"\nParse error: {e}"
-                raise ValueError(error_msg) from e
+            except FluxParseError as e:
+                raise
         # Append template instantiations after all other statements so that
         # namespace functions they depend on are registered before their bodies run.
         if self._template_struct_instances:
@@ -1325,7 +1198,7 @@ class FluxParser:
                     )
                 source_text = self._comptime_strings[var_name]
             else:
-                self.error("~$: expected identifier, string literal, f-string, or i-string after codify operator")
+                self.error("~$: expected identifier, string literal, f-string, or i-string after codify operator", TokenType.IDENTIFIER)
             self.consume(TokenType.SEMICOLON)
             sub_lexer = FluxLexer(source_text)
             sub_tokens = sub_lexer.tokenize()
@@ -1439,7 +1312,7 @@ class FluxParser:
                             self.error("Extern functions must be prototypes (declarations only, no body)")
                         declarations.append(func_def)
                 else:
-                    self.error("Expected function declaration inside extern block")
+                    self.error("Expected function declaration inside extern block", TokenType.DEF)
             
             self.consume(TokenType.RIGHT_BRACE)
             self.consume(TokenType.SEMICOLON)
@@ -1457,7 +1330,7 @@ class FluxParser:
                     self.error("Extern functions must be prototypes (declarations only, no body)")
                 declarations.append(func_def)
         else:
-            self.error("Expected '{' or 'def' after 'extern'")
+            self.error("Expected '{' or 'def' after 'extern'", TokenType.LEFT_BRACE)
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
 
@@ -1499,7 +1372,7 @@ class FluxParser:
                             self.error("'export' requires a full definition, not a prototype")
                         definitions.append(func_def)
                 else:
-                    self.error("Expected function definition inside export block")
+                    self.error("Expected function definition inside export block", TokenType.DEF)
 
             self.consume(TokenType.RIGHT_BRACE)
             self.consume(TokenType.SEMICOLON)
@@ -1518,7 +1391,7 @@ class FluxParser:
                     self.error("'export' requires a full definition, not a prototype")
                 definitions.append(func_def)
         else:
-            self.error("Expected '{' or 'def' after 'export'")
+            self.error("Expected '{' or 'def' after 'export'", TokenType.LEFT_BRACE)
 
         return ExportBlock(definitions).set_location(tok.line, tok.column)
 
@@ -2039,7 +1912,7 @@ class FluxParser:
         elif self.expect(TokenType.DEF):
             self.advance()
         else:
-            self.error("Expected 'def' or calling convention keyword")
+            self.error("Expected 'def' or calling convention keyword", TokenType.DEF)
         
         # Check if this is a function pointer declaration (def{}* or cc{}*)
         if self.expect(TokenType.FUNCTION_POINTER):
@@ -2072,7 +1945,7 @@ class FluxParser:
             tok = self.current_token
             self.advance()
             if not self.expect(TokenType.IDENTIFIER):
-                self.error("Expected identifier after '$' in function name")
+                self.error("Expected identifier after '$' in function name", TokenType.IDENTIFIER)
             str_name = self.current_token.value
             self.advance()
             str_member = None
@@ -2082,12 +1955,12 @@ class FluxParser:
                     str_member = self.current_token.value
                     self.advance()
                 else:
-                    self.error("Expected member name after '.' in stringify function name")
+                    self.error("Expected member name after '.' in stringify function name", TokenType.IDENTIFIER)
             name = Stringify(str_name, str_member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.IDENTIFIER):
             name = self.consume(TokenType.IDENTIFIER).value
         else:
-            self.error("Expected function name (identifier or string literal)")
+            self.error("Expected function name (identifier or string literal)", TokenType.IDENTIFIER)
         
         # Parse optional template parameter list: def name<T, U>(...)
         # Supports optional per-param constraints: def name<T: type1 | type2, U>(...)
@@ -2171,13 +2044,13 @@ class FluxParser:
                         _la_skip_type_constraint_fd()
                     else:
                         # Skip optional '&' IDENTIFIER chain and relation op
-                        # (bare relation — accepted here so real parse can error properly)
+                        # (bare relation - accepted here so real parse can error properly)
                         while self.expect(TokenType.LOGICAL_AND):
                             self.advance()
                             if self.expect(TokenType.IDENTIFIER):
                                 self.advance()
                         if self._is_relconstraint_op() and not self.expect(TokenType.TIE):
-                            # !`< !`<= !`> !`>= — skip op then rhs identifier chain
+                            # !`< !`<= !`> !`>= - skip op then rhs identifier chain
                             self._skip_relconstraint_op()
                             if self.expect(TokenType.IDENTIFIER):
                                 self.advance()
@@ -2307,7 +2180,7 @@ class FluxParser:
                         elif _entry_name in self._constras and not (
                                 self.expect(TokenType.LOGICAL_AND) or
                                 self._is_relconstraint_op()):
-                            # Bare constra name — map template params in order of appearance
+                            # Bare constra name - map template params in order of appearance
                             cs_params, cs_relations = self._constras[_entry_name]
                             # Collect template params seen so far (in declaration order)
                             ordered_tparams = [p for p in template_params]
@@ -2486,7 +2359,7 @@ class FluxParser:
                     tok = self.current_token
                     self.advance()
                     if not self.expect(TokenType.IDENTIFIER):
-                        self.error("Expected identifier after '$' in function name")
+                        self.error("Expected identifier after '$' in function name", TokenType.IDENTIFIER)
                     _sn = self.current_token.value
                     self.advance()
                     _sm = None
@@ -2496,12 +2369,12 @@ class FluxParser:
                             _sm = self.current_token.value
                             self.advance()
                         else:
-                            self.error("Expected member name after '.' in stringify function name")
+                            self.error("Expected member name after '.' in stringify function name", TokenType.IDENTIFIER)
                     proto_name = Stringify(_sn, _sm).set_location(tok.line, tok.column)
                 elif self.expect(TokenType.IDENTIFIER):
                     proto_name = self.consume(TokenType.IDENTIFIER).value
                 else:
-                    self.error("Expected function name (identifier or string literal)")
+                    self.error("Expected function name (identifier or string literal)", TokenType.IDENTIFIER)
 
                 # Optional template params for this prototype: name<T, U>(...)
                 proto_template_params = []
@@ -2549,7 +2422,7 @@ class FluxParser:
             
             self.consume(TokenType.SEMICOLON)
             
-            # Restore active template params — this early return bypasses the normal restore at end of function_def.
+            # Restore active template params - this early return bypasses the normal restore at end of function_def.
             _tmpl_scope_ctx.__exit__(None, None, None)
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
@@ -2904,7 +2777,7 @@ class FluxParser:
             if self.expect(TokenType.COMMA):
                 self.advance()
             elif not self.expect(TokenType.RIGHT_BRACE):
-                self.error("Expected ',' or '}' in enum definition")
+                self.error("Expected ',' or '}' in enum definition", TokenType.COMMA)
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -3228,7 +3101,7 @@ class FluxParser:
                 else:
                     prototypes.append(proto)
             else:
-                self.error(f"Expected 'def' inside trait '{name}'")
+                self.error(f"Expected 'def' inside trait '{name}'", TokenType.DEF)
         self._in_trait -= 1
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -3273,7 +3146,7 @@ class FluxParser:
         # Check for comma-separated prototypes
         names = [name]
         if self.expect(TokenType.COMMA):
-            # Comma-separated prototype list — inheritance not allowed here
+            # Comma-separated prototype list - inheritance not allowed here
             while self.expect(TokenType.COMMA):
                 self.advance()
                 names.append(self.consume(TokenType.IDENTIFIER).value)
@@ -3287,7 +3160,7 @@ class FluxParser:
             base_objects.append(self.consume(TokenType.IDENTIFIER).value)
             while self.expect(TokenType.COMMA):
                 self.advance()
-                # Stop if we hit the body or end — those belong elsewhere
+                # Stop if we hit the body or end - those belong elsewhere
                 if self.expect(TokenType.LEFT_BRACE, TokenType.SEMICOLON):
                     break
                 base_objects.append(self.consume(TokenType.IDENTIFIER).value)
@@ -3739,7 +3612,7 @@ class FluxParser:
                     self.symbol_table.define(var_decl.name, SymbolKind.VARIABLE, var_decl.type_spec)
                 self.consume(TokenType.SEMICOLON)
             else:
-                self.error("Expected function, struct, object, namespace, enum, union, or variable declaration")
+                self.error("Expected function, struct, object, namespace, enum, union, or variable declaration", TokenType.DEF)
         
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
@@ -4136,7 +4009,7 @@ class FluxParser:
             self.advance()
             return [DataType.BYTE, '__string__']
         elif self.expect(TokenType.OBJECT):
-            self.error("Objects cannot be used as types in struct members.")
+            self.error("Objects cannot be used as types in struct members.", TokenType.IDENTIFIER)
         elif self.expect(TokenType.IDENTIFIER):
             # Custom type - return [DataType.DATA, typename]
             # Consume namespace-qualified names: A::B::C
@@ -4151,13 +4024,13 @@ class FluxParser:
                     break
             return [DataType.DATA, custom_typename]
         elif self.expect(TokenType.CODIFY):
-            # ~$varname used as a type — resolve to the string value in _comptime_strings
+            # ~$varname used as a type - resolve to the string value in _comptime_strings
             self.advance()  # consume CODIFY
             _codify_var = self.consume(TokenType.IDENTIFIER).value
             custom_typename = self._comptime_strings.get(_codify_var, _codify_var)
             return [DataType.DATA, custom_typename]
         else:
-            self.error("Expected type specifier")
+            self.error("Expected type specifier", TokenType.IDENTIFIER)
     
     def is_variable_declaration(self) -> bool:
         """
@@ -4468,7 +4341,7 @@ class FluxParser:
             'char':   DataType.CHAR,
         }
         if type_name == 'string' or (type_name == 'byte' and pointer_depth >= 1):
-            # byte* / string — i8*
+            # byte* / string - i8*
             depth = max(1, pointer_depth)
             return TypeSystem(base_type=DataType.BYTE, pointer_depth=depth, is_pointer=True)
         if type_name in _BUILTIN_MAP:
@@ -4504,7 +4377,7 @@ class FluxParser:
         recv_tok = self.current_token
         type_name = self._type_func_receiver_type_name(recv_tok)
         if type_name is None:
-            self.error("Expected a type keyword, literal, or struct name as type function receiver")
+            self.error("Expected a type keyword, literal, or struct name as type function receiver", TokenType.IDENTIFIER)
         self.advance()  # consume receiver token
 
         # Consume any pointer stars after the base type: byte*.func(), int**.func()
@@ -4754,7 +4627,7 @@ class FluxParser:
                         elif not _entry_is_codify and _entry_name in self._constras and not (
                                 self.expect(TokenType.LOGICAL_AND) or
                                 self._is_relconstraint_op()):
-                            # Bare constra name — map template params in order of appearance
+                            # Bare constra name - map template params in order of appearance
                             cs_params, cs_relations = self._constras[_entry_name]
                             ordered_tparams = [p for p in template_params]
                             if len(cs_params) != len(ordered_tparams):
@@ -5087,7 +4960,7 @@ class FluxParser:
                 # Sugar: if the type is a known object with exactly one __init param,
                 # rewrite `ObjType name = expr` as a constructor call `ObjType name(expr)`
                 # Skip the sugar when the RHS is itself a custom operator call or any
-                # FunctionCall whose name is registered as returning this object type —
+                # FunctionCall whose name is registered as returning this object type -
                 # in that case init_expr already produces the object value directly.
                 _is_custom_op_result = (
                     isinstance(init_expr, FunctionCall) and
@@ -5247,7 +5120,7 @@ class FluxParser:
         # Plain anonymous block - no postfix condition.
         # Reject an immediately following block: `{ ... } { ... }` is not valid.
         if self.expect(TokenType.LEFT_BRACE):
-            self.error("Unexpected block after block statement. Did you mean '{ ... } if (cond);'?")
+            self.error("Unexpected block after block statement. Did you mean '{ ... } if (cond);'?", TokenType.LEFT_BRACE)
 
         self.consume(TokenType.SEMICOLON)
         return body
@@ -5485,7 +5358,7 @@ class FluxParser:
             self.advance()
             return DoLoop(body).set_location(tok.line, tok.column)
         else:
-            self.error("Expected 'while' or ';' after do block")
+            self.error("Expected 'while' or ';' after do block", TokenType.SEMICOLON)
     
     def for_statement(self) -> Union[ForLoop, ForInLoop]:
         """
@@ -5601,7 +5474,7 @@ class FluxParser:
             self.consume(TokenType.SEMICOLON)
             value = None
         else:
-            self.error("Expected 'case' or 'default'")
+            self.error("Expected 'case' or 'default'", TokenType.IDENTIFIER)
         return Case(value, body).set_location(tok.line, tok.column)
     
     def try_statement(self) -> TryBlock:
@@ -6129,6 +6002,15 @@ class FluxParser:
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
             self._try_instantiate_template_op(operator.value, expr.left, expr.right)
         
+        # If the next token can start a primary expression but we're not in an
+        # operator position, there's a spurious token or a missing operator here.
+        if (self.current_token is not None
+                and self.current_token.type in _EXPRESSION_START_TOKENS):
+            self.error(
+                f"Unexpected '{self.current_token.value}' in expression"
+                f" - missing operator before this token?"
+            )
+        
         return expr
     
     def multiplicative_expression(self) -> Expression:
@@ -6153,6 +6035,13 @@ class FluxParser:
             right = self.cast_expression()
             expr = BinaryOp(expr, operator, right).set_location(op_tok.line, op_tok.column)
             self._try_instantiate_template_op(operator.value, expr.left, expr.right)
+        
+        if (self.current_token is not None
+                and self.current_token.type in _EXPRESSION_START_TOKENS):
+            self.error(
+                f"Unexpected '{self.current_token.value}' in expression"
+                f" - missing operator before this token?"
+            )
         
         return expr
     
@@ -6374,7 +6263,7 @@ class FluxParser:
             # Deferred template call: FunctionCall whose name is "func<T,U>"
             # or "ObjName<T>.method" constructor/method call patterns.
             if isinstance(obj, FunctionCall) and isinstance(obj.name, str) and '<' in obj.name and '>' in obj.name:
-                # Handle "ObjName<T>.method" — substitute the type arg in the object name.
+                # Handle "ObjName<T>.method" - substitute the type arg in the object name.
                 _gt_pos = obj.name.index('>')
                 if _gt_pos + 1 < len(obj.name) and obj.name[_gt_pos + 1] == '.':
                     _lt = obj.name.index('<')
@@ -6593,7 +6482,7 @@ class FluxParser:
                         return False
                     if concrete.custom_typename != allowed.custom_typename:
                         return False
-                    # bit_width: 0 means unspecified/default — treat 0 as wildcard
+                    # bit_width: 0 means unspecified/default - treat 0 as wildcard
                     if allowed.bit_width and concrete.bit_width and concrete.bit_width != allowed.bit_width:
                         return False
                     return True
@@ -6647,7 +6536,7 @@ class FluxParser:
                 # Both pointer: pointer depth must match
                 if a_ts.is_pointer and a_ts.pointer_depth != b_ts.pointer_depth:
                     return False
-                # Width must match (0 means unresolved/default — treat as wildcard)
+                # Width must match (0 means unresolved/default - treat as wildcard)
                 aw = a_ts.bit_width or 0
                 bw = b_ts.bit_width or 0
                 if aw and bw and aw != bw:
@@ -6735,7 +6624,7 @@ class FluxParser:
             # Tag with the originating namespace so the codegen can restore context
             # when emitting the body (template instances are emitted at top level,
             # outside any namespace visit, so _current_namespace would otherwise be empty).
-            # Find the most-qualified key for this function in the registry —
+            # Find the most-qualified key for this function in the registry -
             # that encodes the namespace the template was defined in.
             _src_ns = ''
             for _key in self._templates.all_of_kind('function'):
@@ -6861,11 +6750,11 @@ class FluxParser:
                                          is_trunc, between, constrained):
                     # Arithmetic BinaryOp: detect implicit lowering context.
                     # When a constrained type participates in arithmetic with a
-                    # narrower type, the result is implicitly narrowed — a lowering
+                    # narrower type, the result is implicitly narrowed - a lowering
                     # context even without an explicit cast node.
                     result_w, max_w = _arithmetic_result_width(node)
                     if not result_w or result_w == max_w:
-                        # No width change — no narrowing / widening
+                        # No width change - no narrowing / widening
                         return False, 0, 0, '?', '?'
                     if is_trunc:
                         # result_w < max_w means the wider operand's value was narrowed
@@ -7250,7 +7139,7 @@ class FluxParser:
 
                 if inferred_ts is not None and param_tname is not None:
                     if param_tname in inferred:
-                        # A previous argument already fixed this param — check consistency.
+                        # A previous argument already fixed this param - check consistency.
                         prev_ts = inferred[param_tname]
                         prev_name = self._type_system_to_mangle_str(prev_ts)
                         new_name  = self._type_system_to_mangle_str(inferred_ts)
@@ -7286,7 +7175,7 @@ class FluxParser:
                     self.current_token = tok
                     self.error(
                         f"Template parameter '{_p}' of '{expr.name}' has no default "
-                        f"and could not be inferred — it must be supplied explicitly"
+                        f"and could not be inferred - it must be supplied explicitly"
                     )
                     self.current_token = _saved_tok3
             if len(inferred) == len(template_param_names):
@@ -7431,7 +7320,7 @@ class FluxParser:
                     else:
                         expr = MethodCall(expr.object, expr.member, args).set_location(tok.line, tok.column)
                 else:
-                    raise SyntaxError(f"Cannot call function on complex expression: {type(expr).__name__}")
+                    self.error(f"Cannot call function on complex expression: {type(expr).__name__}")
             elif self.expect(TokenType.DOT):
                 # Member access - could be struct field or object method/member
                 tok = self.current_token
@@ -7475,7 +7364,7 @@ class FluxParser:
                             if _untied in self._templates:
                                 _tfunc_key = _untied
                 elif isinstance(expr, TieExpression) and isinstance(getattr(expr, 'operand', None), Identifier):
-                    # ~x.member — receiver is a tied variable being moved
+                    # ~x.member - receiver is a tied variable being moved
                     _recv_ts = self.symbol_table.get_type_spec(expr.operand.name)
                     if _recv_ts is not None:
                         _recv_pdepth = getattr(_recv_ts, 'pointer_depth', 0)
@@ -7498,7 +7387,7 @@ class FluxParser:
                             if _untied in self._templates:
                                 _tfunc_key = _untied
                 elif isinstance(expr, (StringLiteral, FStringLiteral)):
-                    # String/f-string/i-string literal receiver — always type 'string'
+                    # String/f-string/i-string literal receiver - always type 'string'
                     _candidate = f"__typefunc__string__{member}"
                     if _candidate in self._templates:
                         _tfunc_key = _candidate
@@ -7529,7 +7418,7 @@ class FluxParser:
                         continue
 
                 # Implicit template type func call: a.my_func(args) where my_func is
-                # a type function template — infer T from argument types at parse time.
+                # a type function template - infer T from argument types at parse time.
                 if _tfunc_key and self.expect(TokenType.LEFT_PAREN):
                     _prev_expr = expr
                     expr = MemberAccess(expr, member).set_location(tok.line, tok.column)
@@ -7587,7 +7476,7 @@ class FluxParser:
                     target_typename = expr.name
                     expr = StructRecast(target_typename, source_expr).set_location(tok.line, tok.column)
                 else:
-                    self.error("Expected struct type name before 'from' keyword")
+                    self.error("Expected struct type name before 'from' keyword", TokenType.IDENTIFIER)
             elif self.expect(TokenType.IF):
                 # If expression: value if (condition) [else alternative]
                 tok = self.current_token
@@ -7865,7 +7754,7 @@ class FluxParser:
             self.advance()  # consume ':'
             self.consume(TokenType.LEFT_PAREN)
             if not self.expect(TokenType.SINT_LITERAL, TokenType.UINT_LITERAL):
-                self.error("Expected integer in placeholder :(N)")
+                self.error("Expected integer in placeholder :(N)", TokenType.SINT_LITERAL)
             index = int(self.current_token.value, 0)
             self.advance()
             self.consume(TokenType.RIGHT_PAREN)
@@ -7895,7 +7784,7 @@ class FluxParser:
             tok = self.current_token
             self.advance()
             if not self.expect(TokenType.IDENTIFIER):
-                raise SyntaxError("Expected identifier after '$'")
+                self.error("Expected identifier after '$'", TokenType.IDENTIFIER)
             name = self.current_token.value
             self.advance()
             member = None
@@ -7905,7 +7794,7 @@ class FluxParser:
                     member = self.current_token.value
                     self.advance()
                 else:
-                    raise SyntaxError("Expected member name after '.' in stringify expression")
+                    self.error("Expected member name after '.' in stringify expression", TokenType.IDENTIFIER)
             return Stringify(name, member).set_location(tok.line, tok.column)
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                          TokenType.CHAR, TokenType.BYTE, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):

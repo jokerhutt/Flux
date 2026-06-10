@@ -18,6 +18,7 @@ from typing import Any, Optional
 from llvmlite import ir
 
 from ftypesys import *
+from ferrors import FluxCodegenError
 
 # ---------------------------------------------------------------------------
 # Calling-convention map
@@ -138,7 +139,7 @@ def _coerce_to_bool(builder: ir.IRBuilder, val: ir.Value) -> ir.Value:
     t = val.type
     # Safety-net: catch any string-literal array/pointer that slipped through.
     if getattr(t, '_is_string_literal', False):
-        raise TypeError(
+        raise FluxCodegenError(
             "A string literal cannot be used as a boolean condition. "
             "Use a pointer variable instead (e.g. `byte* p = \"...\"; if (p) { ... };`).")
     if isinstance(t, ir.IntType):
@@ -180,11 +181,12 @@ def _check_not_string_literal(expr_node, context: str = 'condition', module: ir.
 
     if isinstance(expr_node, (_SL, _FSL)):
         loc = _src_loc_with_source(expr_node, module)
-        raise TypeError(
-            f"String literal cannot be used as a boolean {context} {loc}. "
+        raise FluxCodegenError(
+            f"String literal cannot be used as a boolean {context}. "
             f"A string literal is always a non-null pointer and its truthiness is "
             f"meaningless in Flux. Store it in a pointer variable first: "
-            f"`byte* p = \"...\"; if (p) {{ ... }};`"
+            f"`byte* p = \"...\"; if (p) {{ ... }};`",
+            expr_node, module
         )
 
 
@@ -295,10 +297,9 @@ class CodegenVisitor:
         if hasattr(node, 'codegen'):
             return node.codegen(builder, module)
 
-        raise NotImplementedError(
-            f"\nCodegenVisitor: no visit method for {type(node).__name__} "
-            f"and node has no codegen() [{getattr(node, 'source_line', '?')}:"
-            f"{getattr(node, 'source_col', '?')}]"
+        raise FluxCodegenError(
+            f"CodegenVisitor: no visit method for {type(node).__name__}",
+            node, module
         )
 
     def compile(self, program, module: ir.Module = None) -> ir.Module:
@@ -306,10 +307,10 @@ class CodegenVisitor:
         return self.visit(program, None, module)
 
     def visit_NoInit(self, node, builder, module):
-        raise RuntimeError(
-            f"\nnoinit is a compile-time marker and should not generate code directly. "
-            f"It should only be used as an initializer in variable declarations. "
-            f"[{node.source_line}:{node.source_col}]"
+        raise FluxCodegenError(
+            "noinit is a compile-time marker and should not generate code directly. "
+            "It should only be used as an initializer in variable declarations.",
+            node, module
         )
 
     def visit_ExpressionStatement(self, node, builder, module):
@@ -335,8 +336,8 @@ class CodegenVisitor:
 
     def visit_BreakStatement(self, node, builder, module):
         if not hasattr(builder, 'break_block'):
-            raise SyntaxError(
-                f"'break' outside of loop or switch [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'break' outside of loop or switch", node, module)
         if builder.block.is_terminated:
             return None
         builder.branch(builder.break_block)
@@ -344,8 +345,8 @@ class CodegenVisitor:
 
     def visit_ContinueStatement(self, node, builder, module):
         if not hasattr(builder, 'continue_block'):
-            raise SyntaxError(
-                f"'continue' outside of loop [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'continue' outside of loop", node, module)
         if builder.block.is_terminated:
             return None
         builder.branch(builder.continue_block)
@@ -374,9 +375,8 @@ class CodegenVisitor:
         if builder.block.is_terminated:
             return None
         if not getattr(builder, '_flux_is_recursive_func', False):
-            raise SyntaxError(
-                f"'escape' is only valid inside a <~ recursive function "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'escape' is only valid inside a <~ recursive function ", node, module)
         result = self.visit(node.call, builder, module)
         func = builder.block.function
         ret_type = (func.type.return_type
@@ -403,9 +403,8 @@ class CodegenVisitor:
 
     def visit_GotoStatement(self, node, builder, module):
         if node.target not in builder._flux_label_blocks:
-            raise SyntaxError(
-                f"'goto' to undefined label '{node.target}' "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'goto' to undefined label '{node.target}' ", node, module)
         if builder.block.is_terminated:
             return None
         builder.branch(builder._flux_label_blocks[node.target])
@@ -480,7 +479,7 @@ class CodegenVisitor:
             ref_list = "\n".join(references)
             raise ComptimeError(
                 f"Deprecated namespace '{node.namespace_path}' is still referenced:\n"
-                f"{ref_list} [{node.source_line}:{node.source_col}]"
+                f"{ref_list}"
             )
 
     # typeof() kind constants
@@ -529,9 +528,9 @@ class CodegenVisitor:
             return ir.Constant(ir.IntType(1), 0)
         elif node.type == DataType.DATA:
             if isinstance(node.value, list):
-                raise ValueError(
-                    f"Array literal reached visit_Literal directly — must be handled by "
-                    f"ArrayLiteral or VariableDeclaration [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Array literal reached visit_Literal directly - must be handled by "
+                    f"ArrayLiteral or VariableDeclaration", node, module)
             elif isinstance(node.value, dict):
                 return self._literal_handle_struct(node, builder, module)
             llvm_type = TypeSystem.get_llvm_type(node.type, module, node.value)
@@ -539,22 +538,22 @@ class CodegenVisitor:
                 return ir.Constant(llvm_type, int(node.value) if isinstance(node.value, str) else node.value)
             elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
                 return ir.Constant(llvm_type, float(node.value))
-            raise ValueError(f"Unsupported DATA literal: {node.value} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Unsupported DATA literal: {node.value}", node, module)
         else:
             llvm_type = TypeSystem.get_llvm_type(node.type, module, node.value)
             if isinstance(llvm_type, ir.IntType):
                 return ir.Constant(llvm_type, int(node.value) if isinstance(node.value, str) else node.value)
             elif isinstance(llvm_type, (ir.FloatType, ir.DoubleType)):
                 return ir.Constant(llvm_type, float(node.value))
-            raise ValueError(
-                f"Unsupported literal type: {node.type} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Unsupported literal type: {node.type}", node, module)
 
     def _literal_handle_struct(self, node, builder, module):
         """Handle struct literal initialization."""
         from fast import Literal
         if not isinstance(node.value, dict):
-            raise ValueError(
-                f"Expected dictionary for struct literal [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Expected dictionary for struct literal", node, module)
         struct_type = LiteralTypeHandler.resolve_struct_type(node.value, module)
         if module.symbol_table.is_global_scope():
             field_values = []
@@ -723,8 +722,8 @@ class CodegenVisitor:
     def visit_PointerDeref(self, node, builder, module):
         ptr_val = self.visit(node.pointer, builder, module)
         if not isinstance(ptr_val.type, ir.PointerType):
-            raise ValueError(
-                f"Cannot dereference non-pointer type [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Cannot dereference non-pointer type", node, module)
         return builder.load(ptr_val, name="deref")
 
     def visit_AddressOf(self, node, builder, module):
@@ -773,9 +772,8 @@ class CodegenVisitor:
                 zero_arg = next((o for o in overloads if o['param_count'] == 0), None)
                 if zero_arg:
                     return zero_arg['function']
-                raise ValueError(
-                    f"Ambiguous function reference '@{var_name}': multiple overloads exist. "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Ambiguous function reference '@{var_name}': multiple overloads exist. ", node, module)
             if hasattr(module, '_using_namespaces'):
                 for namespace in module._using_namespaces:
                     mangled_name = namespace.replace('::', '__') + '__' + var_name
@@ -796,8 +794,8 @@ class CodegenVisitor:
                         zero_arg = next((o for o in overloads if o['param_count'] == 0), None)
                         if zero_arg:
                             return zero_arg['function']
-            raise NameError(
-                f"Unknown identifier: {var_name} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Unknown identifier: {var_name}", node, module)
         if isinstance(expr, PointerDeref):
             return self.visit(expr.pointer, builder, module)
         if isinstance(expr, MemberAccess):
@@ -817,9 +815,8 @@ class CodegenVisitor:
                     elif mangled and mangled in module.globals:
                         array_ptr = module.globals[mangled]
                     else:
-                        raise NameError(
-                            f"Unknown array identifier: {var_name} "
-                            f"[{node.source_line}:{node.source_col}]")
+                        raise FluxCodegenError(
+                            f"Unknown array identifier: {var_name} ", node, module)
             elif isinstance(expr.array, MemberAccess):
                 array_ptr = expr.array._get_member_ptr(builder, module)
             else:
@@ -853,8 +850,8 @@ class CodegenVisitor:
             temp = builder.alloca(struct_val.type, name="struct_literal_tmp")
             builder.store(struct_val, temp)
             return temp
-        raise ValueError(
-            f"Cannot take address of {type(expr).__name__} [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Cannot take address of {type(expr).__name__}", node, module)
 
     def visit_Stringify(self, node, builder, module):
         from fast import ComptimeError
@@ -866,37 +863,31 @@ class CodegenVisitor:
                     module.symbol_table.lookup_variable(node.name, current_ns) is None and
                     module.symbol_table.lookup_function(node.name, current_ns) is None):
                 raise ComptimeError(
-                    f"Cannot stringify undefined identifier '{node.name}' "
-                    f"[{node.source_line}:{node.source_col}]")
+                    f"Cannot stringify undefined identifier '{node.name}' ")
             return self._stringify_emit(builder, module, node.name, node)
         if node.member == '_':
             var_entry = module.symbol_table.lookup_variable(node.name, current_ns)
             if var_entry is None:
                 raise ComptimeError(
-                    f"Cannot stringify: '{node.name}' is not a defined variable "
-                    f"[{node.source_line}:{node.source_col}]")
+                    f"Cannot stringify: '{node.name}' is not a defined variable ")
             union_name = var_entry.type_spec.custom_typename if var_entry.type_spec else None
             if (union_name is None or not hasattr(module, '_union_member_info') or
                     union_name not in module._union_member_info):
                 raise ComptimeError(
-                    f"Cannot stringify '._': '{node.name}' is not a tagged union variable "
-                    f"[{node.source_line}:{node.source_col}]")
+                    f"Cannot stringify '._': '{node.name}' is not a tagged union variable ")
             union_info = module._union_member_info[union_name]
             if not union_info.get('is_tagged'):
                 raise ComptimeError(
-                    f"Cannot stringify '._': union '{union_name}' has no tag "
-                    f"[{node.source_line}:{node.source_col}]")
+                    f"Cannot stringify '._': union '{union_name}' has no tag ")
             tag_enum_name = union_info['tag_name']
             if not hasattr(module, '_enum_types') or tag_enum_name not in module._enum_types:
                 raise ComptimeError(
-                    f"Cannot stringify '._': enum '{tag_enum_name}' not found "
-                    f"[{node.source_line}:{node.source_col}]")
+                    f"Cannot stringify '._': enum '{tag_enum_name}' not found ")
             enum_values = module._enum_types[tag_enum_name]
             var_llvm = module.symbol_table.get_llvm_value(node.name)
             if var_llvm is None:
                 raise ComptimeError(
-                    f"Cannot stringify '._': no LLVM value for '{node.name}' "
-                    f"[{node.source_line}:{node.source_col}]")
+                    f"Cannot stringify '._': no LLVM value for '{node.name}' ")
             tag_ptr = builder.gep(
                 var_llvm,
                 [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
@@ -942,9 +933,8 @@ class CodegenVisitor:
         val_type = val.type.pointee if isinstance(val.type, ir.PointerType) else val.type
         align2 = AlignOfTypeHandler.alignment_from_llvm_type(val_type, module)
         if align2 is None:
-            raise ValueError(
-                f"Cannot determine alignment of type: {val_type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Cannot determine alignment of type: {val_type} ", node, module)
         return ir.Constant(ir.IntType(32), align2)
 
     def visit_SizeOf(self, node, builder, module):
@@ -954,9 +944,8 @@ class CodegenVisitor:
         value = self.visit(node.target, builder, module)
         bits = SizeOfTypeHandler.bits_from_llvm_type(value.type, module)
         if bits is None:
-            raise ValueError(
-                f"Cannot determine size of type: {value.type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Cannot determine size of type: {value.type} ", node, module)
         return ir.Constant(ir.IntType(32), bits)
 
     def visit_EndianOf(self, node, builder, module):
@@ -1121,9 +1110,8 @@ class CodegenVisitor:
                 rhs = self.visit(node.right, builder, module)
                 return AssignmentTypeHandler.handle_pointer_deref_assignment(builder, ptr, rhs)
             else:
-                raise ValueError(
-                    f"BinaryOp ASSIGN: unsupported LHS type {type(node.left).__name__} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"BinaryOp ASSIGN: unsupported LHS type {type(node.left, node, module).__name__} ", node, module)
 
         lhs = self.visit(node.left, builder, module)
         rhs = self.visit(node.right, builder, module)
@@ -1138,7 +1126,7 @@ class CodegenVisitor:
                         continue
                     func = overload['function']
                     # Do not re-dispatch to the overload we are currently
-                    # compiling — that produces infinite self-recursion.
+                    # compiling - that produces infinite self-recursion.
                     if func is _current_llvm_func:
                         continue
                     param_types = [p.type for p in func.args]
@@ -1229,9 +1217,9 @@ class CodegenVisitor:
                     ArrayTypeHandler.is_array_or_array_pointer(rhs)):
                 return ArrayTypeHandler.concatenate(builder, module, lhs, rhs, node.operator)
 
-        # i8* + i8* — string concatenation.
+        # i8* + i8* - string concatenation.
         # Fires when either side is explicitly a string value (_from_expr_method or
-        # _is_typefunc_string — the latter is set on the _ parameter of string type funcs).
+        # _is_typefunc_string - the latter is set on the _ parameter of string type funcs).
         if node.operator == Operator.ADD:
             _lhs_str = (getattr(lhs, '_from_expr_method', False) or
                         getattr(lhs, '_is_typefunc_string', False))
@@ -1412,8 +1400,8 @@ class CodegenVisitor:
             unsigned = ctx.is_unsigned(lhs) or ctx.is_unsigned(rhs)
             return TypeSystem.attach_type_metadata(result, DataType.UINT if unsigned else DataType.SINT)
 
-        raise ValueError(
-            f"Unsupported operator: {node.operator} [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Unsupported operator: {node.operator}", node, module)
 
     def visit_UnaryOp(self, node, builder, module):
         from fast import Identifier, AddressOf, MemberAccess
@@ -1492,8 +1480,8 @@ class CodegenVisitor:
                     return ir.Constant(operand_val.type, ~operand_val.constant)
             return builder.not_(operand_val)
 
-        raise ValueError(
-            f"Unsupported unary operator: {node.operator} [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Unsupported unary operator: {node.operator}", node, module)
 
     def _array_access_get_ptr(self, node, builder, module):
         """Return a pointer to the element addressed by an ArrayAccess node,
@@ -1522,9 +1510,8 @@ class CodegenVisitor:
             return builder.gep(array_val, [zero, index_val], inbounds=True, name="inc_gep")
         if isinstance(array_val.type, ir.PointerType):
             return builder.gep(array_val, [index_val], inbounds=True, name="inc_gep")
-        raise ValueError(
-            f"Cannot get element pointer for ++ / -- on type: {array_val.type} "
-            f"[{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Cannot get element pointer for ++ / -- on type: {array_val.type} ", node, module)
 
     def _unary_get_var_ptr(self, name, node, builder, module):
         if (not module.symbol_table.is_global_scope() and
@@ -1537,8 +1524,8 @@ class CodegenVisitor:
             return module.symbol_table.get_llvm_value(mangled)
         if mangled and mangled in module.globals:
             return module.globals[mangled]
-        raise NameError(
-            f"Variable '{name}' not found in any scope [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Variable '{name}' not found in any scope", node, module)
 
     def _unary_increment_address_of(self, node, builder, module):
         base_address = self.visit(node.operand, builder, module)
@@ -1553,9 +1540,8 @@ class CodegenVisitor:
                 offset = ir.Constant(ir.IntType(32), 1 if node.operator == Operator.INCREMENT else -1)
                 return builder.gep(base_address, [offset],
                                    name="inc_addr" if node.operator == Operator.INCREMENT else "dec_addr")
-        raise ValueError(
-            f"Cannot increment/decrement address of non-pointer type: {base_address.type} "
-            f"[{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Cannot increment/decrement address of non-pointer type: {base_address.type} ", node, module)
 
     def visit_CastExpression(self, node, builder, module):
         from fast import Literal, Identifier
@@ -1571,9 +1557,8 @@ class CodegenVisitor:
                 return ir.Constant(target_llvm_type, 0)
             if isinstance(target_llvm_type, (ir.HalfType, ir.FloatType, ir.DoubleType)):
                 return ir.Constant(target_llvm_type, 0.0)
-            raise TypeError(
-                f"cannot cast void-literal to {target_llvm_type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"cannot cast void-literal to {target_llvm_type} ", node, module)
 
         source_val = self.visit(node.expression, builder, module)
         if source_val.type == target_llvm_type:
@@ -1601,9 +1586,8 @@ class CodegenVisitor:
             src_sz = sum(e.width for e in source_val.type.pointee.elements if hasattr(e, 'width'))
             tgt_sz = sum(e.width for e in target_llvm_type.elements if hasattr(e, 'width'))
             if src_sz != tgt_sz:
-                raise ValueError(
-                    f"Cannot cast struct of size {src_sz} to struct of size {tgt_sz} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Cannot cast struct of size {src_sz} to struct of size {tgt_sz} ", node, module)
             ptr = builder.bitcast(source_val, ir.PointerType(target_llvm_type), name="struct_reinterpret")
             return builder.load(ptr, name="reinterpreted_struct")
 
@@ -1612,9 +1596,8 @@ class CodegenVisitor:
             src_sz = sum(e.width for e in source_val.type.elements if hasattr(e, 'width'))
             tgt_sz = sum(e.width for e in target_llvm_type.elements if hasattr(e, 'width'))
             if src_sz != tgt_sz:
-                raise ValueError(
-                    f"Cannot cast struct of size {src_sz} to struct of size {tgt_sz} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Cannot cast struct of size {src_sz} to struct of size {tgt_sz} ", node, module)
             src_ptr = builder.alloca(source_val.type, name="temp_source")
             builder.store(source_val, src_ptr)
             ptr = builder.bitcast(src_ptr, ir.PointerType(target_llvm_type), name="struct_reinterpret")
@@ -1710,7 +1693,7 @@ class CodegenVisitor:
                 builder.store(ir.Constant(target_llvm_type.element, 0), null_ptr)
                 return alloca
             # Source is a bare pointer-to-element (e.g. i8* from an array slice or a
-            # single-element address).  Copy 'count' elements directly — do NOT convert
+            # single-element address).  Copy 'count' elements directly - do NOT convert
             # the pointer value itself to an integer and unpack its bytes, which would
             # produce garbage stack-address bytes instead of the actual data.
             if (isinstance(source_val.type, ir.PointerType) and
@@ -1729,7 +1712,7 @@ class CodegenVisitor:
                 null_ptr = builder.gep(alloca, [zero, null_idx], inbounds=True, name="null_term")
                 builder.store(ir.Constant(target_llvm_type.element, 0), null_ptr)
                 return alloca
-            # Source is a scalar integer — unpack its bytes into a null-terminated array.
+            # Source is a scalar integer - unpack its bytes into a null-terminated array.
             # For byte[N] / char[N] casts of a scalar value (e.g. `(byte[1])word[0]`)
             # we must allocate count+1 slots and write a null terminator so that the
             # result is usable as a C-string by println / %s.  Delegating to
@@ -1769,12 +1752,11 @@ class CodegenVisitor:
                                        name="scalar_null_term")
                 builder.store(ir.Constant(i8, 0), null_ptr)
                 return alloca
-            # General fallback — unpack scalar integer bytes (no null terminator).
+            # General fallback - unpack scalar integer bytes (no null terminator).
             return ArrayTypeHandler.unpack_integer_to_array(builder, module, source_val, target_llvm_type)
         else:
-            raise ValueError(
-                f"Unsupported cast from {source_val.type} to {target_llvm_type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Unsupported cast from {source_val.type} to {target_llvm_type} ", node, module)
 
     def _cast_handle_void(self, node, builder, module):
         from fast import Identifier
@@ -1814,9 +1796,8 @@ class CodegenVisitor:
                 else:
                     builder.store(ir.Constant(gvar.type.pointee, 0), gvar)
             else:
-                raise NameError(
-                    f"Cannot void cast unknown variable: {var_name} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Cannot void cast unknown variable: {var_name} ", node, module)
         else:
             expr_val = self.visit(node.expression, builder, module)
             if isinstance(expr_val.type, ir.PointerType):
@@ -1912,7 +1893,7 @@ class CodegenVisitor:
             elif false_is_ptr and false_val.type.pointee == true_val.type:
                 false_val = _load_branch(false_val, false_end_block, true_val.type)
 
-            # Case 2: both are pointers — array decay and same-struct bitcast
+            # Case 2: both are pointers - array decay and same-struct bitcast
             elif true_is_ptr and false_is_ptr:
                 def _decay(val, end_block):
                     pt = val.type.pointee
@@ -1936,7 +1917,7 @@ class CodegenVisitor:
                         false_val = builder.bitcast(false_val, true_val.type, name='ternary_cast')
                 builder.position_at_start(merge_block)
 
-            # Case 3: scalar pointer vs value (non-struct) — load the pointer side
+            # Case 3: scalar pointer vs value (non-struct) - load the pointer side
             elif true_is_ptr and isinstance(true_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
                 true_val = _load_branch(true_val, true_end_block, true_val.type.pointee)
             elif false_is_ptr and isinstance(false_val.type.pointee, (ir.IntType, ir.FloatType, ir.DoubleType)):
@@ -1964,9 +1945,9 @@ class CodegenVisitor:
                     builder.position_at_start(merge_block)
 
             else:
-                raise TypeError(
+                raise FluxCodegenError(
                     f"Ternary operator branches have incompatible types: "
-                    f"{true_val.type} vs {false_val.type} [{node.source_line}:{node.source_col}]")
+                    f"{true_val.type} vs {false_val.type}", node, module)
 
         phi = builder.phi(true_val.type, name='ternary_result')
         phi.add_incoming(true_val,  true_end_block)
@@ -1980,9 +1961,8 @@ class CodegenVisitor:
         elif isinstance(left_val.type, ir.IntType):
             is_null = builder.icmp_signed('==', left_val, ir.Constant(left_val.type, 0), name='is_zero')
         else:
-            raise TypeError(
-                f"Null coalesce not supported for type: {left_val.type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Null coalesce not supported for type: {left_val.type} ", node, module)
         func = builder.block.function
         right_block = func.append_basic_block('coalesce_right')
         merge_block = func.append_basic_block('coalesce_merge')
@@ -2006,16 +1986,16 @@ class CodegenVisitor:
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
             else:
-                raise TypeError(
+                raise FluxCodegenError(
                     f"Null coalesce operands have incompatible types: "
-                    f"{left_val.type} vs {right_val.type} [{node.source_line}:{node.source_col}]")
+                    f"{left_val.type} vs {right_val.type}", node, module)
         phi = builder.phi(left_val.type, name='coalesce_result')
         phi.add_incoming(left_val,  left_block)
         phi.add_incoming(right_val, right_end_block)
         return phi
 
     def visit_NotNull(self, node, builder, module):
-        # Evaluate the operand unconditionally — no branches needed, this is
+        # Evaluate the operand unconditionally - no branches needed, this is
         # a pure comparison that folds into a single LLVM instruction.
         val = self.visit(node.operand, builder, module)
 
@@ -2030,13 +2010,12 @@ class CodegenVisitor:
             zero = ir.Constant(val.type, 0)
             cmp  = builder.icmp_signed('!=', val, zero, name='not_zero')
         elif isinstance(val.type, (ir.FloatType, ir.DoubleType)):
-            # Float: fcmp one val, 0.0  (ordered, not-equal — false on NaN)  -> i1, zext to i8
+            # Float: fcmp one val, 0.0  (ordered, not-equal - false on NaN)  -> i1, zext to i8
             zero = ir.Constant(val.type, 0.0)
             cmp  = builder.fcmp_ordered('!=', val, zero, name='not_zero_f')
         else:
-            raise TypeError(
-                f"'!?' operator not supported for type {val.type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'!?' operator not supported for type {val.type} ", node, module)
 
         # Widen i1 -> i8 so the result is a usable bool-width integer that
         # can be stored, compared, or passed without further extension.
@@ -2095,7 +2074,7 @@ class CodegenVisitor:
                 return builder.trunc(result, ir.IntType(num_bits), name="rev_trunc")
             return result
 
-        # Forward bit slice — build base_ptr.
+        # Forward bit slice - build base_ptr.
         # Flux bit addressing is MSB-first (bit 0 = MSB of the whole value).
         # Fields are in declaration order (field 0 = most significant bits), but each
         # field's bytes are little-endian on x86. For struct types we build a flat staging
@@ -2167,17 +2146,16 @@ class CodegenVisitor:
             aligned = builder.shl(widened, ir.Constant(i8, 8 - val.type.width), name="bs_prealign")
             tmp = builder.alloca(i8, name="bs_tmp"); builder.store(aligned, tmp); base_ptr = tmp
         else:
-            raise ValueError(
-                f"Bit-slice operator `` requires array/pointer operand, got {val.type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Bit-slice operator `` requires array/pointer operand, got {val.type} ", node, module)
 
         def to_i32(v, name):
             if isinstance(v.type, ir.IntType):
                 if v.type.width < 32: return builder.zext(v, i32, name=name)
                 if v.type.width > 32: return builder.trunc(v, i32, name=name)
                 return v
-            raise ValueError(
-                f"Bit-slice indices must be integers [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Bit-slice indices must be integers", node, module)
 
 
 
@@ -2218,9 +2196,8 @@ class CodegenVisitor:
     def visit_VariadicAccess(self, node, builder, module):
         va_list_alloca = getattr(builder, '_flux_va_list', None)
         if va_list_alloca is None:
-            raise RuntimeError(
-                f"...[N] used outside of a variadic function "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"...[N] used outside of a variadic function ", node, module)
         va_list_i8ptr = getattr(builder, '_flux_va_list_i8ptr')
         index_val = self.visit(node.index, builder, module)
         if isinstance(index_val.type, ir.IntType) and index_val.type.width != 32:
@@ -2412,8 +2389,8 @@ class CodegenVisitor:
                     gvar.initializer = ir.Constant(array_type, [])
                     return gvar
                 return builder.alloca(array_type, name="empty_array")
-            raise ValueError(
-                f"Cannot create empty array without element type [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Cannot create empty array without element type", node, module)
         element_values = []
         element_types = set()
         for elem in node.elements:
@@ -2537,9 +2514,8 @@ class CodegenVisitor:
                 array_type = ir.ArrayType(element_type, expected_size)
                 array_ptr  = builder.alloca(array_type, name="comprehension_array")
             else:
-                raise NotImplementedError(
-                    f"Array comprehensions with runtime-determined ranges require an explicit array size "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Array comprehensions with runtime-determined ranges require an explicit array size ", node, module)
             index_ptr = builder.alloca(ir.IntType(32), name="comp_index")
             builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
             var_ptr = builder.alloca(element_type, name=node.variable)
@@ -2566,9 +2542,8 @@ class CodegenVisitor:
             builder.branch(loop_cond)
             builder.position_at_start(loop_end)
             return array_ptr
-        raise NotImplementedError(
-            f"Array comprehension only supports range expressions and array literals "
-            f"[{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"Array comprehension only supports range expressions and array literals ", node, module)
 
     def visit_FStringLiteral(self, node, builder, module):
         from fast import ArrayLiteral, Literal, BinaryOp, UnaryOp, Identifier, SizeOf
@@ -2582,7 +2557,7 @@ class CodegenVisitor:
                 else:
                     full_string += str(self._fstring_eval_ct(part, node, builder, module))
             return self.visit(ArrayLiteral.from_string(full_string), builder, module)
-        except (ValueError, NotImplementedError):
+        except (ValueError, NotImplementedError, FluxCodegenError):
             return self._fstring_runtime(node, builder, module)
 
     def _resolve_stringify_name(self, stringify_node, builder, module, parent_node) -> str:
@@ -2602,7 +2577,7 @@ class CodegenVisitor:
                 _Identifier(var_name), stringify_node, builder, module)
             resolved = str(val)
         except (ValueError, NotImplementedError):
-            pass  # Not a known global constant — fall back to the identifier name itself
+            pass  # Not a known global constant - fall back to the identifier name itself
 
         if stringify_node.member is not None:
             resolved = f"{resolved}.{stringify_node.member}"
@@ -2619,7 +2594,7 @@ class CodegenVisitor:
             if expr.type == DataType.BOOL:       return bool(expr.value)
             if expr.type == DataType.CHAR:
                 return str(expr.value) if isinstance(expr.value, str) else chr(expr.value)
-            raise ValueError(f"Cannot convert {expr.type} at compile time")
+            raise FluxCodegenError(f"Cannot convert {expr.type} at compile time", node, module)
         if isinstance(expr, BinaryOp):
             l = self._fstring_eval_ct(expr.left,  node, builder, module)
             r = self._fstring_eval_ct(expr.right, node, builder, module)
@@ -2628,13 +2603,13 @@ class CodegenVisitor:
                    Operator.LESS_THAN:l<r, Operator.LESS_EQUAL:l<=r,
                    Operator.GREATER_THAN:l>r, Operator.GREATER_EQUAL:l>=r}
             if expr.operator not in ops:
-                raise NotImplementedError(f"Operator {expr.operator} not supported for compile-time f-string")
+                raise FluxCodegenError(f"Operator {expr.operator} not supported for compile-time f-string", node, module)
             return ops[expr.operator]
         if isinstance(expr, UnaryOp):
             o = self._fstring_eval_ct(expr.operand, node, builder, module)
             if expr.operator == Operator.NOT: return not o
             if expr.operator == Operator.SUB: return -o
-            raise NotImplementedError
+            raise FluxCodegenError
         if isinstance(expr, Identifier):
             # Try the bare name first, then common type-mangled suffixes used by
             # be32/le32/be64/le64 variables (e.g. "x__be32", "x__le32").
@@ -2672,12 +2647,12 @@ class CodegenVisitor:
                                 break
                             parts_ct.append(ev)
                         else:
-                            # All elements resolved — treat as byte array
+                            # All elements resolved - treat as byte array
                             raw = bytes(int(b) & 0xFF for b in parts_ct)
                             # Decode as latin-1 for the same reason as the bytearray
                             # branch above: 1:1 byte→codepoint, never raises.
                             return raw.rstrip(b'\x00').decode('latin-1')
-                # byte* global (e.g. byte* z = "f") — initializer is a GEP/bitcast
+                # byte* global (e.g. byte* z = "f") - initializer is a GEP/bitcast
                 # pointing at a string constant global. Parse the IR text of the
                 # initializer to find the referenced @.str.* global name, then
                 # read its byte array initializer.
@@ -2712,7 +2687,7 @@ class CodegenVisitor:
         if isinstance(expr, TypeConvertExpression):
             inner = self._fstring_eval_ct(expr.expression, node, builder, module)
             # Map the target Flux type to the appropriate Python built-in so the
-            # result stays a plain int/float/bool — exactly what the other branches
+            # result stays a plain int/float/bool - exactly what the other branches
             # return.  Unknown target types just pass the value through unchanged.
             target = getattr(expr, 'target_type', None)
             if target is not None:
@@ -2734,8 +2709,8 @@ class CodegenVisitor:
                     return float(inner)
                 if 'bool' in type_name:
                     return bool(inner)
-            return inner  # no narrowing needed — pass value through unchanged
-        raise NotImplementedError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string")
+            return inner  # no narrowing needed - pass value through unchanged
+        raise FluxCodegenError(f"Cannot evaluate {type(expr).__name__} at compile time for f-string", node, module)
 
     def _fstring_runtime(self, node, builder, module):
         from fast import ArrayLiteral, Literal
@@ -2856,11 +2831,11 @@ class CodegenVisitor:
                     try:
                         parts.append(str(self._fstring_eval_ct(part, node.name, builder, module)))
                     except (ValueError, NotImplementedError) as e:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"f-string function name contains a runtime-only expression "
                             f"that cannot be evaluated at compile time "
-                            f"[{node.source_line}:{node.source_col}]: {e}"
-                        ) from e
+                            f": {e}"
+                        , node, module) from e
             node.name = "".join(parts)
         elif isinstance(node.name, _Stringify):
             node.name = self._resolve_stringify_name(node.name, builder, module, node)
@@ -2885,10 +2860,9 @@ class CodegenVisitor:
                 entry = module.symbol_table.lookup_variable(arg.name)
                 if (entry is not None and entry.type_spec is not None
                         and entry.type_spec.is_local):
-                    raise ValueError(
+                    raise FluxCodegenError(
                         f"Compile error: local variable '{arg.name}' cannot "
-                        f"leave its scope via function call "
-                        f"[{node.source_line}:{node.source_col}]")
+                        f"leave its scope via function call ", node, module)
 
             # ── New: enforce tied-parameter contract ─────────────────────────
             if overload_entry and i < len(overload_entry['param_types']):
@@ -2896,17 +2870,15 @@ class CodegenVisitor:
                 arg_is_tie = isinstance(arg, TieExpression)
                 if param_spec is not None:
                     if param_spec.is_tied and not arg_is_tie:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"Compile error: parameter {i} of '{node.name}' "
-                            f"requires a tied argument (~), but a non-tied "
-                            f"expression was passed "
-                            f"[{node.source_line}:{node.source_col}]")
+                            f"requires a tied argument (~, node, module), but a non-tied "
+                            f"expression was passed ", node, module)
                     if not param_spec.is_tied and arg_is_tie:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"Compile error: parameter {i} of '{node.name}' "
                             f"is not a tied parameter, but a tie expression "
-                            f"(~) was passed "
-                            f"[{node.source_line}:{node.source_col}]")
+                            f"(~, node, module) was passed ", node, module)
 
         arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
         current_ns = module.symbol_table.current_namespace if hasattr(module, 'symbol_table') else ""
@@ -2923,11 +2895,11 @@ class CodegenVisitor:
                     continue
                 n_total = len(defaults)
                 if n_supplied >= n_total:
-                    continue  # Caller supplied all (or too many) args — nothing to fill.
+                    continue  # Caller supplied all (or too many) args - nothing to fill.
                 # Check that all missing args have defaults.
                 missing = defaults[n_supplied:]
                 if any(d is None for d in missing):
-                    continue  # Some required params missing — let normal error path handle it.
+                    continue  # Some required params missing - let normal error path handle it.
                 # Pad with default expressions.
                 for default_expr in missing:
                     node.arguments.append(default_expr)
@@ -2951,14 +2923,13 @@ class CodegenVisitor:
                     continue  # argument endianness unknown / native, let it pass
                 if src_endian != tgt_endian:
                     endian_names = {0: "little-endian", 1: "big-endian"}
-                    raise ValueError(
-                        f"\nCompile error: Passing argument {i} of function {node.name} is "
-                        f"{endian_names.get(src_endian, f'endian({src_endian})')}, "
+                    raise FluxCodegenError(
+                        f"Compile error: Passing argument {i} of function {node.name} is "
+                        f"{endian_names.get(src_endian, f'endian({src_endian}, node, module)')}, "
                         f"but parameter {i} expects "
                         f"{endian_names.get(tgt_endian, f'endian({tgt_endian})')}.\n"
                         f"Endianness mismatch in function call disallowed "
-                        f"(assignment auto-swaps, parameter passing does not). "
-                        f"[{node.source_line}:{node.source_col}]")
+                        f"(assignment auto-swaps, parameter passing does not). ", node, module)
 
         # Pointer-param overload
         if hasattr(module, '_function_overloads'):
@@ -3043,13 +3014,11 @@ class CodegenVisitor:
         if hasattr(module, '_function_overloads') and node.name in module._function_overloads:
             available_counts = [o['param_count'] for o in module._function_overloads[node.name]]
             if len(node.arguments) not in available_counts:
-                raise ValueError(
-                    f"Function {node.name} found but no overload accepts {len(node.arguments)} arguments. "
-                    f"Available overloads accept: {available_counts} arguments. "
-                    f"[{node.source_line}:{node.source_col}]")
-        raise NameError(
-            f"Function '{node.name}' not found in module or any imported namespaces "
-            f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Function {node.name} found but no overload accepts {len(node.arguments, node, module)} arguments. "
+                    f"Available overloads accept: {available_counts} arguments. ", node, module)
+        raise FluxCodegenError(
+            f"Function '{node.name}' not found in module or any imported namespaces ", node, module)
 
     def _funcall_generate(self, node, builder, module, func, arg_vals):
         from fast import Literal, FunctionCall, Identifier
@@ -3083,7 +3052,7 @@ class CodegenVisitor:
                          isinstance(arg_val.type.pointee, (ir.IdentifiedStructType, ir.LiteralStructType)) and
                          not isinstance(expected, ir.PointerType))):
                     # Only raise if the struct type doesn't match what's expected.
-                    # A matching type is a legitimate by-value struct pass — not an object misuse.
+                    # A matching type is a legitimate by-value struct pass - not an object misuse.
                     candidate = arg_val.type.pointee if isinstance(arg_val.type, ir.PointerType) else arg_val.type
                     if candidate == expected:
                         pass  # let convert_argument_to_parameter_type handle it
@@ -3103,13 +3072,11 @@ class CodegenVisitor:
                             is_object = (entry is not None and
                                          entry.kind == SymbolKind.OBJECT)
                             if is_object:
-                                raise TypeError(
+                                raise FluxCodegenError(
                                     f"Object of type '{obj_type_name}' used in expression context "
-                                    f"but has no __expr() method defined. "
+                                    f"but has no __expr(, node, module) method defined. "
                                     f"Define 'def __expr() -> <type> {{ return @this.<member>; }};' "
-                                    f"inside the object to enable expression-context usage. "
-                                    f"[{node.source_line}:{node.source_col}]"
-                                )
+                                    f"inside the object to enable expression-context usage. ")
                 # If this argument was produced by __expr auto-promotion but the
                 # parameter expects the object's own struct type (by value or by
                 # pointer), undo the promotion and pass the struct directly.
@@ -3182,13 +3149,13 @@ class CodegenVisitor:
                     for global_var in module.global_values:
                         if global_var.name == global_name:
                             return builder.load(global_var)
-                    raise NameError(f"Static member '{node.member}' not found in struct '{type_name}' [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Static member '{node.member}' not found in struct '{type_name}'", node, module)
                 elif MemberAccessTypeHandler.is_static_union_member(type_name, module):
                     global_name = f"{type_name}.{node.member}"
                     for global_var in module.global_values:
                         if global_var.name == global_name:
                             return builder.load(global_var)
-                    raise NameError(f"Static member '{node.member}' not found in union '{type_name}' [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Static member '{node.member}' not found in union '{type_name}'", node, module)
             obj_val = self.visit(node.object, builder, module)
         finally:
             self._in_member_access = prev_in_member_access
@@ -3218,7 +3185,7 @@ class CodegenVisitor:
                     return member_ptr
             loaded = builder.load(member_ptr)
             return MemberAccessTypeHandler.attach_member_type_metadata(loaded, struct_type, node.member, module)
-        raise ValueError(f"Member access on unsupported type: {obj_val.type} [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(f"Member access on unsupported type: {obj_val.type}", node, module)
 
     def _member_access_union(self, node, builder, module, union_ptr, union_name):
         union_info = MemberAccessTypeHandler.get_union_member_info(union_name, module)
@@ -3227,7 +3194,7 @@ class CodegenVisitor:
         is_tagged    = union_info['is_tagged']
         if node.member == '_':
             if not is_tagged:
-                raise ValueError(f"Cannot access tag '._' on non-tagged union '{union_name}' [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Cannot access tag '._' on non-tagged union '{union_name}'", node, module)
             tag_ptr = builder.gep(union_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
                                   inbounds=True, name="union_tag_ptr")
             return builder.load(tag_ptr, name="union_tag_value")
@@ -3249,11 +3216,11 @@ class CodegenVisitor:
             if module.symbol_table.get_llvm_value(var_name) is not None:
                 obj_ptr = module.symbol_table.get_llvm_value(var_name)
             else:
-                raise NameError(f"Unknown variable: {var_name}")
+                raise FluxCodegenError(f"Unknown variable: {var_name}", node, module)
         else:
             obj_ptr = self.visit(node.object, builder, module)
         if not isinstance(obj_ptr.type, ir.PointerType):
-            # Could be a non-pointer primitive value — try type func dispatch
+            # Could be a non-pointer primitive value - try type func dispatch
             return self._dispatch_type_func_call(node, obj_ptr, builder, module)
         slot_pointee = obj_ptr.type.pointee
         if isinstance(slot_pointee, ir.IdentifiedStructType):
@@ -3261,9 +3228,9 @@ class CodegenVisitor:
         elif isinstance(slot_pointee, ir.PointerType) and isinstance(slot_pointee.pointee, ir.IdentifiedStructType):
             this_ptr = builder.load(obj_ptr, name=f"{var_name}_load" if var_name else "obj_load")
         else:
-            # Not an object/struct pointer — try type func dispatch.
+            # Not an object/struct pointer - try type func dispatch.
             # If the receiver was a variable (Identifier), obj_ptr is an alloca so load once.
-            # If it was a literal or expression, obj_ptr is already the value — don't load.
+            # If it was a literal or expression, obj_ptr is already the value - don't load.
             if var_name is not None:
                 recv = builder.load(obj_ptr, name="typefunc_recv_load")
             else:
@@ -3283,14 +3250,14 @@ class CodegenVisitor:
                 if struct_type == struct_ty:
                     obj_type_name = type_name; break
         if obj_type_name is None:
-            raise ValueError(f"Cannot determine object type for method call: {struct_ty}")
+            raise FluxCodegenError(f"Cannot determine object type for method call: {struct_ty}", node, module)
         method_func_name = f"{obj_type_name}.{node.method_name}"
         func = module.globals.get(method_func_name)
         if func is None and hasattr(module, '_function_overloads') and method_func_name in module._function_overloads:
             arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
             func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
         if func is None:
-            # No object method found — try type func on the struct type name
+            # No object method found - try type func on the struct type name
             loaded = builder.load(obj_ptr, name="typefunc_struct_recv_load") if isinstance(slot_pointee, ir.IdentifiedStructType) else this_ptr
             return self._dispatch_type_func_call(node, loaded, builder, module, override_type_name=obj_type_name)
 
@@ -3302,9 +3269,7 @@ class CodegenVisitor:
                     if current_object != obj_type_name_key:
                         raise AttributeError(
                             f"\nCannot call private method {node.method_name} on "
-                            f"object instance of {obj_type_name_key} from outside its definition "
-                            f"[{node.source_line}:{node.source_col}]"
-                        )
+                            f"object instance of {obj_type_name_key} from outside its definition ")
                     break
 
         args = [this_ptr]
@@ -3312,7 +3277,7 @@ class CodegenVisitor:
             if isinstance(arg_expr, Identifier):
                 entry = module.symbol_table.lookup_variable(arg_expr.name)
                 if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
-                    raise ValueError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call")
+                    raise FluxCodegenError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call", node, module)
             arg_val = self.visit(arg_expr, builder, module)
             expected_type = func.args[i + 1].type
             if (isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType) and
@@ -3333,7 +3298,7 @@ class CodegenVisitor:
         _INT_WIDTH_MAP = {
             1:  'bool',
             8:  'byte',
-            16: 'int',   # data{16} — not common but map to closest
+            16: 'int',   # data{16} - not common but map to closest
             32: 'int',
             64: 'long',
         }
@@ -3349,7 +3314,7 @@ class CodegenVisitor:
             # byte* is used for strings
             if isinstance(llvm_type.pointee, ir.IntType) and llvm_type.pointee.width == 8:
                 return 'string'
-            # Other pointers — try to match named struct
+            # Other pointers - try to match named struct
             if isinstance(llvm_type.pointee, ir.IdentifiedStructType):
                 name = llvm_type.pointee.name
                 if hasattr(module, '_struct_types') and name in module._struct_types:
@@ -3374,10 +3339,10 @@ class CodegenVisitor:
         if type_name is None:
             type_name = self._llvm_type_to_flux_type_name(recv_val.type, module)
         if type_name is None:
-            raise NameError(
+            raise FluxCodegenError(
                 f"No type function '{node.method_name}' found and cannot determine "
-                f"receiver type for method call [{node.source_line}:{node.source_col}]"
-            )
+                f"receiver type for method call"
+            , node, module)
 
         # Resolve f-string method names at compile time
         from fast import FStringLiteral as _FSL
@@ -3393,7 +3358,7 @@ class CodegenVisitor:
                     try:
                         parts.append(str(self._fstring_eval_ct(part, method_name, builder, module)))
                     except (ValueError, NotImplementedError) as e:
-                        raise ValueError(f"f-string type function call name cannot be evaluated at compile time: {e}") from e
+                        raise FluxCodegenError(f"f-string type function call name cannot be evaluated at compile time: {e}", node, module) from e
             method_name = ''.join(parts)
 
         mangled = f"__typefunc__{type_name}__{method_name}"
@@ -3402,10 +3367,8 @@ class CodegenVisitor:
             arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
             func = TypeResolver.resolve_function(module, mangled, "", arg_vals)
         if func is None:
-            raise NameError(
-                f"No type function '{node.method_name}' defined for type '{type_name}' "
-                f"[{node.source_line}:{node.source_col}]"
-            )
+            raise FluxCodegenError(
+                f"No type function '{node.method_name}' defined for type '{type_name}' ", node, module)
 
         args = [recv_val]
         for i, arg_expr in enumerate(node.arguments):
@@ -3430,10 +3393,8 @@ class CodegenVisitor:
             arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
             func = TypeResolver.resolve_function(module, mangled, "", arg_vals)
         if func is None:
-            raise NameError(
-                f"No type function '{node.func_name}' defined for type '{node.type_name}' "
-                f"[{node.source_line}:{node.source_col}]"
-            )
+            raise FluxCodegenError(
+                f"No type function '{node.func_name}' defined for type '{node.type_name}' ", node, module)
 
         args = [recv_val]
         for i, arg_expr in enumerate(node.arguments):
@@ -3466,10 +3427,10 @@ class CodegenVisitor:
                     try:
                         parts.append(str(self._fstring_eval_ct(part, node.func_name, builder, module)))
                     except (ValueError, NotImplementedError) as e:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"f-string type function name cannot be evaluated at compile time "
-                            f"[{node.source_line}:{node.source_col}]: {e}"
-                        ) from e
+                            f": {e}"
+                        , node, module) from e
             node.func_name = ''.join(parts)
 
         receiver_param = Parameter(
@@ -3502,7 +3463,7 @@ class CodegenVisitor:
 
         from fast import Literal, FunctionCall, FStringLiteral as _FStringLiteral, Stringify as _Stringify
         # If the callee is an f-string literal (e.g. f"{x} {y}"()), resolve its
-        # name at compile time and redirect to a plain named FunctionCall —
+        # name at compile time and redirect to a plain named FunctionCall -
         # exactly the same way StringLiteral names are already handled.
         if isinstance(node.pointer, _FStringLiteral):
             parts = []
@@ -3515,11 +3476,11 @@ class CodegenVisitor:
                     try:
                         parts.append(str(self._fstring_eval_ct(part, node.pointer, builder, module)))
                     except (ValueError, NotImplementedError) as e:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"f-string function name contains a runtime-only expression "
                             f"that cannot be evaluated at compile time "
-                            f"[{node.source_line}:{node.source_col}]: {e}"
-                        ) from e
+                            f": {e}"
+                        , node, module) from e
             resolved_name = "".join(parts)
             synthetic = FunctionCall(name=resolved_name, arguments=node.arguments)
             synthetic.source_line = node.source_line
@@ -3565,7 +3526,7 @@ class CodegenVisitor:
         elif node.pointer_name in module.globals:
             ptr_storage = module.globals[node.pointer_name]
         else:
-            raise NameError(f"Function pointer '{node.pointer_name}' not found [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Function pointer '{node.pointer_name}' not found", node, module)
         func_value = self.visit(node.function_expr, builder, module)
         builder.store(func_value, ptr_storage)
         return func_value
@@ -3624,7 +3585,7 @@ class CodegenVisitor:
             shift_amt = builder.mul(index_i64, ir.Constant(ir.IntType(64), 8), name="byte_shift")
             val_i64 = builder.zext(array_val, ir.IntType(64), name="val_i64") if array_val.type != ir.IntType(64) else array_val
             return builder.trunc(builder.lshr(val_i64, shift_amt, name="byte_shr"), ir.IntType(8), name="byte_extract")
-        raise ValueError(f"Cannot access array element for type: {array_val.type} [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(f"Cannot access array element for type: {array_val.type}", node, module)
 
     def visit_ArraySlice(self, node, builder, module):
         array_val = self.visit(node.array, builder, module)
@@ -3635,7 +3596,7 @@ class CodegenVisitor:
             if v.type == i32: return v
             if isinstance(v.type, ir.IntType):
                 return builder.trunc(v, i32, name=f"{name}_trunc") if v.type.width > 32 else builder.sext(v, i32, name=f"{name}_ext")
-            raise ValueError(f"Slice indices must be integers [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Slice indices must be integers", node, module)
         start_i32 = as_i32(start_val, "slice_start")
         end_i32   = as_i32(end_val,   "slice_end")
         zero = ir.Constant(i32, 0)
@@ -3643,7 +3604,7 @@ class CodegenVisitor:
         is_backward = builder.icmp_signed('>', start_i32, end_i32, name="slice_is_backward")
         gep_start   = builder.select(is_backward, end_i32,   start_i32, name="slice_gep_start")
         # [x:y] is inclusive on both ends: length = |start - end| + 1.
-        # Compute abs(start - end) first, then add 1 — negating after +1 was wrong
+        # Compute abs(start - end) first, then add 1 - negating after +1 was wrong
         # for backward slices (e.g. [7:0] → 7-0=7, 7+1=8, not (0-7+1)=−6→6).
         fwd_len  = builder.sub(end_i32,   start_i32, name="slice_fwd_raw")  # negative when backward
         bwd_len  = builder.sub(start_i32, end_i32,   name="slice_bwd_raw")  # positive when backward
@@ -3657,7 +3618,7 @@ class CodegenVisitor:
         elif isinstance(array_val.type, ir.PointerType):
             src_ptr = builder.gep(array_val, [gep_start], inbounds=True, name="slice_src")
         else:
-            raise ValueError(f"Cannot slice type: {array_val.type} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Cannot slice type: {array_val.type}", node, module)
 
         def _emit_inline_reverse(buf_ptr, byte_len_val):
             """Emit an inline two-pointer byte-swap loop over buf_ptr[0..byte_len_val-1]."""
@@ -3727,9 +3688,8 @@ class CodegenVisitor:
     def visit_TieExpression(self, node, builder, module):
         from fast import Identifier
         if not isinstance(node.operand, Identifier):
-            raise ValueError(
-                f"Tie operator ~ can only be applied to variables "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Tie operator ~ can only be applied to variables ", node, module)
         var_name = node.operand.name
 
         # ── Use-after-untie check (must come before re-tie) ──────────────────
@@ -3741,9 +3701,8 @@ class CodegenVisitor:
         elif var_name in module.globals:
             var_ptr = module.globals[var_name]
         else:
-            raise NameError(
-                f"Unknown variable: {var_name} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Unknown variable: {var_name} ", node, module)
 
         tied_value = builder.load(var_ptr, name=f"{var_name}_tied")
 
@@ -3776,23 +3735,23 @@ class CodegenVisitor:
 
     def visit_StructLiteral(self, node, builder, module):
         if node.struct_type is None:
-            raise ValueError(
-                f"Struct literal must have type context. [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"Struct literal must have type context.", node, module)
         return StructTypeHandler.pack_struct_literal(
             builder, module, node.struct_type, node.field_values, node.positional_values)
 
     def visit_StructInstance(self, node, builder, module):
         if not hasattr(module, '_struct_vtables'):
-            raise ValueError(f"Struct '{node.struct_name}' not defined [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Struct '{node.struct_name}' not defined", node, module)
         vtable = module._struct_vtables.get(node.struct_name)
         if not vtable:
-            raise ValueError(f"Struct '{node.struct_name}' not defined [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Struct '{node.struct_name}' not defined", node, module)
         struct_type = module._struct_types[node.struct_name]
         instance = StructTypeHandler.create_zeroed_instance(struct_type, vtable)
         for field_name, field_value_expr in node.field_values.items():
             field_info = next((f for f in vtable.fields if f[0] == field_name), None)
             if not field_info:
-                raise ValueError(f"Field '{field_name}' not found in struct '{node.struct_name}' [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Field '{field_name}' not found in struct '{node.struct_name}'", node, module)
             _, bit_offset, bit_width, alignment = field_info
             field_value = self.visit(field_value_expr, builder, module)
             instance = StructTypeHandler.pack_field_value(builder, instance, field_value, bit_offset, bit_width, vtable.total_bits)
@@ -3834,11 +3793,11 @@ class CodegenVisitor:
             if isinstance(pointee, (ir.LiteralStructType, ir.IdentifiedStructType)):
                 struct_type = pointee
                 if not hasattr(struct_type, "names") or not struct_type.names:
-                    raise ValueError(f"Struct type missing member names [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Struct type missing member names", node, module)
                 try:
                     field_index = struct_type.names.index(node.field_name)
                 except ValueError:
-                    raise ValueError(f"Field '{node.field_name}' not found in struct [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Field '{node.field_name}' not found in struct", node, module)
                 zero = ir.Constant(ir.IntType(32), 0)
                 idx = ir.Constant(ir.IntType(32), field_index)
                 field_ptr = builder.gep(instance_val, [zero, idx], inbounds=True, name=f"{node.field_name}_ptr")
@@ -3856,10 +3815,10 @@ class CodegenVisitor:
             struct_name = _resolve_struct_name(struct_name)
         vtable = getattr(module, "_struct_vtables", {}).get(struct_name)
         if not vtable:
-            raise ValueError(f"Cannot determine struct type for field access [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Cannot determine struct type for field access", node, module)
         field_info = next((f for f in vtable.fields if f[0] == node.field_name), None)
         if not field_info:
-            raise ValueError(f"Field '{node.field_name}' not found in struct '{struct_name}' [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Field '{node.field_name}' not found in struct '{struct_name}'", node, module)
         _, bit_offset, bit_width, alignment = field_info
         if isinstance(instance.type, ir.IntType):
             instance_type = instance.type
@@ -3871,7 +3830,7 @@ class CodegenVisitor:
             for i, f in enumerate(vtable.fields):
                 if f[0] == node.field_name:
                     return builder.extract_value(instance, i, name=node.field_name)
-            raise ValueError(f"Field '{node.field_name}' not found [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Field '{node.field_name}' not found", node, module)
         byte_offset = bit_offset // 8
         if bit_offset % 8 == 0 and bit_width % 8 == 0:
             field_bytes = bit_width // 8
@@ -3887,11 +3846,11 @@ class CodegenVisitor:
                 if isinstance(target_type, (ir.FloatType, ir.DoubleType)) and isinstance(result.type, ir.IntType):
                     result = builder.bitcast(result, target_type)
             return result
-        raise NotImplementedError(f"Unaligned field access not yet supported [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(f"Unaligned field access not yet supported", node, module)
 
     def visit_StructRecast(self, node, builder, module):
         from fast import ArraySlice as _ArraySlice
-        # Zero-copy path: `T t from src[start:end]` — source_expr is an ArraySlice.
+        # Zero-copy path: `T t from src[start:end]` - source_expr is an ArraySlice.
         # Do NOT call visit_ArraySlice which allocates a copy; instead emit a bare
         # GEP into the source buffer at the start offset and let perform_struct_recast
         # bitcast that pointer in-place, returning a Test* directly into src.
@@ -3910,7 +3869,7 @@ class CodegenVisitor:
                              if isinstance(start_val.type, ir.IntType) and start_val.type.width > 32
                              else builder.sext(start_val, i32, name="recast_start_ext"))
             zero = ir.Constant(i32, 0)
-            # GEP to the first byte of the slice within the source — no copy
+            # GEP to the first byte of the slice within the source - no copy
             if isinstance(array_val, ir.GlobalVariable) and isinstance(array_val.type.pointee, ir.ArrayType):
                 src_ptr = builder.gep(array_val, [zero, start_val], inbounds=True, name="recast_src_ptr")
             elif isinstance(array_val.type, ir.PointerType) and isinstance(array_val.type.pointee, ir.ArrayType):
@@ -3966,7 +3925,7 @@ class CodegenVisitor:
                               and getattr(target_entry.type_spec, 'is_tied', False))
 
             if target_is_tied:
-                # Case 1: RHS is a function call — return type must be tied
+                # Case 1: RHS is a function call - return type must be tied
                 if isinstance(node.value, FunctionCall):
                     current_ns = (module.symbol_table.current_namespace
                                   if hasattr(module, 'symbol_table') else "")
@@ -3975,17 +3934,15 @@ class CodegenVisitor:
                     if ov is not None:
                         ret_spec = ov.get('return_type')
                         if ret_spec is not None and not getattr(ret_spec, 'is_tied', False):
-                            raise ValueError(
+                            raise FluxCodegenError(
                                 f"Compile error: '{node.value.name}' does not return a tied type, "
-                                f"cannot assign to tied variable '{node.target.name}' "
-                                f"[{node.source_line}:{node.source_col}]")
+                                f"cannot assign to tied variable '{node.target.name}' ", node, module)
 
-                # Case 2: RHS is a plain identifier — must be a TieExpression (~w)
+                # Case 2: RHS is a plain identifier - must be a TieExpression (~w)
                 elif isinstance(node.value, Identifier):
-                    raise ValueError(
+                    raise FluxCodegenError(
                         f"Compile error: cannot assign non-tied value to tied variable "
-                        f"'{node.target.name}' — use '~{node.value.name}' to transfer ownership "
-                        f"[{node.source_line}:{node.source_col}]")
+                        f"'{node.target.name}' - use '~{node.value.name}' to transfer ownership ", node, module)
 
             # Case 3: non-tied target, tied-return function (original check, flipped)
             elif isinstance(node.value, FunctionCall):
@@ -3996,10 +3953,9 @@ class CodegenVisitor:
                 if ov is not None:
                     ret_spec = ov.get('return_type')
                     if ret_spec is not None and getattr(ret_spec, 'is_tied', False):
-                        raise ValueError(
-                            f"Compile error: Function {node.value.name} returns a tied type (~), "
-                            f"but {node.target.name}'s type is not tied."
-                            f"[{node.source_line}:{node.source_col}]")
+                        raise FluxCodegenError(
+                            f"Compile error: Function {node.value.name} returns a tied type (~, node, module), "
+                            f"but {node.target.name}'s type is not tied.", node, module)
 
         if isinstance(node.target, Identifier):
             return AssignmentTypeHandler.handle_identifier_assignment(
@@ -4021,7 +3977,7 @@ class CodegenVisitor:
                         s = rng.start.value if isinstance(rng.start, Literal) else None
                         e = rng.end.value if isinstance(rng.end, Literal) else None
                         if s is None or e is None:
-                            raise ValueError(f"Struct member slice assignment indices must be literals [{node.source_line}:{node.source_col}]")
+                            raise FluxCodegenError(f"Struct member slice assignment indices must be literals", node, module)
                         const_len = e - s + 1
                         zero = ir.Constant(ir.IntType(32), 0)
                         start_i32 = ir.Constant(ir.IntType(32), s)
@@ -4070,19 +4026,19 @@ class CodegenVisitor:
 
         elif isinstance(node.target, BitSlice):
             if not isinstance(node.target.value, Identifier):
-                raise ValueError(f"Bit-slice assignment target must be a simple variable [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Bit-slice assignment target must be a simple variable", node, module)
             var_name = node.target.value.name
             ptr = module.symbol_table.get_llvm_value(var_name)
             if ptr is None:
-                raise ValueError(f"Unknown variable '{var_name}' [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Unknown variable '{var_name}'", node, module)
             int_type = ptr.type.pointee
             if not isinstance(int_type, ir.IntType):
-                raise ValueError(f"Bit-slice assignment requires an integer variable [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Bit-slice assignment requires an integer variable", node, module)
             w = int_type.width
             s_val = self.visit(node.target.start, builder, module)
             e_val = self.visit(node.target.end, builder, module)
             if not (hasattr(s_val, 'constant') and hasattr(e_val, 'constant')):
-                raise ValueError(f"Bit-slice assignment indices must be constants [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Bit-slice assignment indices must be constants", node, module)
             s_const = int(s_val.constant)
             e_const = int(e_val.constant)
             slice_width = e_const - s_const + 1
@@ -4103,7 +4059,7 @@ class CodegenVisitor:
             return result
 
         else:
-            raise ValueError(f"Cannot assign to {type(node.target).__name__} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Cannot assign to {type(node.target, node, module).__name__}", node, module)
 
     def visit_CompoundAssignment(self, node, builder, module):
         return AssignmentTypeHandler.handle_compound_assignment(
@@ -4114,11 +4070,11 @@ class CodegenVisitor:
         if isinstance(node.target, Identifier):
             sym = module.symbol_table.lookup(node.target.name)
             if sym is None:
-                raise ValueError(f"Undefined variable '{node.target.name}' [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Undefined variable '{node.target.name}'", node, module)
             ptr = module.symbol_table.get_llvm_value(node.target.name)
             current_val = builder.load(ptr, name="ternary_assign_cur")
         else:
-            raise ValueError(f"TernaryAssign: unsupported target type {type(node.target).__name__} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"TernaryAssign: unsupported target type {type(node.target, node, module).__name__}", node, module)
 
         zero = ir.Constant(current_val.type, 0)
         is_zero = builder.icmp_unsigned('==', current_val, zero, name="ternary_assign_cmp")
@@ -4162,6 +4118,8 @@ class CodegenVisitor:
                         stmt_result = self.visit(stmt, builder, module)
                         if stmt_result is not None:
                             result = stmt_result
+                    except FluxCodegenError:
+                        raise
                     except Exception as e:
                         import traceback as _tb
                         current_frame = _inspect.currentframe()
@@ -4169,16 +4127,10 @@ class CodegenVisitor:
                         caller_name = caller_frame.f_code.co_name
                         stack = _inspect.stack()
                         stmt_i = i
-                        #print("Full call stack (from current to outermost):")
-                        #for i, frame_info in enumerate(reversed(stack)):
-                            #print(f"  {i}: {frame_info.function}() in {frame_info.filename}:{frame_info.lineno}")
-                        #print("--- REAL EXCEPTION ---")
-                        #_tb.print_exc()
-                        #print("--- END REAL EXCEPTION ---")
                         loc = ""
                         if hasattr(stmt, 'source_line') and stmt.source_line:
                             loc = f" {_src_loc(stmt, module)}"
-                        raise ValueError(f"Block{{}} Debug: Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e}")
+                        raise FluxCodegenError(f"Error in statement {stmt_i} ({type(stmt).__name__}){loc}: {e}", stmt, module) from e
 
             if builder._flux_defer_stack and not builder.block.is_terminated:
                 for deferred in reversed(builder._flux_defer_stack):
@@ -4202,7 +4154,7 @@ class CodegenVisitor:
             cond_val = self.visit(node.condition, builder, module)
         except Exception as e:
             from fast import ComptimeError
-            raise ComptimeError(f"if statement condition: {e} [{node.source_line}:{node.source_col}]")
+            raise ComptimeError(f"if statement condition: {e}")
 
         func = builder.block.function
         then_block = func.append_basic_block('then')
@@ -4248,7 +4200,7 @@ class CodegenVisitor:
         try:
             cond_val = self.visit(node.condition, builder, module)
         except Exception as e:
-            raise RuntimeError(f"Could not evaluate global if condition: {e} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Could not evaluate global if condition: {e}", node, module)
 
         if isinstance(cond_val, ir.Constant):
             if cond_val.constant:
@@ -4264,7 +4216,7 @@ class CodegenVisitor:
                 if not executed and node.else_block:
                     self.visit(node.else_block, builder, module)
         else:
-            raise RuntimeError(f"Cannot use runtime conditions in global scope if statements [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Cannot use runtime conditions in global scope if statements", node, module)
 
         return None
 
@@ -4305,7 +4257,7 @@ class CodegenVisitor:
 
         # Statement-context if-expression with a void value and no else clause:
         # e.g. ``println("hi") if (cond);``
-        # The else branch just falls through to merge — no phi needed.
+        # The else branch just falls through to merge - no phi needed.
         is_void_value = isinstance(value_val.type, ir.VoidType)
         if is_void_value and node.else_expr is None:
             builder.position_at_start(else_block)
@@ -4355,9 +4307,9 @@ class CodegenVisitor:
                     builder.branch(merge_block)
                     builder.position_at_start(merge_block)
             else:
-                raise TypeError(
+                raise FluxCodegenError(
                     f"If expression branches have incompatible types: "
-                    f"{value_val.type} vs {else_val.type} [{node.source_line}:{node.source_col}]")
+                    f"{value_val.type} vs {else_val.type}", node, module)
 
         phi = builder.phi(value_val.type, name='ifexpr_result')
         phi.add_incoming(value_val, value_end_block)
@@ -4607,9 +4559,9 @@ class CodegenVisitor:
                             size = raw if isinstance(raw, int) else (
                                 raw.value if hasattr(raw, 'value') else int(raw))
             if size is None:
-                raise ValueError(
-                    f"Cannot iterate over pointer type {coll_type} — "
-                    f"array size not known at compile time [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"Cannot iterate over pointer type {coll_type} - "
+                    f"array size not known at compile time", node, module)
 
             index_ptr = builder.alloca(ir.IntType(32), name='forin.idx')
             builder.store(ir.Constant(ir.IntType(32), 0), index_ptr)
@@ -4630,7 +4582,7 @@ class CodegenVisitor:
             module.symbol_table.define(node.variables[0], SymbolKind.VARIABLE, llvm_value=var_ptr)
 
         else:
-            raise ValueError(f"Cannot iterate over type {coll_type} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Cannot iterate over type {coll_type}", node, module)
 
         old_break    = getattr(builder, 'break_block', None)
         old_continue = getattr(builder, 'continue_block', None)
@@ -4677,7 +4629,7 @@ class CodegenVisitor:
         Needle shapes
         -------------
         - Scalar (iW)            : single-element membership test.
-        - i8*                    : null-terminated string — full substring search.
+        - i8*                    : null-terminated string - full substring search.
         - [N x iW]* / iW* array  : contiguous sub-sequence search.
 
         Haystack shapes
@@ -4759,18 +4711,16 @@ class CodegenVisitor:
         elif isinstance(needle_type, ir.PointerType):
             dec_ptr, elem_ty, count = _decay(needle_raw, node.needle)
             if elem_ty is None:
-                raise ValueError(
-                    f"'in' operator: unsupported needle type {needle_type} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"'in' operator: unsupported needle type {needle_type} ", node, module)
             if count is None:
                 # Plain pointer needle (e.g. i8* string variable): treat as
                 # NUL-terminated sequence; count stays None (loop stops at NUL).
                 count = _array_size_from_sym(node.needle)
             needle_seq = (dec_ptr, elem_ty, count)
         else:
-            raise ValueError(
-                f"'in' operator: unsupported needle type {needle_type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'in' operator: unsupported needle type {needle_type} ", node, module)
 
         # ══════════════════════════════════════════════════════════════════════
         # Emit and classify HAYSTACK
@@ -4788,15 +4738,13 @@ class CodegenVisitor:
             # Emit a sliding bit-window: for pos in 0..(H-N) inclusive,
             # check (haystack >> pos) & mask == needle  (mask = (1<<N)-1).
             if needle_scalar is None:
-                raise ValueError(
-                    f"'in' operator: sequence needle not supported for integer haystack "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"'in' operator: sequence needle not supported for integer haystack ", node, module)
             hay_w = haystack_type.width
             ndl_w = needle_scalar.type.width
             if ndl_w > hay_w:
-                raise ValueError(
-                    f"'in' operator: needle width {ndl_w} exceeds haystack width {hay_w} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"'in' operator: needle width {ndl_w} exceeds haystack width {hay_w} ", node, module)
             # Widen both to the haystack width for uniform arithmetic.
             iHW   = haystack_type
             hay_v = haystack_raw
@@ -4846,27 +4794,25 @@ class CodegenVisitor:
         if isinstance(haystack_type, ir.PointerType):
             hay_ptr, hay_elem, hay_count = _decay(haystack_raw, node.haystack)
             if hay_elem is None:
-                raise ValueError(
-                    f"'in' operator: unsupported haystack type {haystack_type} "
-                    f"[{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(
+                    f"'in' operator: unsupported haystack type {haystack_type} ", node, module)
             if hay_count is None:
-                # Plain pointer — try symbol table
+                # Plain pointer - try symbol table
                 hay_count = _array_size_from_sym(node.haystack)
                 # If still None and element is i8, treat as NUL-terminated
         else:
-            raise ValueError(
-                f"'in' operator: unsupported haystack type {haystack_type} "
-                f"[{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(
+                f"'in' operator: unsupported haystack type {haystack_type} ", node, module)
 
         is_nul_haystack = (hay_count is None and
                            isinstance(hay_elem, ir.IntType) and
                            hay_elem.width == 8)
 
         if hay_count is None and not is_nul_haystack:
-            raise ValueError(
+            raise FluxCodegenError(
                 f"'in' operator: cannot determine size of haystack "
-                f"'{getattr(node.haystack, 'name', '?')}' "
-                f"at compile time [{node.source_line}:{node.source_col}]")
+                f"'{getattr(node.haystack, 'name', '?', node, module)}' "
+                f"at compile time", node, module)
 
         # ── Common result blocks ───────────────────────────────────────────────
         found_block  = func.append_basic_block('in.found')
@@ -5068,7 +5014,7 @@ class CodegenVisitor:
         if isinstance(node.value, Identifier):
             entry = module.symbol_table.lookup_variable(node.value.name)
             if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
-                raise ValueError(f"Compile error: local variable '{node.value.name}' cannot leave its scope via return [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Compile error: local variable '{node.value.name}' cannot leave its scope via return", node, module)
 
         # Suppress __expr promotion when the function's return type is itself a struct.
         # Without this, "return str_var;" would call str_var.__expr() (yielding e.g. i8*)
@@ -5117,7 +5063,7 @@ class CodegenVisitor:
         elif hasattr(func.type, 'pointee') and hasattr(func.type.pointee, 'return_type'):
             expected = func.type.pointee.return_type
         else:
-            raise RuntimeError(f"Cannot determine function return type [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Cannot determine function return type", node, module)
 
         if isinstance(expected, ir.VoidType):
             builder.ret_void()
@@ -5172,7 +5118,7 @@ class CodegenVisitor:
                 init = getattr(src[0], 'initializer', None)
                 if isinstance(init, ir.Constant) and isinstance(init.type, ir.IntType):
                     return ir.Constant(switch_val.type, init.constant)
-            raise ValueError(f"Switch case value is not a constant integer: {val_expr} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Switch case value is not a constant integer: {val_expr}", node, module)
 
         for i, case in enumerate(node.cases):
             if case.value is None:
@@ -5302,7 +5248,7 @@ class CodegenVisitor:
 
     def visit_ThrowStatement(self, node, builder, module):
         if not hasattr(builder, 'flux_exception_flag') or builder.flux_exception_flag is None:
-            raise RuntimeError(f"throw statement used outside of try block [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"throw statement used outside of try block", node, module)
 
         exc_flag  = builder.flux_exception_flag
         exc_value = builder.flux_exception_value
@@ -5409,11 +5355,11 @@ class CodegenVisitor:
                     try:
                         parts.append(str(self._fstring_eval_ct(part, node.name, builder, module)))
                     except (ValueError, NotImplementedError) as e:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"f-string function name contains a runtime-only expression "
                             f"that cannot be evaluated at compile time "
-                            f"[{node.source_line}:{node.source_col}]: {e}"
-                        ) from e
+                            f": {e}"
+                        , node, module) from e
             node.name = "".join(parts)
         elif isinstance(node.name, _Stringify):
             node.name = self._resolve_stringify_name(node.name, builder, module, node)
@@ -5445,9 +5391,9 @@ class CodegenVisitor:
                     base_name = node.name.split('::')[-1] if '::' in node.name else node.name
                     SymbolTable.register_function_overload(module, base_name, disambig_name, node.parameters, node.return_type, func)
                 else:
-                    raise ValueError(f"Function '{node.name}' with signature '{mangled_name}' redefined [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Function '{node.name}' with signature '{mangled_name}' redefined", node, module)
             else:
-                raise ValueError(f"Name '{mangled_name}' already used for non-function [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Name '{mangled_name}' already used for non-function", node, module)
         else:
             func = ir.Function(module, func_type, mangled_name)
             if hasattr(module, 'symbol_table') and module.symbol_table.current_namespace:
@@ -5597,13 +5543,13 @@ class CodegenVisitor:
                     call_instr.tail = "musttail"
                 builder.ret_void()
             else:
-                # If the current block is empty it was never branched to — all
+                # If the current block is empty it was never branched to - all
                 # reachable paths already returned via other blocks.  Emit
                 # unreachable so LLVM can discard the dead block cleanly.
                 if len(builder.block.instructions) == 0:
                     builder.unreachable()
                 else:
-                    raise RuntimeError(f"Function '{node.name}' must end with return statement {_src_loc_with_source(node, module)}")
+                    raise FluxCodegenError(f"Function '{node.name}' must end with return statement {_src_loc_with_source(node, module)}")
 
         return func
 
@@ -5653,8 +5599,8 @@ class CodegenVisitor:
             return alloca
 
     def visit_FunctionPointerAssignment(self, node, builder, module):
-        raise NotImplementedError(
-            f"FunctionPointerAssignment has no codegen implementation [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(
+            f"FunctionPointerAssignment has no codegen implementation", node, module)
 
     def visit_EnumDef(self, node, builder, module):
         if not hasattr(module, '_enum_types'):
@@ -5665,7 +5611,7 @@ class CodegenVisitor:
             if not node.values:
                 return
             if existing_values:
-                raise ValueError(f"Enum '{node.name}' already defined [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Enum '{node.name}' already defined", node, module)
 
         module._enum_types[node.name] = node.values
 
@@ -5706,7 +5652,7 @@ class CodegenVisitor:
                 if hasattr(module, '_type_aliases') and member_type in module._type_aliases:
                     member_type = module._type_aliases[member_type]
                 else:
-                    raise ValueError(f"Unknown type: {member_type} [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Unknown type: {member_type}", node, module)
             member_types.append(member_type)
             member_names.append(member.name)
 
@@ -5750,7 +5696,7 @@ class CodegenVisitor:
 
         if node.tag_name:
             if not hasattr(module, '_enum_types') or node.tag_name not in module._enum_types:
-                raise ValueError(f"Tag '{node.tag_name}' is not a defined enum type [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Tag '{node.tag_name}' is not a defined enum type", node, module)
             tag_type = ir.IntType(32)
             data_type = ir.ArrayType(ir.IntType(8), max_size)
             union_type = ir.LiteralStructType([tag_type, data_type])
@@ -5789,7 +5735,7 @@ class CodegenVisitor:
             if not node.members:
                 return existing_struct
             if existing_struct.elements:
-                # Body already set — but still (re)compute the vtable so TLD is correct.
+                # Body already set - but still (re)compute the vtable so TLD is correct.
                 node.vtable = node.calculate_vtable(module)
                 vtable_name = f"{node.name}.TLD"
                 if vtable_name not in module.globals:
@@ -5814,10 +5760,10 @@ class CodegenVisitor:
             for base_name in node.base_structs:
                 base_specs = module._struct_member_type_specs.get(base_name)
                 if base_specs is None:
-                    raise RuntimeError(
+                    raise FluxCodegenError(
                         f"Struct composition: base struct '{base_name}' has not been defined "
-                        f"before '{node.name}' [{node.source_line}:{node.source_col}]"
-                    )
+                        f"before '{node.name}'"
+                    , node, module)
                 base_vtable = module._struct_vtables.get(base_name)
                 ordered_names = [fname for fname, _, _, _ in base_vtable.fields] if base_vtable else list(base_specs.keys())
                 for fname in ordered_names:
@@ -5831,10 +5777,10 @@ class CodegenVisitor:
         for base_name in getattr(node, 'post_structs', []):
             base_specs = module._struct_member_type_specs.get(base_name)
             if base_specs is None:
-                raise RuntimeError(
+                raise FluxCodegenError(
                     f"Struct post-composition: struct '{base_name}' has not been defined "
-                    f"before '{node.name}' [{node.source_line}:{node.source_col}]"
-                )
+                    f"before '{node.name}'"
+                , node, module)
             base_vtable = module._struct_vtables.get(base_name)
             ordered_names = [fname for fname, _, _, _ in base_vtable.fields] if base_vtable else list(base_specs.keys())
             for fname in ordered_names:
@@ -5902,7 +5848,7 @@ class CodegenVisitor:
                         is_pointer=False, pointer_depth=0
                     )
                 else:
-                    raise TypeError(f"Expected TypeSystem or DataType, got {type(type_spec)} [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Expected TypeSystem or DataType, got {type(type_spec, node, module)}", node, module)
                 type_spec.array_element_type = element_type_spec
             member_type_specs[name] = type_spec
         # DEBUG: Print member type specs
@@ -5948,7 +5894,7 @@ class CodegenVisitor:
             # Consider the type already registered if it has elements (data members),
             # OR if it has no data members but does have methods (methods-only object).
             # Previously only `existing_type.elements` was checked, which is falsy for
-            # objects with no member variables — causing the struct and symbol to be
+            # objects with no member variables - causing the struct and symbol to be
             # re-registered on retry passes, producing "X is already defined" errors
             # when a private method body caused the first visit to raise an exception.
             if existing_type.elements or not node.members:
@@ -6013,7 +5959,7 @@ class CodegenVisitor:
                     node.name, method.name, method, struct_type, module)
                 func = method_funcs.get(func_name)
                 if func is None:
-                    raise RuntimeError(f"Internal error: missing function for method {method.name} [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Internal error: missing function for method {method.name}", node, module)
                 self._emit_method_body(method, func, node.name, module)
 
         return struct_type
@@ -6021,7 +5967,7 @@ class CodegenVisitor:
     def visit_ExternBlock(self, node, builder, module):
         for func_def in node.declarations:
             if not func_def.is_prototype:
-                raise ValueError(f"Extern functions must be prototypes (no body): {func_def.name} [{node.source_line}:{node.source_col}]")
+                raise FluxCodegenError(f"Extern functions must be prototypes (no body, node, module): {func_def.name}", node, module)
             ret_type = TypeSystem.get_llvm_type(func_def.return_type, module)
             param_types = [TypeSystem.get_llvm_type(param.type_spec, module) for param in func_def.parameters]
             func_type = ir.FunctionType(ret_type, param_types)
@@ -6038,7 +5984,7 @@ class CodegenVisitor:
             if final_name in module.globals:
                 func = module.globals[final_name]
                 if not isinstance(func, ir.Function):
-                    raise ValueError(f"Name '{final_name}' already used for non-function [{node.source_line}:{node.source_col}]")
+                    raise FluxCodegenError(f"Name '{final_name}' already used for non-function", node, module)
             else:
                 func = ir.Function(module, func_type, final_name)
             func.linkage = 'external'
@@ -6065,10 +6011,8 @@ class CodegenVisitor:
         """
         for func_def in node.definitions:
             if func_def.is_prototype:
-                raise ValueError(
-                    f"'export' requires a full definition, not a prototype: '{func_def.name}' "
-                    f"[{node.source_line}:{node.source_col}]"
-                )
+                raise FluxCodegenError(
+                    f"'export' requires a full definition, not a prototype: '{func_def.name}' ", node, module)
             func = self.visit_FunctionDef(func_def, builder, module)
             # Override the default internal/private linkage set by visit_FunctionDef
             # so that this symbol is exported from the shared library.
@@ -6193,7 +6137,7 @@ class CodegenVisitor:
             return
         if len(func.blocks) != 0:
             # If the existing entry block is already properly terminated, the method
-            # was fully emitted on a previous pass — skip it.
+            # was fully emitted on a previous pass - skip it.
             # If it is *not* terminated, it was partially emitted during an earlier
             # failed attempt (e.g. a function-resolution error in the pre-pass retry
             # loop).  In that case we must wipe the stale block and re-emit the body
@@ -6233,7 +6177,7 @@ class CodegenVisitor:
                     if len(method_builder.block.instructions) == 0:
                         method_builder.unreachable()
                     else:
-                        raise RuntimeError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement")
+                        raise FluxCodegenError(f"CodegenVisitor._emit_method_body: Method {method.name} must end with return statement", node, module)
         finally:
             module.symbol_table.exit_scope()
             module.symbol_table.current_namespace = saved_namespace
@@ -6264,7 +6208,7 @@ class CodegenVisitor:
         #NamespaceTypeHandler.add_using_namespace(module, node.name)
 
         if not hasattr(module, 'symbol_table'):
-            raise RuntimeError(f"Module must have symbol_table for namespace support [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Module must have symbol_table for namespace support", node, module)
 
         original_namespace = module.symbol_table.current_namespace
         module.symbol_table.set_namespace(node.name)
@@ -6334,7 +6278,7 @@ class CodegenVisitor:
         return None
 
     def visit_macroDef(self, node, builder, module):
-        """Direct visit of the macroDef node — also a no-op at codegen time."""
+        """Direct visit of the macroDef node - also a no-op at codegen time."""
         return None
 
     def visit_ConstraDef(self, node, builder, module):
@@ -6367,7 +6311,7 @@ class CodegenVisitor:
           3. Walk the copy, substituting every Identifier whose name matches a
              macro parameter with the corresponding caller argument expression
              (also deep-copied so the same argument can appear multiple times).
-          4. Codegen the substituted body — it's a plain Expression at this point
+          4. Codegen the substituted body - it's a plain Expression at this point
              and goes through the normal visitor dispatch.
 
         Arity is checked eagerly so the error message points at the call site.
@@ -6383,18 +6327,14 @@ class CodegenVisitor:
             macro_def = module._parser_macros.get(node.name)
 
         if macro_def is None:
-            raise NameError(
-                f"Unknown expression macro '{node.name}' "
-                f"[{node.source_line}:{node.source_col}]"
-            )
+            raise FluxCodegenError(
+                f"Unknown expression macro '{node.name}' ", node, module)
 
         # ── 2. Arity check ────────────────────────────────────────────────────
         if len(node.arguments) != len(macro_def.params):
-            raise TypeError(
-                f"Expression macro '{node.name}' expects {len(macro_def.params)} "
-                f"argument(s), got {len(node.arguments)} "
-                f"[{node.source_line}:{node.source_col}]"
-            )
+            raise FluxCodegenError(
+                f"Expression macro '{node.name}' expects {len(macro_def.params, node, module)} "
+                f"argument(s), got {len(node.arguments)} ")
 
         # ── 3. Build substitution map: param_name -> deep-copied arg expression
         subst = {
@@ -6466,7 +6406,7 @@ class CodegenVisitor:
             return node
 
         if isinstance(node, macroCall):
-            # Nested macro call — substitute into its arguments too
+            # Nested macro call - substitute into its arguments too
             node.arguments = [
                 CodegenVisitor._macro_substitute(a, subst) for a in node.arguments
             ]
@@ -6523,7 +6463,7 @@ class CodegenVisitor:
                 node.else_expr = CodegenVisitor._macro_substitute(node.else_expr, subst)
             return node
 
-        # Literals, SizeOf, AlignOf, Stringify, etc. — nothing to substitute
+        # Literals, SizeOf, AlignOf, Stringify, etc. - nothing to substitute
         return node
 
     def visit_EnumDefStatement(self, node, builder, module):
@@ -6560,7 +6500,7 @@ class CodegenVisitor:
             print(str);   // calls str.__expr() transparently
 
         NOT called when visiting the object of a member access (str.val) or
-        method call (str.foo()) — those need the raw struct pointer.
+        method call (str.foo()) - those need the raw struct pointer.
 
         Handles two common alloca shapes:
           1. alloca of struct:            ptr.type == %ObjName*   (this_ptr = ptr)
@@ -6586,7 +6526,7 @@ class CodegenVisitor:
         else:
             return None
 
-        # Use the struct's own LLVM name directly — it's always the canonical mangled
+        # Use the struct's own LLVM name directly - it's always the canonical mangled
         # key (e.g. "standard__strings__string") matching what predeclare_method
         # registered.  Iterating _struct_types risks hitting a short alias (e.g.
         # "string") before the fully-qualified name, producing the wrong lookup key.
@@ -6724,7 +6664,7 @@ class CodegenVisitor:
             if IdentifierTypeHandler.is_type_alias(mangled_name, module):
                 return module._type_aliases[mangled_name]
 
-        raise NameError(f"Unknown identifier: {node.name} [{node.source_line}:{node.source_col}]")
+        raise FluxCodegenError(f"Unknown identifier: {node.name}", node, module)
 
     def visit_VariableDeclaration(self, node, builder, module):
         # Resolve type (with automatic array size inference if needed)
@@ -6894,7 +6834,7 @@ class CodegenVisitor:
         # Zero-copy struct recast: `T t from src[start:end]` or `T t from arr`
         # visit_StructRecast returns a T* pointer directly into the source buffer
         # whenever the source is a pointer (slice GEP, array alloca, etc.).
-        # Register that pointer as the variable — no alloca, no load, no store.
+        # Register that pointer as the variable - no alloca, no load, no store.
         from fast import StructRecast as _StructRecast, ArraySlice as _ArraySlice, Identifier as _Identifier
         if isinstance(node.initial_value, _StructRecast):
             recast_ptr = self.visit(node.initial_value, builder, module)
@@ -6966,7 +6906,7 @@ class CodegenVisitor:
                 if resolved_type_spec:
                     alloca._flux_type_spec = resolved_type_spec
                 module.symbol_table.define(node.name, SymbolKind.VARIABLE, type_spec=resolved_type_spec, llvm_value=alloca)
-                # VLA: cannot store an aggregate initializer into an element pointer — skip init
+                # VLA: cannot store an aggregate initializer into an element pointer - skip init
                 return alloca
             else:
                 current_block = builder.block
@@ -7066,7 +7006,7 @@ class CodegenVisitor:
 
         # --- resolve / declare fmalloc -----------------------------------
         # The canonical mangled name emitted by the standard library.
-        # Signature: u64 fmalloc(u64 size)  — takes and returns a raw address (u64).
+        # Signature: u64 fmalloc(u64 size)  - takes and returns a raw address (u64).
         _FMALLOC_MANGLED = (
             'standard__memory__allocators__stdheap__fmalloc'
             '__1__dataE1_ubits64__ret_dataE1_ubits64'
@@ -7360,7 +7300,7 @@ class CodegenVisitor:
                         break
 
         if func is None:
-            raise NameError(f"Constructor not found: {func_call.name} [{node.source_line}:{node.source_col}]")
+            raise FluxCodegenError(f"Constructor not found: {func_call.name}", node, module)
         # Build arguments: 'this' pointer first, then constructor arguments
         args = [alloca]
 
@@ -7501,7 +7441,7 @@ class CodegenVisitor:
             if (len(still_tl) == len(pending_tl) and
                     len(still_ns) == len(pending_ns_retry) and
                     len(still_ex) == len(pending_ex)):
-                # No progress — surface the real errors
+                # No progress - surface the real errors
                 for stmt in still_tl:
                     self.visit(stmt, builder, module)
                 for ns in still_ns:
@@ -7531,7 +7471,7 @@ class CodegenVisitor:
             if isinstance(stmt, _skip_types):
                 continue
             if isinstance(stmt, _FunctionDef) and hasattr(stmt, '_source_namespace'):
-                continue  # template instantiation — emitted after last namespace
+                continue  # template instantiation - emitted after last namespace
             self.visit(stmt, builder, module)
             # After processing the last namespace, flush all template instantiations.
             if _stmt_idx == _last_ns_idx:
@@ -7550,7 +7490,7 @@ class CodegenVisitor:
                 obj_def = stmt.object_def
             if obj_def is None or not obj_def.traits:
                 continue
-            # Skip template object definitions that have not been instantiated —
+            # Skip template object definitions that have not been instantiated -
             # they still carry template_params and are never used directly.
             if getattr(obj_def, 'template_params', None):
                 continue
@@ -7558,20 +7498,20 @@ class CodegenVisitor:
             for trait_name in obj_def.traits:
                 required = module.symbol_table._trait_registry.get(trait_name)
                 if required is None:
-                    raise ValueError(
+                    raise FluxCodegenError(
                         f"Trait '{trait_name}' used by object '{obj_def.name}' is not defined "
-                        f"[{obj_def.source_line}:{obj_def.source_col}]")
+                        f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
                 for proto in required:
                     # Templated prototypes (e.g. def get<T>(...)) cannot be matched by
-                    # name alone — the concrete object implements them via its own template
+                    # name alone - the concrete object implements them via its own template
                     # parameter.  Skip enforcement for these.
                     if getattr(proto, '_is_trait_template_proto', False):
                         continue
                     if proto.name not in implemented_names:
-                        raise ValueError(
+                        raise FluxCodegenError(
                             f"Object '{obj_def.name}' does not implement required function "
                             f"'{proto.name}' from '{trait_name}' trait "
-                            f"[{obj_def.source_line}:{obj_def.source_col}]")
+                            f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
 
         # Pass 4: Re-emit object method bodies that were skipped or partially emitted
         # during the pre-pass (e.g. because using-namespace functions such as println()
