@@ -6337,6 +6337,15 @@ class CodegenVisitor:
         """Direct visit of the macroDef node — also a no-op at codegen time."""
         return None
 
+    def visit_ConstraDef(self, node, builder, module):
+        """
+        ConstraDef is a compile-time-only construct.
+        Named constraint sets are registered in the parser's _constras table
+        and expanded into relational constraints at parse time.
+        There is nothing to emit into LLVM IR here.
+        """
+        return None
+
     def visit_ContractDef(self, node, builder, module):
         """
         ContractDef is a compile-time-only construct.

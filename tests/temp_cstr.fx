@@ -2,19 +2,20 @@
  
 using standard::io::console;
 
-byte* z = "f",
-      t = "T",
-      u = "U";
+byte* z = "f";
 
-#def NULLSTR "";
+constra MyCS(A,B)
+{
+    A ~ B
+};
 
-NULLSTR.f<~$t: NULLSTR, ~$u: NULLSTR, ~$t ~ ~$u>(~$t x, ~$u y) -> NULLSTR
+i"".i"{}":{z}<T: "", U: "", :{MyCS}>(T x, U y) -> ""
 {
     return _ + i"{} {}":{x; y;};
 };
 
 def main() -> int
 {
-    println("Hello".f(",", "World!"));
+    println(i"Hello":{}.i"{}":{z}(",", "World!"));
     return 0;
 };

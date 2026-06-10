@@ -458,6 +458,87 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
     return merged_members, merged_methods
 
 
+@dataclass
+class TemplateEntry:
+    kind: str                          # 'function' | 'struct' | 'object' | 'operator'
+    params: List[str]                  # template parameter names in declaration order
+    node: object                       # the template AST node (FunctionDef, StructDef, etc.)
+    constraints: dict                  # param_name -> [allowed_type_spec_strings]
+    relational_constraints: list       # relational constraint entries
+    defaults: dict                     # param_name -> TypeSystem default
+    no_default: set                    # param names that must be supplied explicitly
+    emitted: set                       # mangled names already instantiated
+
+
+class TemplateRegistry:
+    def __init__(self):
+        self._entries: dict = {}
+
+    def register(self, name: str, kind: str, params: list, node: object,
+                 constraints=None, relational=None, defaults=None, no_default=None) -> None:
+        existing = self._entries.get(name)
+        if existing is not None and existing.kind == kind:
+            # Overwrite in place so that aliases sharing this entry pick up the new node.
+            existing.params = list(params)
+            existing.node = node
+            if constraints:
+                existing.constraints = constraints
+            if relational:
+                existing.relational_constraints = relational
+            if defaults:
+                existing.defaults = defaults
+            if no_default:
+                existing.no_default = no_default
+            return
+        self._entries[name] = TemplateEntry(
+            kind=kind,
+            params=list(params),
+            node=node,
+            constraints=constraints or {},
+            relational_constraints=relational or [],
+            defaults=defaults or {},
+            no_default=no_default or set(),
+            emitted=set(),
+        )
+
+    def lookup(self, name: str):
+        return self._entries.get(name)
+
+    def has(self, name: str) -> bool:
+        return name in self._entries
+
+    def register_alias(self, alias: str, original: str) -> None:
+        if original in self._entries:
+            self._entries[alias] = self._entries[original]
+
+    def mark_emitted(self, name: str, mangled: str) -> None:
+        entry = self._entries.get(name)
+        if entry is not None:
+            entry.emitted.add(mangled)
+
+    def is_emitted(self, name: str, mangled: str) -> bool:
+        entry = self._entries.get(name)
+        return entry is not None and mangled in entry.emitted
+
+    def all_of_kind(self, kind: str) -> dict:
+        return {k: v for k, v in self._entries.items() if v.kind == kind}
+
+    def keys(self):
+        return self._entries.keys()
+
+    def items(self):
+        return self._entries.items()
+
+    def __contains__(self, name):
+        return name in self._entries
+
+    def __iter__(self):
+        return iter(self._entries)
+
+    def __bool__(self):
+        return bool(self._entries)
+
+
 class FluxParser:
     def __init__(self, tokens: List[Token], default_byte_width: int = 8, source_lines: Optional[List[str]] = None):
         self.tokens = tokens
@@ -471,25 +552,15 @@ class FluxParser:
         self._macros = {}  # name -> macroDef, populated as macro definitions are parsed
         self._namespace_stack = []  # Track current namespace path for symbol registration
         self._object_init_params = {}  # object_name -> __init parameter count (excluding 'this')
-        self._template_functions = {}  # name -> (template_param_names, FunctionDef AST)
-        self._template_constraints = {}  # name -> {param_name -> [allowed_type_spec_strings]}
-        self._template_relations = {}   # name -> [(lhs_names, compat: bool, rhs_names)]
-        self._template_defaults = {}    # name -> {param_name -> TypeSystem}
-        self._template_no_default = {}  # name -> set of param_names that must be supplied
-        self._emitted_template_instances = set()  # mangled names already instantiated
+        self._templates = TemplateRegistry()  # all template state (functions/structs/objects/operators)
         self._template_instantiations = []  # concrete FunctionDef nodes to inject into program
-        self._template_structs = {}               # name -> (param_names, StructDef AST)
-        self._emitted_template_struct_instances = set()
         self._template_struct_instances = []      # concrete StructDefs to inject
-        self._template_objects = {}               # name -> (param_names, ObjectDef AST)
-        self._emitted_template_object_instances = set()
         self._template_object_instances = []      # concrete ObjectDefs to inject
         self._parsed_objects = {}  # object_name -> ObjectDef AST node
         self._custom_operators: Dict[str, str] = {}  # symbol string -> base function name
-        self._template_operators: Dict[str, tuple] = {}  # op_symbol -> (template_param_names, FunctionDef AST)
-        self._emitted_template_operator_instances: set = set()  # mangled names already instantiated
         self._active_template_params: set = set()  # template param names in scope during current def/struct parse
         self._contracts: Dict[str, Block] = {}  # name -> Block of statements to inject
+        self._constras: dict = {}  # name -> (params: List[str], relations: list)
         self._function_depth = 0  # Tracks nesting depth; nested function defs are illegal
         self._loop_depth = 0      # Tracks nesting depth of for/while/do-while loops
         self._in_for_init = False # True while parsing the init clause of a for(...) header
@@ -498,6 +569,15 @@ class FluxParser:
         self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
         # Populated by from_file after preprocessing; maps global line index (0-based) -> (filename, local_line 1-based)
         self._line_map: List[tuple] = []
+
+    @contextmanager
+    def _template_scope(self, params: List[str]):
+        prev = self._active_template_params
+        self._active_template_params = set(params) if params else prev
+        try:
+            yield
+        finally:
+            self._active_template_params = prev
 
     def resolve_source_location(self, global_line: int) -> tuple:
         """
@@ -869,7 +949,7 @@ class FluxParser:
                 is_prototype=is_prototype,
                 no_mangle=False
             ).set_location(tok.line, tok.column)
-            self._template_operators[symbol] = (template_params, func_def)
+            self._templates.register(symbol, 'operator', template_params, func_def)
             return None
 
         return FunctionDef(
@@ -1055,6 +1135,8 @@ class FluxParser:
             return self.export_statement()
         elif self.expect(TokenType.CONTRACT):
             return self.contract_def()
+        elif self.expect(TokenType.CONSTRA):
+            return self.constra_def()
         elif self.expect(TokenType.INLINE):
             return self.function_def()
         elif self.expect(TokenType.DEF):
@@ -1674,6 +1756,66 @@ class FluxParser:
         self._contracts[name] = (params, body)
         return ContractDef(name, body, params).set_location(tok.line, tok.column)
 
+    def constra_def(self) -> 'ConstraDef':
+        """
+        constra_def -> 'constra' IDENTIFIER '(' param_list ')' '{' relation_list '}' ';'
+                     | 'constra' IDENTIFIER '{' relation_list '}' ';'
+
+        Parses a named relational constraint set and registers it in self._constras.
+        Relations use the formal parameter names declared in the constra parameter list.
+
+        Syntax:
+            constra MyCS(A, B)
+            {
+                A ~ B
+            };
+        """
+        tok = self.current_token
+        self.consume(TokenType.CONSTRA)
+        name = self.consume(TokenType.IDENTIFIER).value
+        params = []
+        if self.expect(TokenType.LEFT_PAREN):
+            self.advance()
+            if not self.expect(TokenType.RIGHT_PAREN):
+                params.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    params.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.RIGHT_PAREN)
+        self.consume(TokenType.LEFT_BRACE)
+        relations = []
+        def _parse_id_list_cs():
+            names = [self.consume(TokenType.IDENTIFIER).value]
+            while self.expect(TokenType.LOGICAL_AND):
+                self.advance()
+                names.append(self.consume(TokenType.IDENTIFIER).value)
+            return names
+        def _is_constraint_op():
+            # A constraint op starts with TIE (~) or NOT (~$ ahead)
+            return self.expect(TokenType.TIE) or self.expect(TokenType.NOT)
+        def _parse_rel_expr():
+            # Parse a chained relational expression: A ~ B !~ C ~ D ...
+            # Each step: consume op, consume rhs id-list, emit a (lhs, compat, rhs) pair
+            lhs = _parse_id_list_cs()
+            while _is_constraint_op():
+                compat = True
+                if self.expect(TokenType.NOT):
+                    self.advance()
+                    compat = False
+                self.consume(TokenType.TIE)
+                rhs = _parse_id_list_cs()
+                relations.append((lhs, compat, rhs))
+                # rhs becomes lhs for next chained op
+                lhs = rhs
+        _parse_rel_expr()
+        while self.expect(TokenType.COMMA):
+            self.advance()
+            _parse_rel_expr()
+        self.consume(TokenType.RIGHT_BRACE)
+        self.consume(TokenType.SEMICOLON)
+        self._constras[name] = (params, relations)
+        return ConstraDef(name, params, relations).set_location(tok.line, tok.column)
+
     def function_def(self, calling_conv: Optional[str] = None) -> Union[FunctionDef, List[FunctionDef]]:
         """
         function_def -> ('const')? ('volatile')? ('inline')? ('def' | calling_conv_kw) ('!!')? (IDENTIFIER | STRING_LITERAL | F_STRING | I_STRING | STRINGIFY) '(' parameter_list? ')' '->' type_spec (';' | block ';')
@@ -1795,30 +1937,60 @@ class FluxParser:
                         self.advance()
                 if self.expect(TokenType.CODIFY):
                     self.advance()
-                if self.expect(TokenType.IDENTIFIER):
+                # Helper used in lookahead to skip ':{' ... '}'
+                def _la_skip_constraint_set_fd():
+                    self.advance()  # consume ':'
+                    self.advance()  # consume '{'
+                    depth = 1
+                    while not self.expect(TokenType.EOF):
+                        if self.expect(TokenType.LEFT_BRACE):
+                            depth += 1
+                            self.advance()
+                        elif self.expect(TokenType.RIGHT_BRACE):
+                            depth -= 1
+                            self.advance()
+                            if depth == 0:
+                                break
+                        else:
+                            self.advance()
+                # Helper to skip a type-constraint value after ':' (not followed by '{')
+                def _la_skip_type_constraint_fd():
+                    depth = 0
+                    while not self.expect(TokenType.EOF):
+                        if self.expect(TokenType.LESS_THAN):
+                            depth += 1
+                            self.advance()
+                        elif self.expect(TokenType.GREATER_THAN):
+                            if depth == 0:
+                                break
+                            depth -= 1
+                            self.advance()
+                        elif self.expect(TokenType.COMMA) and depth == 0:
+                            break
+                        else:
+                            self.advance()
+                # First entry: ':{...}' constraint set, identifier param, or bare relation (accepted
+                # in lookahead so the real parse can emit a proper error for it)
+                _la_first_ok = False
+                if self.expect(TokenType.COLON):
+                    _la_saved = self.position
                     self.advance()
-                    # Skip optional constraint clause: ': type (| type)*'
-                    # or relation entry: ('&' IDENTIFIER)* ('~'|'!~') IDENTIFIER ('&' IDENTIFIER)*
+                    if self.expect(TokenType.LEFT_BRACE):
+                        self.position = _la_saved
+                        self.current_token = self.tokens[self.position]
+                        _la_skip_constraint_set_fd()
+                        _la_first_ok = True
+                    else:
+                        self.position = _la_saved
+                        self.current_token = self.tokens[self.position]
+                elif self.expect(TokenType.IDENTIFIER):
+                    self.advance()
                     if self.expect(TokenType.COLON):
                         self.advance()
-                        # Skip tokens until we hit COMMA or GREATER_THAN, tracking
-                        # bracket depth so nested angle brackets don't confuse us.
-                        depth = 0
-                        while not self.expect(TokenType.EOF):
-                            if self.expect(TokenType.LESS_THAN):
-                                depth += 1
-                                self.advance()
-                            elif self.expect(TokenType.GREATER_THAN):
-                                if depth == 0:
-                                    break
-                                depth -= 1
-                                self.advance()
-                            elif self.expect(TokenType.COMMA) and depth == 0:
-                                break
-                            else:
-                                self.advance()
+                        _la_skip_type_constraint_fd()
                     else:
                         # Skip optional '&' IDENTIFIER chain and '~'/'!~' relation
+                        # (bare relation — accepted here so real parse can error properly)
                         while self.expect(TokenType.LOGICAL_AND):
                             self.advance()
                             if self.expect(TokenType.IDENTIFIER):
@@ -1841,52 +2013,44 @@ class FluxParser:
                                         self.advance()
                                         if self.expect(TokenType.IDENTIFIER):
                                             self.advance()
+                    _la_first_ok = True
+                if _la_first_ok:
                     while self.expect(TokenType.COMMA):
                         self.advance()
-                        # Accept optional <!+ prefix on subsequent entries
                         if self.expect(TokenType.NOT):
                             self.advance()
                             if self.expect(TokenType.PLUS):
                                 self.advance()
-                        if self.expect(TokenType.CODIFY):
+                        if self.expect(TokenType.COLON):
+                            _la_saved2 = self.position
+                            self.advance()
+                            if self.expect(TokenType.LEFT_BRACE):
+                                self.position = _la_saved2
+                                self.current_token = self.tokens[self.position]
+                                _la_skip_constraint_set_fd()
+                            else:
+                                self.position = _la_saved2
+                                self.current_token = self.tokens[self.position]
+                                break
+                        elif self.expect(TokenType.CODIFY):
                             self.advance()
                             self.advance()  # consume IDENTIFIER after CODIFY
+                            if self.expect(TokenType.COLON):
+                                self.advance()
+                                _la_skip_type_constraint_fd()
                         elif not self.expect(TokenType.IDENTIFIER):
                             break
                         else:
                             self.advance()
-                        # Skip optional constraint clause for this param too
-                        if self.expect(TokenType.COLON):
-                            self.advance()
-                            depth = 0
-                            while not self.expect(TokenType.EOF):
-                                if self.expect(TokenType.LESS_THAN):
-                                    depth += 1
-                                    self.advance()
-                                elif self.expect(TokenType.GREATER_THAN):
-                                    if depth == 0:
-                                        break
-                                    depth -= 1
-                                    self.advance()
-                                elif self.expect(TokenType.COMMA) and depth == 0:
-                                    break
-                                else:
-                                    self.advance()
-                        else:
-                            while self.expect(TokenType.LOGICAL_AND):
+                            if self.expect(TokenType.COLON):
                                 self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
+                                _la_skip_type_constraint_fd()
+                            else:
+                                # Skip bare relation in subsequent entry
+                                while self.expect(TokenType.LOGICAL_AND):
                                     self.advance()
-                            if self.expect(TokenType.TIE):
-                                self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
-                                    self.advance()
-                                    while self.expect(TokenType.LOGICAL_AND):
+                                    if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
-                                        if self.expect(TokenType.IDENTIFIER):
-                                            self.advance()
-                            elif self.expect(TokenType.NOT):
-                                self.advance()
                                 if self.expect(TokenType.TIE):
                                     self.advance()
                                     if self.expect(TokenType.IDENTIFIER):
@@ -1895,6 +2059,16 @@ class FluxParser:
                                             self.advance()
                                             if self.expect(TokenType.IDENTIFIER):
                                                 self.advance()
+                                elif self.expect(TokenType.NOT):
+                                    self.advance()
+                                    if self.expect(TokenType.TIE):
+                                        self.advance()
+                                        if self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
+                                            while self.expect(TokenType.LOGICAL_AND):
+                                                self.advance()
+                                                if self.expect(TokenType.IDENTIFIER):
+                                                    self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
 
@@ -1907,6 +2081,83 @@ class FluxParser:
                         self.advance()
                         names.append(self.consume(TokenType.IDENTIFIER).value)
                     return names
+                # Helper: parse a ':{' ... '}' constraint set and collect relational constraints
+                def _parse_constraint_set_fd():
+                    self.consume(TokenType.COLON)
+                    self.consume(TokenType.LEFT_BRACE)
+                    # Parse one or more comma-separated entries: raw relation or named constra
+                    def _parse_one_cs_entry():
+                        # Peek: IDENTIFIER followed by '~', '!~', '&', or '(' -> constra ref or relation
+                        _entry_tok = self.current_token
+                        _entry_name = self.consume(TokenType.IDENTIFIER).value
+                        if self.expect(TokenType.LEFT_PAREN):
+                            # Named constra with explicit args: MyCS(T, U)
+                            if _entry_name not in self._constras:
+                                self.current_token = _entry_tok
+                                self.error(f"Unknown named constraint set '{_entry_name}'")
+                            cs_params, cs_relations = self._constras[_entry_name]
+                            self.advance()  # consume '('
+                            call_args = []
+                            if not self.expect(TokenType.RIGHT_PAREN):
+                                call_args.append(self.consume(TokenType.IDENTIFIER).value)
+                                while self.expect(TokenType.COMMA):
+                                    self.advance()
+                                    call_args.append(self.consume(TokenType.IDENTIFIER).value)
+                            self.consume(TokenType.RIGHT_PAREN)
+                            if len(call_args) != len(cs_params):
+                                self.current_token = _entry_tok
+                                self.error(
+                                    f"Named constraint set '{_entry_name}' expects "
+                                    f"{len(cs_params)} argument(s), got {len(call_args)}"
+                                )
+                            for arg in call_args:
+                                if arg not in template_params:
+                                    self.error(
+                                        f"'{arg}' is not a template parameter; "
+                                        f"valid parameters are: {', '.join(template_params)}"
+                                    )
+                            mapping = dict(zip(cs_params, call_args))
+                            for lhs_f, compat_f, rhs_f in cs_relations:
+                                _func_relations.append(
+                                    ([mapping.get(n, n) for n in lhs_f], compat_f,
+                                     [mapping.get(n, n) for n in rhs_f])
+                                )
+                        elif _entry_name in self._constras and not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                            # Bare constra name — map template params in order of appearance
+                            cs_params, cs_relations = self._constras[_entry_name]
+                            # Collect template params seen so far (in declaration order)
+                            ordered_tparams = [p for p in template_params]
+                            if len(cs_params) != len(ordered_tparams):
+                                self.current_token = _entry_tok
+                                self.error(
+                                    f"Named constraint set '{_entry_name}' has {len(cs_params)} "
+                                    f"parameter(s) but the template has {len(ordered_tparams)} "
+                                    f"parameter(s); use explicit arguments: '{_entry_name}(...)'"
+                                )
+                            mapping = dict(zip(cs_params, ordered_tparams))
+                            for lhs_f, compat_f, rhs_f in cs_relations:
+                                _func_relations.append(
+                                    ([mapping.get(n, n) for n in lhs_f], compat_f,
+                                     [mapping.get(n, n) for n in rhs_f])
+                                )
+                        else:
+                            # Raw relation: lhs already started with _entry_name
+                            lhs = [_entry_name]
+                            while self.expect(TokenType.LOGICAL_AND):
+                                self.advance()
+                                lhs.append(self.consume(TokenType.IDENTIFIER).value)
+                            compat = True
+                            if self.expect(TokenType.NOT):
+                                self.advance()
+                                compat = False
+                            self.consume(TokenType.TIE)
+                            rhs = _parse_id_list()
+                            _func_relations.append((lhs, compat, rhs))
+                    _parse_one_cs_entry()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        _parse_one_cs_entry()
+                    self.consume(TokenType.RIGHT_BRACE)
                 # Helper: parse a param entry with optional <!+ prefix and constraint with optional + default
                 def _parse_param_entry(param_name):
                     if self.expect(TokenType.COLON):
@@ -1954,71 +2205,59 @@ class FluxParser:
                             _func_defaults[param_name] = _default_ts
                     else:
                         template_params.append(param_name)
-                # Parse first entry: optional <!+ prefix, then param decl or relation
-                _no_default_first = False
-                if self.expect(TokenType.NOT):
-                    self.advance()
-                    self.consume(TokenType.PLUS)
-                    _no_default_first = True
-                if self.expect(TokenType.CODIFY):
-                    self.advance()
-                    _codify_var = self.consume(TokenType.IDENTIFIER).value
-                    _first_id = self._comptime_strings.get(_codify_var, _codify_var)
+                # Parse first entry: ':{...}' constraint set, or identifier param entry
+                if self.expect(TokenType.COLON):
+                    _parse_constraint_set_fd()
                 else:
-                    _first_id = self.consume(TokenType.IDENTIFIER).value
-                if _no_default_first:
-                    _func_no_default.add(_first_id)
-                if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
-                    _parse_param_entry(_first_id)
-                else:
-                    # Relation entry
-                    lhs = [_first_id]
-                    while self.expect(TokenType.LOGICAL_AND):
-                        self.advance()
-                        lhs.append(self.consume(TokenType.IDENTIFIER).value)
-                    compat = True
-                    if self.expect(TokenType.NOT):
-                        self.advance()
-                        compat = False
-                    self.consume(TokenType.TIE)
-                    rhs = _parse_id_list()
-                    _func_relations.append((lhs, compat, rhs))
-                while self.expect(TokenType.COMMA):
-                    self.advance()
-                    _no_default_next = False
+                    _no_default_first = False
                     if self.expect(TokenType.NOT):
                         self.advance()
                         self.consume(TokenType.PLUS)
-                        _no_default_next = True
+                        _no_default_first = True
                     if self.expect(TokenType.CODIFY):
                         self.advance()
                         _codify_var = self.consume(TokenType.IDENTIFIER).value
-                        _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                        _first_id = self._comptime_strings.get(_codify_var, _codify_var)
                     else:
-                        _next_id = self.consume(TokenType.IDENTIFIER).value
-                    if _no_default_next:
-                        _func_no_default.add(_next_id)
-                    if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
-                        _parse_param_entry(_next_id)
+                        _first_id = self.consume(TokenType.IDENTIFIER).value
+                    if _no_default_first:
+                        _func_no_default.add(_first_id)
+                    if self.expect(TokenType.LOGICAL_AND, TokenType.TIE) or (self.expect(TokenType.NOT) and not self.expect(TokenType.COLON)):
+                        self.error(
+                            f"Relational template constraints must be wrapped in a constraint set as :{{T ~ U}}. "
+                            f"Did you mean :{{{_first_id} ~ ...}}, or did you intend a type constraint {_first_id}: ?"
+                        )
+                    _parse_param_entry(_first_id)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    if self.expect(TokenType.COLON):
+                        _parse_constraint_set_fd()
                     else:
-                        lhs = [_next_id]
-                        while self.expect(TokenType.LOGICAL_AND):
-                            self.advance()
-                            lhs.append(self.consume(TokenType.IDENTIFIER).value)
-                        compat = True
+                        _no_default_next = False
                         if self.expect(TokenType.NOT):
                             self.advance()
-                            compat = False
-                        self.consume(TokenType.TIE)
-                        rhs = _parse_id_list()
-                        _func_relations.append((lhs, compat, rhs))
+                            self.consume(TokenType.PLUS)
+                            _no_default_next = True
+                        if self.expect(TokenType.CODIFY):
+                            self.advance()
+                            _codify_var = self.consume(TokenType.IDENTIFIER).value
+                            _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                        else:
+                            _next_id = self.consume(TokenType.IDENTIFIER).value
+                        if _no_default_next:
+                            _func_no_default.add(_next_id)
+                        if self.expect(TokenType.LOGICAL_AND, TokenType.TIE) or (self.expect(TokenType.NOT) and not self.expect(TokenType.COLON)):
+                            self.error(
+                                f"Relational template constraints must be wrapped in a constraint set: :{{T ~ U}}. "
+                                f"Did you mean :{{{_next_id} ~ ...}}, or did you intend a type constraint {_next_id}: ?"
+                            )
+                        _parse_param_entry(_next_id)
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() can detect and defer
         # myStru<T>-style type arguments that are still unresolved template params.
-        _prev_active = self._active_template_params
-        self._active_template_params = set(template_params) if template_params else _prev_active
-
+        _tmpl_scope_ctx = self._template_scope(template_params if template_params else [])
+        _tmpl_scope_ctx.__enter__()
         self.consume(TokenType.LEFT_PAREN)
         parameters = []
         if not self.expect(TokenType.RIGHT_PAREN):
@@ -2106,23 +2345,19 @@ class FluxParser:
                             self.advance()
                             proto_template_params.append(self.consume(TokenType.IDENTIFIER).value)
                         self.consume(TokenType.GREATER_THAN)
-                _prev_proto_active = self._active_template_params
-                if proto_template_params:
-                    self._active_template_params = set(proto_template_params)
+                with self._template_scope(proto_template_params if proto_template_params else []):
                 
-                self.consume(TokenType.LEFT_PAREN)
-                proto_parameters = []
-                if not self.expect(TokenType.RIGHT_PAREN):
-                    proto_parameters = self.parameter_list()
-                self.consume(TokenType.RIGHT_PAREN)
+                    self.consume(TokenType.LEFT_PAREN)
+                    proto_parameters = []
+                    if not self.expect(TokenType.RIGHT_PAREN):
+                        proto_parameters = self.parameter_list()
+                    self.consume(TokenType.RIGHT_PAREN)
                 
-                self.consume(TokenType.RETURN_ARROW)
-                proto_return_type = self.type_spec()
+                    self.consume(TokenType.RETURN_ARROW)
+                    proto_return_type = self.type_spec()
 
                 _proto_is_var = any(getattr(p, '_is_variadic_sentinel', False) for p in proto_parameters)
                 _proto_real = [p for p in proto_parameters if not getattr(p, '_is_variadic_sentinel', False)]
-
-                self._active_template_params = _prev_proto_active
 
                 # no_mangle applies to ALL functions in this comma-separated list
                 _proto_fd = FunctionDef(proto_name, _proto_real, proto_return_type,
@@ -2135,7 +2370,7 @@ class FluxParser:
             self.consume(TokenType.SEMICOLON)
             
             # Restore active template params — this early return bypasses the normal restore at end of function_def.
-            self._active_template_params = _prev_active
+            _tmpl_scope_ctx.__exit__(None, None, None)
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
         # Resolve contract(s): def foo(int x) -> int : NonZero, LessThan(y,x) { ... }
@@ -2234,22 +2469,18 @@ class FluxParser:
         
         # Restore the previous active template param set now that the entire function
         # (params, return type, and body) has been parsed.
-        self._active_template_params = _prev_active
+        _tmpl_scope_ctx.__exit__(None, None, None)
 
         # If this is a template function, store it and return None (no immediate codegen)
         if template_params:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
                                    is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
                                    is_recursive, is_inline)
-            self._template_functions[name] = (template_params, func_def)
-            if _func_constraints:
-                self._template_constraints[name] = _func_constraints
-            if _func_relations:
-                self._template_relations[name] = _func_relations
-            if _func_defaults:
-                self._template_defaults[name] = _func_defaults
-            if _func_no_default:
-                self._template_no_default[name] = _func_no_default
+            self._templates.register(name, 'function', template_params, func_def,
+                                     constraints=_func_constraints or {},
+                                     relational=_func_relations or [],
+                                     defaults=_func_defaults or {},
+                                     no_default=_func_no_default or set())
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const,
@@ -2744,7 +2975,7 @@ class FluxParser:
                        nested_structs=nested_structs, template_params=template_params)
         sd.set_location(tok.line, tok.column)
         if template_params:
-            self._template_structs[name] = (template_params, sd)
+            self._templates.register(name, 'struct', template_params, sd)
             return None  # no immediate emission; instantiated on use
         return sd
     
@@ -2805,11 +3036,11 @@ class FluxParser:
             if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                 proto = self.function_def()
                 if proto is None:
-                    # Templated prototype: function_def() stored it in _template_functions
+                    # Templated prototype: function_def() stored it in _templates
                     # and returned None.  Recover the FunctionDef so the trait registry
                     # can record it; the compliance checker will skip it.
-                    bare_name = next(reversed(self._template_functions))
-                    _, recovered = self._template_functions[bare_name]
+                    bare_name = next(reversed(self._templates.all_of_kind('function')))
+                    recovered = self._templates.lookup(bare_name).node
                     recovered._is_trait_template_proto = True
                     prototypes.append(recovered)
                 elif isinstance(proto, list):
@@ -2856,8 +3087,8 @@ class FluxParser:
                     template_params.append(self.consume(TokenType.IDENTIFIER).value)
                 self.consume(TokenType.GREATER_THAN)
 
-        _prev_active = self._active_template_params
-        self._active_template_params = set(template_params) if template_params else self._active_template_params
+        _obj_tmpl_scope_ctx = self._template_scope(template_params if template_params else [])
+        _obj_tmpl_scope_ctx.__enter__()
 
         # Check for comma-separated prototypes
         names = [name]
@@ -2890,7 +3121,7 @@ class FluxParser:
         if self.expect(TokenType.SEMICOLON):
             is_prototype = True
             self.advance()
-            self._active_template_params = _prev_active
+            _obj_tmpl_scope_ctx.__exit__(None, None, None)
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
                 return [ObjectDef(n, [], [], [], [], traits=traits).set_location(tok.line, tok.column) for n in names]
@@ -2902,13 +3133,13 @@ class FluxParser:
         if len(names) > 1:
             self.error("Comma-separated names are only allowed for prototypes (forward declarations)")
 
-        # Pre-register in _template_objects before parsing the body so that
+        # Pre-register in _templates before parsing the body so that
         # type_spec() can resolve self-referential return types like Tensor<T>*
         # inside method signatures (e.g. def __expr() -> Tensor<T>*).
         # We store a sentinel now and overwrite with the real ObjectDef after.
         if template_params:
             _sentinel = ObjectDef(name, [], [], [], [], traits=traits, template_params=template_params)
-            self._template_objects[name] = (template_params, _sentinel)
+            self._templates.register(name, 'object', template_params, _sentinel)
 
         self.consume(TokenType.LEFT_BRACE)
         
@@ -2929,19 +3160,18 @@ class FluxParser:
                         _is_override = True
                         self.advance()  # consume '+'
                     if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
-                        _obj_tmpl_keys_before = set(self._template_functions.keys())
+                        _obj_tmpl_keys_before = set(self._templates.all_of_kind('function').keys())
                         method = self.function_def()
                         if method is None:
                             # Template method: re-register under qualified ObjectName.methodname key
                             # and record a stub in methods so trait compliance can see the name.
-                            _new_method_names = [k for k in self._template_functions
+                            _new_method_names = [k for k in self._templates.all_of_kind('function')
                                                  if k not in _obj_tmpl_keys_before]
                             for bare_name in _new_method_names:
                                 qualified = f"{name}.{bare_name}"
-                                if qualified not in self._template_functions:
-                                    self._template_functions[qualified] = self._template_functions[bare_name]
-                            bare_name = _new_method_names[-1] if _new_method_names else next(reversed(self._template_functions))
-                            _, recovered = self._template_functions[bare_name]
+                                self._templates.register_alias(qualified, bare_name)
+                            bare_name = _new_method_names[-1] if _new_method_names else next(reversed(self._templates.all_of_kind('function')))
+                            recovered = self._templates.lookup(bare_name).node
                             stub = FunctionDef(recovered.name, [], recovered.return_type,
                                                Block([]), is_prototype=True)
                             stub._is_template_method = True
@@ -3008,19 +3238,18 @@ class FluxParser:
                     _is_override = True
                     self.advance()  # consume '+'
                 if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
-                    _obj_tmpl_keys_before = set(self._template_functions.keys())
+                    _obj_tmpl_keys_before = set(self._templates.all_of_kind('function').keys())
                     method = self.function_def()
                     if method is None:
                         # Template method: re-register under qualified ObjectName.methodname key
                         # and record a stub in methods so trait compliance can see the name.
-                        _new_method_names = [k for k in self._template_functions
+                        _new_method_names = [k for k in self._templates.all_of_kind('function')
                                              if k not in _obj_tmpl_keys_before]
                         for bare_name in _new_method_names:
                             qualified = f"{name}.{bare_name}"
-                            if qualified not in self._template_functions:
-                                self._template_functions[qualified] = self._template_functions[bare_name]
-                        bare_name = _new_method_names[-1] if _new_method_names else next(reversed(self._template_functions))
-                        _, recovered = self._template_functions[bare_name]
+                            self._templates.register_alias(qualified, bare_name)
+                        bare_name = _new_method_names[-1] if _new_method_names else next(reversed(self._templates.all_of_kind('function')))
+                        recovered = self._templates.lookup(bare_name).node
                         stub = FunctionDef(recovered.name, [], recovered.return_type,
                                            Block([]), is_prototype=True)
                         stub._is_template_method = True
@@ -3105,9 +3334,9 @@ class FluxParser:
         obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits, template_params=template_params)
         obj_def.base_objects = base_objects
         obj_def = obj_def.set_location(tok.line, tok.column)
-        self._active_template_params = _prev_active
+        _obj_tmpl_scope_ctx.__exit__(None, None, None)
         if template_params:
-            self._template_objects[name] = (template_params, obj_def)
+            self._templates.register(name, 'object', template_params, obj_def)
             return None
         self._parsed_objects[name] = obj_def
         return obj_def
@@ -3170,49 +3399,19 @@ class FluxParser:
                     func_ptr = self.function_pointer_declaration(calling_conv=cc_str)
                     variables.append(func_ptr)
                 else:
-                    _ns_tmpl_keys_before = set(self._template_functions.keys())
+                    _ns_tmpl_keys_before = set(self._templates.all_of_kind('function').keys())
                     func = self.function_def()
                     # function_def() returns None for template functions (deferred instantiation).
                     if func is None:
                         # Register the template under its namespace-qualified names so that
                         # call-site lookup resolves correctly.
-                        _new_bare_names = [k for k in self._template_functions
+                        _new_bare_names = [k for k in self._templates.all_of_kind('function')
                                            if k not in _ns_tmpl_keys_before]
                         for bare_name in _new_bare_names:
-                            tmpl_entry = self._template_functions[bare_name]
                             ns_mangled = f"{current_namespace}__{bare_name}"
                             ns_scoped  = f"{current_namespace}::{bare_name}"
-                            if ns_mangled not in self._template_functions:
-                                self._template_functions[ns_mangled] = tmpl_entry
-                            if ns_scoped not in self._template_functions:
-                                self._template_functions[ns_scoped] = tmpl_entry
-                            # Propagate constraints under the qualified names too
-                            if bare_name in self._template_constraints:
-                                _centry = self._template_constraints[bare_name]
-                                if ns_mangled not in self._template_constraints:
-                                    self._template_constraints[ns_mangled] = _centry
-                                if ns_scoped not in self._template_constraints:
-                                    self._template_constraints[ns_scoped] = _centry
-                            # Propagate relations under the qualified names too
-                            if bare_name in self._template_relations:
-                                _rentry = self._template_relations[bare_name]
-                                if ns_mangled not in self._template_relations:
-                                    self._template_relations[ns_mangled] = _rentry
-                                if ns_scoped not in self._template_relations:
-                                    self._template_relations[ns_scoped] = _rentry
-                            # Propagate defaults and no_default under the qualified names too
-                            if bare_name in self._template_defaults:
-                                _dentry = self._template_defaults[bare_name]
-                                if ns_mangled not in self._template_defaults:
-                                    self._template_defaults[ns_mangled] = _dentry
-                                if ns_scoped not in self._template_defaults:
-                                    self._template_defaults[ns_scoped] = _dentry
-                            if bare_name in self._template_no_default:
-                                _ndentry = self._template_no_default[bare_name]
-                                if ns_mangled not in self._template_no_default:
-                                    self._template_no_default[ns_mangled] = _ndentry
-                                if ns_scoped not in self._template_no_default:
-                                    self._template_no_default[ns_scoped] = _ndentry
+                            self._templates.register_alias(ns_mangled, bare_name)
+                            self._templates.register_alias(ns_scoped,  bare_name)
                     elif isinstance(func, list):
                         for f in func:
                             functions.append(f)
@@ -3233,18 +3432,14 @@ class FluxParser:
                     # The template was registered under its bare name by struct_def.
                     # Also register it under the namespace-qualified forms so that
                     # type_spec() can find it when the caller writes XYZ::myStru2<int>.
-                    # We peek at the last entry added to _template_structs to get the name.
-                    if self._template_structs:
-                        bare_name = next(reversed(self._template_structs))
-                        tmpl_entry = self._template_structs[bare_name]
+                    if self._templates.all_of_kind('struct'):
+                        bare_name = next(reversed(self._templates.all_of_kind('struct')))
                         # Register under  "NS__bare"  and  "NS::bare"  so both lookup
                         # styles hit the same template definition.
                         ns_mangled = f"{current_namespace}__{bare_name}"
                         ns_scoped  = f"{current_namespace}::{bare_name}"
-                        if ns_mangled not in self._template_structs:
-                            self._template_structs[ns_mangled] = tmpl_entry
-                        if ns_scoped not in self._template_structs:
-                            self._template_structs[ns_scoped] = tmpl_entry
+                        self._templates.register_alias(ns_mangled, bare_name)
+                        self._templates.register_alias(ns_scoped,  bare_name)
                 # Handle both single struct and list of structs (comma-separated prototypes)
                 elif isinstance(struct_result, list):
                     for struct in struct_result:
@@ -3264,15 +3459,12 @@ class FluxParser:
                 # object_def() returns None for template objects (deferred instantiation).
                 if obj_result is None:
                     # Register under namespace-qualified names so type_spec() can find it.
-                    if self._template_objects:
-                        bare_name = next(reversed(self._template_objects))
-                        tmpl_entry = self._template_objects[bare_name]
+                    if self._templates.all_of_kind('object'):
+                        bare_name = next(reversed(self._templates.all_of_kind('object')))
                         ns_mangled = f"{current_namespace}__{bare_name}"
                         ns_scoped  = f"{current_namespace}::{bare_name}"
-                        if ns_mangled not in self._template_objects:
-                            self._template_objects[ns_mangled] = tmpl_entry
-                        if ns_scoped not in self._template_objects:
-                            self._template_objects[ns_scoped] = tmpl_entry
+                        self._templates.register_alias(ns_mangled, bare_name)
+                        self._templates.register_alias(ns_scoped,  bare_name)
                 # Handle both single object and list of objects (comma-separated prototypes)
                 elif isinstance(obj_result, list):
                     objects.extend(obj_result)
@@ -3285,15 +3477,12 @@ class FluxParser:
             elif self._is_trait_prefixed_object():
                 obj_result = self._parse_trait_prefixed_object()
                 if obj_result is None:
-                    if self._template_objects:
-                        bare_name = next(reversed(self._template_objects))
-                        tmpl_entry = self._template_objects[bare_name]
+                    if self._templates.all_of_kind('object'):
+                        bare_name = next(reversed(self._templates.all_of_kind('object')))
                         ns_mangled = f"{current_namespace}__{bare_name}"
                         ns_scoped  = f"{current_namespace}::{bare_name}"
-                        if ns_mangled not in self._template_objects:
-                            self._template_objects[ns_mangled] = tmpl_entry
-                        if ns_scoped not in self._template_objects:
-                            self._template_objects[ns_scoped] = tmpl_entry
+                        self._templates.register_alias(ns_mangled, bare_name)
+                        self._templates.register_alias(ns_scoped,  bare_name)
                 elif isinstance(obj_result, list):
                     objects.extend(obj_result)
                 else:
@@ -3493,17 +3682,17 @@ class FluxParser:
             # the __ mangled form ("NS__bare"), so namespace-qualified references work.
             _tmpl_key = None
             _is_object_tmpl = False
-            if custom_typename in self._template_structs:
+            if custom_typename in self._templates and self._templates.lookup(custom_typename).kind == 'struct':
                 _tmpl_key = custom_typename
-            elif custom_typename in self._template_objects:
+            elif custom_typename in self._templates and self._templates.lookup(custom_typename).kind == 'object':
                 _tmpl_key = custom_typename
                 _is_object_tmpl = True
             else:
                 # "XYZ_TEST::myStru2" -> try "XYZ_TEST__myStru2"
                 _mangled_attempt = custom_typename.replace("::", "__")
-                if _mangled_attempt in self._template_structs:
+                if _mangled_attempt in self._templates and self._templates.lookup(_mangled_attempt).kind == 'struct':
                     _tmpl_key = _mangled_attempt
-                elif _mangled_attempt in self._template_objects:
+                elif _mangled_attempt in self._templates and self._templates.lookup(_mangled_attempt).kind == 'object':
                     _tmpl_key = _mangled_attempt
                     _is_object_tmpl = True
             if _tmpl_key is not None:
@@ -4192,27 +4381,56 @@ class FluxParser:
                         self.advance()
                 if self.expect(TokenType.CODIFY):
                     self.advance()
-                if self.expect(TokenType.IDENTIFIER):
+                # Helper used in lookahead to skip ':{' ... '}'
+                def _la_skip_cset_tf():
+                    self.advance()  # consume ':'
+                    self.advance()  # consume '{'
+                    depth = 1
+                    while not self.expect(TokenType.EOF):
+                        if self.expect(TokenType.LEFT_BRACE):
+                            depth += 1
+                            self.advance()
+                        elif self.expect(TokenType.RIGHT_BRACE):
+                            depth -= 1
+                            self.advance()
+                            if depth == 0:
+                                break
+                        else:
+                            self.advance()
+                def _la_skip_type_con_tf():
+                    depth = 0
+                    while not self.expect(TokenType.EOF):
+                        if self.expect(TokenType.LESS_THAN):
+                            depth += 1
+                            self.advance()
+                        elif self.expect(TokenType.GREATER_THAN):
+                            if depth == 0:
+                                break
+                            depth -= 1
+                            self.advance()
+                        elif self.expect(TokenType.COMMA) and depth == 0:
+                            break
+                        else:
+                            self.advance()
+                _la_tf_first_ok = False
+                if self.expect(TokenType.COLON):
+                    _la_tf_saved = self.position
                     self.advance()
-                    # Skip optional constraint clause: ': type (| type)*'
-                    # or relation entry: ('&' IDENTIFIER)* ('~'|'!~') IDENTIFIER ('&' IDENTIFIER)*
+                    if self.expect(TokenType.LEFT_BRACE):
+                        self.position = _la_tf_saved
+                        self.current_token = self.tokens[self.position]
+                        _la_skip_cset_tf()
+                        _la_tf_first_ok = True
+                    else:
+                        self.position = _la_tf_saved
+                        self.current_token = self.tokens[self.position]
+                elif self.expect(TokenType.IDENTIFIER):
+                    self.advance()
                     if self.expect(TokenType.COLON):
                         self.advance()
-                        depth = 0
-                        while not self.expect(TokenType.EOF):
-                            if self.expect(TokenType.LESS_THAN):
-                                depth += 1
-                                self.advance()
-                            elif self.expect(TokenType.GREATER_THAN):
-                                if depth == 0:
-                                    break
-                                depth -= 1
-                                self.advance()
-                            elif self.expect(TokenType.COMMA) and depth == 0:
-                                break
-                            else:
-                                self.advance()
+                        _la_skip_type_con_tf()
                     else:
+                        # Skip bare relation (accepted here so real parse can error properly)
                         while self.expect(TokenType.LOGICAL_AND):
                             self.advance()
                             if self.expect(TokenType.IDENTIFIER):
@@ -4251,59 +4469,44 @@ class FluxParser:
                                             self.advance()
                                     elif self.expect(TokenType.IDENTIFIER):
                                         self.advance()
+                    _la_tf_first_ok = True
+                if _la_tf_first_ok:
                     while self.expect(TokenType.COMMA):
                         self.advance()
-                        # Accept optional <!+ prefix on subsequent entries
                         if self.expect(TokenType.NOT):
                             self.advance()
                             if self.expect(TokenType.PLUS):
                                 self.advance()
-                        if self.expect(TokenType.CODIFY):
+                        if self.expect(TokenType.COLON):
+                            _la_tf_saved2 = self.position
+                            self.advance()
+                            if self.expect(TokenType.LEFT_BRACE):
+                                self.position = _la_tf_saved2
+                                self.current_token = self.tokens[self.position]
+                                _la_skip_cset_tf()
+                            else:
+                                self.position = _la_tf_saved2
+                                self.current_token = self.tokens[self.position]
+                                break
+                        elif self.expect(TokenType.CODIFY):
                             self.advance()
                             self.advance()  # consume IDENTIFIER after CODIFY
+                            if self.expect(TokenType.COLON):
+                                self.advance()
+                                _la_skip_type_con_tf()
                         elif not self.expect(TokenType.IDENTIFIER):
                             break
                         else:
                             self.advance()
-                        if self.expect(TokenType.COLON):
-                            self.advance()
-                            depth = 0
-                            while not self.expect(TokenType.EOF):
-                                if self.expect(TokenType.LESS_THAN):
-                                    depth += 1
-                                    self.advance()
-                                elif self.expect(TokenType.GREATER_THAN):
-                                    if depth == 0:
-                                        break
-                                    depth -= 1
-                                    self.advance()
-                                elif self.expect(TokenType.COMMA) and depth == 0:
-                                    break
-                                else:
-                                    self.advance()
-                        else:
-                            while self.expect(TokenType.LOGICAL_AND):
+                            if self.expect(TokenType.COLON):
                                 self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
-                                    self.advance()
-                            if self.expect(TokenType.TIE):
-                                self.advance()
-                                if self.expect(TokenType.CODIFY):
+                                _la_skip_type_con_tf()
+                            else:
+                                # Skip bare relation in subsequent entry
+                                while self.expect(TokenType.LOGICAL_AND):
                                     self.advance()
                                     if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
-                                elif self.expect(TokenType.IDENTIFIER):
-                                    self.advance()
-                                while self.expect(TokenType.LOGICAL_AND):
-                                    self.advance()
-                                    if self.expect(TokenType.CODIFY):
-                                        self.advance()
-                                        if self.expect(TokenType.IDENTIFIER):
-                                            self.advance()
-                                    elif self.expect(TokenType.IDENTIFIER):
-                                        self.advance()
-                            elif self.expect(TokenType.NOT):
-                                self.advance()
                                 if self.expect(TokenType.TIE):
                                     self.advance()
                                     if self.expect(TokenType.CODIFY):
@@ -4320,6 +4523,24 @@ class FluxParser:
                                                 self.advance()
                                         elif self.expect(TokenType.IDENTIFIER):
                                             self.advance()
+                                elif self.expect(TokenType.NOT):
+                                    self.advance()
+                                    if self.expect(TokenType.TIE):
+                                        self.advance()
+                                        if self.expect(TokenType.CODIFY):
+                                            self.advance()
+                                            if self.expect(TokenType.IDENTIFIER):
+                                                self.advance()
+                                        elif self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
+                                        while self.expect(TokenType.LOGICAL_AND):
+                                            self.advance()
+                                            if self.expect(TokenType.CODIFY):
+                                                self.advance()
+                                                if self.expect(TokenType.IDENTIFIER):
+                                                    self.advance()
+                                            elif self.expect(TokenType.IDENTIFIER):
+                                                self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
             if is_template:
@@ -4340,6 +4561,92 @@ class FluxParser:
                         else:
                             names.append(self.consume(TokenType.IDENTIFIER).value)
                     return names
+                # Helper: parse a ':{' ... '}' constraint set and collect relational constraints
+                def _parse_constraint_set_tf():
+                    self.consume(TokenType.COLON)
+                    self.consume(TokenType.LEFT_BRACE)
+                    def _parse_one_cs_entry_tf():
+                        _entry_tok = self.current_token
+                        if self.expect(TokenType.CODIFY):
+                            self.advance()
+                            _cv = self.consume(TokenType.IDENTIFIER).value
+                            _entry_name = self._comptime_strings.get(_cv, _cv)
+                            _entry_is_codify = True
+                        else:
+                            _entry_name = self.consume(TokenType.IDENTIFIER).value
+                            _entry_is_codify = False
+                        if not _entry_is_codify and self.expect(TokenType.LEFT_PAREN):
+                            # Named constra with explicit args: MyCS(T, U)
+                            if _entry_name not in self._constras:
+                                self.current_token = _entry_tok
+                                self.error(f"Unknown named constraint set '{_entry_name}'")
+                            cs_params, cs_relations = self._constras[_entry_name]
+                            self.advance()  # consume '('
+                            call_args = []
+                            if not self.expect(TokenType.RIGHT_PAREN):
+                                call_args.append(self.consume(TokenType.IDENTIFIER).value)
+                                while self.expect(TokenType.COMMA):
+                                    self.advance()
+                                    call_args.append(self.consume(TokenType.IDENTIFIER).value)
+                            self.consume(TokenType.RIGHT_PAREN)
+                            if len(call_args) != len(cs_params):
+                                self.current_token = _entry_tok
+                                self.error(
+                                    f"Named constraint set '{_entry_name}' expects "
+                                    f"{len(cs_params)} argument(s), got {len(call_args)}"
+                                )
+                            for arg in call_args:
+                                if arg not in template_params:
+                                    self.error(
+                                        f"'{arg}' is not a template parameter; "
+                                        f"valid parameters are: {', '.join(template_params)}"
+                                    )
+                            mapping = dict(zip(cs_params, call_args))
+                            for lhs_f, compat_f, rhs_f in cs_relations:
+                                _typefunc_relations.append(
+                                    ([mapping.get(n, n) for n in lhs_f], compat_f,
+                                     [mapping.get(n, n) for n in rhs_f])
+                                )
+                        elif not _entry_is_codify and _entry_name in self._constras and not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                            # Bare constra name — map template params in order of appearance
+                            cs_params, cs_relations = self._constras[_entry_name]
+                            ordered_tparams = [p for p in template_params]
+                            if len(cs_params) != len(ordered_tparams):
+                                self.current_token = _entry_tok
+                                self.error(
+                                    f"Named constraint set '{_entry_name}' has {len(cs_params)} "
+                                    f"parameter(s) but the template has {len(ordered_tparams)} "
+                                    f"parameter(s); use explicit arguments: '{_entry_name}(...)'"
+                                )
+                            mapping = dict(zip(cs_params, ordered_tparams))
+                            for lhs_f, compat_f, rhs_f in cs_relations:
+                                _typefunc_relations.append(
+                                    ([mapping.get(n, n) for n in lhs_f], compat_f,
+                                     [mapping.get(n, n) for n in rhs_f])
+                                )
+                        else:
+                            # Raw relation
+                            lhs = [_entry_name]
+                            while self.expect(TokenType.LOGICAL_AND):
+                                self.advance()
+                                if self.expect(TokenType.CODIFY):
+                                    self.advance()
+                                    _cv = self.consume(TokenType.IDENTIFIER).value
+                                    lhs.append(self._comptime_strings.get(_cv, _cv))
+                                else:
+                                    lhs.append(self.consume(TokenType.IDENTIFIER).value)
+                            compat = True
+                            if self.expect(TokenType.NOT):
+                                self.advance()
+                                compat = False
+                            self.consume(TokenType.TIE)
+                            rhs = _parse_id_list_tf()
+                            _typefunc_relations.append((lhs, compat, rhs))
+                    _parse_one_cs_entry_tf()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        _parse_one_cs_entry_tf()
+                    self.consume(TokenType.RIGHT_BRACE)
                 def _parse_param_entry_tf(param_name):
                     if self.expect(TokenType.COLON):
                         template_params.append(param_name)
@@ -4385,68 +4692,58 @@ class FluxParser:
                             _typefunc_defaults[param_name] = _default_ts
                     else:
                         template_params.append(param_name)
-                # Parse first entry
-                _no_default_first = False
-                if self.expect(TokenType.NOT):
-                    self.advance()
-                    self.consume(TokenType.PLUS)
-                    _no_default_first = True
-                if self.expect(TokenType.CODIFY):
-                    self.advance()
-                    _codify_var = self.consume(TokenType.IDENTIFIER).value
-                    _first_id = self._comptime_strings.get(_codify_var, _codify_var)
+                # Parse first entry: ':{...}' constraint set, or identifier param entry
+                if self.expect(TokenType.COLON):
+                    _parse_constraint_set_tf()
                 else:
-                    _first_id = self.consume(TokenType.IDENTIFIER).value
-                if _no_default_first:
-                    _typefunc_no_default.add(_first_id)
-                if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
-                    _parse_param_entry_tf(_first_id)
-                else:
-                    lhs = [_first_id]
-                    while self.expect(TokenType.LOGICAL_AND):
-                        self.advance()
-                        lhs.append(self.consume(TokenType.IDENTIFIER).value)
-                    compat = True
-                    if self.expect(TokenType.NOT):
-                        self.advance()
-                        compat = False
-                    self.consume(TokenType.TIE)
-                    rhs = _parse_id_list_tf()
-                    _typefunc_relations.append((lhs, compat, rhs))
-                while self.expect(TokenType.COMMA):
-                    self.advance()
-                    _no_default_next = False
+                    _no_default_first = False
                     if self.expect(TokenType.NOT):
                         self.advance()
                         self.consume(TokenType.PLUS)
-                        _no_default_next = True
+                        _no_default_first = True
                     if self.expect(TokenType.CODIFY):
                         self.advance()
                         _codify_var = self.consume(TokenType.IDENTIFIER).value
-                        _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                        _first_id = self._comptime_strings.get(_codify_var, _codify_var)
                     else:
-                        _next_id = self.consume(TokenType.IDENTIFIER).value
-                    if _no_default_next:
-                        _typefunc_no_default.add(_next_id)
-                    if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
-                        _parse_param_entry_tf(_next_id)
+                        _first_id = self.consume(TokenType.IDENTIFIER).value
+                    if _no_default_first:
+                        _typefunc_no_default.add(_first_id)
+                    if self.expect(TokenType.LOGICAL_AND, TokenType.TIE) or (self.expect(TokenType.NOT) and not self.expect(TokenType.COLON)):
+                        self.error(
+                            f"Relational template constraints must be wrapped in a constraint set :{{T ~ U}}. "
+                            f"Did you mean :{{{_first_id} ~ ...}}, or did you intend a type constraint {_first_id}: ?"
+                        )
+                    _parse_param_entry_tf(_first_id)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    if self.expect(TokenType.COLON):
+                        _parse_constraint_set_tf()
                     else:
-                        lhs = [_next_id]
-                        while self.expect(TokenType.LOGICAL_AND):
-                            self.advance()
-                            lhs.append(self.consume(TokenType.IDENTIFIER).value)
-                        compat = True
+                        _no_default_next = False
                         if self.expect(TokenType.NOT):
                             self.advance()
-                            compat = False
-                        self.consume(TokenType.TIE)
-                        rhs = _parse_id_list_tf()
-                        _typefunc_relations.append((lhs, compat, rhs))
+                            self.consume(TokenType.PLUS)
+                            _no_default_next = True
+                        if self.expect(TokenType.CODIFY):
+                            self.advance()
+                            _codify_var = self.consume(TokenType.IDENTIFIER).value
+                            _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                        else:
+                            _next_id = self.consume(TokenType.IDENTIFIER).value
+                        if _no_default_next:
+                            _typefunc_no_default.add(_next_id)
+                        if self.expect(TokenType.LOGICAL_AND, TokenType.TIE) or (self.expect(TokenType.NOT) and not self.expect(TokenType.COLON)):
+                            self.error(
+                                f"Relational template constraints must be wrapped in a constraint set :{{T ~ U}}."
+                                f"\nDid you mean :{{{_next_id} ~ ...}}, or did you intend a type constraint {_next_id}:"
+                            )
+                        _parse_param_entry_tf(_next_id)
                 self.consume(TokenType.GREATER_THAN)
 
         # Expose template param names so type_spec() inside params/return type defers them.
-        _prev_active = self._active_template_params
-        self._active_template_params = set(template_params) if template_params else _prev_active
+        _tf_tmpl_scope_ctx = self._template_scope(template_params if template_params else [])
+        _tf_tmpl_scope_ctx.__enter__()
 
         self.consume(TokenType.LEFT_PAREN)
         parameters = []
@@ -4476,21 +4773,17 @@ class FluxParser:
         # Prototype if ';' follows immediately after return type
         if self.expect(TokenType.SEMICOLON):
             self.advance()
-            self._active_template_params = _prev_active
+            _tf_tmpl_scope_ctx.__exit__(None, None, None)
             if template_params:
                 mangled_base = f"__typefunc__{effective_type_name}__{func_name}"
                 receiver_param = Parameter(name='_', type_spec=receiver_ts)
                 synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
                                            return_type, Block([]), is_prototype=True)
-                self._template_functions[mangled_base] = (template_params, synthetic_fd)
-                if _typefunc_constraints:
-                    self._template_constraints[mangled_base] = _typefunc_constraints
-                if _typefunc_relations:
-                    self._template_relations[mangled_base] = _typefunc_relations
-                if _typefunc_defaults:
-                    self._template_defaults[mangled_base] = _typefunc_defaults
-                if _typefunc_no_default:
-                    self._template_no_default[mangled_base] = _typefunc_no_default
+                self._templates.register(mangled_base, 'function', template_params, synthetic_fd,
+                                         constraints=_typefunc_constraints or {},
+                                         relational=_typefunc_relations or [],
+                                         defaults=_typefunc_defaults or {},
+                                         no_default=_typefunc_no_default or set())
                 return None
             return TypeFuncDef(
                 type_name=effective_type_name,
@@ -4505,22 +4798,18 @@ class FluxParser:
         body = self.block()
         self.consume(TokenType.SEMICOLON)
 
-        self._active_template_params = _prev_active
+        _tf_tmpl_scope_ctx.__exit__(None, None, None)
 
         if template_params:
             mangled_base = f"__typefunc__{effective_type_name}__{func_name}"
             receiver_param = Parameter(name='_', type_spec=receiver_ts)
             synthetic_fd = FunctionDef(mangled_base, [receiver_param] + list(parameters),
                                        return_type, body)
-            self._template_functions[mangled_base] = (template_params, synthetic_fd)
-            if _typefunc_constraints:
-                self._template_constraints[mangled_base] = _typefunc_constraints
-            if _typefunc_relations:
-                self._template_relations[mangled_base] = _typefunc_relations
-            if _typefunc_defaults:
-                self._template_defaults[mangled_base] = _typefunc_defaults
-            if _typefunc_no_default:
-                self._template_no_default[mangled_base] = _typefunc_no_default
+            self._templates.register(mangled_base, 'function', template_params, synthetic_fd,
+                                     constraints=_typefunc_constraints or {},
+                                     relational=_typefunc_relations or [],
+                                     defaults=_typefunc_defaults or {},
+                                     no_default=_typefunc_no_default or set())
             return None
 
         return TypeFuncDef(
@@ -5887,7 +6176,8 @@ class FluxParser:
                 bracket = name.index('<')
                 struct_base = name[:bracket]
                 raw_args = name[bracket + 1:-1].split(',')
-                if struct_base in self._template_structs and any(a in mapping for a in raw_args):
+                _sentry = self._templates.lookup(struct_base)
+                if _sentry is not None and _sentry.kind == 'struct' and any(a in mapping for a in raw_args):
                     concrete_type_names = []
                     concrete_type_specs = []
                     for arg in raw_args:
@@ -5905,7 +6195,7 @@ class FluxParser:
                     result.custom_typename = mangled
                     result.base_type = DataType.DATA
                     return result
-                if struct_base in self._template_objects and any(a in mapping for a in raw_args):
+                if _sentry is not None and _sentry.kind == 'object' and any(a in mapping for a in raw_args):
                     concrete_type_names = []
                     concrete_type_specs = []
                     for arg in raw_args:
@@ -5949,7 +6239,8 @@ class FluxParser:
                     _obj_base = obj.name[:_lt]
                     _raw_args = obj.name[_lt + 1:_gt_pos].split(',')
                     _method = obj.name[_gt_pos + 1:]  # e.g. '.__init'
-                    if _obj_base in self._template_objects and any(a.strip() in mapping for a in _raw_args):
+                    _oentry = self._templates.lookup(_obj_base)
+                    if _oentry is not None and _oentry.kind == 'object' and any(a.strip() in mapping for a in _raw_args):
                         _concrete_names = []
                         _concrete_specs = []
                         for _a in _raw_args:
@@ -5969,7 +6260,8 @@ class FluxParser:
                 bracket = obj.name.index('<')
                 fn_base = obj.name[:bracket]
                 raw_args = obj.name[bracket + 1:-1].split(',')
-                if fn_base in self._template_functions and any(a.strip() in mapping for a in raw_args):
+                _fentry = self._templates.lookup(fn_base)
+                if _fentry is not None and _fentry.kind == 'function' and any(a.strip() in mapping for a in raw_args):
                     concrete_type_names = []
                     concrete_type_specs = []
                     for arg in raw_args:
@@ -5986,7 +6278,7 @@ class FluxParser:
                     new_obj.name = resolved_name
                     new_obj.arguments = [walk(a) for a in obj.arguments]
                     return new_obj
-                if fn_base in self._template_objects and any(a.strip() in mapping for a in raw_args):
+                if _fentry is not None and _fentry.kind == 'object' and any(a.strip() in mapping for a in raw_args):
                     concrete_type_names = []
                     concrete_type_specs = []
                     for arg in raw_args:
@@ -6039,17 +6331,19 @@ class FluxParser:
         Instantiate a template struct with concrete type arguments.
         Returns the mangled concrete struct name.
         """
-        if struct_name not in self._template_structs:
+        entry = self._templates.lookup(struct_name)
+        if entry is None or entry.kind != 'struct':
             self.error(f"Unknown template struct '{struct_name}'")
-        template_params, template_sd = self._template_structs[struct_name]
+        template_params = entry.params
+        template_sd = entry.node
         if len(type_names) != len(template_params):
             self.error(
                 f"Template struct '{struct_name}' expects {len(template_params)} "
                 f"type argument(s), got {len(type_names)}"
             )
         mangled = struct_name + "__" + "_".join(type_names)
-        if mangled not in self._emitted_template_struct_instances:
-            self._emitted_template_struct_instances.add(mangled)
+        if not self._templates.is_emitted(struct_name, mangled):
+            self._templates.mark_emitted(struct_name, mangled)
             mapping = {}
             for param, tname, tspec in zip(
                     template_params, type_names,
@@ -6070,17 +6364,19 @@ class FluxParser:
         Instantiate a template object with concrete type arguments.
         Returns the mangled concrete object name.
         """
-        if object_name not in self._template_objects:
+        entry = self._templates.lookup(object_name)
+        if entry is None or entry.kind != 'object':
             self.error(f"Unknown template object '{object_name}'")
-        template_params, template_od = self._template_objects[object_name]
+        template_params = entry.params
+        template_od = entry.node
         if len(type_names) != len(template_params):
             self.error(
                 f"Template object '{object_name}' expects {len(template_params)} "
                 f"type argument(s), got {len(type_names)}"
             )
         mangled = object_name + "__" + "_".join(type_names)
-        if mangled not in self._emitted_template_object_instances:
-            self._emitted_template_object_instances.add(mangled)
+        if not self._templates.is_emitted(object_name, mangled):
+            self._templates.mark_emitted(object_name, mangled)
             mapping = {}
             for param, tname, tspec in zip(
                     template_params, type_names,
@@ -6109,7 +6405,11 @@ class FluxParser:
         lossy round-trip through the mangle string that previously caused fully-
         resolved alias types (e.g. u64 -> DATA/64-bit) to lose their bit_width.
         """
-        template_params, template_func = self._template_functions[func_name]
+        entry = self._templates.lookup(func_name)
+        if entry is None or entry.kind not in ('function',):
+            self.error(f"Unknown template function '{func_name}'")
+        template_params = entry.params
+        template_func = entry.node
 
         if len(arg_type_names) != len(template_params):
             self.error(
@@ -6118,15 +6418,13 @@ class FluxParser:
             )
 
         # Enforce template constraints if any were declared for this function.
-        # Also check under qualified names (the constraints dict may be keyed by the
-        # bare name or a namespace-qualified variant).
-        _constraint_key = func_name
-        _constraints_map = self._template_constraints.get(_constraint_key)
-        if _constraints_map is None:
+        # Also check under qualified names (the entry may be keyed by a namespace-qualified variant).
+        _constraints_map = entry.constraints
+        if not _constraints_map:
             # Try stripping namespace prefix to find the bare-name entry
-            for _ck, _cv in self._template_constraints.items():
-                if func_name.endswith('__' + _ck) or func_name == _ck:
-                    _constraints_map = _cv
+            for _ck, _ce in self._templates.items():
+                if (func_name.endswith('__' + _ck) or func_name == _ck) and _ce.constraints:
+                    _constraints_map = _ce.constraints
                     break
         if _constraints_map:
             for i, param_name in enumerate(template_params):
@@ -6182,11 +6480,11 @@ class FluxParser:
                     )
 
         # Check relation constraints (T~U, T!~U, T&U~V, etc.)
-        _relations_list = self._template_relations.get(func_name)
-        if _relations_list is None:
-            for _rk, _rv in self._template_relations.items():
-                if func_name.endswith('__' + _rk) or func_name == _rk:
-                    _relations_list = _rv
+        _relations_list = entry.relational_constraints
+        if not _relations_list:
+            for _rk, _re in self._templates.items():
+                if (func_name.endswith('__' + _rk) or func_name == _rk) and _re.relational_constraints:
+                    _relations_list = _re.relational_constraints
                     break
         if _relations_list:
             # Build param_name -> concrete TypeSystem mapping for relation checks
@@ -6235,8 +6533,8 @@ class FluxParser:
         # Build mangled name: func__tmpl__T1__T2
         mangled = func_name + '__tmpl__' + '__'.join(arg_type_names)
 
-        if mangled not in self._emitted_template_instances:
-            self._emitted_template_instances.add(mangled)
+        if not self._templates.is_emitted(func_name, mangled):
+            self._templates.mark_emitted(func_name, mangled)
 
             # Map DataType enum value strings back to DataType members
             _datatype_by_value = {dt.value: dt for dt in DataType}
@@ -6275,10 +6573,10 @@ class FluxParser:
             # Tag with the originating namespace so the codegen can restore context
             # when emitting the body (template instances are emitted at top level,
             # outside any namespace visit, so _current_namespace would otherwise be empty).
-            # Find the most-qualified key for this function in _template_functions —
+            # Find the most-qualified key for this function in the registry —
             # that encodes the namespace the template was defined in.
             _src_ns = ''
-            for _key in self._template_functions:
+            for _key in self._templates.all_of_kind('function'):
                 if _key.endswith('__' + func_name) and '__' in _key:
                     # e.g. "standard__tensors__tensor_make" ends with "__tensor_make"
                     _candidate_ns = _key[:-(len(func_name) + 2)]
@@ -6309,7 +6607,7 @@ class FluxParser:
         registered for `op_symbol` and we can infer concrete types from both operands,
         instantiate the concrete FunctionDef so codegen's overload lookup finds it.
         """
-        if op_symbol not in self._template_operators:
+        if not (self._templates.has(op_symbol) and self._templates.lookup(op_symbol).kind == 'operator'):
             return
         lts = self._infer_type_from_expr(left_expr)
         rts = self._infer_type_from_expr(right_expr)
@@ -6327,9 +6625,11 @@ class FluxParser:
         _template_instantiations so codegen can find it by normal overload resolution
         inside visit_BinaryOp.  The BinaryOp AST node is left unchanged.
         """
-        if op_symbol not in self._template_operators:
+        entry = self._templates.lookup(op_symbol)
+        if entry is None or entry.kind != 'operator':
             return
-        template_params, template_func = self._template_operators[op_symbol]
+        template_params = entry.params
+        template_func = entry.node
         if len(template_params) != len(arg_type_specs):
             return  # Arity mismatch - cannot instantiate
 
@@ -6355,9 +6655,9 @@ class FluxParser:
         type_names = [self._type_system_to_mangle_str(ts) for ts in arg_type_specs]
         mangle_key = template_func.name + '__tmpl__' + '__'.join(type_names)
 
-        if mangle_key in self._emitted_template_operator_instances:
+        if self._templates.is_emitted(op_symbol, mangle_key):
             return
-        self._emitted_template_operator_instances.add(mangle_key)
+        self._templates.mark_emitted(op_symbol, mangle_key)
 
         # Build the substitution mapping: template param name -> concrete TypeSystem
         mapping = {pname: ts for pname, ts in zip(template_params, arg_type_specs)}
@@ -6417,7 +6717,7 @@ class FluxParser:
         # Handle explicit template call: foo<int>(args) or foo<i32>(args)
         # Check before the main postfix loop so <type> is consumed before '('
         if (isinstance(expr, Identifier) and
-                expr.name in self._template_functions and
+                self._templates.has(expr.name) and self._templates.lookup(expr.name).kind == 'function' and
                 self.expect(TokenType.LESS_THAN)):
             # Parse the explicit type argument list
             tok = self.current_token
@@ -6455,7 +6755,7 @@ class FluxParser:
         # Only triggered when the function name is a known template function and the next
         # token is '(' (no explicit '<' type list was written by the programmer).
         elif (isinstance(expr, Identifier) and
-                expr.name in self._template_functions and
+                self._templates.has(expr.name) and self._templates.lookup(expr.name).kind == 'function' and
                 self.expect(TokenType.LEFT_PAREN)):
             tok = self.current_token
             self.consume(TokenType.LEFT_PAREN)
@@ -6467,7 +6767,9 @@ class FluxParser:
                 args = self.argument_list()
             self.consume(TokenType.RIGHT_PAREN)
 
-            template_param_names, template_func = self._template_functions[expr.name]
+            _entry_6487 = self._templates.lookup(expr.name)
+            template_param_names = _entry_6487.params
+            template_func = _entry_6487.node
 
             # Build a mapping from template-param-name -> inferred TypeSystem by
             # walking each declared parameter and matching its template param name
@@ -6529,14 +6831,14 @@ class FluxParser:
                             # Recover which concrete type was substituted for each inner
                             # template param by looking up the mangled name's template record.
                             arg_ctn = arg_ts.custom_typename
-                            # Search both template structs and template objects.
-                            _tmpl_registries = [
-                                self._template_structs,
-                                {k: v for k, v in self._template_objects.items()},
-                            ]
+                            # Search template structs and objects in the unified registry.
+                            _struct_obj_entries = {**self._templates.all_of_kind('struct'),
+                                                   **self._templates.all_of_kind('object')}
+                            _tmpl_registries = [_struct_obj_entries]
                             for _registry in _tmpl_registries:
                                 _found = False
-                                for tmpl_name, (tmpl_params, _) in _registry.items():
+                                for tmpl_name, _te in _registry.items():
+                                    tmpl_params = _te.params
                                     sep = tmpl_name + "__"
                                     if arg_ctn.startswith(sep) or arg_ctn == tmpl_name:
                                         suffix = arg_ctn[len(sep):]
@@ -6601,8 +6903,8 @@ class FluxParser:
             # (e.g. inferred["T"] = TypeSystem(custom_typename="T")), the variable was
             # declared inside a template body and its type is still abstract -- skip.
             # Fill in defaults for any unresolved params before the completeness check.
-            _defaults_map = self._template_defaults.get(expr.name) or {}
-            _no_default_set = self._template_no_default.get(expr.name) or set()
+            _defaults_map = (self._templates.lookup(expr.name).defaults if self._templates.has(expr.name) else {}) or {}
+            _no_default_set = (self._templates.lookup(expr.name).no_default if self._templates.has(expr.name) else set()) or set()
             for _p in template_param_names:
                 if _p not in inferred and _p in _defaults_map:
                     inferred[_p] = _defaults_map[_p]
@@ -6702,8 +7004,10 @@ class FluxParser:
                     # Method call: obj.method() -> call obj_type.method with obj as first arg
                     # If tagged as a type function template, infer T and instantiate.
                     _tfk = getattr(expr, '_typefunc_template_key', None)
-                    if _tfk and _tfk in self._template_functions:
-                        _tmpl_params, _tmpl_fd = self._template_functions[_tfk]
+                    if _tfk and _tfk in self._templates:
+                        _tfk_entry = self._templates.lookup(_tfk)
+                        _tmpl_params = _tfk_entry.params
+                        _tmpl_fd = _tfk_entry.node
                         _inferred = {}
                         _decl_params = _tmpl_fd.parameters[1:]  # skip implicit '_'
                         for _i, _dp in enumerate(_decl_params):
@@ -6787,12 +7091,12 @@ class FluxParser:
                         if getattr(_recv_ts, 'is_tied', False):
                             _recv_tname = 'tied_' + _recv_tname
                         _candidate = f"__typefunc__{_recv_tname}__{member}"
-                        if _candidate in self._template_functions:
+                        if _candidate in self._templates:
                             _tfunc_key = _candidate
-                        elif _candidate not in self._template_functions:
+                        elif _candidate not in self._templates:
                             # Also try without tied_ prefix as fallback
                             _untied = f"__typefunc__{_recv_tname.removeprefix('tied_')}__{member}"
-                            if _untied in self._template_functions:
+                            if _untied in self._templates:
                                 _tfunc_key = _untied
                 elif isinstance(expr, TieExpression) and isinstance(getattr(expr, 'operand', None), Identifier):
                     # ~x.member — receiver is a tied variable being moved
@@ -6810,23 +7114,23 @@ class FluxParser:
                         # Always use tied_ prefix for a TieExpression receiver
                         _recv_tname = 'tied_' + _recv_tname
                         _candidate = f"__typefunc__{_recv_tname}__{member}"
-                        if _candidate in self._template_functions:
+                        if _candidate in self._templates:
                             _tfunc_key = _candidate
                         else:
                             # Fallback: untied type function
                             _untied = f"__typefunc__{_recv_tname.removeprefix('tied_')}__{member}"
-                            if _untied in self._template_functions:
+                            if _untied in self._templates:
                                 _tfunc_key = _untied
                 elif isinstance(expr, (StringLiteral, FStringLiteral)):
                     # String/f-string/i-string literal receiver — always type 'string'
                     _candidate = f"__typefunc__string__{member}"
-                    if _candidate in self._template_functions:
+                    if _candidate in self._templates:
                         _tfunc_key = _candidate
                 if self.expect(TokenType.LESS_THAN):
                     obj_name = expr.name if isinstance(expr, Identifier) else None
                     qualified = f"{obj_name}.{member}" if obj_name else None
-                    _tmpl_key = qualified if (qualified and qualified in self._template_functions) else _tfunc_key
-                    if _tmpl_key and _tmpl_key in self._template_functions:
+                    _tmpl_key = qualified if (qualified and qualified in self._templates) else _tfunc_key
+                    if _tmpl_key and _tmpl_key in self._templates:
                         self.advance()  # consume '<'
                         type_names = []
                         type_specs = []

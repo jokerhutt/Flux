@@ -59,7 +59,7 @@ contexts:
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|compt|const|continue|def|defer|default|deprecate|do|elif|else|extern|false|for|from|goto|global|heap|if|in|is|jump|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|super|switch|this|throw|trait|true|try|typeof|union|unsigned|using|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|cdecl|compt|const|constra|continue|def|defer|default|deprecate|do|elif|else|export|extern|false|fastcall|for|from|goto|global|heap|if|in|inline|is|jump|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|stdcall|super|switch|this|thiscall|throw|trait|true|try|typeof|union|unsigned|using|vectorcall|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers
@@ -134,8 +134,8 @@ contexts:
     - match: '\[([~!@#$%^&*\-+=|<>]+)\]'
       scope: keyword.operator.custom.flux
 
-    # Operators - Custom operator usage (3+ character combinations that aren't standard)
-    - match: '(``|`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--)'
+    # Operators - Custom operator usage
+    - match: '(``|`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--|\\)'
       scope: keyword.operator.custom.flux
     # Operators - Comparison
     - match: '(==|!=|>=|<=|>|<)'

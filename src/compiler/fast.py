@@ -1551,6 +1551,33 @@ class ContractDef(Statement):
         return f"contract {self.name}{params_str} {{ {self.body} }}"
 
 
+@dataclass
+class ConstraDef(Statement):
+    """
+    A named relational constraint set.
+
+    Syntax:
+        constra MyCS(A, B)
+        {
+            A ~ B
+        };
+
+    Applied inside a template constraint set:
+        <T, U, :{MyCS(T, U)}>
+        <T, U, :{MyCS}>         // parameters mapped in declaration order
+
+    ConstraDef nodes are stored in the parser's _constras table and never
+    reach codegen directly.
+    """
+    name: str
+    params: List[str]           # formal parameter names (A, B, ...)
+    relations: list             # list of (lhs_names, compat: bool, rhs_names) using formal names
+
+    def __repr__(self) -> str:
+        params_str = '(' + ', '.join(self.params) + ')' if self.params else ''
+        return f"constra {self.name}{params_str} {{ ... }}"
+
+
 # Program root
 @dataclass
 class TypeFuncDef(ASTNode):
