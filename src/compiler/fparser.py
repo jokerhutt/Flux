@@ -1584,6 +1584,8 @@ class FluxParser:
                     self.advance()
                     if self.expect(TokenType.PLUS):
                         self.advance()
+                if self.expect(TokenType.CODIFY):
+                    self.advance()
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
                     # Skip optional constraint clause: ': type (| type)*'
@@ -1637,9 +1639,13 @@ class FluxParser:
                             self.advance()
                             if self.expect(TokenType.PLUS):
                                 self.advance()
-                        if not self.expect(TokenType.IDENTIFIER):
+                        if self.expect(TokenType.CODIFY):
+                            self.advance()
+                            self.advance()  # consume IDENTIFIER after CODIFY
+                        elif not self.expect(TokenType.IDENTIFIER):
                             break
-                        self.advance()
+                        else:
+                            self.advance()
                         # Skip optional constraint clause for this param too
                         if self.expect(TokenType.COLON):
                             self.advance()
@@ -1745,7 +1751,12 @@ class FluxParser:
                     self.advance()
                     self.consume(TokenType.PLUS)
                     _no_default_first = True
-                _first_id = self.consume(TokenType.IDENTIFIER).value
+                if self.expect(TokenType.CODIFY):
+                    self.advance()
+                    _codify_var = self.consume(TokenType.IDENTIFIER).value
+                    _first_id = self._comptime_strings.get(_codify_var, _codify_var)
+                else:
+                    _first_id = self.consume(TokenType.IDENTIFIER).value
                 if _no_default_first:
                     _func_no_default.add(_first_id)
                 if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
@@ -1770,7 +1781,12 @@ class FluxParser:
                         self.advance()
                         self.consume(TokenType.PLUS)
                         _no_default_next = True
-                    _next_id = self.consume(TokenType.IDENTIFIER).value
+                    if self.expect(TokenType.CODIFY):
+                        self.advance()
+                        _codify_var = self.consume(TokenType.IDENTIFIER).value
+                        _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                    else:
+                        _next_id = self.consume(TokenType.IDENTIFIER).value
                     if _no_default_next:
                         _func_no_default.add(_next_id)
                     if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
@@ -3508,6 +3524,12 @@ class FluxParser:
                 else:
                     break
             return [DataType.DATA, custom_typename]
+        elif self.expect(TokenType.CODIFY):
+            # ~$varname used as a type — resolve to the string value in _comptime_strings
+            self.advance()  # consume CODIFY
+            _codify_var = self.consume(TokenType.IDENTIFIER).value
+            custom_typename = self._comptime_strings.get(_codify_var, _codify_var)
+            return [DataType.DATA, custom_typename]
         else:
             self.error("Expected type specifier")
     
@@ -3724,11 +3746,12 @@ class FluxParser:
             self.advance()
 
             # Skip optional template parameter list: <T, U, ...>
-            if self.expect(TokenType.LESS_THAN):
-                self.advance()  # consume '<'
+            # RECURSE_ARROW '<~' is lexed as a single token; treat it as '<' + implicit '~'
+            if self.expect(TokenType.LESS_THAN, TokenType.RECURSE_ARROW):
+                self.advance()  # consume '<' or '<~'
                 depth_t = 1
                 while depth_t > 0 and not self.expect(TokenType.EOF):
-                    if self.expect(TokenType.LESS_THAN):
+                    if self.expect(TokenType.LESS_THAN, TokenType.RECURSE_ARROW):
                         depth_t += 1
                     elif self.expect(TokenType.GREATER_THAN):
                         depth_t -= 1
@@ -3894,7 +3917,14 @@ class FluxParser:
         _typefunc_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
         _typefunc_defaults = {}     # param_name -> TypeSystem (the default type)
         _typefunc_no_default = set()  # param_names marked <!+
-        if self.expect(TokenType.LESS_THAN):
+        if self.expect(TokenType.LESS_THAN, TokenType.RECURSE_ARROW):
+            # RECURSE_ARROW '<~' is lexed as a single token; split it by consuming it
+            # and injecting a synthetic TIE token so the rest of the parser sees '<' + '~'.
+            if self.expect(TokenType.RECURSE_ARROW):
+                _ra_tok = self.current_token
+                _tie_tok = Token(TokenType.TIE, '~', _ra_tok.line, _ra_tok.column + 1)
+                self.tokens = self.tokens[:self.position] + [_tie_tok] + self.tokens[self.position:]
+                self.tokens[self.position] = Token(TokenType.LESS_THAN, '<', _ra_tok.line, _ra_tok.column)
             with self._lookahead():
                 is_template = False
                 self.advance()  # consume '<'
@@ -3903,6 +3933,8 @@ class FluxParser:
                     self.advance()
                     if self.expect(TokenType.PLUS):
                         self.advance()
+                if self.expect(TokenType.CODIFY):
+                    self.advance()
                 if self.expect(TokenType.IDENTIFIER):
                     self.advance()
                     # Skip optional constraint clause: ': type (| type)*'
@@ -3930,22 +3962,38 @@ class FluxParser:
                                 self.advance()
                         if self.expect(TokenType.TIE):
                             self.advance()
-                            if self.expect(TokenType.IDENTIFIER):
+                            if self.expect(TokenType.CODIFY):
                                 self.advance()
-                                while self.expect(TokenType.LOGICAL_AND):
+                                if self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                            elif self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                            while self.expect(TokenType.LOGICAL_AND):
+                                self.advance()
+                                if self.expect(TokenType.CODIFY):
                                     self.advance()
                                     if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
+                                elif self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
                         elif self.expect(TokenType.NOT):
                             self.advance()
                             if self.expect(TokenType.TIE):
                                 self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
+                                if self.expect(TokenType.CODIFY):
                                     self.advance()
-                                    while self.expect(TokenType.LOGICAL_AND):
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                                elif self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                                while self.expect(TokenType.LOGICAL_AND):
+                                    self.advance()
+                                    if self.expect(TokenType.CODIFY):
                                         self.advance()
                                         if self.expect(TokenType.IDENTIFIER):
                                             self.advance()
+                                    elif self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
                     while self.expect(TokenType.COMMA):
                         self.advance()
                         # Accept optional <!+ prefix on subsequent entries
@@ -3953,9 +4001,13 @@ class FluxParser:
                             self.advance()
                             if self.expect(TokenType.PLUS):
                                 self.advance()
-                        if not self.expect(TokenType.IDENTIFIER):
+                        if self.expect(TokenType.CODIFY):
+                            self.advance()
+                            self.advance()  # consume IDENTIFIER after CODIFY
+                        elif not self.expect(TokenType.IDENTIFIER):
                             break
-                        self.advance()
+                        else:
+                            self.advance()
                         if self.expect(TokenType.COLON):
                             self.advance()
                             depth = 0
@@ -3979,31 +4031,57 @@ class FluxParser:
                                     self.advance()
                             if self.expect(TokenType.TIE):
                                 self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
+                                if self.expect(TokenType.CODIFY):
                                     self.advance()
-                                    while self.expect(TokenType.LOGICAL_AND):
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                                elif self.expect(TokenType.IDENTIFIER):
+                                    self.advance()
+                                while self.expect(TokenType.LOGICAL_AND):
+                                    self.advance()
+                                    if self.expect(TokenType.CODIFY):
                                         self.advance()
                                         if self.expect(TokenType.IDENTIFIER):
                                             self.advance()
+                                    elif self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
                             elif self.expect(TokenType.NOT):
                                 self.advance()
                                 if self.expect(TokenType.TIE):
                                     self.advance()
-                                    if self.expect(TokenType.IDENTIFIER):
+                                    if self.expect(TokenType.CODIFY):
                                         self.advance()
-                                        while self.expect(TokenType.LOGICAL_AND):
+                                        if self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
+                                    elif self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                                    while self.expect(TokenType.LOGICAL_AND):
+                                        self.advance()
+                                        if self.expect(TokenType.CODIFY):
                                             self.advance()
                                             if self.expect(TokenType.IDENTIFIER):
                                                 self.advance()
+                                        elif self.expect(TokenType.IDENTIFIER):
+                                            self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
             if is_template:
                 self.advance()  # consume '<'
                 def _parse_id_list_tf():
-                    names = [self.consume(TokenType.IDENTIFIER).value]
+                    if self.expect(TokenType.CODIFY):
+                        self.advance()
+                        _codify_var = self.consume(TokenType.IDENTIFIER).value
+                        names = [self._comptime_strings.get(_codify_var, _codify_var)]
+                    else:
+                        names = [self.consume(TokenType.IDENTIFIER).value]
                     while self.expect(TokenType.LOGICAL_AND):
                         self.advance()
-                        names.append(self.consume(TokenType.IDENTIFIER).value)
+                        if self.expect(TokenType.CODIFY):
+                            self.advance()
+                            _codify_var = self.consume(TokenType.IDENTIFIER).value
+                            names.append(self._comptime_strings.get(_codify_var, _codify_var))
+                        else:
+                            names.append(self.consume(TokenType.IDENTIFIER).value)
                     return names
                 def _parse_param_entry_tf(param_name):
                     if self.expect(TokenType.COLON):
@@ -4056,7 +4134,12 @@ class FluxParser:
                     self.advance()
                     self.consume(TokenType.PLUS)
                     _no_default_first = True
-                _first_id = self.consume(TokenType.IDENTIFIER).value
+                if self.expect(TokenType.CODIFY):
+                    self.advance()
+                    _codify_var = self.consume(TokenType.IDENTIFIER).value
+                    _first_id = self._comptime_strings.get(_codify_var, _codify_var)
+                else:
+                    _first_id = self.consume(TokenType.IDENTIFIER).value
                 if _no_default_first:
                     _typefunc_no_default.add(_first_id)
                 if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
@@ -4080,7 +4163,12 @@ class FluxParser:
                         self.advance()
                         self.consume(TokenType.PLUS)
                         _no_default_next = True
-                    _next_id = self.consume(TokenType.IDENTIFIER).value
+                    if self.expect(TokenType.CODIFY):
+                        self.advance()
+                        _codify_var = self.consume(TokenType.IDENTIFIER).value
+                        _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                    else:
+                        _next_id = self.consume(TokenType.IDENTIFIER).value
                     if _no_default_next:
                         _typefunc_no_default.add(_next_id)
                     if self.expect(TokenType.COLON) or (not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT)):
@@ -4395,6 +4483,10 @@ class FluxParser:
                     elif self.expect(TokenType.ASSIGN):
                         self.advance()
                         initializers.append(self.expression())
+                        # Record byte* string-literal initialisers in comma-chain so ~$varname can splice them
+                        if (isinstance(initializers[-1], StringLiteral) and
+                                type_spec.is_pointer and type_spec.base_type == DataType.BYTE):
+                            self._comptime_strings[var_name] = initializers[-1].value
                     else:
                         initializers.append(None)
             

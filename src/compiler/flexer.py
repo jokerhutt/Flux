@@ -1099,9 +1099,13 @@ class FluxLexer:
             if len(lookahead) >= 2:
                 double_char = lookahead[:2]
                 if double_char in double_char_tokens:
-                    tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
-                    self.advance(count=2)
-                    continue
+                    # '<~' must not consume the '~' when it belongs to a '~$' CODIFY token.
+                    if double_char == '<~' and len(lookahead) >= 3 and lookahead[2] == '$':
+                        pass  # fall through to single-char '<'
+                    else:
+                        tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
+                        self.advance(count=2)
+                        continue
             
             # Check for 1-char tokens
             if char in single_char_tokens:
