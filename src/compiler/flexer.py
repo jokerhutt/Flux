@@ -174,6 +174,7 @@ class TokenType(Enum):
     MODULO_ASSIGN = auto()  # %=
     POWER_ASSIGN = auto()   # ^=
     # Bitwise Operators
+    BACKTICK = auto()       # `
     # Logical
     BITNOT_OP = auto()      # `!
     BITAND_OP = auto()      # `&
@@ -356,7 +357,8 @@ single_char_tokens = {
     '.': TokenType.DOT,
     '~': TokenType.TIE,
     '$': TokenType.STRINGIFY,
-    '\\': TokenType.BACKSLASH
+    '\\': TokenType.BACKSLASH,
+    '`': TokenType.BACKTICK
 }
 
 _TOKEN_TYPE_TO_STR: dict = {
@@ -908,11 +910,20 @@ class FluxLexer:
             token_type = TokenType.DOUBLE
             is_double = True
             self.advance()
+        # Check for unsigned long suffix 'ul' (must check before 'u' alone)
+        elif not is_float and self.current_char() and self.current_char() == 'u' and self.peek_char() == 'l':
+            token_type = TokenType.ULONG_LITERAL
+            self.advance()  # consume 'u'
+            self.advance()  # consume 'l'
         # Check for unsigned suffix (lowercase 'u' only) - but NOT if we already found 'f'
         elif not is_float and self.current_char() and self.current_char() == 'u':
             token_type = TokenType.UINT_LITERAL
             #result += self.current_char()  # Keep the 'u' in the token value
             self.advance()
+        # Check for long suffix (lowercase 'l' only)
+        elif not is_float and self.current_char() and self.current_char() == 'l':
+            token_type = TokenType.SLONG_LITERAL
+            self.advance()  # consume 'l'
         # If we have a decimal point but no 'f' suffix, it's still a float
         if is_float and dc <= 5:
             token_type = TokenType.FLOAT
@@ -1102,13 +1113,9 @@ class FluxLexer:
             if len(lookahead) >= 2:
                 double_char = lookahead[:2]
                 if double_char in double_char_tokens:
-                    # '<~' must not consume the '~' when it belongs to a '~$' CODIFY token.
-                    if double_char == '<~' and len(lookahead) >= 3 and lookahead[2] == '$':
-                        pass  # fall through to single-char '<'
-                    else:
-                        tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
-                        self.advance(count=2)
-                        continue
+                    tokens.append(Token(double_char_tokens[double_char], double_char, start_pos[0], start_pos[1]))
+                    self.advance(count=2)
+                    continue
             
             # Check for 1-char tokens
             if char in single_char_tokens:

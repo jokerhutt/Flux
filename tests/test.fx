@@ -1,22 +1,19 @@
 #import <standard.fx>;
- 
+
 using standard::io::console;
- 
-struct Vec3
+
+constra MyCS(A,B)
 {
-    float x, y, z;
+    A !`>= B
 };
- 
-def dot(Vec3 a, Vec3 b) -> float
+
+def foo<T: long, U: int, :{MyCS}>(T x, U y) -> U
 {
-    return a.x * b.x + a.y * b.y + a.z * b.z;
+    return x + y;
 };
- 
+
 def main() -> int
 {
-    Vec3 u from { x = 1.0f, y = 2.0f, z = 3.0f };
-    Vec3 v from { x = 4.0f, y = 5.0f, z = 6.0f };
-    float d = dot(u, v);
-    print(f"dot(u, v) = {d}\n\0");
+    println(foo(10l, 20));
     return 0;
 };

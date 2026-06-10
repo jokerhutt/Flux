@@ -130,13 +130,14 @@ class ParseError(Exception):
     def __init__(self, message: str, token: Optional[Token] = None,
                  source_lines: Optional[List[str]] = None,
                  expected_type=None, prev_token: Optional[Token] = None,
-                 line_map=None):
+                 line_map=None, annotation: str = ""):
         self.message = message
         self.token = token
         self.source_lines = source_lines
         self.expected_type = expected_type  # TokenType or None
         self.prev_token = prev_token
         self.line_map = line_map or []
+        self.annotation = annotation
         super().__init__(self._format())
 
     def _format(self) -> str:
@@ -247,6 +248,8 @@ class ParseError(Exception):
 
         if suggestion:
             return f"{header}\n{src_line}\n{caret_line}\n{suggestion}"
+        if self.annotation:
+            return f"{header}\n{src_line}\n{self.annotation}\n{caret_line}"
         return f"{header}\n{src_line}\n{caret_line}"
 
 
@@ -630,9 +633,9 @@ class FluxParser:
             self.position = saved_pos
             self.current_token = saved_token
     
-    def error(self, message: str, expected_type=None, prev_token=None) -> None:
+    def error(self, message: str, expected_type=None, prev_token=None, annotation: str = "") -> None:
         """Raise a parse error with current token context"""
-        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token, self._line_map)
+        raise ParseError(message, self.current_token, self._source_lines, expected_type, prev_token, self._line_map, annotation)
 
     def warn(self, message: str) -> None:
         """Emit a non-fatal compiler warning to stderr with source location context."""
@@ -685,6 +688,81 @@ class FluxParser:
             return False
         return self.current_token.type in token_types
     
+    # ------------------------------------------------------------------
+    # Relational constraint operator helpers
+    # ------------------------------------------------------------------
+    # All type-algebra operators are sequences of existing tokens.
+    # These helpers centralise detection and consumption so every parse
+    # site (constra_def, function_def, type_func_def, and their
+    # lookahead skippers) stays in sync.
+    #
+    # Current operator set:
+    #   ~=       TIE ASSIGN                       compatible
+    #   !~=      NOT TIE ASSIGN                   incompatible
+    #   !`<      NOT BACKTICK LESS_THAN            no-truncation (independent)
+    #   !`<=     NOT BACKTICK LESS_EQUAL           no-truncation (between)
+    #   !`>      NOT BACKTICK GREATER_THAN         no-widening (independent)
+    #   !`>=     NOT BACKTICK GREATER_EQUAL        no-widening (between)
+    # ------------------------------------------------------------------
+
+    def _is_relconstraint_op(self) -> bool:
+        """Return True if the current position starts a relational constraint operator."""
+        if self.expect(TokenType.TIE) and self.peek(1) and self.peek(1).type == TokenType.ASSIGN:
+            return True
+        if self.expect(TokenType.NOT):
+            p1 = self.peek(1)
+            if p1 is None:
+                return False
+            if p1.type == TokenType.TIE and self.peek(2) and self.peek(2).type == TokenType.ASSIGN:
+                return True
+            if p1.type == TokenType.BACKTICK:
+                p2 = self.peek(2)
+                if p2 and p2.type in (TokenType.LESS_THAN, TokenType.LESS_EQUAL,
+                                      TokenType.GREATER_THAN, TokenType.GREATER_EQUAL):
+                    return True
+        return False
+
+    def _consume_relconstraint_op(self) -> str:
+        """Consume the tokens of the current relational constraint operator and return its string."""
+        if self.expect(TokenType.TIE):
+            self.consume(TokenType.TIE)
+            self.consume(TokenType.ASSIGN)
+            return "~="
+        self.consume(TokenType.NOT)
+        if self.expect(TokenType.TIE):
+            self.consume(TokenType.TIE)
+            self.consume(TokenType.ASSIGN)
+            return "!~="
+        # BACKTICK branch — !`< !`<= !`> !`>=
+        self.consume(TokenType.BACKTICK)
+        if self.expect(TokenType.LESS_EQUAL):
+            self.advance()
+            return "!`<="
+        elif self.expect(TokenType.LESS_THAN):
+            self.advance()
+            return "!`<"
+        elif self.expect(TokenType.GREATER_EQUAL):
+            self.advance()
+            return "!`>="
+        elif self.expect(TokenType.GREATER_THAN):
+            self.advance()
+            return "!`>"
+        self.error("Unknown constraint operator after '!`'")
+
+    def _skip_relconstraint_op(self) -> None:
+        """Advance past the tokens of a relational constraint operator (lookahead use)."""
+        if self.expect(TokenType.TIE):
+            self.advance()  # TIE
+            self.advance()  # ASSIGN
+            return
+        self.advance()  # NOT
+        if self.expect(TokenType.TIE):
+            self.advance()  # TIE
+            self.advance()  # ASSIGN
+            return
+        self.advance()  # BACKTICK
+        self.advance()  # LESS_THAN | LESS_EQUAL | GREATER_THAN | GREATER_EQUAL
+
     def consume(self, expected_type: TokenType, message: str = None) -> Token:
         """Consume a token of the expected type or raise error"""
         if not self.expect(expected_type):
@@ -1768,7 +1846,7 @@ class FluxParser:
         Syntax:
             constra MyCS(A, B)
             {
-                A ~ B
+                A ~= B
             };
 
         Merge syntax (union of two or more existing constraint sets):
@@ -1781,6 +1859,7 @@ class FluxParser:
 
         Relations from all sources are concatenated after remapping each
         source's formal parameter names to the final parameter names.
+        Mutex pairs (~= / !~= and !`<= / !`>=) are detected at merge time.
         """
         tok = self.current_token
         self.consume(TokenType.CONSTRA)
@@ -1788,8 +1867,7 @@ class FluxParser:
         # Optional rename param list before '=': constra A(M,N) = B + C;
         rename_params = None
         if self.expect(TokenType.LEFT_PAREN) and not self.expect(TokenType.LEFT_BRACE):
-            # Peek ahead: if followed eventually by '=' this is a merge rename, not a normal def.
-            # We speculatively parse the param list; if no '=' follows we treat it as normal.
+            # Speculatively parse the param list; only treat as rename if '=' follows.
             _saved_pos = self.position
             _saved_tok = self.current_token
             self.advance()  # consume '('
@@ -1803,7 +1881,7 @@ class FluxParser:
             if self.expect(TokenType.ASSIGN):
                 rename_params = _rp
             else:
-                # Not a merge — restore and fall through to normal constra body parse
+                # Not a merge -- restore and fall through to normal constra body parse
                 self.position = _saved_pos
                 self.current_token = _saved_tok
         # Merge form: constra A = B + C;  or  constra A(M,N) = B + C;
@@ -1827,6 +1905,7 @@ class FluxParser:
             base_arity = len(sources[0][1])
             for src_name, src_params, _ in sources[1:]:
                 if len(src_params) != base_arity:
+                    self.current_token = tok
                     self.error(
                         f"Cannot merge constraint sets of different arity: "
                         f"'{sources[0][0]}' has {base_arity} parameter(s) but "
@@ -1835,6 +1914,7 @@ class FluxParser:
             # Determine final param names
             if rename_params is not None:
                 if len(rename_params) != base_arity:
+                    self.current_token = tok
                     self.error(
                         f"Rename parameter list has {len(rename_params)} name(s) but "
                         f"merged constraint sets have arity {base_arity}"
@@ -1847,27 +1927,36 @@ class FluxParser:
             merged_relations = []
             for _, src_params, src_relations in sources:
                 mapping = dict(zip(src_params, final_params))
-                for lhs_f, compat_f, rhs_f in src_relations:
+                for lhs_f, op_f, rhs_f in src_relations:
                     merged_relations.append(
-                        ([mapping.get(n, n) for n in lhs_f], compat_f,
+                        ([mapping.get(n, n) for n in lhs_f], op_f,
                          [mapping.get(n, n) for n in rhs_f])
                     )
-            # Conflict check: same (lhs, rhs) pair cannot be both ~ and !~
-            _seen_compat = {}
-            for lhs_r, compat_r, rhs_r in merged_relations:
+            # Mutex conflict check: certain op pairs on the same (lhs, rhs) cannot both hold
+            # Mutex pairs: (~= , !~=) and (!`<= , !`>=)
+            _MUTEX_PAIRS = [
+                ("~=", "!~="),
+                ("!`<=", "!`>="),
+            ]
+            _mutex_map = {}
+            for _ma, _mb in _MUTEX_PAIRS:
+                _mutex_map[_ma] = _mb
+                _mutex_map[_mb] = _ma
+            _seen_ops = {}  # (frozenset(lhs), frozenset(rhs)) -> set of ops
+            for lhs_r, op_r, rhs_r in merged_relations:
                 _key = (frozenset(lhs_r), frozenset(rhs_r))
-                if _key in _seen_compat:
-                    if _seen_compat[_key] != compat_r:
-                        _lhs_str = ' & '.join(sorted(lhs_r))
-                        _rhs_str = ' & '.join(sorted(rhs_r))
-                        self.current_token = tok
-                        self.error(
-                            f"Conflicting constraint relation in {name}: "
-                            f"'{_lhs_str} ~ {_rhs_str}' and '{_lhs_str} !~ {_rhs_str}' "
-                            f"cannot be true simultaneously"
-                        )
-                else:
-                    _seen_compat[_key] = compat_r
+                _ops = _seen_ops.setdefault(_key, set())
+                if op_r in _mutex_map and _mutex_map[op_r] in _ops:
+                    _lhs_str = ' & '.join(sorted(lhs_r))
+                    _rhs_str = ' & '.join(sorted(rhs_r))
+                    self.current_token = tok
+                    self.error(
+                        f"Conflicting constraints in merge '{name}': "
+                        f"'{_lhs_str} {_mutex_map[op_r]} {_rhs_str}' and "
+                        f"'{_lhs_str} {op_r} {_rhs_str}' "
+                        f"cannot be true simultaneously"
+                    )
+                _ops.add(op_r)
             self._constras[name] = (final_params, merged_relations)
             return ConstraDef(name, final_params, merged_relations).set_location(tok.line, tok.column)
         params = []
@@ -1888,20 +1977,15 @@ class FluxParser:
                 names.append(self.consume(TokenType.IDENTIFIER).value)
             return names
         def _is_constraint_op():
-            # A constraint op starts with TIE (~) or NOT (~$ ahead)
-            return self.expect(TokenType.TIE) or self.expect(TokenType.NOT)
+            return self._is_relconstraint_op()
         def _parse_rel_expr():
-            # Parse a chained relational expression: A ~ B !~ C ~ D ...
-            # Each step: consume op, consume rhs id-list, emit a (lhs, compat, rhs) pair
+            # Parse a chained relational expression: A ~= B !~= C ~= D ...
+            # Each step: consume op, consume rhs id-list, emit a (lhs, op, rhs) tuple
             lhs = _parse_id_list_cs()
             while _is_constraint_op():
-                compat = True
-                if self.expect(TokenType.NOT):
-                    self.advance()
-                    compat = False
-                self.consume(TokenType.TIE)
+                op = self._consume_relconstraint_op()
                 rhs = _parse_id_list_cs()
-                relations.append((lhs, compat, rhs))
+                relations.append((lhs, op, rhs))
                 # rhs becomes lhs for next chained op
                 lhs = rhs
         _parse_rel_expr()
@@ -2020,7 +2104,7 @@ class FluxParser:
             return name
         template_params = []
         _func_constraints = {}  # param_name -> list of (TypeSystem, source_text)
-        _func_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
+        _func_relations = []    # list of (lhs_names, op: str, rhs_names)
         _func_defaults = {}     # param_name -> TypeSystem (the default type)
         _func_no_default = set()  # param_names marked <!+
         if self.expect(TokenType.LESS_THAN):
@@ -2086,13 +2170,23 @@ class FluxParser:
                         self.advance()
                         _la_skip_type_constraint_fd()
                     else:
-                        # Skip optional '&' IDENTIFIER chain and '~'/'!~' relation
+                        # Skip optional '&' IDENTIFIER chain and relation op
                         # (bare relation — accepted here so real parse can error properly)
                         while self.expect(TokenType.LOGICAL_AND):
                             self.advance()
                             if self.expect(TokenType.IDENTIFIER):
                                 self.advance()
-                        if self.expect(TokenType.TIE):
+                        if self._is_relconstraint_op() and not self.expect(TokenType.TIE):
+                            # !`< !`<= !`> !`>= — skip op then rhs identifier chain
+                            self._skip_relconstraint_op()
+                            if self.expect(TokenType.IDENTIFIER):
+                                self.advance()
+                                while self.expect(TokenType.LOGICAL_AND):
+                                    self.advance()
+                                    if self.expect(TokenType.IDENTIFIER):
+                                        self.advance()
+                        elif self.expect(TokenType.TIE) and self.peek(1) and self.peek(1).type == TokenType.ASSIGN:
+                            self.advance()
                             self.advance()
                             if self.expect(TokenType.IDENTIFIER):
                                 self.advance()
@@ -2100,16 +2194,17 @@ class FluxParser:
                                     self.advance()
                                     if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
-                        elif self.expect(TokenType.NOT):
+                        elif self.expect(TokenType.NOT) and self.peek(1) and self.peek(1).type == TokenType.TIE \
+                                and self.peek(2) and self.peek(2).type == TokenType.ASSIGN:
                             self.advance()
-                            if self.expect(TokenType.TIE):
+                            self.advance()
+                            self.advance()
+                            if self.expect(TokenType.IDENTIFIER):
                                 self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
+                                while self.expect(TokenType.LOGICAL_AND):
                                     self.advance()
-                                    while self.expect(TokenType.LOGICAL_AND):
+                                    if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
-                                        if self.expect(TokenType.IDENTIFIER):
-                                            self.advance()
                     _la_first_ok = True
                 if _la_first_ok:
                     while self.expect(TokenType.COMMA):
@@ -2148,24 +2243,14 @@ class FluxParser:
                                     self.advance()
                                     if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
-                                if self.expect(TokenType.TIE):
-                                    self.advance()
+                                if self._is_relconstraint_op():
+                                    self._skip_relconstraint_op()
                                     if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
                                         while self.expect(TokenType.LOGICAL_AND):
                                             self.advance()
                                             if self.expect(TokenType.IDENTIFIER):
                                                 self.advance()
-                                elif self.expect(TokenType.NOT):
-                                    self.advance()
-                                    if self.expect(TokenType.TIE):
-                                        self.advance()
-                                        if self.expect(TokenType.IDENTIFIER):
-                                            self.advance()
-                                            while self.expect(TokenType.LOGICAL_AND):
-                                                self.advance()
-                                                if self.expect(TokenType.IDENTIFIER):
-                                                    self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
 
@@ -2219,7 +2304,9 @@ class FluxParser:
                                     ([mapping.get(n, n) for n in lhs_f], compat_f,
                                      [mapping.get(n, n) for n in rhs_f])
                                 )
-                        elif _entry_name in self._constras and not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        elif _entry_name in self._constras and not (
+                                self.expect(TokenType.LOGICAL_AND) or
+                                self._is_relconstraint_op()):
                             # Bare constra name — map template params in order of appearance
                             cs_params, cs_relations = self._constras[_entry_name]
                             # Collect template params seen so far (in declaration order)
@@ -2243,13 +2330,9 @@ class FluxParser:
                             while self.expect(TokenType.LOGICAL_AND):
                                 self.advance()
                                 lhs.append(self.consume(TokenType.IDENTIFIER).value)
-                            compat = True
-                            if self.expect(TokenType.NOT):
-                                self.advance()
-                                compat = False
-                            self.consume(TokenType.TIE)
+                            op = self._consume_relconstraint_op()
                             rhs = _parse_id_list()
-                            _func_relations.append((lhs, compat, rhs))
+                            _func_relations.append((lhs, op, rhs))
                     _parse_one_cs_entry()
                     while self.expect(TokenType.COMMA):
                         self.advance()
@@ -2319,10 +2402,10 @@ class FluxParser:
                         _first_id = self.consume(TokenType.IDENTIFIER).value
                     if _no_default_first:
                         _func_no_default.add(_first_id)
-                    if self.expect(TokenType.LOGICAL_AND, TokenType.TIE) or (self.expect(TokenType.NOT) and not self.expect(TokenType.COLON)):
+                    if self.expect(TokenType.LOGICAL_AND) or self._is_relconstraint_op():
                         self.error(
-                            f"Relational template constraints must be wrapped in a constraint set as :{{T ~ U}}. "
-                            f"Did you mean :{{{_first_id} ~ ...}}, or did you intend a type constraint {_first_id}: ?"
+                            f"Relational template constraints must be wrapped in a constraint set as :{{T ~= U}}. "
+                            f"Did you mean :{{{_first_id} ~= ...}}, or did you intend a type constraint {_first_id}: ?"
                         )
                     _parse_param_entry(_first_id)
                 while self.expect(TokenType.COMMA):
@@ -2343,10 +2426,10 @@ class FluxParser:
                             _next_id = self.consume(TokenType.IDENTIFIER).value
                         if _no_default_next:
                             _func_no_default.add(_next_id)
-                        if self.expect(TokenType.LOGICAL_AND, TokenType.TIE) or (self.expect(TokenType.NOT) and not self.expect(TokenType.COLON)):
+                        if self.expect(TokenType.LOGICAL_AND) or self._is_relconstraint_op():
                             self.error(
-                                f"Relational template constraints must be wrapped in a constraint set: :{{T ~ U}}. "
-                                f"Did you mean :{{{_next_id} ~ ...}}, or did you intend a type constraint {_next_id}: ?"
+                                f"Relational template constraints must be wrapped in a constraint set: :{{T ~= U}}. "
+                                f"Did you mean :{{{_next_id} ~= ...}}, or did you intend a type constraint {_next_id}: ?"
                             )
                         _parse_param_entry(_next_id)
                 self.consume(TokenType.GREATER_THAN)
@@ -4457,7 +4540,7 @@ class FluxParser:
             return name
         template_params = []
         _typefunc_constraints = {}  # param_name -> list of (TypeSystem, source_text)
-        _typefunc_relations = []    # list of (lhs_names, compatible: bool, rhs_names)
+        _typefunc_relations = []    # list of (lhs_names, op: str, rhs_names)
         _typefunc_defaults = {}     # param_name -> TypeSystem (the default type)
         _typefunc_no_default = set()  # param_names marked <!+
         if self.expect(TokenType.LESS_THAN, TokenType.RECURSE_ARROW):
@@ -4532,8 +4615,8 @@ class FluxParser:
                             self.advance()
                             if self.expect(TokenType.IDENTIFIER):
                                 self.advance()
-                        if self.expect(TokenType.TIE):
-                            self.advance()
+                        if self._is_relconstraint_op():
+                            self._skip_relconstraint_op()
                             if self.expect(TokenType.CODIFY):
                                 self.advance()
                                 if self.expect(TokenType.IDENTIFIER):
@@ -4548,24 +4631,6 @@ class FluxParser:
                                         self.advance()
                                 elif self.expect(TokenType.IDENTIFIER):
                                     self.advance()
-                        elif self.expect(TokenType.NOT):
-                            self.advance()
-                            if self.expect(TokenType.TIE):
-                                self.advance()
-                                if self.expect(TokenType.CODIFY):
-                                    self.advance()
-                                    if self.expect(TokenType.IDENTIFIER):
-                                        self.advance()
-                                elif self.expect(TokenType.IDENTIFIER):
-                                    self.advance()
-                                while self.expect(TokenType.LOGICAL_AND):
-                                    self.advance()
-                                    if self.expect(TokenType.CODIFY):
-                                        self.advance()
-                                        if self.expect(TokenType.IDENTIFIER):
-                                            self.advance()
-                                    elif self.expect(TokenType.IDENTIFIER):
-                                        self.advance()
                     _la_tf_first_ok = True
                 if _la_tf_first_ok:
                     while self.expect(TokenType.COMMA):
@@ -4604,8 +4669,8 @@ class FluxParser:
                                     self.advance()
                                     if self.expect(TokenType.IDENTIFIER):
                                         self.advance()
-                                if self.expect(TokenType.TIE):
-                                    self.advance()
+                                if self._is_relconstraint_op():
+                                    self._skip_relconstraint_op()
                                     if self.expect(TokenType.CODIFY):
                                         self.advance()
                                         if self.expect(TokenType.IDENTIFIER):
@@ -4620,24 +4685,6 @@ class FluxParser:
                                                 self.advance()
                                         elif self.expect(TokenType.IDENTIFIER):
                                             self.advance()
-                                elif self.expect(TokenType.NOT):
-                                    self.advance()
-                                    if self.expect(TokenType.TIE):
-                                        self.advance()
-                                        if self.expect(TokenType.CODIFY):
-                                            self.advance()
-                                            if self.expect(TokenType.IDENTIFIER):
-                                                self.advance()
-                                        elif self.expect(TokenType.IDENTIFIER):
-                                            self.advance()
-                                        while self.expect(TokenType.LOGICAL_AND):
-                                            self.advance()
-                                            if self.expect(TokenType.CODIFY):
-                                                self.advance()
-                                                if self.expect(TokenType.IDENTIFIER):
-                                                    self.advance()
-                                            elif self.expect(TokenType.IDENTIFIER):
-                                                self.advance()
                     if self.expect(TokenType.GREATER_THAN):
                         is_template = True
             if is_template:
@@ -4704,7 +4751,9 @@ class FluxParser:
                                     ([mapping.get(n, n) for n in lhs_f], compat_f,
                                      [mapping.get(n, n) for n in rhs_f])
                                 )
-                        elif not _entry_is_codify and _entry_name in self._constras and not self.expect(TokenType.LOGICAL_AND, TokenType.TIE, TokenType.NOT):
+                        elif not _entry_is_codify and _entry_name in self._constras and not (
+                                self.expect(TokenType.LOGICAL_AND) or
+                                self._is_relconstraint_op()):
                             # Bare constra name — map template params in order of appearance
                             cs_params, cs_relations = self._constras[_entry_name]
                             ordered_tparams = [p for p in template_params]
@@ -4732,13 +4781,9 @@ class FluxParser:
                                     lhs.append(self._comptime_strings.get(_cv, _cv))
                                 else:
                                     lhs.append(self.consume(TokenType.IDENTIFIER).value)
-                            compat = True
-                            if self.expect(TokenType.NOT):
-                                self.advance()
-                                compat = False
-                            self.consume(TokenType.TIE)
+                            op = self._consume_relconstraint_op()
                             rhs = _parse_id_list_tf()
-                            _typefunc_relations.append((lhs, compat, rhs))
+                            _typefunc_relations.append((lhs, op, rhs))
                     _parse_one_cs_entry_tf()
                     while self.expect(TokenType.COMMA):
                         self.advance()
@@ -6491,7 +6536,7 @@ class FluxParser:
             self._template_object_instances.append(concrete)
         return mangled
 
-    def _resolve_template_call(self, func_name, arg_type_names, arg_type_specs=None):
+    def _resolve_template_call(self, func_name, arg_type_names, arg_type_specs=None, arg_positions=None):
         """
         Given a template function name and a list of concrete type-name strings
         (one per template param, in declaration order), produce and register a
@@ -6570,13 +6615,19 @@ class FluxParser:
                             _display_name = f'"{_recv}".{_meth}' if _recv == 'string' else f'{_recv}.{_meth}'
                     else:
                         _display_name = func_name
+                    _saved_pos_tok = self.current_token
+                    if arg_positions is not None and i < len(arg_positions):
+                        _aline, _acol = arg_positions[i]
+                        self.current_token = type('_Tok', (), {'line': _aline, 'column': _acol})()
                     self.error(
                         f"Template parameter '{param_name}' of '{_display_name}' was instantiated "
                         f"with type '{arg_type_names[i]}', which does not satisfy the constraint "
                         f"[{allowed_strs}]"
                     )
+                    self.current_token = _saved_pos_tok
 
         # Check relation constraints (T~U, T!~U, T&U~V, etc.)
+        _pending_body_checks = []  # (op, lname, rname, lts, rts) for body-level ops
         _relations_list = entry.relational_constraints
         if not _relations_list:
             for _rk, _re in self._templates.items():
@@ -6602,30 +6653,44 @@ class FluxParser:
                 if aw and bw and aw != bw:
                     return False
                 return True
-            for lhs_names, compat, rhs_names in _relations_list:
+
+            # Body-walk helpers for !`< !`<= !`> !`>=
+            # These ops require scanning the instantiated function body for
+            # cast/truncation/widening operations involving the constrained types.
+            # The walk is deferred until after _substitute_template produces
+            # concrete_func; the _pending_body_checks list carries the work.
+            _TRUNCATION_OPS = {"!`<", "!`<="}
+            _WIDENING_OPS   = {"!`>", "!`>="}
+            _body_check_ops = _TRUNCATION_OPS | _WIDENING_OPS
+
+            for lhs_names, op, rhs_names in _relations_list:
                 for lname in lhs_names:
                     for rname in rhs_names:
                         lts = _param_to_ts.get(lname)
                         rts = _param_to_ts.get(rname)
                         if lts is None or rts is None:
                             continue
-                        is_compat = _types_compatible(lts, rts)
-                        if compat and not is_compat:
-                            lmangle = self._type_system_to_mangle_str(lts)
-                            rmangle = self._type_system_to_mangle_str(rts)
-                            self.error(
-                                f"Relation constraint '{lname}~{rname}' violated: "
-                                f"'{lmangle}' and '{rmangle}' are not compatible "
-                                f"(pointer mismatch or width mismatch)"
-                            )
-                        elif not compat and is_compat:
-                            lmangle = self._type_system_to_mangle_str(lts)
-                            rmangle = self._type_system_to_mangle_str(rts)
-                            self.error(
-                                f"Relation constraint '{lname}!~{rname}' violated: "
-                                f"'{lmangle}' and '{rmangle}' must be incompatible "
-                                f"but are compatible"
-                            )
+
+                        if op == "~=":
+                            if not _types_compatible(lts, rts):
+                                lmangle = self._type_system_to_mangle_str(lts)
+                                rmangle = self._type_system_to_mangle_str(rts)
+                                self.error(
+                                    f"Relation constraint '{lname} ~= {rname}' violated: "
+                                    f"'{lmangle}' and '{rmangle}' are not compatible "
+                                    f"(pointer mismatch or width mismatch)"
+                                )
+                        elif op == "!~=":
+                            if _types_compatible(lts, rts):
+                                lmangle = self._type_system_to_mangle_str(lts)
+                                rmangle = self._type_system_to_mangle_str(rts)
+                                self.error(
+                                    f"Relation constraint '{lname} !~= {rname}' violated: "
+                                    f"'{lmangle}' and '{rmangle}' must be incompatible "
+                                    f"but are compatible"
+                                )
+                        elif op in _body_check_ops:
+                            _pending_body_checks.append((op, lname, rname, lts, rts))
 
         # Build mangled name: func__tmpl__T1__T2
         mangled = func_name + '__tmpl__' + '__'.join(arg_type_names)
@@ -6680,6 +6745,210 @@ class FluxParser:
                     if len(_candidate_ns) > len(_src_ns):
                         _src_ns = _candidate_ns
             concrete_func._source_namespace = _src_ns
+
+            # Body-level relation checks: !`< !`<= !`> !`>=
+            # Walk the substituted AST looking for CastExpression / TypeConvertExpression
+            # nodes that truncate or widen one of the constrained parameter types.
+            if _pending_body_checks:
+                from fast import (CastExpression as _CastExpr,
+                                  TypeConvertExpression as _TypeConvExpr,
+                                  BinaryOp as _BinaryOp,
+                                  UnaryOp as _UnaryOp,
+                                  Assignment as _Assignment,
+                                  CompoundAssignment as _CompoundAssignment)
+
+                def _walk(node):
+                    """Yield every node in the AST (depth-first)."""
+                    if node is None:
+                        return
+                    yield node
+                    for attr in vars(node).values():
+                        if isinstance(attr, list):
+                            for item in attr:
+                                if hasattr(item, '__dataclass_fields__'):
+                                    yield from _walk(item)
+                        elif hasattr(attr, '__dataclass_fields__'):
+                            yield from _walk(attr)
+
+                def _bw(ts):
+                    """Return bit width of a TypeSystem, 0 if unknown."""
+                    if ts is None:
+                        return 0
+                    if ts.bit_width:
+                        return ts.bit_width
+                    from ftypesys import get_builtin_bit_width as _gbw
+                    try:
+                        return _gbw(ts.base_type)
+                    except Exception:
+                        return 0
+
+                # Build a name -> TypeSystem table from the concrete function's
+                # parameters and local variable declarations.  This is needed
+                # because _resolved_type annotations are set by codegen, not by
+                # the parser, so Identifier nodes in the substituted AST carry no
+                # type at this point.
+                from fast import VariableDeclaration as _VarDecl, Identifier as _Ident
+                _local_type_table = {}
+                for _p in concrete_func.parameters:
+                    if _p.name is not None:
+                        _local_type_table[_p.name] = _p.type_spec
+                for _n in _walk(concrete_func):
+                    if isinstance(_n, _VarDecl):
+                        _local_type_table[_n.name] = _n.type_spec
+
+                def _ts_of_expr(expr):
+                    """Best-effort TypeSystem for an expression node."""
+                    ts = getattr(expr, '_resolved_type', None)
+                    if ts is not None:
+                        return ts
+                    # CastExpression / TypeConvertExpression carry their own target type
+                    if isinstance(expr, (_CastExpr, _TypeConvExpr)):
+                        return expr.target_type
+                    # Identifier: look up in the local type table built above
+                    if isinstance(expr, _Ident):
+                        return _local_type_table.get(expr.name)
+                    return None
+
+                def _arithmetic_result_width(node):
+                    """
+                    For a BinaryOp, infer the result width as the minimum of the two
+                    operand widths (C-style implicit truncation to narrower type).
+                    Returns (result_width, max_operand_width) or (0, 0) if unknown.
+                    """
+                    lts = _ts_of_expr(node.left)
+                    rts = _ts_of_expr(node.right)
+                    lw = _bw(lts)
+                    rw = _bw(rts)
+                    if not lw or not rw:
+                        return 0, 0
+                    return min(lw, rw), max(lw, rw)
+
+                # ----------------------------------------------------------------
+                # Node-type checker registry.
+                # Each entry: node_type -> checker(node, op, lname, rname, lts, rts,
+                #                                  is_trunc, _between, constrained)
+                #             -> (violated: bool, src_w, dst_w, line, col)
+                #
+                # Add new checkers here as new relational constraint semantics land.
+                # ----------------------------------------------------------------
+
+                def _check_cast_node(node, op, lname, rname, lts, rts,
+                                     is_trunc, between, constrained):
+                    # Explicit cast / type-convert: (type)expr or type(expr)
+                    src_ts = _ts_of_expr(node.expression)
+                    dst_ts = node.target_type
+                    src_w  = _bw(src_ts)
+                    dst_w  = _bw(dst_ts)
+                    if not src_w or not dst_w:
+                        return False, 0, 0, '?', '?'
+                    if is_trunc:
+                        if dst_w >= src_w:
+                            return False, 0, 0, '?', '?'
+                    else:
+                        if dst_w <= src_w:
+                            return False, 0, 0, '?', '?'
+                    src_match = any(_bw(cts) == src_w for cts in constrained.values())
+                    dst_match = any(_bw(cts) == dst_w for cts in constrained.values())
+                    if between:
+                        violated = src_match and dst_match
+                    else:
+                        violated = src_match or dst_match
+                    line = getattr(node, 'source_line', '?')
+                    col  = getattr(node, 'source_col',  '?')
+                    return violated, src_w, dst_w, line, col
+
+                def _check_binaryop_node(node, op, lname, rname, lts, rts,
+                                         is_trunc, between, constrained):
+                    # Arithmetic BinaryOp: detect implicit lowering context.
+                    # When a constrained type participates in arithmetic with a
+                    # narrower type, the result is implicitly narrowed — a lowering
+                    # context even without an explicit cast node.
+                    result_w, max_w = _arithmetic_result_width(node)
+                    if not result_w or result_w == max_w:
+                        # No width change — no narrowing / widening
+                        return False, 0, 0, '?', '?'
+                    if is_trunc:
+                        # result_w < max_w means the wider operand's value was narrowed
+                        pass
+                    else:
+                        # widening check: result_w > min operand width
+                        lts_n = _ts_of_expr(node.left)
+                        rts_n = _ts_of_expr(node.right)
+                        lw_n  = _bw(lts_n)
+                        rw_n  = _bw(rts_n)
+                        if not lw_n or not rw_n:
+                            return False, 0, 0, '?', '?'
+                        if result_w <= min(lw_n, rw_n):
+                            return False, 0, 0, '?', '?'
+                    # Check whether the constrained params are involved
+                    constrained_widths = {_bw(cts) for cts in constrained.values()}
+                    narrow_match = result_w in constrained_widths
+                    wide_match   = max_w    in constrained_widths
+                    if between:
+                        violated = narrow_match and wide_match
+                    else:
+                        violated = narrow_match or wide_match
+                    line = getattr(node, 'source_line', '?')
+                    col  = getattr(node, 'source_col',  '?')
+                    return violated, result_w, max_w, line, col
+
+                def _check_unaryop_node(node, op, lname, rname, lts, rts,
+                                        is_trunc, between, constrained):
+                    # Placeholder: unary ops do not currently produce narrowing /
+                    # widening contexts.  Hook is present for future operators
+                    # (e.g. sign-extension, bit-truncation unary ops).
+                    return False, 0, 0, '?', '?'
+
+                # Registry maps node type -> checker function
+                _node_checkers = {
+                    _CastExpr:      _check_cast_node,
+                    _TypeConvExpr:  _check_cast_node,
+                    _BinaryOp:      _check_binaryop_node,
+                    _UnaryOp:       _check_unaryop_node,
+                }
+
+                for _op, _lname, _rname, _lts, _rts in _pending_body_checks:
+                    _lw = _bw(_lts)
+                    _rw = _bw(_rts)
+                    _between  = _op in ("!`<=", "!`>=")
+                    _is_trunc = _op in ("!`<",  "!`<=")
+                    _constrained = {_lname: _lts, _rname: _rts}
+
+                    for _node in _walk(concrete_func):
+                        _checker = _node_checkers.get(type(_node))
+                        if _checker is None:
+                            continue
+                        _violated, _sw, _dw, _line, _col = _checker(
+                            _node, _op, _lname, _rname, _lts, _rts,
+                            _is_trunc, _between, _constrained
+                        )
+                        if not _violated:
+                            continue
+                        _kind    = "truncation" if _is_trunc else "widening"
+                        _scope   = "between" if _between else "on"
+                        _lmangle = self._type_system_to_mangle_str(_lts)
+                        _rmangle = self._type_system_to_mangle_str(_rts)
+                        # Build operand annotation for BinaryOp violations
+                        _annotation = ""
+                        if isinstance(_node, _BinaryOp):
+                            _lt_n = _ts_of_expr(_node.left)
+                            _rt_n = _ts_of_expr(_node.right)
+                            _lt_s = self._type_system_to_mangle_str(_lt_n) if _lt_n else "?"
+                            _rt_s = self._type_system_to_mangle_str(_rt_n) if _rt_n else "?"
+                            # Centre \ / under the operator: space in \ / is at
+                            # offset len(_lt_s)+2 within the annotation (1-based),
+                            # so pad = _col - len(_lt_s) - 2
+                            _pad = max(0, _col - len(_lt_s) - 3) if isinstance(_col, int) else 0
+                            _annotation = " " * _pad + f"{_lt_s} \\ / {_rt_s}"
+                        _saved_err_tok = self.current_token
+                        if isinstance(_line, int) and isinstance(_col, int) and _line > 0:
+                            self.current_token = type('_Tok', (), {'line': _line, 'column': _col})()
+                        self.error(
+                            f"Type relation {_lname} {_op} {_rname} violated: "
+                            f"illegal {_kind} {_scope} {_lmangle} and {_rmangle}",
+                            annotation=_annotation
+                        )
+                        self.current_token = _saved_err_tok
 
             # If this is a method template (qualified name), inject directly into the
             # object's method list so it is compiled via emit_method_body, which
@@ -6872,6 +7141,7 @@ class FluxParser:
             # walking each declared parameter and matching its template param name
             # against the corresponding call-site argument.
             inferred: dict = {}  # template param name -> TypeSystem
+            _arg_pos: dict = {}  # template param name -> (line, col) of call-site arg
 
             for i, decl_param in enumerate(template_func.parameters):
                 if i >= len(args):
@@ -6994,6 +7264,10 @@ class FluxParser:
                             self.current_token = _saved_tok2
                     else:
                         inferred[param_tname] = inferred_ts
+                        _arg_pos[param_tname] = (
+                            getattr(args[i], 'source_line', None),
+                            getattr(args[i], 'source_col',  None),
+                        )
 
             # Only proceed with implicit instantiation if every template param was resolved
             # to a *concrete* type. If any inferred TypeSystem maps a param back to itself
@@ -7025,7 +7299,12 @@ class FluxParser:
                 else:
                     _saved_tok = self.current_token
                     self.current_token = tok
-                    mangled = self._resolve_template_call(expr.name, type_names, type_specs)
+                    _positions = [
+                        _arg_pos.get(p, (None, None))
+                        for p in template_param_names
+                    ]
+                    mangled = self._resolve_template_call(expr.name, type_names, type_specs,
+                                                          arg_positions=_positions)
                     self.current_token = _saved_tok
                     expr = FunctionCall(mangled, args).set_location(tok.line, tok.column)
             else:
@@ -7505,24 +7784,34 @@ class FluxParser:
                 self.advance()
             #print(value)
             return Literal(value, DataType.UINT).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.SLONG_LITERAL):
+            tok = self.current_token
+            value = float(tok.value)
+            self.advance()
+            return Literal(value, DataType.SLONG).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.ULONG_LITERAL):
+            tok = self.current_token
+            value = float(tok.value)
+            self.advance()
+            return Literal(value, DataType.ULONG).set_location(tok.line, tok.column)
         elif self.expect(TokenType.FLOAT):
             tok = self.current_token
-            value = float(self.current_token.value)
+            value = float(tok.value)
             self.advance()
             return Literal(value, DataType.FLOAT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.DOUBLE):
             tok = self.current_token
-            value = float(self.current_token.value)
+            value = float(tok.value)
             self.advance()
             return Literal(value, DataType.DOUBLE).set_location(tok.line, tok.column)
         elif self.expect(TokenType.CHAR):
             tok = self.current_token
-            value = self.current_token.value
+            value = tok.value
             self.advance()
             return Literal(value, DataType.CHAR).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRING_LITERAL):
             tok = self.current_token
-            value = self.current_token.value
+            value = tok.value
             self.advance()
             return StringLiteral(value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.F_STRING):
@@ -7532,7 +7821,7 @@ class FluxParser:
             return self.parse_f_string(f_string_content).set_location(tok.line, tok.column)
         elif self.expect(TokenType.I_STRING):
             tok = self.current_token
-            token_value = self.current_token.value
+            token_value = tok.value
             self.advance()
             return self.parse_i_string(token_value).set_location(tok.line, tok.column)
         elif self.expect(TokenType.TRUE):

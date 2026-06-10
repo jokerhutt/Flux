@@ -1559,7 +1559,7 @@ class ConstraDef(Statement):
     Syntax:
         constra MyCS(A, B)
         {
-            A ~ B
+            A ~= B
         };
 
     Applied inside a template constraint set:
@@ -1571,7 +1571,7 @@ class ConstraDef(Statement):
     """
     name: str
     params: List[str]           # formal parameter names (A, B, ...)
-    relations: list             # list of (lhs_names, compat: bool, rhs_names) using formal names
+    relations: list             # list of (lhs_names, op: str, rhs_names) using formal names
 
     def __repr__(self) -> str:
         params_str = '(' + ', '.join(self.params) + ')' if self.params else ''
