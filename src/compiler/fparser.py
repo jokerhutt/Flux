@@ -1760,6 +1760,7 @@ class FluxParser:
         """
         constra_def -> 'constra' IDENTIFIER '(' param_list ')' '{' relation_list '}' ';'
                      | 'constra' IDENTIFIER '{' relation_list '}' ';'
+                     | 'constra' IDENTIFIER '=' IDENTIFIER ('+' IDENTIFIER)* ';'
 
         Parses a named relational constraint set and registers it in self._constras.
         Relations use the formal parameter names declared in the constra parameter list.
@@ -1769,10 +1770,106 @@ class FluxParser:
             {
                 A ~ B
             };
+
+        Merge syntax (union of two or more existing constraint sets):
+            constra MyCS3 = MyCS1 + MyCS2;
+
+        All sources must have the same arity. The merged set adopts the
+        parameter names of the first source unless an explicit rename list
+        is supplied before '=':
+            constra MyCS3(M, N) = MyCS1 + MyCS2;
+
+        Relations from all sources are concatenated after remapping each
+        source's formal parameter names to the final parameter names.
         """
         tok = self.current_token
         self.consume(TokenType.CONSTRA)
         name = self.consume(TokenType.IDENTIFIER).value
+        # Optional rename param list before '=': constra A(M,N) = B + C;
+        rename_params = None
+        if self.expect(TokenType.LEFT_PAREN) and not self.expect(TokenType.LEFT_BRACE):
+            # Peek ahead: if followed eventually by '=' this is a merge rename, not a normal def.
+            # We speculatively parse the param list; if no '=' follows we treat it as normal.
+            _saved_pos = self.position
+            _saved_tok = self.current_token
+            self.advance()  # consume '('
+            _rp = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                _rp.append(self.consume(TokenType.IDENTIFIER).value)
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    _rp.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.RIGHT_PAREN)
+            if self.expect(TokenType.ASSIGN):
+                rename_params = _rp
+            else:
+                # Not a merge — restore and fall through to normal constra body parse
+                self.position = _saved_pos
+                self.current_token = _saved_tok
+        # Merge form: constra A = B + C;  or  constra A(M,N) = B + C;
+        if self.expect(TokenType.ASSIGN):
+            self.advance()
+            sources = []  # list of (src_name, src_params, src_relations)
+            def _collect_one():
+                src_tok = self.current_token
+                src_name = self.consume(TokenType.IDENTIFIER).value
+                if src_name not in self._constras:
+                    self.current_token = src_tok
+                    self.error(f"Unknown constraint set '{src_name}' in constra merge")
+                src_params, src_relations = self._constras[src_name]
+                sources.append((src_name, src_params, src_relations))
+            _collect_one()
+            while self.expect(TokenType.PLUS):
+                self.advance()
+                _collect_one()
+            self.consume(TokenType.SEMICOLON)
+            # Arity check: all sources must have the same number of parameters
+            base_arity = len(sources[0][1])
+            for src_name, src_params, _ in sources[1:]:
+                if len(src_params) != base_arity:
+                    self.error(
+                        f"Cannot merge constraint sets of different arity: "
+                        f"'{sources[0][0]}' has {base_arity} parameter(s) but "
+                        f"'{src_name}' has {len(src_params)}"
+                    )
+            # Determine final param names
+            if rename_params is not None:
+                if len(rename_params) != base_arity:
+                    self.error(
+                        f"Rename parameter list has {len(rename_params)} name(s) but "
+                        f"merged constraint sets have arity {base_arity}"
+                    )
+                final_params = rename_params
+            else:
+                # Use first source's param names
+                final_params = list(sources[0][1])
+            # Build merged relations, remapping each source's formal params -> final_params
+            merged_relations = []
+            for _, src_params, src_relations in sources:
+                mapping = dict(zip(src_params, final_params))
+                for lhs_f, compat_f, rhs_f in src_relations:
+                    merged_relations.append(
+                        ([mapping.get(n, n) for n in lhs_f], compat_f,
+                         [mapping.get(n, n) for n in rhs_f])
+                    )
+            # Conflict check: same (lhs, rhs) pair cannot be both ~ and !~
+            _seen_compat = {}
+            for lhs_r, compat_r, rhs_r in merged_relations:
+                _key = (frozenset(lhs_r), frozenset(rhs_r))
+                if _key in _seen_compat:
+                    if _seen_compat[_key] != compat_r:
+                        _lhs_str = ' & '.join(sorted(lhs_r))
+                        _rhs_str = ' & '.join(sorted(rhs_r))
+                        self.current_token = tok
+                        self.error(
+                            f"Conflicting constraint relation in {name}: "
+                            f"'{_lhs_str} ~ {_rhs_str}' and '{_lhs_str} !~ {_rhs_str}' "
+                            f"cannot be true simultaneously"
+                        )
+                else:
+                    _seen_compat[_key] = compat_r
+            self._constras[name] = (final_params, merged_relations)
+            return ConstraDef(name, final_params, merged_relations).set_location(tok.line, tok.column)
         params = []
         if self.expect(TokenType.LEFT_PAREN):
             self.advance()

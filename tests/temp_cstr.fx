@@ -4,12 +4,19 @@ using standard::io::console;
 
 byte* z = "f";
 
-constra MyCS(A,B)
+constra MyCS1(A,B)
 {
     A ~ B
 };
 
-i"".i"{}":{z}<T: "", U: "", :{MyCS}>(T x, U y) -> ""
+constra MyCS2(A,B)
+{
+    A !~ B
+};
+
+constra MyCS3(M,N) = MyCS1 + MyCS2;
+
+i"".i"{}":{z}<T: "", U: "", :{MyCS3}>(T x, U y) -> ""
 {
     return _ + i"{} {}":{x; y;};
 };
