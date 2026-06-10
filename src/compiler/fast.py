@@ -1258,7 +1258,7 @@ class ObjectDef(ASTNode):
     name: str
     methods: List[ObjectMethod] = field(default_factory=list)
     members: List[StructMember] = field(default_factory=list)
-    #base_objects: List[str] = field(default_factory=list)
+    base_objects: List[str] = field(default_factory=list)
     nested_objects: List['ObjectDef'] = field(default_factory=list)
     nested_structs: List[StructDef] = field(default_factory=list)
     super_calls: List[Tuple[str, str, List[Expression]]] = field(default_factory=list)

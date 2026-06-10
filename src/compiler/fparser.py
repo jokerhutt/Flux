@@ -249,6 +249,195 @@ class ParseError(Exception):
             return f"{header}\n{src_line}\n{caret_line}\n{suggestion}"
         return f"{header}\n{src_line}\n{caret_line}"
 
+
+def _resolve_inheritance(child_name, base_names, child_members, child_methods, parsed_objects, error_fn):
+    """
+    Resolve and merge inheritance for an object definition.
+
+    Returns (merged_members, merged_methods) where:
+    - merged_members: grandparent ... parent (L-to-R) ... child members
+    - merged_methods: child methods + deduplicated inherited methods
+                      (excluding __init, __exit, __expr from parents)
+
+    Diamond inheritance is handled by tagging each member with its original
+    defining object. Members that trace back to the same origin are deduplicated
+    silently; members with the same name from different origins are an error.
+    """
+
+    # ------------------------------------------------------------------ #
+    # 1. Collect flattened members from a parent chain (DFS, parents first)
+    # ------------------------------------------------------------------ #
+    def collect_members(obj_name, visited_for_cycle):
+        """Return list of (StructMember, origin_object_name) in declaration order."""
+        if obj_name in visited_for_cycle:
+            return []
+        visited_for_cycle = visited_for_cycle | {obj_name}
+
+        if obj_name not in parsed_objects:
+            error_fn(f"Inheritance error: '{obj_name}' must be fully defined before "
+                     f"'{child_name}' can inherit from it")
+
+        obj = parsed_objects[obj_name]
+        result = []
+
+        # Recurse into this object's own parents first
+        for base in obj.base_objects:
+            result.extend(collect_members(base, visited_for_cycle))
+
+        # Then this object's own members
+        for m in obj.members:
+            result.append((m, obj_name))
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    # 2. Collect flattened methods from a parent chain
+    # ------------------------------------------------------------------ #
+    _NEVER_INHERITED = {'__init', '__exit', '__expr'}
+
+    def collect_methods(obj_name, visited_for_cycle):
+        """Return list of FunctionDef from the parent chain, excluding never-inherited."""
+        if obj_name in visited_for_cycle:
+            return []
+        visited_for_cycle = visited_for_cycle | {obj_name}
+
+        if obj_name not in parsed_objects:
+            # error already raised from collect_members; just return empty
+            return []
+
+        obj = parsed_objects[obj_name]
+        result = []
+
+        for base in obj.base_objects:
+            result.extend(collect_methods(base, visited_for_cycle))
+
+        for m in obj.methods:
+            if isinstance(m, FunctionDef) and m.name not in _NEVER_INHERITED:
+                result.append(m)
+
+        return result
+
+    # ------------------------------------------------------------------ #
+    # 3. Build merged member list
+    # ------------------------------------------------------------------ #
+    # Accumulate (member, origin) pairs from all parents in order
+    inherited_member_pairs = []
+    for base in base_names:
+        inherited_member_pairs.extend(collect_members(base, set()))
+
+    # Deduplicate by member name, tracking origin for diamond detection
+    seen_members = {}   # member_name -> origin_object_name
+    dedup_inherited = []
+    for (m, origin) in inherited_member_pairs:
+        if m.name in seen_members:
+            prev_origin = seen_members[m.name]
+            if prev_origin != origin:
+                error_fn(
+                    f"Inheritance conflict: member '{m.name}' is defined in both "
+                    f"'{prev_origin}' and '{origin}', inherited by '{child_name}'"
+                )
+            # Same origin (diamond) — silently skip duplicate
+        else:
+            seen_members[m.name] = origin
+            dedup_inherited.append(m)
+
+    # Child members must not shadow any inherited member
+    child_member_names = {m.name for m in child_members}
+    for m in dedup_inherited:
+        if m.name in child_member_names:
+            error_fn(
+                f"Inheritance conflict: member '{m.name}' is defined in both "
+                f"a parent of '{child_name}' and '{child_name}' itself"
+            )
+
+    merged_members = dedup_inherited + child_members
+
+    # ------------------------------------------------------------------ #
+    # 4. Build merged method list
+    # ------------------------------------------------------------------ #
+    def sig_key(method):
+        """(name, tuple of param type reprs) — mirrors the mangler's key."""
+        param_types = tuple(
+            repr(p.type_spec) for p in method.parameters if p.name != 'this'
+        )
+        return (method.name, param_types)
+
+    # Gather all inherited methods
+    all_inherited = []
+    for base in base_names:
+        all_inherited.extend(collect_methods(base, set()))
+
+    # Build sig_key -> list of FunctionDef (possibly from different parents)
+    inherited_map = {}
+    for m in all_inherited:
+        k = sig_key(m)
+        if k not in inherited_map:
+            inherited_map[k] = []
+        # Deduplicate by object identity (diamond — same FunctionDef object)
+        if not any(existing is m for existing in inherited_map[k]):
+            inherited_map[k].append(m)
+
+    # Check for conflicts and build the final inherited set.
+    # Rules:
+    #   - Child method marked with '+' (_is_override=True) -> child always wins.
+    #   - Child method with a non-empty body (no '+') -> child wins.
+    #   - Child method with an empty body (no '+') -> parent wins; stub is dropped.
+    def _has_body(m):
+        return isinstance(m, FunctionDef) and m.body is not None and bool(m.body.statements)
+
+    def _is_explicit_override(m):
+        return isinstance(m, FunctionDef) and getattr(m, '_is_override', False)
+
+    child_override_keys = {sig_key(m) for m in child_methods
+                           if _is_explicit_override(m) or _has_body(m)}
+
+    final_inherited = []
+    for k, candidates in inherited_map.items():
+        # Child wins for this signature (explicit override or non-empty body)
+        if k in child_override_keys:
+            continue
+
+        if len(candidates) == 1:
+            final_inherited.append(candidates[0])
+        else:
+            # Multiple different FunctionDef objects for same signature = conflict
+            conflict_sources = []
+            for m in candidates:
+                # Walk parsed_objects to find which object defined this method
+                for oname, odef in parsed_objects.items():
+                    if any(om is m for om in odef.methods):
+                        conflict_sources.append(oname)
+                        break
+                else:
+                    conflict_sources.append('?')
+
+            method_name = k[0]
+            sig_str = ', '.join(k[1]) if k[1] else ''
+            error_fn(
+                f"Inheritance conflict: method '{method_name}({sig_str})' has different "
+                f"implementations in '{conflict_sources[0]}' and '{conflict_sources[1]}'. "
+                f"Object '{child_name}' must override it."
+            )
+
+    # Build the set of signatures that were actually inherited (parent won)
+    inherited_sig_keys = {sig_key(m) for m in final_inherited}
+
+    # Keep child methods that either:
+    #   - are explicitly marked '+' (_is_override), OR
+    #   - have a non-empty body (real override), OR
+    #   - are empty but have NO inherited counterpart (standalone empty method on child)
+    filtered_child_methods = [
+        m for m in child_methods
+        if not isinstance(m, FunctionDef)
+           or _is_explicit_override(m)
+           or _has_body(m)
+           or sig_key(m) not in inherited_sig_keys
+    ]
+
+    merged_methods = filtered_child_methods + final_inherited
+    return merged_members, merged_methods
+
+
 class FluxParser:
     def __init__(self, tokens: List[Token], default_byte_width: int = 8, source_lines: Optional[List[str]] = None):
         self.tokens = tokens
@@ -2652,18 +2841,25 @@ class FluxParser:
 
         # Check for comma-separated prototypes
         names = [name]
-        while self.expect(TokenType.COMMA):
-            self.advance()
-            names.append(self.consume(TokenType.IDENTIFIER).value)
-        
-        # Parse inheritance -- TODO, impelment after we have v1 Flux base
-        #base_objects = []
-        #if self.expect(TokenType.COLON):
-        #    self.advance()
-        #    base_objects.append(self.consume(TokenType.IDENTIFIER).value)
-        #    while self.expect(TokenType.COMMA):
-        #        self.advance()
-        #        base_objects.append(self.consume(TokenType.IDENTIFIER).value)
+        if self.expect(TokenType.COMMA):
+            # Comma-separated prototype list — inheritance not allowed here
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                names.append(self.consume(TokenType.IDENTIFIER).value)
+
+        # Parse inheritance list: object A : B, C
+        base_objects = []
+        if self.expect(TokenType.COLON):
+            if len(names) > 1:
+                self.error("Cannot use comma-separated prototype names with an inheritance list")
+            self.advance()  # consume ':'
+            base_objects.append(self.consume(TokenType.IDENTIFIER).value)
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                # Stop if we hit the body or end — those belong elsewhere
+                if self.expect(TokenType.LEFT_BRACE, TokenType.SEMICOLON):
+                    break
+                base_objects.append(self.consume(TokenType.IDENTIFIER).value)
         
         methods = []
         members = []
@@ -2678,7 +2874,9 @@ class FluxParser:
             # Return multiple prototypes if comma-separated
             if len(names) > 1:
                 return [ObjectDef(n, [], [], [], [], traits=traits).set_location(tok.line, tok.column) for n in names]
-            return ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits).set_location(tok.line, tok.column)
+            proto = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits)
+            proto.base_objects = base_objects
+            return proto.set_location(tok.line, tok.column)
 
         # Full definition - only allowed for single name
         if len(names) > 1:
@@ -2701,6 +2899,10 @@ class FluxParser:
                 self.consume(TokenType.LEFT_BRACE)
                 
                 while not self.expect(TokenType.RIGHT_BRACE):
+                    _is_override = False
+                    if self.expect(TokenType.PLUS) and self.peek().type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
+                        _is_override = True
+                        self.advance()  # consume '+'
                     if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                         _obj_tmpl_keys_before = set(self._template_functions.keys())
                         method = self.function_def()
@@ -2719,13 +2921,16 @@ class FluxParser:
                                                Block([]), is_prototype=True)
                             stub._is_template_method = True
                             stub.is_private = is_private
+                            stub._is_override = _is_override
                             methods.append(stub)
                         elif isinstance(method, list):
                             for m in method:
                                 m.is_private = is_private
+                                m._is_override = _is_override
                                 methods.append(m)
                         else:
                             method.is_private = is_private
+                            method._is_override = _is_override
                             methods.append(method)
                     elif self.expect(TokenType.OBJECT):
                         nested_obj_result = self.object_def()
@@ -2765,6 +2970,10 @@ class FluxParser:
                 self.consume(TokenType.SEMICOLON)
             else:
                 # Regular member (defaults to public)
+                _is_override = False
+                if self.expect(TokenType.PLUS) and self.peek().type in ({TokenType.INLINE, TokenType.DEF} | _CALLING_CONV_TOKENS):
+                    _is_override = True
+                    self.advance()  # consume '+'
                 if self.expect(TokenType.INLINE) or self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                     _obj_tmpl_keys_before = set(self._template_functions.keys())
                     method = self.function_def()
@@ -2782,10 +2991,14 @@ class FluxParser:
                         stub = FunctionDef(recovered.name, [], recovered.return_type,
                                            Block([]), is_prototype=True)
                         stub._is_template_method = True
+                        stub._is_override = _is_override
                         methods.append(stub)
                     elif isinstance(method, list):
+                        for m in method:
+                            m._is_override = _is_override
                         methods.extend(method)
                     else:
+                        method._is_override = _is_override
                         methods.append(method)
                 elif self.expect(TokenType.OBJECT):
                     nested_obj_result = self.object_def()
@@ -2818,6 +3031,12 @@ class FluxParser:
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
 
+        # Resolve inheritance: merge parent members and methods before validation
+        if base_objects:
+            members, methods = _resolve_inheritance(
+                name, base_objects, members, methods, self._parsed_objects, self.error
+            )
+
         # Register __init parameter count for single-arg constructor sugar
         for method in methods:
             if isinstance(method, FunctionDef) and method.name == '__init':
@@ -2847,7 +3066,9 @@ class FluxParser:
                     f"Object '{name}': __expr() must have a non-void return type"
                 )
 
-        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits, template_params=template_params).set_location(tok.line, tok.column)
+        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits, template_params=template_params)
+        obj_def.base_objects = base_objects
+        obj_def = obj_def.set_location(tok.line, tok.column)
         self._active_template_params = _prev_active
         if template_params:
             self._template_objects[name] = (template_params, obj_def)
