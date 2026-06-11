@@ -1862,7 +1862,15 @@ struct.my_struct_func() -> struct
 ---
 
 <a id="templates"></a>
-## <**Templates**>
+## <**Templates**>  
+Templates in Flux are extremely simple.
+
+There are no keywords for templates, only syntax, and involve only type substitution.  
+There is no SFINAE, so templates are not subject to the pitfalls SFINAE allows.  
+
+Templates can be applied to functions, structs, objects, and custom operator definitions.
+
+Here's an example of using a template:
 ```
 #import <standard.fx>;
 
@@ -1878,8 +1886,8 @@ def main() -> int
     float y = foo<float>(5.5f);
     int z = foo<int>(3);
 
-    print(y); print();
-    print(z); print();
+    println(y);
+    println(z);
 
     system("pause\0");
     return 0;
@@ -1921,6 +1929,183 @@ def main() -> int
     return 0;
 };
 ```
+
+## Template Constraints:
+You can add constraints to template parameters on their allowed types like so:
+```
+<T: int | i32, U: long | i64>
+```
+The syntax is `Param: type (| type)*` comma separated.
+
+Here's an example:
+```
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+"".fx<T: "", U: "">(T x, U y) -> ""
+{
+    return _ + f"{x} {y}";
+};
+
+def main() -> int
+{
+    byte* new = "Hello".fx(",", "World!");
+    println(new);
+    return 0;
+};
+```
+"new" isn't a keyword in Flux, so this is fine.
+
+To set a default type constraint, use `+` before the type like so:
+```
+<T: +float | int>
+```
+To enforce no default constraint, use `!+` before your parameter like so:
+```
+<!+T: float | int>
+```
+Using `+` on any constraint type when the parameter has no default set with `!+` will throw a compiler error.
+
+## Templates and Type Relationships
+Flux allows ways to describe how a type - or pair of types - can behave.
+
+There is a dedicated type relationships operator set specifically to describe relations between types.  
+Since all operators are binary, to perform a unary operation, you do `A <op> A`, which is type self-referential.  
+All template type relationships operators are distinct and not related to regular operators and cannot be overloaded.
+
+See the [Algebraic Types](https://github.com/kvthweatt/Flux/blob/main/docs/algebraic_types.md) documentation for more details on the operators.
+
+To use type relationships expressions, they must be constrained in a set.
+
+Here's the same example using `~=`, the "must be compatible" operator, and the `:{}` set constraint.
+```
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+"".fx<T: "", U: "", :{T ~= U}>(T x, U y) -> ""
+{
+    return _ + f"{x} {y}";
+};
+
+def main() -> int
+{
+    byte* new = "Hello".fx(",", "World!");
+    println(new);
+    return 0;
+};
+```
+
+You can separate expressions with a comma like:
+```
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+"".fx<T: "", U: "", :{T ~= U, T !`< U}>(T x, U y) -> ""
+{
+    return _ + f"{x} {y}";
+};
+
+def main() -> int
+{
+    byte* new = "Hello".fx(",", "World!");
+    println(new);
+    return 0;
+};
+```
+
+However, you do not have to comma separate, and can instead write them circularly.  
+Circular expressions can be very long, terse, and carry a lot of meaning.  
+Example:
+```
+D !~= B & [A !@ A] !~= C !`< D !-= A
+```
+This reads as (inner most []):  
+- Values of type A cannot have an address taken of them  
+- D must be incompatible with B and A  
+- B and A must be incompatible with C  
+- C and D independently cannot be used in an expression where bit lowering would occur  
+- D cannot be used in signed operations with A
+
+There is a similar relationship here, `D !~= A & B !~= C`. This means `D ~= C` by relation, and doesn't need to be explicitly defined.  
+This can be hard to see if you do not write your expression with care, because you may intend `D !~= C`. See the following:
+```
+C !~= D !~= B & [A !@ A] !~= C !`< D !-= A
+```
+
+Just place the relationship in an open position.
+
+No one wants to see that long expression in their template definition, that's why `constra` exists.  
+`constra` creates named, generic and parameterized relational expression sets that can be used with a template like so:
+```
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+constra MyCS(A)
+{
+    A !`< A    // This is a unary expression, read as the relation !`< "between A types"
+};
+
+def foo<T: int, :{MyCS}>(T x) -> byte
+{
+    return 5 + x; // lowering would occur here, violating MyCS
+};
+
+def main() -> int
+{
+    foo(10);
+    return 0;
+};
+```
+Compiler will output:
+```
+✗ Compilation failed: Type relation T !`< T violated: illegal truncation on int at 12:5
+    return 5 + x;
+----^ // 5 + x will lower to byte
+```
+
+You can comma separate named constraints in your template definition like so:  
+`<T: int, :{MyCS1, MyCS2, MyCS3}>`
+
+Template constraints can be used in any template, including operator, struct, and object templates.
+
+```
+struct myStru<A,B>
+{
+    A ax, ay, az;
+    B bx, by, bz;
+};
+```
+Composition and templates can be combined, however they **will** shadow.
+```
+struct myStru1<A,B>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+};
+
+struct myStru2<A,B,C> : myStru1
+{
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+
+// Becomes,
+
+struct myStru2<A,B,C>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+```
+If you intended for `a1x` to be a different type than `a2x`, you must use different parameter names.
+
+Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be `object` type.
 
 <a id="templating-operators"></a>
 ## Templating operators:
@@ -1989,170 +2174,6 @@ def main() -> int
 };
 ```
 Result: `60`
-
-## Template Constraints:
-You can add constraints to template parameters on their allowed types like so:
-```
-<T: int | i32, U: long | i64>
-```
-The syntax is `Param: type (| type)*` comma separated.
-
-Here's an example:
-```
-#import <standard.fx>;
- 
-using standard::io::console;
-
-"".fx<T: "", U: "">(T x, U y) -> ""
-{
-    return _ + f"{x} {y}";
-};
-
-def main() -> int
-{
-    byte* new = "Hello".fx(",", "World!");
-    println(new);
-    return 0;
-};
-```
-"new" isn't a keyword in Flux, so this is fine.
-
-## Templates and Type Relationships
-Flux allows ways to describe how a type - or pair of types - can behave.
-
-There is a dedicated type relationships operator set specifically to describe relations between types.  
-Since all operators are binary, to perform a unary operation, you do `A <op> A`, which is type self-referential.  
-All template type relationships operators are distinct and not related to regular operators and cannot be overloaded.
-
-See the [Algebraic Types](https://github.com/kvthweatt/Flux/blob/main/docs/algebraic_types.md) documentation for more details on the operators.
-
-To use type relationships expressions, they must be constrained in a set.
-
-Here's the same example using `~=`, the "must be compatible" operator, and the `:{}` set constraint.
-```
-#import <standard.fx>;
- 
-using standard::io::console;
-
-"".fx<T: "", U: "", :{T ~= U}>(T x, U y) -> ""
-{
-    return _ + f"{x} {y}";
-};
-
-def main() -> int
-{
-    byte* new = "Hello".fx(",", "World!");
-    println(new);
-    return 0;
-};
-```
-
-You can separate expressions with a comma like:
-```
-#import <standard.fx>;
- 
-using standard::io::console;
-
-"".fx<T: "", U: "", :{T ~= U, T !`< U}>(T x, U y) -> ""
-{
-    return _ + f"{x} {y}";
-};
-
-def main() -> int
-{
-    byte* new = "Hello".fx(",", "World!");
-    println(new);
-    return 0;
-};
-```
-
-However, you do not have to comma separate, and can instead write them circularly.  
-Circular expressions can be very long, terse, and carry a lot of meaning.  
-Example:
-```
-D !~= B & [A !@ A] !~= C !`< D !-= A
-```
-This reads as (inner most []):
-- Values of type A cannot have an address taken of them
-- D must be incompatible with B and A
-- B and A must be incompatible with C
-- C and D independently cannot be used in an expression where bit lowering would occur
-- D cannot be used in signed operations with A
-
-There is a similar relationship here, `D !~= A & B !~= C`. This means `D ~= C` by relation, and doesn't need to be explicitly defined.  
-This can be hard to see if you do not write your expression with care, because you may intend `D !~= C`. See the following:
-```
-C !~= D !~= B & [A !@ A] !~= C !`< D !-= A
-```
-
-Just place the relationship in an open position.
-
-No one wants to see that long expression in their template definition, that's why `constra` exists.  
-`constra` creates named, generic and parameterized relational expression sets that can be used with a template like so:
-```
-#import <standard.fx>;
- 
-using standard::io::console;
-
-constra MyCS(A)
-{
-    A !`< A    // This is a unary expression, read as the relation !`< "between A types"
-};
-
-def foo<T: int, :{MyCS}>(T x) -> byte
-{
-    return 5 + x; // lowering would occur here, violating MyCS
-};
-
-def main() -> int
-{
-    foo(10);
-    return 0;
-};
-```
-Compiler will output:
-```
-✗ Compilation failed: Type relation T !`< T violated: illegal truncation on int at 12:5
-    return 5 + x;
-----^ // 5 + x will lower to byte
-```
-
-Template constraints can be used in any template, including operator, struct, and object templates.
-
-```
-struct myStru<A,B>
-{
-    A ax, ay, az;
-    B bx, by, bz;
-};
-```
-Composition and templates can be combined, however they **will** shadow.
-```
-struct myStru1<A,B>
-{
-    A a1x, a1y;
-    B b1x, b1y;
-};
-
-struct myStru2<A,B,C> : myStru1
-{
-    A a2x, a2y, a2z;
-    B b2x, b2y, b2z;
-};
-
-// Becomes,
-
-struct myStru2<A,B,C>
-{
-    A a1x, a1y;
-    B b1x, b1y;
-    A a2x, a2y, a2z;
-    B b2x, b2y, b2z;
-};
-```
-If you intended for `a1x` to be a different type than `a2x`, you must use different parameter names.
-
-Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be `object` type.
 
 ---
 
