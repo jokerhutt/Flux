@@ -290,7 +290,16 @@ def main() -> int
 <a id="importing-with-package"></a>
 ## **Importing with `#package`**
 
-- To do.
+Packages are imported from the compiler's local FPM registry located inside `.fpm\packages`.
+
+To import a package, use the package name directly:
+```
+#import <standard.fx">
+
+#package super-types, flux-boost;  // these don't exist, yet..
+```
+
+You still need to perform `using` statements unless the package self-uses, meaning it has the `using` statements inside of it near the end of entrypoint file.
 
 ---
 
@@ -700,7 +709,7 @@ def main() -> int
     x = i"Bar {}":{bar()};     // "Bar World!"
 
     noopstr a = "Hello", b = "World!",
-            c = f"{a} {b}";    / "Hello World!"
+            c = f"{a} {b}";    // "Hello World!"
 
     println(c);
 
