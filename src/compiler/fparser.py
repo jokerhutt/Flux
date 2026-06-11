@@ -183,9 +183,16 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
         for base in obj.base_objects:
             result.extend(collect_members(base, visited_for_cycle))
 
-        # Then this object's own members
+        # Then this object's own members (private members not inherited,
+        # unless they are friend-private for the child being resolved)
         for m in obj.members:
-            result.append((m, obj_name))
+            if getattr(m, 'is_private', False):
+                # Friend-private: pass through only to the named friend
+                if getattr(m, 'friend_of', None) == child_name:
+                    result.append((m, obj_name))
+                # Plain private: never inherited
+            else:
+                result.append((m, obj_name))
 
         return result
 
@@ -212,7 +219,13 @@ def _resolve_inheritance(child_name, base_names, child_members, child_methods, p
 
         for m in obj.methods:
             if isinstance(m, FunctionDef) and m.name not in _NEVER_INHERITED:
-                result.append(m)
+                if getattr(m, 'is_private', False):
+                    # Friend-private: pass through only to the named friend
+                    if getattr(m, 'friend_of', None) == child_name:
+                        result.append(m)
+                    # Plain private: never inherited
+                else:
+                    result.append(m)
 
         return result
 
@@ -3288,6 +3301,11 @@ class FluxParser:
             if self.expect(TokenType.PUBLIC, TokenType.PRIVATE):
                 is_private = self.current_token.type == TokenType.PRIVATE
                 self.advance()
+                # Optional friend syntax: private : SomeFriend { ... }
+                friend_name = None
+                if is_private and self.expect(TokenType.COLON):
+                    self.advance()  # consume ':'
+                    friend_name = self.consume(TokenType.IDENTIFIER).value
                 self.consume(TokenType.LEFT_BRACE)
                 
                 while not self.expect(TokenType.RIGHT_BRACE):
@@ -3317,17 +3335,20 @@ class FluxParser:
                                                Block([]), is_prototype=True)
                             stub._is_template_method = True
                             stub.is_private = is_private
+                            stub.friend_of = friend_name
                             stub._is_override = _is_override
                             stub._no_override = _no_override
                             methods.append(stub)
                         elif isinstance(method, list):
                             for m in method:
                                 m.is_private = is_private
+                                m.friend_of = friend_name
                                 m._is_override = _is_override
                                 m._no_override = _no_override
                                 methods.append(m)
                         else:
                             method.is_private = is_private
+                            method.friend_of = friend_name
                             method._is_override = _is_override
                             method._no_override = _no_override
                             methods.append(method)
@@ -3359,9 +3380,11 @@ class FluxParser:
                         if isinstance(var, list):
                             for v in var:
                                 member = StructMember(v.name, v.type_spec, v.initial_value, is_private)
+                                member.friend_of = friend_name
                                 members.append(member)
                         else:
                             member = StructMember(var.name, var.type_spec, var.initial_value, is_private)
+                            member.friend_of = friend_name
                             members.append(member)
                         self.consume(TokenType.SEMICOLON)
                 

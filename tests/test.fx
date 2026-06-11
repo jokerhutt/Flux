@@ -28,6 +28,8 @@ interface MyInter(A: MyTrait1, B: MyTrait2)
     };
 };
 
+object Test3; // Forward ref
+
 MyTrait2 object Test2
 {
     def __init() -> this { return this; };
@@ -39,6 +41,11 @@ MyTrait2 object Test2
 
     def haha() -> void
     {};
+
+    private : Test3
+    {
+        def hoho() -> void { println("hoho"); };
+    };
 };
 
 MyTrait1 object Test1
@@ -49,8 +56,6 @@ MyTrait1 object Test1
 
     def foo() -> void
     {
-        Test2 x();
-        x.hehe();
     };
 
     def bar() -> int
@@ -58,13 +63,19 @@ MyTrait1 object Test1
         return 0;
     };
 } : MyInter(this, Test2);
+
+object Test3 : Test2
+{
+    def __init() -> this { return this; };
+    def __expr() -> this { return this; };
+    def __exit() -> void {};
+};
  
 def main() -> int
 {
-    Test1 t1();
-    Test2 t2();
+    Test3 t3();
 
-    t1().foo();
+    t3.hoho();
 
     return 0;
 };

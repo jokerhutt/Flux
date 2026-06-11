@@ -3315,6 +3315,11 @@ class CodegenVisitor:
             arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
             func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
         if func is None:
+            # If the receiver is a known object type, give a clear "method not found" error
+            # rather than falling through to type function dispatch (which produces a misleading message).
+            if hasattr(module, "_object_type_names") and obj_type_name in module._object_type_names:
+                raise FluxCodegenError(
+                    f"Object '{obj_type_name}' has no method '{node.method_name}'", node, module)
             # No object method found - try type func on the struct type name
             loaded = builder.load(obj_ptr, name="typefunc_struct_recv_load") if isinstance(slot_pointee, ir.IdentifiedStructType) else this_ptr
             return self._dispatch_type_func_call(node, loaded, builder, module, override_type_name=obj_type_name)
@@ -3324,11 +3329,17 @@ class CodegenVisitor:
             current_object = getattr(module, '_current_object_name', None)
             for obj_type_name_key, priv_set in module._private_methods.items():
                 if method_func_name in priv_set:
-                    if current_object != obj_type_name_key:
-                        raise AttributeError(
-                            f"\nCannot call private method {node.method_name} on "
-                            f"object instance of {obj_type_name_key} from outside its definition ")
-                    break
+                    # Allow access from the defining object itself
+                    if current_object == obj_type_name_key:
+                        break
+                    # Allow access from the declared friend
+                    friend = (module._friend_methods.get(method_func_name)
+                              if hasattr(module, '_friend_methods') else None)
+                    if friend is not None and current_object == friend:
+                        break
+                    raise AttributeError(
+                        f"\nCannot call private method {node.method_name} on "
+                        f"object instance of {obj_type_name_key} from outside its definition ")
 
         args = [this_ptr]
         for i, arg_expr in enumerate(node.arguments):
@@ -5955,7 +5966,9 @@ class CodegenVisitor:
             # objects with no member variables - causing the struct and symbol to be
             # re-registered on retry passes, producing "X is already defined" errors
             # when a private method body caused the first visit to raise an exception.
-            if existing_type.elements or not node.members:
+            _is_fwd_decl = (hasattr(module, '_forward_declared_objects') and
+                            node.name in module._forward_declared_objects)
+            if not _is_fwd_decl and (existing_type.elements or not node.members):
                 struct_type = existing_type
                 type_already_registered = True
 
@@ -5966,6 +5979,10 @@ class CodegenVisitor:
                 if not hasattr(module, '_struct_types'):
                     module._struct_types = {}
                 module._struct_types[node.name] = opaque_struct
+                # Mark as a forward declaration so the full definition can supersede it.
+                if not hasattr(module, '_forward_declared_objects'):
+                    module._forward_declared_objects = set()
+                module._forward_declared_objects.add(node.name)
                 if hasattr(module, 'symbol_table'):
                     module.symbol_table.define(
                         node.name, SymbolKind.OBJECT,
@@ -5976,6 +5993,9 @@ class CodegenVisitor:
             struct_type = ObjectTypeHandler.create_struct_type(node.name, member_types, member_names, module)
             fields = ObjectTypeHandler.calculate_field_layout(node.members, member_types)
             ObjectTypeHandler.create_vtable(node.name, fields, module)
+            # Clear forward-decl marker now that the full definition is registered.
+            if hasattr(module, '_forward_declared_objects'):
+                module._forward_declared_objects.discard(node.name)
 
             if hasattr(module, 'symbol_table'):
                 #print(f"[OBJECT] Registering object '{node.name}' in symbol table", file=sys.stdout)
@@ -5990,6 +6010,12 @@ class CodegenVisitor:
             func = ObjectTypeHandler.predeclare_method(func_type, func_name, method, module)
             method_funcs[func_name] = func
 
+        # Track all object type names so visit_MethodCall can give a proper
+        # "method not found" error instead of a misleading type-function error.
+        if not hasattr(module, '_object_type_names'):
+            module._object_type_names = set()
+        module._object_type_names.add(node.name)
+
         # Record private method names for access enforcement.
         # We store the fully-qualified "ObjName.method_name" key (plain, not mangled)
         # because visit_MethodCall builds its lookup key the same way:
@@ -5999,8 +6025,19 @@ class CodegenVisitor:
         private_set = set()
         for method in node.methods:
             if getattr(method, 'is_private', False):
+                # A method is private on this object only if it was defined here,
+                # not if it was inherited via the friend mechanism (friend_of == node.name).
+                # Inherited friend-private methods are accessible as normal on the child.
+                if getattr(method, 'friend_of', None) == node.name:
+                    continue
                 priv_func_name = f"{node.name}.{method.name}"
                 private_set.add(priv_func_name)
+                # Record friend association if present
+                friend = getattr(method, 'friend_of', None)
+                if friend is not None:
+                    if not hasattr(module, '_friend_methods'):
+                        module._friend_methods = {}
+                    module._friend_methods[priv_func_name] = friend
         if private_set:
             module._private_methods.setdefault(node.name, set()).update(private_set)
 

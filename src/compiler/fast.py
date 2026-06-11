@@ -1059,6 +1059,7 @@ class StructMember(ASTNode):
     type_spec: TypeSystem
     offset: Optional[int] = None  # Bit offset, calculated during vtable gen
     is_private: bool = False
+    friend_of: Optional[str] = None  # If set, only this named object may access/inherit
     initial_value: Optional[Expression] = None
 
 # Struct instance
