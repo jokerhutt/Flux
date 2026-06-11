@@ -625,6 +625,62 @@ Drawable object myObj
 };
 ```
 
+<a id="interfaces"></a>
+## **Interfaces**
+Interfaces are a generic way to define how two objects interact.  
+Attaching an interface to an object implicitly attaches traits because you need traits to define an interface.
+
+Here's how an interface is defined and used:
+```
+trait Readable
+{
+    def read(byte*,int)->int,
+        write(byte*,int)->int,
+        flush()->int;
+};
+
+trait Writable
+{
+    def ack()->int;
+};
+
+interface Stream(A: Readable, B: Writable)
+{
+    A : B  // reads as "A can call from B { these functions }"
+    {
+        read(byte*,int)->int,
+        write(byte*,int)->int,
+        flush()->int
+    };
+
+    B : A
+    {
+        ack()->int
+    };
+};
+
+// Does not implicitly have Writable
+object Socket
+{
+    ///...///
+};
+
+// Implicitly has Readable via Stream
+object Pipe
+{
+    ///...///
+} : Stream(this, Socket); // Pipe used with Socket is expected to have traits Writable
+```
+
+The interface is only attached to the Pipe object.  
+At compile time if Pipe uses a Socket *not* satisfying the trait Writable, this is an error.  
+
+This does not mean you must add Stream to Socket.
+What this does mean is Socket is protected in the event a function was not implemented, and a Pipe object is attempting to use a Socket which *should* have trait Writable, and Socket itself did not satisfy that trait.
+
+Once an interface is attached to an object, method calls between the two parties are restricted to the listed functions only.  
+Calling any unlisted method - even a public one - is a compile-time error.
+
 ---
 
 
