@@ -1240,6 +1240,22 @@ class TraitDef(ASTNode):
     prototypes: List['FunctionDef'] = field(default_factory=list)
 
 
+# Interface protocol: one directional block inside an interface body (A : B { ... })
+@dataclass
+class InterfaceProtocol(ASTNode):
+    caller: str                    # role name, e.g. "A"
+    callee: str                    # role name, e.g. "B"
+    methods: List['FunctionDef'] = field(default_factory=list)  # prototypes only
+
+
+# Interface definition (compile-time only, no IR output)
+@dataclass
+class InterfaceDef(ASTNode):
+    name: str
+    params: List[Tuple[str, Optional[str]]] = field(default_factory=list)  # [("A", "Readable"), ...]
+    protocols: List[InterfaceProtocol] = field(default_factory=list)
+
+
 
 # Object method
 @dataclass
@@ -1267,6 +1283,7 @@ class ObjectDef(ASTNode):
     is_prototype: bool = False
     traits: List[str] = field(default_factory=list)
     template_params: List[str] = field(default_factory=list)
+    interfaces: List[Tuple[str, List[str]]] = field(default_factory=list)
 
     def codegen_type_only(self, module: ir.Module) -> ir.Type:
         """Register the struct type and symbol table entry for this object without emitting method bodies.

@@ -97,13 +97,14 @@ class TokenType(Enum):
     IF = auto()           # "        if
     IN = auto()           # "        in
     INLINE = auto()       # "        inline
+    SINT = auto()         # "        int
+    INTERFACE = auto()    # "        interface
     IS = auto()           # "        is
     JUMP = auto()         # "        jump
     LABEL = auto()        # "        label
     LOCAL = auto()        # "        local
     SLONG = auto()        # "        long
     ULONG = auto()        # "        ulong
-    SINT = auto()         # "        int
     UINT = auto()         # "        uint
     MACRO = auto()        # "        macro
     NAMESPACE = auto()    # "        namespace
@@ -413,6 +414,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.HEAP:       'heap',
     TokenType.IF:         'if',
     TokenType.IN:         'in',
+    TokenType.INTERFACE:  'interface',
     TokenType.INLINE:     'inline',
     TokenType.IS:         'is',
     TokenType.JUMP:       'jump',
@@ -552,8 +554,9 @@ class FluxLexer:
             'if': TokenType.IF,
             'in': TokenType.IN,
             'inline': TokenType.INLINE,
-            'is': TokenType.IS,
             'int': TokenType.SINT,
+            'interface': TokenType.INTERFACE,
+            'is': TokenType.IS,
             'jump': TokenType.JUMP,
             'label': TokenType.LABEL,
             'local': TokenType.LOCAL,

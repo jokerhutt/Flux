@@ -50,6 +50,11 @@ contexts:
         1: entity.name.namespace.flux
         2: punctuation.accessor.double-colon.flux
 
+    # Trait name before 'object' keyword - light blue
+    - match: '\b({{identifier}})(?=\s+object\b)'
+      captures:
+        1: entity.name.trait.flux
+
     # Primitive types (MUST come before keywords)
     - match: '\b(int|uint|long|ulong|float|double|void|bool|byte|char|data)\b'
       scope: storage.type.primitive.flux
@@ -59,7 +64,7 @@ contexts:
       scope: storage.type.flux
 
     # Keywords (but NOT types)
-    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|cdecl|compt|const|constra|continue|def|defer|default|deprecate|do|elif|else|export|extern|false|fastcall|for|from|goto|global|heap|if|in|inline|is|jump|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|stdcall|super|switch|this|thiscall|throw|trait|true|try|typeof|union|unsigned|using|vectorcall|volatile|while|xor)\b'
+    - match: '\b(alignof|and|as|asm|assert|auto|break|case|catch|cdecl|compt|const|constra|continue|def|defer|default|deprecate|do|elif|else|export|extern|false|fastcall|for|from|goto|global|heap|if|in|inline|interface|is|jump|label|local|namespace|noreturn|not|operator|or|private|public|register|return|signed|sizeof|stack|stdcall|super|switch|this|thiscall|throw|trait|true|try|typeof|union|unsigned|using|vectorcall|volatile|while|xor)\b'
       scope: keyword.control.flux
 
     # Type modifiers
@@ -107,19 +112,19 @@ contexts:
       scope: keyword.operator.dereference.flux
 
     # Numbers - Duotrigesimal
-    - match: '\b0d[0-9A-V]+u?\b'
+    - match: '\b0d[0-9A-V]+(l|u|ul)?\b'
       scope: constant.numeric.duotrigesimal.flux
 
     # Numbers - Hex
-    - match: '\b0x[0-9A-F]+u?\b'
+    - match: '\b0x[0-9A-F]+(l|u|ul)?\b'
       scope: constant.numeric.hex.flux
 
     # Numbers - Octal
-    - match: '\b0o[0-7]+u?\b'
+    - match: '\b0o[0-7]+(l|u|ul)?\b'
       scope: constant.numeric.octal.flux
 
     # Numbers - Binary
-    - match: '\b0b[01]+u?\b'
+    - match: '\b0b[01]+(l|u|ul)?\b'
       scope: constant.numeric.binary.flux
 
     # Numbers - Float
@@ -127,7 +132,7 @@ contexts:
       scope: constant.numeric.float.flux
 
     # Numbers - Integer
-    - match: '\b\d+u?\b'
+    - match: '\b\d+(l|u|ul)?\b'
       scope: constant.numeric.integer.flux
 
     # Operators - Custom operator definition
@@ -135,7 +140,7 @@ contexts:
       scope: keyword.operator.custom.flux
 
     # Operators - Custom operator usage
-    - match: '(``|`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--|\\)'
+    - match: '(``|`!&=|`!\|=|`\^\^=|`&=|`\|=|<<=|>>=|!&|!\||<->|\^\^=|&=|\|=|%=|\^=|\+=|-=|\*=|/=|`!&|`!\||`\^\^|\+\+|--|\\|`)'
       scope: keyword.operator.custom.flux
     # Operators - Comparison
     - match: '(==|!=|>=|<=|>|<)'

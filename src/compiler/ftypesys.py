@@ -184,6 +184,7 @@ class SymbolKind(Enum):
     ENUM = "enum"
     TRAIT = "trait"
     OPERATOR = "operator"
+    INTERFACE = "interface"
 
 @dataclass
 class SymbolEntry:
@@ -219,6 +220,8 @@ class SymbolTable:
         self.registered_namespaces: List[str] = []
         self._global_symbols: Dict[str, SymbolEntry] = {}
         self._trait_registry: Dict[str, List] = {}
+        self._interface_registry: Dict[str, Any] = {}
+        self._interface_whitelist: Dict[tuple, set] = {}
 
     @staticmethod
     def is_macro_defined(module: ir.Module, macro_name: str) -> bool:

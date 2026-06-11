@@ -1117,6 +1117,8 @@ class FluxParser:
             return self.object_def()
         elif self.expect(TokenType.TRAIT):
             return self.trait_def()
+        elif self.expect(TokenType.INTERFACE):
+            return self.interface_def()
         elif self._is_trait_prefixed_object():
             return self._parse_trait_prefixed_object()
         elif self.expect(TokenType.NAMESPACE):
@@ -3116,6 +3118,83 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
         return TraitDef(name, prototypes).set_location(tok.line, tok.column)
 
+    def interface_def(self) -> 'InterfaceDef':
+        """
+        interface_def -> 'interface' IDENTIFIER '(' param_list ')' '{' protocol_list '}' ';'
+
+        param_list    -> IDENTIFIER (':' IDENTIFIER)? (',' IDENTIFIER (':' IDENTIFIER)?)*
+        protocol_list -> (IDENTIFIER ':' IDENTIFIER '{' prototype_list '}' ';')*
+        prototype_list -> (function_prototype ';')*
+        """
+        from fast import InterfaceDef, InterfaceProtocol
+        tok = self.current_token
+        self.consume(TokenType.INTERFACE)
+        name = self.consume(TokenType.IDENTIFIER).value
+
+        # Parse parameter list: (A: Readable, B: Writable, C)
+        self.consume(TokenType.LEFT_PAREN)
+        params = []
+        if not self.expect(TokenType.RIGHT_PAREN):
+            param_name = self.consume(TokenType.IDENTIFIER).value
+            trait_name = None
+            if self.expect(TokenType.COLON):
+                self.advance()
+                trait_name = self.consume(TokenType.IDENTIFIER).value
+            params.append((param_name, trait_name))
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                param_name = self.consume(TokenType.IDENTIFIER).value
+                trait_name = None
+                if self.expect(TokenType.COLON):
+                    self.advance()
+                    trait_name = self.consume(TokenType.IDENTIFIER).value
+                params.append((param_name, trait_name))
+        self.consume(TokenType.RIGHT_PAREN)
+
+        # Parse body: { A : B { ... }; ... }
+        self.consume(TokenType.LEFT_BRACE)
+        protocols = []
+        while not self.expect(TokenType.RIGHT_BRACE):
+            caller = self.consume(TokenType.IDENTIFIER).value
+            self.consume(TokenType.COLON)
+            callee = self.consume(TokenType.IDENTIFIER).value
+            self.consume(TokenType.LEFT_BRACE)
+            # Parse bare prototype list: name(params) -> type, name2(...) -> type;  (comma-separated)
+            proto_methods = []
+            while not self.expect(TokenType.RIGHT_BRACE):
+                proto_tok = self.current_token
+                func_name = self.consume(TokenType.IDENTIFIER).value
+                self.consume(TokenType.LEFT_PAREN)
+                sig_params = []
+                if not self.expect(TokenType.RIGHT_PAREN):
+                    p_type = self.type_spec()
+                    p_name = self.consume(TokenType.IDENTIFIER).value
+                    sig_params.append(Parameter(p_name, p_type).set_location(proto_tok.line, proto_tok.column))
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        p_type = self.type_spec()
+                        p_name = self.consume(TokenType.IDENTIFIER).value
+                        sig_params.append(Parameter(p_name, p_type).set_location(proto_tok.line, proto_tok.column))
+                self.consume(TokenType.RIGHT_PAREN)
+                self.consume(TokenType.RETURN_ARROW)
+                ret_type = self.type_spec()
+                proto = FunctionDef(func_name, sig_params, ret_type, Block([]), is_prototype=True)
+                proto.set_location(proto_tok.line, proto_tok.column)
+                proto_methods.append(proto)
+                # Signatures are comma-separated; a trailing comma or closing brace ends the list
+                if self.expect(TokenType.COMMA):
+                    self.advance()
+                else:
+                    break
+            self.consume(TokenType.RIGHT_BRACE)
+            self.consume(TokenType.SEMICOLON)
+            protocol = InterfaceProtocol(caller, callee, proto_methods)
+            protocol.set_location(tok.line, tok.column)
+            protocols.append(protocol)
+        self.consume(TokenType.RIGHT_BRACE)
+        self.consume(TokenType.SEMICOLON)
+        return InterfaceDef(name, params, protocols).set_location(tok.line, tok.column)
+
     def object_def(self, trait_names: Optional[List[str]] = None) -> Union[ObjectDef, List[ObjectDef]]:
         """
         object_def -> 'object' IDENTIFIER (',' IDENTIFIER)* (';' | '{' object_body '}')
@@ -3356,6 +3435,40 @@ class FluxParser:
                     self.consume(TokenType.SEMICOLON)
         
         self.consume(TokenType.RIGHT_BRACE)
+
+        # Parse interface attachments: } : InterfaceName(arg, ...), Other(arg, ...) ;
+        def _consume_iface_arg():
+            if self.expect(TokenType.THIS):
+                self.advance()
+                return 'this'
+            return self.consume(TokenType.IDENTIFIER).value
+
+        interface_attachments = []
+        if self.expect(TokenType.COLON):
+            self.advance()  # consume ':'
+            iface_name = self.consume(TokenType.IDENTIFIER).value
+            self.consume(TokenType.LEFT_PAREN)
+            iface_args = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                iface_args.append(_consume_iface_arg())
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    iface_args.append(_consume_iface_arg())
+            self.consume(TokenType.RIGHT_PAREN)
+            interface_attachments.append((iface_name, iface_args))
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                iface_name = self.consume(TokenType.IDENTIFIER).value
+                self.consume(TokenType.LEFT_PAREN)
+                iface_args = []
+                if not self.expect(TokenType.RIGHT_PAREN):
+                    iface_args.append(_consume_iface_arg())
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        iface_args.append(_consume_iface_arg())
+                self.consume(TokenType.RIGHT_PAREN)
+                interface_attachments.append((iface_name, iface_args))
+
         self.consume(TokenType.SEMICOLON)
 
         # Resolve inheritance: merge parent members and methods before validation
@@ -3393,7 +3506,7 @@ class FluxParser:
                     f"Object '{name}': __expr() must have a non-void return type"
                 )
 
-        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits, template_params=template_params)
+        obj_def = ObjectDef(name, methods, members, nested_objects, nested_structs, traits=traits, template_params=template_params, interfaces=interface_attachments)
         obj_def.base_objects = base_objects
         obj_def = obj_def.set_location(tok.line, tok.column)
         _obj_tmpl_scope_ctx.__exit__(None, None, None)
@@ -3536,6 +3649,9 @@ class FluxParser:
                 trait_result = self.trait_def()
                 # TraitDef is registered at codegen time; store in objects list for codegen traversal
                 objects.append(trait_result)
+            elif self.expect(TokenType.INTERFACE):
+                iface_result = self.interface_def()
+                objects.append(iface_result)
             elif self._is_trait_prefixed_object():
                 obj_result = self._parse_trait_prefixed_object()
                 if obj_result is None:

@@ -444,6 +444,18 @@ class CodegenVisitor:
             module.symbol_table._trait_registry[node.name] = node.prototypes
         return None
 
+    def visit_InterfaceDef(self, node, builder, module):
+        if hasattr(module, 'symbol_table'):
+            module.symbol_table.define(
+                node.name,
+                SymbolKind.INTERFACE,
+                type_spec=None,
+                llvm_type=None,
+                llvm_value=None,
+            )
+            module.symbol_table._interface_registry[node.name] = node
+        return None
+
     def visit_DeprecateStatement(self, node, builder, module):
         from fast import Identifier, FunctionCall, ASTNode
         mangled = node.namespace_path.replace("::", "__")
@@ -2992,6 +3004,40 @@ class CodegenVisitor:
             if init_func is not None:
                 builder.call(init_func, [tmp] + arg_vals)
                 return tmp
+        # name() where name is a local object variable: call __init on the existing alloca
+        if func is None:
+            _local_ptr = module.symbol_table.get_llvm_value(node.name)
+            if _local_ptr is not None and isinstance(_local_ptr.type, ir.PointerType):
+                _pointee = _local_ptr.type.pointee
+                if isinstance(_pointee, ir.IdentifiedStructType):
+                    _obj_type_name = _pointee.name
+                elif (isinstance(_pointee, ir.PointerType) and
+                      isinstance(_pointee.pointee, ir.IdentifiedStructType)):
+                    _local_ptr = builder.load(_local_ptr, name=f"{node.name}_deref")
+                    _obj_type_name = _local_ptr.type.pointee.name
+                else:
+                    _obj_type_name = None
+                if _obj_type_name is not None:
+                    _init_name = f"{_obj_type_name}.__init"
+                    _init_func = TypeResolver.resolve_function(module, _init_name, current_ns, [_local_ptr] + arg_vals)
+                    if _init_func is None and hasattr(module, '_function_overloads'):
+                        for _k, _ovs in module._function_overloads.items():
+                            if _k == _init_name or _k.startswith(_init_name):
+                                for _ov in _ovs:
+                                    _init_func = _ov['function']
+                                    break
+                            if _init_func is not None:
+                                break
+                    if _init_func is None:
+                        _init_func = module.globals.get(_init_name)
+                        if _init_func is None:
+                            for _k, _v in module.globals.items():
+                                if _k.startswith(_init_name) and isinstance(_v, ir.Function):
+                                    _init_func = _v
+                                    break
+                    if _init_func is not None:
+                        builder.call(_init_func, [_local_ptr] + arg_vals)
+                        return _local_ptr
         if func is None:
             self._funcall_not_found(node, module)
         return self._funcall_generate(node, builder, module, func, arg_vals)
@@ -3251,6 +3297,18 @@ class CodegenVisitor:
                     obj_type_name = type_name; break
         if obj_type_name is None:
             raise FluxCodegenError(f"Cannot determine object type for method call: {struct_ty}", node, module)
+
+        # Interface whitelist enforcement: if (caller_type, callee_type) is governed by an
+        # interface, only whitelisted methods may be called.
+        _caller_type = getattr(module, '_current_object_name', None)
+        if _caller_type is not None and hasattr(module, 'symbol_table'):
+            _whitelist = getattr(module.symbol_table, '_interface_whitelist', {})
+            _key = (_caller_type, obj_type_name)
+            if _key in _whitelist and node.method_name not in _whitelist[_key]:
+                raise FluxCodegenError(
+                    f"Interface violation: {_caller_type} is not permitted to call "
+                    f"{node.method_name} from {obj_type_name} "
+                    f"[{node.source_line}:{node.source_col}]", node, module)
         method_func_name = f"{obj_type_name}.{node.method_name}"
         func = module.globals.get(method_func_name)
         if func is None and hasattr(module, '_function_overloads') and method_func_name in module._function_overloads:
@@ -7512,6 +7570,62 @@ class CodegenVisitor:
                             f"Object '{obj_def.name}' does not implement required function "
                             f"'{proto.name}' from '{trait_name}' trait "
                             f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+
+        # Pass 3.6: Verify interface compliance and build method whitelists.
+        from fast import InterfaceDef as _InterfaceDef
+        if not hasattr(module.symbol_table, '_interface_whitelist'):
+            module.symbol_table._interface_whitelist = {}
+        for stmt in node.statements:
+            obj_def = None
+            if isinstance(stmt, _ObjectDef):
+                obj_def = stmt
+            elif isinstance(stmt, _ObjectDefStatement):
+                obj_def = stmt.object_def
+            if obj_def is None or not getattr(obj_def, 'interfaces', None):
+                continue
+            if getattr(obj_def, 'template_params', None):
+                continue
+            for (iface_name, iface_args) in obj_def.interfaces:
+                iface_node = module.symbol_table._interface_registry.get(iface_name)
+                if iface_node is None:
+                    raise FluxCodegenError(
+                        f"Interface '{iface_name}' attached to object '{obj_def.name}' is not defined "
+                        f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                if len(iface_args) != len(iface_node.params):
+                    raise FluxCodegenError(
+                        f"Interface '{iface_name}' expects {len(iface_node.params)} arguments "
+                        f"but got {len(iface_args)} on object '{obj_def.name}' "
+                        f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                # Build role -> concrete type mapping; 'this' maps to the object itself
+                role_map = {}
+                for role_arg, (role_name, _trait) in zip(iface_args, iface_node.params):
+                    concrete = obj_def.name if role_arg == 'this' else role_arg
+                    role_map[role_name] = concrete
+                # Apply implicit trait constraints derived from interface params
+                for role_name, trait_name in iface_node.params:
+                    if trait_name is None:
+                        continue
+                    concrete = role_map.get(role_name)
+                    if concrete is None:
+                        continue
+                    if concrete == obj_def.name:
+                        # Apply to this object if not already listed
+                        if trait_name not in obj_def.traits:
+                            obj_def.traits.append(trait_name)
+                    # For partner types we record the implicit requirement but cannot enforce
+                    # here without access to their ObjectDef; enforcement is deferred to
+                    # a future pass when partner ObjectDefs are available in the statement list.
+                # Build call whitelist for each protocol block
+                for protocol in iface_node.protocols:
+                    caller_concrete = role_map.get(protocol.caller)
+                    callee_concrete = role_map.get(protocol.callee)
+                    if caller_concrete is None or callee_concrete is None:
+                        continue
+                    key = (caller_concrete, callee_concrete)
+                    if key not in module.symbol_table._interface_whitelist:
+                        module.symbol_table._interface_whitelist[key] = set()
+                    for proto in protocol.methods:
+                        module.symbol_table._interface_whitelist[key].add(proto.name)
 
         # Pass 4: Re-emit object method bodies that were skipped or partially emitted
         # during the pre-pass (e.g. because using-namespace functions such as println()
