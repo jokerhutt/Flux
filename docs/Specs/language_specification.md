@@ -2024,7 +2024,7 @@ There is a dedicated type relationships operator set specifically to describe re
 Since all operators are binary, to perform a unary operation, you do `A <op> A`, which is type self-referential.  
 All template type relationships operators are distinct and not related to regular operators and cannot be overloaded.
 
-See --link to type relationship operators-- for more details on the operators.
+See the [Algebraic Types](https://github.com/kvthweatt/Flux/blob/main/docs/algebraic_types.md) documentation for more details on the operators.
 
 To use type relationships expressions, they must be constrained in a set.
 
