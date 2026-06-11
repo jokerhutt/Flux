@@ -1,19 +1,18 @@
 #import <standard.fx>;
  
 using standard::io::console;
-
-constra MyCS(A)
-{
-    A !`< A    // This is a unary expression, read as the relation !`< "between A types"
-};
-
-def foo<T: int, :{MyCS}>(T x) -> byte
-{
-    return 5 + x; // lowering would occur here, violating MyCS
-};
-
+ 
 def main() -> int
 {
-    foo(10);
+    noopstr[][] maze = [
+        ["S", "O", "X", "O", "O", "O"],
+        ["X", "O", "X", "O", "X", "O"],
+        ["O", "O", "O", "O", "X", "O"],
+        ["O", "X", "X", "O", "X", "O"],
+        ["O", "O", "O", "O", "O", "O"],
+        ["X", "X", "X", "X", "X", "E"]
+    ];
+
+    print(maze[0][0]);
     return 0;
 };

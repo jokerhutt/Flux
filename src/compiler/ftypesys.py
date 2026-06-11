@@ -1533,6 +1533,37 @@ class VariableTypeHandler:
             elem_count = len(elems)
             if elem_count and isinstance(elems[-1], _Lit) and elems[-1].value == 0:
                 elem_count -= 1
+            # If array_dimensions has None entries, infer each dimension from the literal nesting
+            existing_dims = type_spec.array_dimensions
+            if existing_dims and any(d is None for d in existing_dims):
+                inferred_dims = []
+                current_elems = initial_value.elements
+                for dim in existing_dims:
+                    if dim is None:
+                        inferred_dims.append(len(current_elems))
+                        # Descend into the first nested ArrayLiteral for subsequent dims
+                        if current_elems and isinstance(current_elems[0], ArrayLiteral):
+                            current_elems = current_elems[0].elements
+                        else:
+                            inferred_dims.extend(None for _ in existing_dims[len(inferred_dims):])
+                            break
+                    else:
+                        inferred_dims.append(dim)
+                return TypeSystem(
+                    base_type=type_spec.base_type,
+                    is_signed=type_spec.is_signed,
+                    is_const=type_spec.is_const,
+                    is_volatile=type_spec.is_volatile,
+                    is_local=type_spec.is_local,
+                    bit_width=type_spec.bit_width,
+                    alignment=type_spec.alignment,
+                    endianness=type_spec.endianness,
+                    is_array=True,
+                    array_size=inferred_dims[0] if inferred_dims else elem_count,
+                    array_dimensions=inferred_dims,
+                    is_pointer=type_spec.is_pointer,
+                    pointer_depth=getattr(type_spec, 'pointer_depth', 0),
+                    custom_typename=type_spec.custom_typename)
             return TypeSystem(
                 base_type=type_spec.base_type,
                 is_signed=type_spec.is_signed,
@@ -2700,6 +2731,11 @@ class ArrayTypeHandler:
                     # Pack the nested array literal into an integer
                     elem_val = ArrayTypeHandler.pack_array_to_integer(
                         builder, module, elem, llvm_type.element)
+                elif isinstance(elem, ArrayLiteral) and isinstance(llvm_type.element, ir.ArrayType):
+                    # Recursively initialize a nested array element (e.g. 2D noopstr[][] or int[][])
+                    elem_ptr = builder.gep(alloca, [zero, ArrayTypeHandler._index(i)], name=f"elem_{i}")
+                    ArrayTypeHandler.initialize_local_array(builder, module, elem_ptr, llvm_type.element, elem)
+                    continue
                 else:
                     # Seed struct_type on StructLiteral elements so that bare struct
                     # literals in local array initialisers have the required type context.
