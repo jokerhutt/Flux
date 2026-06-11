@@ -639,6 +639,26 @@ struct myStruct
     int x, y;
 };
 
+object Obj2;
+
+object Obj1
+{
+
+    Obj2 myObject();
+
+    // ... required methods ...
+
+    private : Obj2    // Obj2 is a friend class and can inherit Obj1's private members
+    {
+        // code
+    };
+
+    def foo() -> int
+    {
+        return this.myObject.myStruct.y;    // ERROR - Need to use a getter of Obj2
+    };
+};
+
 object Obj2
 {
     private
@@ -650,20 +670,7 @@ object Obj2
 
     def get_y() -> int
     {
-        return this.myStruct.y;             // Safe - Access is in the same scope (immediate `this` Obj2, not `super` Obj1)
-    };
-};
-
-object Obj1
-{
-
-    Obj2 myObject;
-
-    // ... required methods ...
-
-    def foo() -> int
-    {
-        return this.myObject.myStruct.y;    // ERROR - Need to use a getter of Obj2
+        return this.myStruct.y;
     };
 };
 ```
