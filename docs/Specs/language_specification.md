@@ -29,7 +29,8 @@ If you like Flux, please consider contributing to the project or joining the [Fl
     - [Required methods](#required-methods)
   - [Deferred object cleanup with `defer`](#deferred-object-cleanup-with-defer)
   - [Traits](#traits)
-  - [Public/Private with Objects/Structs](#publicprivate-with-objectsstructs)
+  - [Interfaces](#interfaces)
+  - [Public/Private with Objects/Structs](#publicprivate-with-objects)
   - [i-Strings and f-Strings](#istrings-and-fstrings)
   - [Pointers](#pointers)
   - [You can also use in-line assembly directly](#you-can-also-use-inline-assembly-directly)
@@ -544,7 +545,7 @@ Inheritance syntax is: `object B : A`, which means B inherits from A.
 
 - A child object will not inherit mandatory methods (`__init`, `__expr`, `__exit`)
 - If two parents have a function, and signatures match but implementation doesn't, the compiler will error
-- The child will inherit all structure and members, including public and private
+- The child will inherit all structure and members, excluding private members, unless the parent has `private : your_child, other_child`
 - The child will not inherit member symbols that already exist in the child
 
 **Multiple inheritance** is: `object C : A, B`
@@ -684,9 +685,9 @@ Calling any unlisted method - even a public one - is a compile-time error.
 ---
 
 
-<a id="publicprivate-with-objectsstructs"></a>
-## **Public/Private with Objects/Structs**  
-Struct public and private works by only allowing access to private sections by the parent object/struct that "owns" the struct.  
+<a id="publicprivate-with-objects"></a>
+## **Public/Private with Objects**  
+Struct public and private works by only allowing access to private sections by the parent object that "owns" the struct.  
 The struct is still data where public members are visible anywhere, but its private members are only visible/modifiable by the object immediately containing it.
 
 ```
