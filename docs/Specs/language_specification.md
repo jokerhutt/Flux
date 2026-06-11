@@ -16,11 +16,15 @@ If you like Flux, please consider contributing to the project or joining the [Fl
 
 - [Flux](#flux)
   - [Functions](#functions)
-  - [Importing with `import`](#importing-with-import)
+  - [Variadic functions](#variadic-functions)
+  - [Chaining Functions](#chaining-functions)
+  - [External Functions (FFI)](#external-functions-ffi)
+  - [Exporting Functions with `export`](#exporting-functions-with-export)
+  - [Importing with `#import`](#importing-with-import)
+  - [Importing with `#package`](#importing-with-package)
     - [Very simple preprocessor](#very-simple-preprocessor)
   - [Namespaces](#namespaces)
   - [Structs](#structs)
-    - [You can template structs by using angle brackets `<`,`>`](#you-can-template-structs-by-using-angle-brackets)
   - [Objects](#objects)
     - [Required methods](#required-methods)
   - [Deferred object cleanup with `defer`](#deferred-object-cleanup-with-defer)
@@ -62,10 +66,6 @@ If you like Flux, please consider contributing to the project or joining the [Fl
   - [Templates](#templates)
   - [Templating operators](#templating-operators)
   - [Combining templates, contracts, and operators](#combining-templates-contracts-and-operators)
-  - [Variadic functions](#variadic-functions)
-  - [Chaining Functions](#chaining-functions)
-  - [External Functions (FFI)](#external-functions-ffi)
-  - [Exporting Functions with `export`](#exporting-functions-with-export)
   - [Advanced pointer manipulation](#advanced-pointer-manipulation)
     - [Taking address of literals](#taking-address-of-literals)
     - [Pointer to integer conversions](#pointer-to-integer-conversions)
@@ -140,15 +140,128 @@ def myAdd(float x, float y) -> float
 };
 ```
 
+
+<a id="variadic-functions"></a>
+## **Variadic functions**
+Variadics in Flux are very straightforward, and use the `...` elipse operator.  
+You can index the elipse operator to yield the arguments passed, example:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+def variadic(...) -> void
+{
+    print(...[0]); print();
+    print(...[1]); print();
+    print(...[2]); print();
+    print(...[3]); print();
+};
+
+
+
+def main() -> int
+{
+    variadic(1,2,3,4);
+
+    return 0;
+};
+```
+Result:
+```
+1
+2
+3
+4
+```
+
+---
+
+<a id="chaining-functions"></a>
+## **Chaining functions**
+```
+def foo(int x) -> int
+{
+    return x / 2;
+};
+
+def bar () -> int
+{
+    return 0xFF;
+};
+
+int z = foo() <- bar(); // == // int z = foo(bar());
+```
+
+---
+
+<a id="external-functions-ffi"></a>
+## **External Functions (FFI)**
+Single-line:
+```
+extern def foo() -> void;
+extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
+```
+Block-based:
+```
+extern
+{
+    def foo() -> void;
+    def bar() -> void;
+    def !!zed() -> void;
+};
+```
+Or multiple prototypes at once:
+```
+extern
+{
+    // Memory allocation
+    def !!
+        malloc(size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        free(void*) -> void,
+        calloc(size_t, size_t) -> void*,
+        realloc(void*, size_t) -> void*,
+        memcpy(void*, void*, size_t) -> void*,
+        memmove(void*, void*, size_t) -> void*,
+        memset(void*, int, size_t) -> void*,
+        memcmp(void*, void*, size_t) -> int,
+        abort() -> void,
+        exit(int) -> void,
+        atexit(void*) -> int;
+};
+```
+String-literal based function name support to target any compiled library function:
+```
+def "??foo@"()->void;
+```
+
+<a id="exporting-functions-with-export"></a>
+## **Exporting Functions with `export`**
+Using `export` will cause a function to be marked as external for linkage.  
+Use this when writing libraries, or to allow a function to be "seen".
+```
+#import "types.fx";
+
+export
+{
+    def !!stub() -> void {};
+};
+```
+This is a valid library and will compile if you do:
+`python fxc.py tests\testlib.fx --library -o mylib.dll` on Windows,
+and
+`python3 fxc.py tests/testlib.fx --library -o testlib.so` on Linux.
+
 ---
 
 <a id="importing-with-import"></a>
-## **Importing with `import`**
+## **Importing with `#import`**
 
 Any file you import will take the place of the import statement.
 
 ```
-#import "standard.fx";
+#import <standard.fx>;  // <> means stdlib, "" means local to source file
 #import "mylib.fx", "foobar.fx";  // Multi-line imports are processed from left to right in the order they appear.
 ```
 
@@ -174,10 +287,17 @@ def main() -> int
 };
 ```
 
+<a id="importing-with-package"></a>
+## **Importing with `#package`**
+
+- To do.
+
+---
+
 <a id="very-simple-preprocessor"></a>
 ### Very simple preprocessor
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 #ifdef __WINDOWS__
 #def DEFAULT_CONFIG_FLAG 0x4000;
@@ -291,43 +411,6 @@ struct BMP : Header, InfoHeader
 } : ExtraData;
 ```
 
-<a id="you-can-template-structs-by-using-angle-brackets"></a>
-### You can template structs by using angle brackets `<`,`>`:
-```
-struct myStru<A,B>
-{
-    A ax, ay, az;
-    B bx, by, bz;
-};
-```
-Composition and templates can be combined, however they **will** shadow.
-```
-struct myStru1<A,B>
-{
-    A a1x, a1y;
-    B b1x, b1y;
-};
-
-struct myStru2<A,B,C> : myStru1
-{
-    A a2x, a2y, a2z;
-    B b2x, b2y, b2z;
-};
-
-// Becomes,
-
-struct myStru2<A,B,C>
-{
-    A a1x, a1y;
-    B b1x, b1y;
-    A a2x, a2y, a2z;
-    B b2x, b2y, b2z;
-};
-```
-If you intended for `a1x` to be a different type than `a2x`, you must use different parameter names.
-
-Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be `object` type.
-
 ---
 
 <a id="objects"></a>
@@ -357,7 +440,7 @@ __expr()       -> any
 
 If an object's `__init` method takes **only one parameter**, you may instance it like sO:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -392,7 +475,7 @@ It is syntactic sugar for `SomeObj sobj(5);`
 Deferred statements execute in LIFO order.  
 Deferred calls execute after post-contract code, immediately before the function returns.
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -421,9 +504,9 @@ def main() -> int
 };
 ```
 
-### You can also defer in blocks:
+### You can also `defer` in blocks:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -443,6 +526,67 @@ Result:
 Hello!
 Test2!
 Test1!
+```
+
+## **Inheritance**  
+Object inheritance follows simple rules which eliminate the diamond problem. It will not permit the diamond problem to exist.  
+
+Inheritance syntax is: `object B : A`, which means B inherits from A.
+
+- A child object will not inherit mandatory methods (`__init`, `__expr`, `__exit`)
+- If two parents have a function, and signatures match but implementation doesn't, the compiler will error
+- The child will inherit all structure and members, including public and private
+- The child will not inherit member symbols that already exist in the child
+
+**Multiple inheritance** is: `object C : A, B`
+
+Here's an example:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+object A
+{
+    int a1, a2, a3;
+    def __init() -> this { return this; };
+    def __expr() -> A*   { return this; };
+    def __exit() -> void { (void)this;  };
+};
+
+object B
+{
+    int b1, b2, b3;
+    def __init() -> this { return this; };
+    def __expr() -> A*   { return this; };
+    def __exit() -> void { (void)this;  };
+};
+
+object C : A, B
+{
+    int c1, c2, c3;
+    def __init() -> this { return this; };
+    def __expr() -> A*   { return this; };
+    def __exit() -> void { (void)this;  };
+};
+```
+
+You may use `!+` before `def` to indicate no override, like so:
+```
+object B
+{
+    int b1, b2, b3;
+    def __init() -> this { return this; };
+    def __expr() -> A*   { return this; };
+    def __exit() -> void { (void)this;  };
+
+    !+ def foo() -> void {};
+};
+
+object C : B
+{
+    +  def foo() -> void {}; // compiler will error, child must inherit foo from parent
+}
 ```
 
 ---
@@ -522,11 +666,28 @@ object Obj1
 
 The syntax in Flux would be: `i"{}{}{}":{x;y;z;};` for an i-string, and `f"{var1}{var2}\0";` for an f-string.
 
-The brackets are replaced with the results of the statements in order respective to the statements' position in the statement array in i-strings.  
-**i-string Example**
-
+This allows you to write clean interpolated strings without strange formatting.  
+**f-string Example**
 ```
-#import "standard.fx"; // imports types.fx
+#import <standard.fx>;
+
+using standard::io::console,
+      standard::strings;
+
+def main() -> int
+{
+    string h = "Hello";
+    string w = "World!";
+    print(f"{h} {w}");
+    return 0;
+};
+```
+`Result: Hello World!`
+
+**i-string Example**  
+The brackets are replaced with the results of the statements in order respective to the statements' position in the statement array in i-strings.  
+```
+#import <standard.fx>; // imports types.fx
 
 using standard::io::console;
 
@@ -546,24 +707,6 @@ def main() -> int
     return 0;
 };
 ```
-
-This allows you to write clean interpolated strings without strange formatting.  
-**f-string Example**
-```
-#import "standard.fx";
-
-using standard::io::console,
-      standard::strings;
-
-def main() -> int
-{
-    string h = "Hello";
-    string w = "World!";
-    print(f"{h} {w}");
-    return 0;
-};
-```
-`Result: Hello World!`
 
 ---
 
@@ -675,7 +818,7 @@ Alternatively, you can use a ternary `?:`
 
 You can also use `if` expressions in the following manner:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -695,7 +838,7 @@ def main() -> int
 ```
 You may also use groups of statements in a block before an if:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -720,7 +863,7 @@ def main() -> int
 
 Ternary logic:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -741,7 +884,7 @@ def main() -> int
 
 Ternary assignment:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -761,7 +904,7 @@ def main() -> int
 
 Null coalesce operator:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 def main() -> int
 {
@@ -909,7 +1052,7 @@ In this case, `stackVar` is zeroed out and the reference invalidated.
 <a id="stringification-with"></a>
 ## Stringification with `$`:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -928,7 +1071,7 @@ Result:
 ## Codification:
 Codification is the inverse of stringification, using the codify operator `~$`
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -951,7 +1094,7 @@ Result: `5`
 ## Direct type conversion:
 You can do function-like conversion only with built-in types like `int`, `long`, `double`, `bool`, etc.
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1043,7 +1186,7 @@ int[20] events = [x for (int x= 1; x <= 20; x++) if (x % 2 == 0)];
 
 **Static array comprehension using a dynamic type**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::collections; // For the dynamic array 'Array'
 
@@ -1111,7 +1254,7 @@ while (1)
 <a id="singleinitialized-variables-with-singinit"></a>
 ## **Single-initialized variables with `singinit`**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1157,7 +1300,7 @@ def rsub(int x, int y) -> int
 ## Strict Recursion with `<~`:
 Functions that have the recurse return operator will always return to themselves. Their stack frame never grows because they become tail calls, and get optimized as such.
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1324,7 +1467,7 @@ def main() -> int
 <a id="tagged-unions"></a>
 ## **Tagged unions**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1436,7 +1579,7 @@ not using some::specific::namespace;
 <a id="deprecation-with-deprecate"></a>
 ## **Deprecation with `deprecate`**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 namespace test1
 {
@@ -1552,7 +1695,7 @@ Post-contract form puts the contract's statements before the function's return.
 Contracts are not specifically `assert`-only, they can contain any statement.
 They are similar to macros and expand before type checking and semantic analysis.
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1596,7 +1739,7 @@ The contracts disappear from the compilation unit after transformation.
 <a id="contracts-on-operators"></a>
 ## Contracts on operators:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1627,7 +1770,7 @@ Result at runtime:
 <a id="expressionbased-macros-with-macro"></a>
 ## **Expression-based macros with `macro`**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1654,11 +1797,74 @@ Result:
 
 ---
 
-<a id="templates"></a>
-## **Templates**
-
+<a id="defining-type-functions"></a>
+## **Defining Type Functions**:
+Flux has the ability to define functions for a given type, allowing `.` call notation on a value or variable of that type.
+Inside of a type function `_` is reserved, and acts as the `this` parameter.
 ```
-#import "standard.fx";
+// noopstr is alias for byte*
+noopstr.add_world() -> noopstr
+{
+    return _ + ", World!";  //  "Hello".add_world() == return "Hello" + ", World!"
+};
+
+/// Alternatively, you may use "" - Note this is special for type functions ///
+"".add_world() -> ""
+{
+    return _ + ", World!";
+};
+```
+
+You can use plain types or pointer types, and named struct types, like so:
+```
+struct MyStru
+{
+    // .. members ..
+};
+
+MyStru.mystru_func1() -> MyStru
+{
+    // impl
+};
+```
+
+You may also use tied ~types:
+```
+~byte*.sub11() -> ~byte*
+{
+    return _[0] - 11; // set first char - 11, _ is tied type, no need for explicit move
+};
+```
+
+You can make literal modifiers as well by using `0` with an appropriate suffix:
+```
+0.my_int_func() -> int   // 55.my_int_func()
+{
+    return _;
+};
+
+0l.my_long_func() -> long
+{
+    return _;
+};
+
+0d.my_double_func() -> double
+{
+    return _;
+};
+
+struct.my_struct_func() -> struct
+{
+    // impl for your arbitrary struct func
+};
+```
+
+---
+
+<a id="templates"></a>
+## <**Templates**>
+```
+#import <standard.fx>;
 
 
 def foo<T>(T x) -> T
@@ -1682,7 +1888,7 @@ def main() -> int
 
 The compiler can also infer templates at call sites, so you don't end up with a mess of angle brackets:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1728,7 +1934,7 @@ operator<T, K>(T t, K k)[+] -> int
 <a id="combining-templates-contracts-and-operators"></a>
 ## Combining templates, contracts, and operators:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -1784,119 +1990,169 @@ def main() -> int
 ```
 Result: `60`
 
----
-
-<a id="variadic-functions"></a>
-## **Variadic functions**
-Variadics in Flux are very straightforward, and use the `...` elipse operator.  
-You can index the elipse operator to yield the arguments passed, example:
+## Template Constraints:
+You can add constraints to template parameters on their allowed types like so:
 ```
-#import "standard.fx";
+<T: int | i32, U: long | i64>
+```
+The syntax is `Param: type (| type)*` comma separated.
 
+Here's an example:
+```
+#import <standard.fx>;
+ 
 using standard::io::console;
 
-def variadic(...) -> void
+"".fx<T: "", U: "">(T x, U y) -> ""
 {
-    print(...[0]); print();
-    print(...[1]); print();
-    print(...[2]); print();
-    print(...[3]); print();
+    return _ + f"{x} {y}";
 };
-
-
 
 def main() -> int
 {
-    variadic(1,2,3,4);
-
+    byte* new = "Hello".fx(",", "World!");
+    println(new);
     return 0;
 };
 ```
-Result:
-```
-1
-2
-3
-4
-```
+"new" isn't a keyword in Flux, so this is fine.
 
----
+## Templates and Type Relationships
+Flux allows ways to describe how a type - or pair of types - can behave.
 
-<a id="chaining-functions"></a>
-## **Chaining functions**
+There is a dedicated type relationships operator set specifically to describe relations between types.  
+Since all operators are binary, to perform a unary operation, you do `A <op> A`, which is type self-referential.  
+All template type relationships operators are distinct and not related to regular operators and cannot be overloaded.
+
+See --link to type relationship operators-- for more details on the operators.
+
+To use type relationships expressions, they must be constrained in a set.
+
+Here's the same example using `~=`, the "must be compatible" operator, and the `:{}` set constraint.
 ```
-def foo(int x) -> int
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+"".fx<T: "", U: "", :{T ~= U}>(T x, U y) -> ""
 {
-    return x / 2;
+    return _ + f"{x} {y}";
 };
 
-def bar () -> int
+def main() -> int
 {
-    return 0xFF;
-};
-
-int z = foo() <- bar(); // == // int z = foo(bar());
-```
-
----
-
-<a id="external-functions-ffi"></a>
-## **External Functions (FFI)**
-Single-line:
-```
-extern def foo() -> void;
-extern def !!foo() -> void;  // !! tells the compiler do not mangle this function name
-```
-Block-based:
-```
-extern
-{
-    def foo() -> void;
-    def bar() -> void;
-    def !!zed() -> void;
+    byte* new = "Hello".fx(",", "World!");
+    println(new);
+    return 0;
 };
 ```
-Or multiple prototypes at once:
+
+You can separate expressions with a comma like:
 ```
-extern
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+"".fx<T: "", U: "", :{T ~= U, T !`< U}>(T x, U y) -> ""
 {
-    // Memory allocation
-    def !!
-        malloc(size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        free(void*) -> void,
-        calloc(size_t, size_t) -> void*,
-        realloc(void*, size_t) -> void*,
-        memcpy(void*, void*, size_t) -> void*,
-        memmove(void*, void*, size_t) -> void*,
-        memset(void*, int, size_t) -> void*,
-        memcmp(void*, void*, size_t) -> int,
-        abort() -> void,
-        exit(int) -> void,
-        atexit(void*) -> int;
+    return _ + f"{x} {y}";
+};
+
+def main() -> int
+{
+    byte* new = "Hello".fx(",", "World!");
+    println(new);
+    return 0;
 };
 ```
-String-literal based function name support to target any compiled library function:
+
+However, you do not have to comma separate, and can instead write them circularly.  
+Circular expressions can be very long, terse, and carry a lot of meaning.  
+Example:
 ```
-def "??foo@"()->void;
+D !~= B & [A !@ A] !~= C !`< D !-= A
+```
+This reads as (inner most []):
+- Values of type A cannot have an address taken of them
+- D must be incompatible with B and A
+- B and A must be incompatible with C
+- C and D independently cannot be used in an expression where bit lowering would occur
+- D cannot be used in signed operations with A
+
+There is a similar relationship here, `D !~= A & B !~= C`. This means `D ~= C` by relation, and doesn't need to be explicitly defined.  
+This can be hard to see if you do not write your expression with care, because you may intend `D !~= C`. See the following:
+```
+C !~= D !~= B & [A !@ A] !~= C !`< D !-= A
 ```
 
-<a id="exporting-functions-with-export"></a>
-## **Exporting Functions with `export`**
-Using `export` will cause a function to be marked as external for linkage.  
-Use this when writing libraries, or to allow a function to be "seen".
-```
-#import "types.fx";
+Just place the relationship in an open position.
 
-export
+No one wants to see that long expression in their template definition, that's why `constra` exists.  
+`constra` creates named, generic and parameterized relational expression sets that can be used with a template like so:
+```
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+constra MyCS(A)
 {
-    def !!stub() -> void {};
+    A !`< A    // This is a unary expression, read as the relation !`< "between A types"
+};
+
+def foo<T: int, :{MyCS}>(T x) -> byte
+{
+    return 5 + x; // lowering would occur here, violating MyCS
+};
+
+def main() -> int
+{
+    foo(10);
+    return 0;
 };
 ```
-This is a valid library and will compile if you do:
-`python fxc.py tests\testlib.fx --library -o mylib.dll` on Windows,
-and
-`python3 fxc.py tests/testlib.fx --library -o testlib.so` on Linux.
+Compiler will output:
+```
+✗ Compilation failed: Type relation T !`< T violated: illegal truncation on int at 12:5
+    return 5 + x;
+----^ // 5 + x will lower to byte
+```
+
+Template constraints can be used in any template, including operator, struct, and object templates.
+
+```
+struct myStru<A,B>
+{
+    A ax, ay, az;
+    B bx, by, bz;
+};
+```
+Composition and templates can be combined, however they **will** shadow.
+```
+struct myStru1<A,B>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+};
+
+struct myStru2<A,B,C> : myStru1
+{
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+
+// Becomes,
+
+struct myStru2<A,B,C>
+{
+    A a1x, a1y;
+    B b1x, b1y;
+    A a2x, a2y, a2z;
+    B b2x, b2y, b2z;
+};
+```
+If you intended for `a1x` to be a different type than `a2x`, you must use different parameter names.
+
+Structs cannot contain objects, but objects can contain structs. This means struct template parameters cannot be `object` type.
 
 ---
 
@@ -1925,7 +2181,7 @@ int* offset = base + 5;
 <a id="pointer-to-integer-conversions"></a>
 ### Pointer to integer conversions
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2073,7 +2329,7 @@ hash[28..31] = (byte[4])(be32)ctx.state[7];
 <a id="bit-slices"></a>
 ### ***Bit slices***
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2093,7 +2349,7 @@ def main() -> int
 ### ***Taking bit slices from structs***
 Bit slicing structs can cross member boundaries, because structs members are packed tightly in memory.
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2114,7 +2370,7 @@ def main() -> int
 <a id="bit-slices-of-bit-slices"></a>
 ### ***Bit slices of bit slices***
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2168,7 +2424,7 @@ You may take arbitrary width slices as well, stored in your arbitrarily sized ty
 <a id="function-pointers"></a>
 ## **Function Pointers**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2196,7 +2452,7 @@ def main() -> int
 ## **Callbacks**
 One of a few ways you can set up callbacks:
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2222,7 +2478,7 @@ def main() -> int
 <a id="raw-bytecode-functions"></a>
 ## **Raw bytecode functions**
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -2250,7 +2506,7 @@ A function returning a tied type cannot return to a variable of non-tied type.
 Similarly, you cannot pass a non-tied variable to a tied parameter.
 
 ```
-#import "standard.fx";
+#import <standard.fx>;
 
 def foo(~int z) -> void  // accepts a tied parameter
 {

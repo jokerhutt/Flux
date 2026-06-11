@@ -286,7 +286,10 @@ def _render_diagnostic(
     if suggestion:
         formatted = f"{header}\n{src_line}\n{caret_line}\n{suggestion}"
     elif annotation:
-        formatted = f"{header}\n{src_line}\n{annotation}\n{caret_line}"
+        if annotation.startswith('//'):
+            formatted = f"{header}\n{src_line}\n{caret_line} {annotation}"
+        else:
+            formatted = f"{header}\n{src_line}\n{annotation}\n{caret_line}"
     else:
         formatted = f"{header}\n{src_line}\n{caret_line}"
 

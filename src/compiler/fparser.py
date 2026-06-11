@@ -568,6 +568,7 @@ class FluxParser:
     # Current operator set:
     #   ~=       TIE ASSIGN                       compatible
     #   !~=      NOT TIE ASSIGN                   incompatible
+    #   !@       NOT ADDRESS_OF                   no-address-of
     #   !`<      NOT BACKTICK LESS_THAN            no-truncation (independent)
     #   !`<=     NOT BACKTICK LESS_EQUAL           no-truncation (between)
     #   !`>      NOT BACKTICK GREATER_THAN         no-widening (independent)
@@ -583,6 +584,8 @@ class FluxParser:
             if p1 is None:
                 return False
             if p1.type == TokenType.TIE and self.peek(2) and self.peek(2).type == TokenType.ASSIGN:
+                return True
+            if p1.type == TokenType.ADDRESS_OF:
                 return True
             if p1.type == TokenType.BACKTICK:
                 p2 = self.peek(2)
@@ -602,6 +605,9 @@ class FluxParser:
             self.consume(TokenType.TIE)
             self.consume(TokenType.ASSIGN)
             return "!~="
+        if self.expect(TokenType.ADDRESS_OF):
+            self.advance()
+            return "!@"
         # BACKTICK branch - !`< !`<= !`> !`>=
         self.consume(TokenType.BACKTICK)
         if self.expect(TokenType.LESS_EQUAL):
@@ -628,6 +634,9 @@ class FluxParser:
         if self.expect(TokenType.TIE):
             self.advance()  # TIE
             self.advance()  # ASSIGN
+            return
+        if self.expect(TokenType.ADDRESS_OF):
+            self.advance()  # ADDRESS_OF
             return
         self.advance()  # BACKTICK
         self.advance()  # LESS_THAN | LESS_EQUAL | GREATER_THAN | GREATER_EQUAL
@@ -6550,7 +6559,8 @@ class FluxParser:
             # concrete_func; the _pending_body_checks list carries the work.
             _TRUNCATION_OPS = {"!`<", "!`<="}
             _WIDENING_OPS   = {"!`>", "!`>="}
-            _body_check_ops = _TRUNCATION_OPS | _WIDENING_OPS
+            _ADDRESS_OPS    = {"!@"}
+            _body_check_ops = _TRUNCATION_OPS | _WIDENING_OPS | _ADDRESS_OPS
 
             for lhs_names, op, rhs_names in _relations_list:
                 for lname in lhs_names:
@@ -6579,7 +6589,64 @@ class FluxParser:
                                     f"but are compatible"
                                 )
                         elif op in _body_check_ops:
-                            _pending_body_checks.append((op, lname, rname, lts, rts))
+                            if op == "!@":
+                                # !@ : walk the original template body for AddressOf nodes
+                                # whose operand is an identifier declared with a constrained
+                                # param type.  Done here (before substitution) so the type
+                                # names are still the abstract param names (T, U, ...).
+                                def _walk_tmpl(node):
+                                    if node is None:
+                                        return
+                                    yield node
+                                    for _attr in vars(node).values():
+                                        if isinstance(_attr, list):
+                                            for _item in _attr:
+                                                if hasattr(_item, '__dataclass_fields__'):
+                                                    yield from _walk_tmpl(_item)
+                                        elif hasattr(_attr, '__dataclass_fields__'):
+                                            yield from _walk_tmpl(_attr)
+                                _addr_param_names = set()
+                                _addr_param_names.add(lname)
+                                _addr_param_names.add(rname)
+                                # Collect variable/parameter names declared with a constrained type
+                                _tparam_vars = {}
+                                for _tp in template_func.parameters:
+                                    if (_tp.name and _tp.type_spec and
+                                            _tp.type_spec.custom_typename in _addr_param_names):
+                                        _tparam_vars[_tp.name] = _tp.type_spec.custom_typename
+                                from fast import VariableDeclaration as _TVarDecl
+                                for _tn in _walk_tmpl(template_func):
+                                    if isinstance(_tn, _TVarDecl) and _tn.type_spec:
+                                        if _tn.type_spec.custom_typename in _addr_param_names:
+                                            _tparam_vars[_tn.name] = _tn.type_spec.custom_typename
+                                # Scan for AddressOf whose operand is one of those variables
+                                from fast import AddressOf as _TAddressOf, Identifier as _TIdent
+                                for _tn in _walk_tmpl(template_func):
+                                    if not isinstance(_tn, _TAddressOf):
+                                        continue
+                                    _expr = _tn.expression
+                                    if not isinstance(_expr, _TIdent):
+                                        continue
+                                    if _expr.name not in _tparam_vars:
+                                        continue
+                                    _line = getattr(_tn, 'source_line', '?')
+                                    _col  = getattr(_tn, 'source_col',  '?')
+                                    _lmangle = self._type_system_to_mangle_str(lts)
+                                    _rmangle = self._type_system_to_mangle_str(rts)
+                                    if lname == rname or _lmangle == _rmangle:
+                                        _type_clause = _lmangle
+                                    else:
+                                        _type_clause = f"{_lmangle} and {_rmangle}"
+                                    _saved_err_tok = self.current_token
+                                    if isinstance(_line, int) and isinstance(_col, int) and _line > 0:
+                                        self.current_token = type('_Tok', (), {'line': _line, 'column': _col})()
+                                    self.error(
+                                        f"Type relation {lname} {op} {rname} violated: "
+                                        f"cannot take address of {_type_clause}",
+                                    )
+                                    self.current_token = _saved_err_tok
+                            else:
+                                _pending_body_checks.append((op, lname, rname, lts, rts))
 
         # Build mangled name: func__tmpl__T1__T2
         mangled = func_name + '__tmpl__' + '__'.join(arg_type_names)
@@ -6644,7 +6711,9 @@ class FluxParser:
                                   BinaryOp as _BinaryOp,
                                   UnaryOp as _UnaryOp,
                                   Assignment as _Assignment,
-                                  CompoundAssignment as _CompoundAssignment)
+                                  CompoundAssignment as _CompoundAssignment,
+                                  ReturnStatement as _ReturnStatement,
+                                  Literal as _Literal)
 
                 def _walk(node):
                     """Yield every node in the AST (depth-first)."""
@@ -6696,6 +6765,12 @@ class FluxParser:
                     # Identifier: look up in the local type table built above
                     if isinstance(expr, _Ident):
                         return _local_type_table.get(expr.name)
+                    # Literal: build a minimal TypeSystem so e.g. 5 in '5 + x' resolves to int
+                    if isinstance(expr, _Literal):
+                        return TypeSystem(base_type=expr.type,
+                                          is_signed=expr.type in (DataType.SINT, DataType.SLONG,
+                                                                   DataType.CHAR, DataType.FLOAT,
+                                                                   DataType.DOUBLE))
                     return None
 
                 def _arithmetic_result_width(node):
@@ -6788,12 +6863,48 @@ class FluxParser:
                     # (e.g. sign-extension, bit-truncation unary ops).
                     return False, 0, 0, '?', '?'
 
+                def _check_return_node(node, op, lname, rname, lts, rts,
+                                       is_trunc, between, constrained):
+                    # 'return expr' is a truncation context when the function's declared
+                    # return type is narrower than the expression being returned.
+                    if node.value is None:
+                        return False, 0, 0, '?', '?'
+                    ret_ts = concrete_func.return_type
+                    expr_ts = _ts_of_expr(node.value)
+                    # BinaryOp has no _resolved_type at parse time; infer from operands.
+                    if expr_ts is None and isinstance(node.value, _BinaryOp):
+                        _rw_result, _rw_max = _arithmetic_result_width(node.value)
+                        expr_w = _rw_max if _rw_max else _rw_result
+                    else:
+                        expr_w = _bw(expr_ts)
+                    ret_w = _bw(ret_ts)
+                    if not ret_w or not expr_w:
+                        return False, 0, 0, '?', '?'
+                    if is_trunc:
+                        if expr_w <= ret_w:
+                            return False, 0, 0, '?', '?'
+                        src_w, dst_w = expr_w, ret_w
+                    else:
+                        if expr_w >= ret_w:
+                            return False, 0, 0, '?', '?'
+                        src_w, dst_w = expr_w, ret_w
+                    src_match = any(_bw(cts) == src_w for cts in constrained.values())
+                    dst_match = any(_bw(cts) == dst_w for cts in constrained.values())
+                    if between:
+                        violated = src_match and dst_match
+                    else:
+                        violated = src_match or dst_match
+                    line = getattr(node, 'source_line', '?')
+                    col  = getattr(node, 'source_col',  '?')
+                    return violated, src_w, dst_w, line, col
+
                 # Registry maps node type -> checker function
                 _node_checkers = {
-                    _CastExpr:      _check_cast_node,
-                    _TypeConvExpr:  _check_cast_node,
-                    _BinaryOp:      _check_binaryop_node,
-                    _UnaryOp:       _check_unaryop_node,
+                    _CastExpr:          _check_cast_node,
+                    _TypeConvExpr:      _check_cast_node,
+                    _BinaryOp:          _check_binaryop_node,
+                    _UnaryOp:           _check_unaryop_node,
+                    _ReturnStatement:   _check_return_node,
                 }
 
                 for _op, _lname, _rname, _lts, _rts in _pending_body_checks:
@@ -6829,14 +6940,30 @@ class FluxParser:
                             # so pad = _col - len(_lt_s) - 2
                             _pad = max(0, _col - len(_lt_s) - 3) if isinstance(_col, int) else 0
                             _annotation = " " * _pad + f"{_lt_s} \\ / {_rt_s}"
+                        elif isinstance(_node, _ReturnStatement):
+                            _ret_mangle = self._type_system_to_mangle_str(concrete_func.return_type)
+                            _annotation = f"// 5 + x will lower to {_ret_mangle}"
+                        # For unary relations (lname == rname) the types are the same;
+                        # emit "on {type}" rather than "on {type} and {type}".
+                        if _lname == _rname or _lmangle == _rmangle:
+                            _type_clause = _lmangle
+                        else:
+                            _type_clause = f"{_lmangle} and {_rmangle}"
                         _saved_err_tok = self.current_token
                         if isinstance(_line, int) and isinstance(_col, int) and _line > 0:
                             self.current_token = type('_Tok', (), {'line': _line, 'column': _col})()
-                        self.error(
-                            f"Type relation {_lname} {_op} {_rname} violated: "
-                            f"illegal {_kind} {_scope} {_lmangle} and {_rmangle}",
-                            annotation=_annotation
-                        )
+                        if _op == "!@":
+                            self.error(
+                                f"Type relation {_lname} {_op} {_rname} violated: "
+                                f"cannot take address of {_type_clause}",
+                                annotation=_annotation
+                            )
+                        else:
+                            self.error(
+                                f"Type relation {_lname} {_op} {_rname} violated: "
+                                f"illegal {_kind} {_scope} {_type_clause}",
+                                annotation=_annotation
+                            )
                         self.current_token = _saved_err_tok
 
             # If this is a method template (qualified name), inject directly into the

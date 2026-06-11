@@ -2,20 +2,18 @@
  
 using standard::io::console;
 
-byte* z = "f";
-
-constra MyCS(A,B)
+constra MyCS(A)
 {
-    A ~= B
+    A !`< A    // This is a unary expression, read as the relation !`< "between A types"
 };
 
-i"".i"{}":{z}<T: "", U: "", :{MyCS}>(T x, U y) -> ""
+def foo<T: int, :{MyCS}>(T x) -> byte
 {
-    return _ + i"{} {}":{x; y;};
+    return 5 + x; // lowering would occur here, violating MyCS
 };
 
 def main() -> int
 {
-    println(i"Hello":{}.i"{}":{z}(",", "World!"));
+    foo(10);
     return 0;
 };
