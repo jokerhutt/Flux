@@ -670,7 +670,7 @@ object Socket
 object Pipe
 {
     ///...///
-} : Stream(this, Socket); // Pipe used with Socket is expected to have traits Writable
+} : Stream(this, Socket); // A Socket used by Pipe is expected to have traits Writable
 ```
 
 The interface is only attached to the Pipe object.  
