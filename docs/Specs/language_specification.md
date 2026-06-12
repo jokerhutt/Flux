@@ -2103,6 +2103,8 @@ This reads as (inner most []):
 - D cannot be used in signed operations with A
 
 There is a similar relationship here, `D !~= A & B !~= C`. This means `D ~= C` by relation, and doesn't need to be explicitly defined.  
+This is the type geometry of Flux.
+
 This can be hard to see if you do not write your expression with care, because you may intend `D !~= C`. See the following:
 ```
 C !~= D !~= B & [A !@ A] !~= C !`< D !-= A

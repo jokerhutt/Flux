@@ -7730,6 +7730,123 @@ class CodegenVisitor:
 
         return module
 
+    # ------------------------------------------------------------------
+    # Comptime block execution
+    # ------------------------------------------------------------------
+
+    def visit_ComptimeBlock(self, node, builder: ir.IRBuilder, module: ir.Module):
+        """
+        Execute a comptime block via fvm.py, then splice any emitflux emissions
+        back into the IR at the current position.
+
+        Steps:
+          1. Capture enclosing scope constants from module (read-only).
+          2. Compile the ComptimeBlock AST to VM bytecode via fvmcodegen.
+          3. Run the VM.
+          4. For each ('flux', text) entry in vm.emit_results:
+             a. Re-preprocess and re-lex the substituted text.
+             b. Parse it into AST nodes.
+             c. Visit each node through this codegen visitor against the
+                current builder and module.
+        """
+        from fvmcodegen import FVMCodegen
+        from fvm import FluxVM, StructLayout, TTag, Val
+        from flexer import FluxLexer
+        from fparser import FluxParser
+
+        # Build a captured scope from module-level integer constants
+        captured_scope: dict = {}
+        if module is not None:
+            for name, gv in module.globals.items():
+                try:
+                    if hasattr(gv, 'initializer') and gv.initializer is not None:
+                        init = gv.initializer
+                        if hasattr(init, 'constant') and isinstance(init.constant, int):
+                            captured_scope[name] = Val(TTag.INT, init.constant)
+                except Exception:
+                    pass
+
+        # Compile comptime block to VM bytecode
+        cg = FVMCodegen()
+        try:
+            bc = cg.compile(node, captured_scope)
+        except Exception as e:
+            raise FluxCodegenError(f'comptime codegen failed: {e}', node, module)
+
+        # Build struct layouts from module for VM struct access
+        struct_layouts = {}
+        if hasattr(module, '_struct_types'):
+            from fvm import StructLayout as SL
+            for tname, lt in module._struct_types.items():
+                try:
+                    fields = []
+                    for fname, ftype in lt.elements:
+                        try:
+                            fsz = lt.get_abi_size(ftype) // 8
+                        except Exception:
+                            fsz = 4
+                        try:
+                            foff = lt.get_abi_offset(lt.elements.index((fname, ftype))) // 8
+                        except Exception:
+                            foff = 0
+                        from fvm import _str_to_ttag
+                        ftag = _str_to_ttag(str(ftype))
+                        fields.append((fname, ftag, foff, fsz))
+                    try:
+                        tsz = lt.get_abi_size(lt) // 8
+                    except Exception:
+                        tsz = sum(f[3] for f in fields)
+                    struct_layouts[tname] = SL(name=tname, fields=fields, total_size=tsz)
+                except Exception:
+                    pass
+
+        # Execute
+        vm = FluxVM(struct_layouts=struct_layouts)
+        try:
+            vm.execute(bc.instructions, bc.local_count)
+        except Exception as e:
+            raise FluxCodegenError(f'comptime execution failed: {e}', node, module)
+
+        # Process emissions
+        for entry in vm.emit_results:
+            if not (isinstance(entry, tuple) and len(entry) >= 2 and entry[0] == 'flux'):
+                continue
+            flux_text = entry[1]
+            # Re-lex and re-parse the emitted text
+            try:
+                sub_lexer = FluxLexer(flux_text)
+                sub_tokens = sub_lexer.tokenize()
+                sub_parser = FluxParser(sub_tokens)
+                sub_stmts = []
+                while not sub_parser.expect(sub_parser.current_token.__class__) or \
+                      sub_parser.current_token.type.name != 'EOF':
+                    if sub_parser.current_token.type.name == 'EOF':
+                        break
+                    stmt = sub_parser.statement()
+                    if isinstance(stmt, list):
+                        sub_stmts.extend(s for s in stmt if s is not None)
+                    elif stmt is not None:
+                        sub_stmts.append(stmt)
+            except Exception as e:
+                raise FluxCodegenError(
+                    f'comptime emitflux parse failed: {e}\n  emitted text: {flux_text!r}',
+                    node, module
+                )
+            # Visit each emitted statement
+            for stmt in sub_stmts:
+                self.visit(stmt, builder, module)
+
+    def visit_EmitFlux(self, node, builder: ir.IRBuilder, module: ir.Module):
+        """
+        EmitFlux nodes are consumed inside visit_ComptimeBlock via the VM.
+        If one is encountered standalone (outside a comptime block) that is a
+        parser-level error; this visitor should never be reached directly.
+        """
+        raise FluxCodegenError(
+            "'emitflux' encountered outside a 'comptime' block during codegen",
+            node, module
+        )
+
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
