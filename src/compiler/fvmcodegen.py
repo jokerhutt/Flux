@@ -19,22 +19,35 @@ from fast import (
     ASTNode,
     ComptimeBlock, EmitFlux,
     VariableDeclaration,
+    TypeDeclaration,
     Assignment, CompoundAssignment,
     BinaryOp, UnaryOp,
     Literal, Identifier, StringLiteral, FStringLiteral,
     FunctionCall, MethodCall, MemberAccess,
     ArrayLiteral,
     AddressOf, CastExpression, TypeConvertExpression,
+    PointerDeref,
+    InExpression,
+    SizeOf,
     IfStatement,
     WhileLoop, DoLoop, DoWhileLoop,
     ForLoop,
     ReturnStatement,
     BreakStatement, ContinueStatement,
+    LabelStatement, GotoStatement, JumpStatement,
     ExpressionStatement,
     Block,
     ArrayAccess,
     SwitchStatement, Case,
     FunctionDef, FunctionDefStatement,
+    FunctionPointerDeclaration,
+    TypeFuncDef, TypeFuncCall,
+    NamespaceDef, NamespaceDefStatement,
+    StructDef, StructDefStatement, StructMember, StructInstance, StructLiteral,
+    StructFieldAccess, StructFieldAssign,
+    UnionDef, UnionDefStatement,
+    ConstraDef,
+    EnumDef, EnumDefStatement,
 )
 from ftypesys import DataType, Operator
 
@@ -78,6 +91,13 @@ class ComptimeBytecode:
 # FVMCodegen visitor
 # ---------------------------------------------------------------------------
 
+class FVMCodegenError(Exception):
+    """Carries both a message and the AST node that caused the failure."""
+    def __init__(self, message: str, node=None):
+        super().__init__(message)
+        self.source_node = node
+
+
 class FVMCodegen:
     """
     Visits a ComptimeBlock AST node and emits FluxVM bytecode.
@@ -88,7 +108,8 @@ class FVMCodegen:
         vm.execute(bc.instructions, bc.local_count)
     """
 
-    def __init__(self):
+    def __init__(self, known_functions: Dict[str, list] = None,
+                 known_struct_layouts: Dict[str, Any] = None):
         self._instructions: List[Instr] = []
         # Maps variable name -> local slot index
         self._locals: Dict[str, int] = {}
@@ -97,6 +118,16 @@ class FVMCodegen:
         self._loop_patches: List[Tuple[int, str]] = []
         # Compiled comptime functions: name -> List[Instr]
         self.compiled_functions: Dict[str, List[Instr]] = {}
+        # Previously accumulated comptime functions (from prior blocks) for lookup
+        self._known_functions: Dict[str, list] = known_functions or {}
+        # Maps local variable name -> declared type name (for type function resolution)
+        self._local_types: Dict[str, str] = {}
+        # Struct layouts computed from StructDef nodes: name -> StructLayout
+        self._struct_layouts: Dict[str, Any] = dict(known_struct_layouts or {})
+        # Label name -> instruction index (for goto resolution)
+        self._labels: Dict[str, int] = {}
+        # Goto patches: list of (instr_idx, label_name) to resolve after body
+        self._goto_patches: List[Tuple[int, str]] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -124,6 +155,9 @@ class FVMCodegen:
 
         # Compile the body
         self._visit_body(node.body)
+
+        # Resolve any remaining forward goto patches
+        self._resolve_goto_patches()
 
         # Terminate with HALT
         self._emit(_instr(Op.HALT))
@@ -158,14 +192,60 @@ class FVMCodegen:
     # ------------------------------------------------------------------
 
     def _visit_body(self, stmts: list):
-        for stmt in stmts:
-            self._visit_stmt(stmt)
+        from fast import ArrayLiteral as _AL
+        _unpack_targets = {DataType.SINT, DataType.UINT, DataType.SLONG, DataType.ULONG,
+                           DataType.BYTE, DataType.CHAR}
+
+        # Pre-scan: find unpack groups. Pattern: one or more None-init VariableDeclarations
+        # of the same type immediately followed by an ArrayLiteral([src]) VariableDeclaration.
+        # Mark each group as (start_idx, end_idx_inclusive, src_expr).
+        unpack_ranges: dict = {}  # start_idx -> (end_idx, src_expr)
+        skip_indices: set = set()
+        j = 0
+        while j < len(stmts):
+            s = stmts[j]
+            if (isinstance(s, VariableDeclaration) and
+                    s.initial_value is not None and
+                    isinstance(s.initial_value, _AL) and
+                    not s.initial_value.is_string and
+                    len(s.initial_value.elements) == 1 and
+                    s.type_spec is not None and
+                    not s.type_spec.is_array and
+                    s.type_spec.base_type in _unpack_targets):
+                # Look back for None-init declarations of the same type
+                k = j - 1
+                while (k >= 0 and k not in skip_indices and
+                       isinstance(stmts[k], VariableDeclaration) and
+                       stmts[k].initial_value is None and
+                       stmts[k].type_spec is not None and
+                       stmts[k].type_spec.base_type == s.type_spec.base_type):
+                    k -= 1
+                group_start = k + 1
+                if group_start < j:
+                    unpack_ranges[group_start] = (j, s.initial_value.elements[0])
+                    for idx in range(group_start, j + 1):
+                        skip_indices.add(idx)
+            j += 1
+
+        i = 0
+        while i < len(stmts):
+            if i in unpack_ranges:
+                end_idx, src_expr = unpack_ranges[i]
+                group = stmts[i:end_idx + 1]
+                self._emit_unpack(group, src_expr)
+                i = end_idx + 1
+            elif i in skip_indices:
+                i += 1
+            else:
+                self._visit_stmt(stmts[i])
+                i += 1
 
     def _visit_stmt(self, node: ASTNode):
         if node is None:
             return
         t = type(node)
         if t is VariableDeclaration:     self._visit_var_decl(node)
+        elif t is TypeDeclaration:       self._visit_type_decl(node)
         elif t is Assignment:            self._visit_assignment(node)
         elif t is CompoundAssignment:    self._visit_compound_assign(node)
         elif t is ExpressionStatement:   self._visit_expr_stmt(node)
@@ -181,28 +261,89 @@ class FVMCodegen:
         elif t is SwitchStatement:       self._visit_switch(node)
         elif t is FunctionDef:           self._visit_function_def(node)
         elif t is FunctionDefStatement:  self._visit_function_def(node.function_def)
+        elif t is FunctionPointerDeclaration: self._visit_fp_decl(node)
+        elif t is TypeFuncDef:           self._visit_type_func_def(node)
+        elif t is NamespaceDef:          self._visit_namespace_def(node)
+        elif t is NamespaceDefStatement: self._visit_namespace_def(node.namespace_def)
+        elif t is StructDef:             self._visit_struct_def(node)
+        elif t is StructDefStatement:    self._visit_struct_def(node.struct_def)
+        elif t is StructFieldAssign:     self._visit_struct_field_assign(node)
+        elif t is UnionDef:              self._visit_union_def(node)
+        elif t is UnionDefStatement:     self._visit_union_def(node.union_def)
+        elif t is ConstraDef:            pass  # compile-time only, no VM emission
+        elif t is EnumDef:               self._visit_enum_def(node)
+        elif t is EnumDefStatement:      self._visit_enum_def(node.enum_def)
+        elif t is LabelStatement:        self._visit_label(node)
+        elif t is GotoStatement:         self._visit_goto(node)
+        elif t is JumpStatement:         self._visit_jump(node)
         elif t is EmitFlux:              self._visit_emitflux(node)
         elif t is ComptimeBlock:         self._visit_body(node.body)
         elif isinstance(node, list):     self._visit_body(node)
         else:
-            raise NotImplementedError(
-                f'fvmcodegen: unsupported node in comptime: {type(node).__name__}'
+            raise FVMCodegenError(
+                f'fvmcodegen: unsupported node in comptime: {type(node).__name__}',
+                node
             )
 
     # ------------------------------------------------------------------
     # Variable declaration
     # ------------------------------------------------------------------
 
+    def _visit_type_decl(self, node: TypeDeclaration):
+        """
+        Type alias declaration: data{8} as nbyte; or int as myint;
+        At comptime this has no runtime effect — register the alias name so
+        that subsequent variable declarations using it resolve correctly.
+        If an initial value is present treat it like a variable declaration.
+        """
+        if node.type_spec is not None:
+            bt = node.type_spec.base_type
+            if node.type_spec.custom_typename:
+                self._local_types[node.name] = node.type_spec.custom_typename
+            elif bt is not None and bt == DataType.DATA and node.type_spec.bit_width:
+                self._local_types[node.name] = f'__data_{node.type_spec.bit_width}'
+            elif bt is not None:
+                self._local_types[node.name] = bt.value if hasattr(bt, 'value') else str(bt)
+        if node.initial_value is not None:
+            slot = self._alloc_local(node.name)
+            self._visit_expr(node.initial_value)
+            self._emit(_instr(Op.LOCAL_SET, slot))
+
     def _visit_var_decl(self, node: VariableDeclaration):
         slot = self._alloc_local(node.name)
+        # Record the type name for type function resolution
+        if node.type_spec is not None:
+            ts = node.type_spec
+            if ts.custom_typename:
+                self._local_types[node.name] = ts.custom_typename
+            elif ts.base_type is not None:
+                self._local_types[node.name] = str(ts.base_type.value) if hasattr(ts.base_type, 'value') else str(ts.base_type)
         if node.initial_value is not None:
-            self._visit_expr(node.initial_value)
+            # Pack expression: scalar_type var = [a, b, ...] packs elements into an integer.
+            # Detect this when the target type is a scalar integer and the initial value
+            # is an ArrayLiteral that is not a string.
+            from fast import ArrayLiteral as _AL
+            _pack_targets = {DataType.SINT, DataType.UINT, DataType.SLONG, DataType.ULONG,
+                             DataType.BYTE, DataType.CHAR}
+            if (node.type_spec is not None and
+                    not node.type_spec.is_array and
+                    isinstance(node.initial_value, _AL) and
+                    not node.initial_value.is_string and
+                    node.type_spec.base_type in _pack_targets):
+                self._emit_pack(node.initial_value, node.type_spec)
+            else:
+                self._visit_expr(node.initial_value)
         else:
             # Zero-initialise (all Flux variables are zero-init by default)
-            ttag = _datatype_to_ttag(
-                node.type_spec.base_type if node.type_spec else DataType.SINT
-            )
-            self._emit(_instr(Op.PUSH, Val(ttag, 0)))
+            if (node.type_spec is not None and
+                    node.type_spec.custom_typename is not None and
+                    node.type_spec.custom_typename in self._struct_layouts):
+                self._emit(_instr(Op.STRUCT_NEW, node.type_spec.custom_typename))
+            else:
+                ttag = _datatype_to_ttag(
+                    node.type_spec.base_type if node.type_spec else DataType.SINT
+                )
+                self._emit(_instr(Op.PUSH, Val(ttag, 0)))
         self._emit(_instr(Op.LOCAL_SET, slot))
 
     # ------------------------------------------------------------------
@@ -214,9 +355,29 @@ class FVMCodegen:
             self._visit_expr(node.value)
             slot = self._alloc_local(node.target.name)
             self._emit(_instr(Op.LOCAL_SET, slot))
+        elif isinstance(node.target, MemberAccess):
+            # struct.field = value
+            # Special case: ._ is the tagged union type tag — store as metadata
+            # in a synthetic local rather than FIELD_SET on an enum variable.
+            if node.target.member == '_':
+                # me1._ = MyUnionType — store type tag in a synthetic slot
+                tag_slot_name = f'__{node.target.object.name if isinstance(node.target.object, Identifier) else "__"}__tag__'
+                tag_slot = self._alloc_local(tag_slot_name)
+                self._visit_expr(node.value)
+                self._emit(_instr(Op.LOCAL_SET, tag_slot))
+            else:
+                self._visit_expr(node.target.object)
+                self._visit_expr(node.value)
+                self._emit(_instr(Op.FIELD_SET, node.target.member))
+        elif isinstance(node.target, PointerDeref):
+            # *ptr = value  ->  push ptr, push value, LOCAL_DEREF_SET
+            self._visit_expr(node.target.pointer)
+            self._visit_expr(node.value)
+            self._emit(_instr(Op.LOCAL_DEREF_SET))
         else:
-            raise NotImplementedError(
-                'fvmcodegen: only simple identifier assignment supported in comptime'
+            raise FVMCodegenError(
+                f'fvmcodegen: unsupported assignment target in comptime: {type(node.target).__name__}',
+                node
             )
 
     def _visit_compound_assign(self, node: CompoundAssignment):
@@ -285,12 +446,22 @@ class FVMCodegen:
         elif t is FunctionCall:        return self._visit_function_call(node)
         elif t is MethodCall:          return self._visit_method_call(node)
         elif t is ArrayAccess:         return self._visit_array_access(node)
+        elif t is TypeFuncCall:        return self._visit_type_func_call(node)
+        elif t is StructFieldAccess:   return self._visit_struct_field_access(node)
+        elif t is StructInstance:      return self._visit_struct_instance(node)
+        elif t is StructLiteral:       return self._visit_struct_literal(node)
+        elif t is MemberAccess:        return self._visit_member_access(node)
+        elif t is Assignment:          self._visit_assignment(node); return False
         elif t is AddressOf:           return self._visit_address_of(node)
+        elif t is PointerDeref:        return self._visit_pointer_deref(node)
+        elif t is SizeOf:              return self._visit_sizeof(node)
+        elif t is InExpression:        return self._visit_in_expression(node)
         elif t is CastExpression:      return self._visit_cast(node)
         elif t is TypeConvertExpression: return self._visit_cast(node)
         else:
-            raise NotImplementedError(
-                f'fvmcodegen: unsupported expression in comptime: {type(node).__name__}'
+            raise FVMCodegenError(
+                f'fvmcodegen: unsupported expression in comptime: {type(node).__name__}',
+                node
             )
 
     def _visit_literal(self, node: Literal):
@@ -298,7 +469,12 @@ class FVMCodegen:
         ttag = _datatype_to_ttag(dt)
         raw = node.value
         if ttag in (TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG, TTag.BYTE, TTag.CHAR):
-            data = int(raw) if not isinstance(raw, int) else raw
+            if isinstance(raw, int):
+                data = raw
+            elif isinstance(raw, str) and len(raw) == 1:
+                data = ord(raw)
+            else:
+                data = int(raw)
         elif ttag in (TTag.FLOAT, TTag.DOUBLE):
             data = float(raw) if not isinstance(raw, float) else raw
         elif ttag == TTag.BOOL:
@@ -384,6 +560,10 @@ class FVMCodegen:
         name = node.name
         if name in self._locals:
             self._emit(_instr(Op.LOCAL_GET, self._locals[name]))
+            return True
+        # Type name used as a value (e.g. union/struct type in tagged union assignment)
+        if name in self._struct_layouts:
+            self._emit(_instr(Op.PUSH, Val(TTag.BYTES, name.encode('utf-8'))))
             return True
         raise NameError(f'fvmcodegen: undefined comptime variable {name!r}')
 
@@ -471,20 +651,185 @@ class FVMCodegen:
         self._emit(_instr(vm_op))
         return True
 
+    def _visit_type_func_call(self, node: TypeFuncCall) -> bool:
+        """
+        Emit a call to a comptime type function.
+        Push receiver first (becomes '_' / slot 0), then explicit args, then CALL.
+        """
+        self._visit_expr(node.receiver)
+        for arg in node.arguments:
+            self._visit_expr(arg)
+        mangled = TypeFuncDef.mangle(node.type_name, node.func_name)
+        self._emit(_instr(Op.CALL, mangled, 1 + len(node.arguments)))
+        return True
+
+    def _visit_sizeof(self, node: SizeOf) -> bool:
+        """
+        sizeof(T) returns the bit width of T as a ulong.
+        Supports TypeSystem targets and Identifier targets (type aliases, locals).
+        """
+        from ftypesys import TypeSystem as _TS, DataType as _DT
+        _prim_bits = {
+            _DT.SINT:  32, _DT.UINT:  32,
+            _DT.SLONG: 64, _DT.ULONG: 64,
+            _DT.FLOAT: 32, _DT.DOUBLE: 64,
+            _DT.BOOL:  1,  _DT.BYTE:  8,
+            _DT.CHAR:  8,  _DT.DATA:  0,
+        }
+        bits = None
+        target = node.target
+
+        if isinstance(target, _TS):
+            if target.base_type == _DT.DATA and target.bit_width:
+                bits = target.bit_width
+            elif target.is_pointer:
+                bits = 64
+            elif target.base_type in _prim_bits:
+                bits = _prim_bits[target.base_type]
+
+        elif isinstance(target, Identifier):
+            type_name = self._local_types.get(target.name)
+            if type_name is not None:
+                if type_name.startswith('__data_'):
+                    bits = int(type_name[7:])
+                else:
+                    _name_bits = {
+                        'int': 32, 'uint': 32, 'long': 64, 'ulong': 64,
+                        'float': 32, 'double': 64, 'bool': 1,
+                        'byte': 8, 'char': 8,
+                    }
+                    bits = _name_bits.get(type_name)
+            # Check struct layouts
+            if bits is None:
+                layout = self._struct_layouts.get(target.name)
+                if layout is not None:
+                    bits = layout.total_size * 8
+
+        if bits is None:
+            bits = 0  # unknown — emit 0 rather than crash
+
+        self._emit(_instr(Op.PUSH, Val(TTag.ULONG, bits)))
+        return True
+
+    def _visit_in_expression(self, node: InExpression) -> bool:
+        """
+        needle in haystack — linear scan of the array for needle.
+        Strategy: evaluate needle and haystack once, then emit a counted
+        loop that INDEX_GETs each element, CMP_EQs with needle, and BORs
+        the result into an accumulator.  Leaves a BOOL on the stack.
+
+        Since we don't know the array length at codegen time, we use the
+        VM's ARRAY_LEN op if available, otherwise we emit a runtime loop
+        using the meta count stored in the PTR.  For simplicity we use a
+        pure bytecode loop with a runtime length read.
+        """
+        # Evaluate needle into a temp slot
+        self._visit_expr(node.needle)
+        needle_slot = self._alloc_local('__in_needle__')
+        self._emit(_instr(Op.LOCAL_SET, needle_slot))
+
+        # Evaluate haystack (array PTR) into a temp slot
+        self._visit_expr(node.haystack)
+        arr_slot = self._alloc_local('__in_arr__')
+        self._emit(_instr(Op.LOCAL_SET, arr_slot))
+
+        # Get array length via STR_LEN workaround — use ARRAY_LEN if it exists,
+        # otherwise push the count from meta via a dedicated op.
+        # Since the VM doesn't have ARRAY_LEN, we use a Python-level count stored
+        # as an inline literal by pushing the array PTR and reading meta at runtime.
+        # We emit a loop with a runtime index counter using JMP/JNF.
+
+        # result accumulator = false
+        result_slot = self._alloc_local('__in_result__')
+        self._emit(_instr(Op.PUSH, Val(TTag.BOOL, 0)))
+        self._emit(_instr(Op.LOCAL_SET, result_slot))
+
+        # index counter = 0
+        idx_slot = self._alloc_local('__in_idx__')
+        self._emit(_instr(Op.PUSH, Val(TTag.INT, 0)))
+        self._emit(_instr(Op.LOCAL_SET, idx_slot))
+
+        # Get array length: push arr PTR, emit ARRAY_LEN op
+        len_slot = self._alloc_local('__in_len__')
+        self._emit(_instr(Op.LOCAL_GET, arr_slot))
+        self._emit(_instr(Op.ARRAY_LEN))
+        self._emit(_instr(Op.LOCAL_SET, len_slot))
+
+        # Loop start: if idx >= len, jump out
+        loop_start = self._current_ip()
+        self._emit(_instr(Op.LOCAL_GET, idx_slot))
+        self._emit(_instr(Op.LOCAL_GET, len_slot))
+        self._emit(_instr(Op.CMP_GE))
+        exit_patch = self._emit(_instr(Op.JIF, 0))
+
+        # elem = arr[idx]
+        self._emit(_instr(Op.LOCAL_GET, arr_slot))
+        self._emit(_instr(Op.LOCAL_GET, idx_slot))
+        self._emit(_instr(Op.INDEX_GET))
+
+        # result |= (elem == needle)
+        self._emit(_instr(Op.LOCAL_GET, needle_slot))
+        self._emit(_instr(Op.CMP_EQ))
+        self._emit(_instr(Op.LOCAL_GET, result_slot))
+        self._emit(_instr(Op.BOR))
+        self._emit(_instr(Op.LOCAL_SET, result_slot))
+
+        # idx += 1
+        self._emit(_instr(Op.LOCAL_GET, idx_slot))
+        self._emit(_instr(Op.PUSH, Val(TTag.INT, 1)))
+        self._emit(_instr(Op.ADD))
+        self._emit(_instr(Op.LOCAL_SET, idx_slot))
+
+        # jump back to loop start
+        self._emit(_instr(Op.JMP, loop_start))
+
+        # patch exit
+        self._patch_at(exit_patch, Op.JIF, self._current_ip())
+
+        self._emit(_instr(Op.LOCAL_GET, result_slot))
+        return True
+
+    def _visit_pointer_deref(self, node: PointerDeref) -> bool:
+        """
+        *ptr -- dereference a VM stack pointer.
+        PTR(slot) -> locals[slot] for regular pointers.
+        For function pointers, *pb returns the slot index itself (the address of the function).
+        """
+        from fast import Identifier as _Id
+        if (isinstance(node.pointer, _Id) and
+                self._local_types.get(node.pointer.name) == '__funcptr__'):
+            # *pb on a funcptr: pb holds PTR(slot); return slot index as ULONG
+            slot = self._locals[node.pointer.name]
+            self._emit(_instr(Op.LOCAL_GET, slot))
+            self._emit(_instr(Op.CAST, TTag.ULONG))
+            return True
+        self._visit_expr(node.pointer)
+        self._emit(_instr(Op.LOCAL_DEREF))
+        return True
+
     def _visit_address_of(self, node: AddressOf) -> bool:
         """
-        @x in comptime: push Val(TTag.PTR, slot_index).
-        The slot index serves as the VM-level pointer to the local variable.
-        Only simple identifier operands are supported.
+        @x — push Val(TTag.PTR, slot_index).
+        For variables: slot holds the variable value.
+        For functions: allocate a slot holding Val(BYTES, func_name), push PTR to it.
         """
         if not isinstance(node.expression, Identifier):
             raise NotImplementedError(
                 'fvmcodegen: address-of only supported on simple identifiers in comptime'
             )
         name = node.expression.name
-        if name not in self._locals:
-            raise NameError(f'fvmcodegen: undefined comptime variable {name!r}')
-        slot = self._locals[name]
+        # Variable address
+        if name in self._locals:
+            slot = self._locals[name]
+            self._emit(_instr(Op.PUSH, Val(TTag.PTR, slot)))
+            return True
+        # Function address: allocate a slot for the function name value
+        fn_slot_name = f'__fnaddr_{name}__'
+        slot = self._alloc_local(fn_slot_name)
+        # Store the function name as BYTES in that slot
+        self._emit(_instr(Op.PUSH, Val(TTag.BYTES, name.encode('utf-8'))))
+        self._emit(_instr(Op.LOCAL_SET, slot))
+        # Push PTR to that slot
         self._emit(_instr(Op.PUSH, Val(TTag.PTR, slot)))
         return True
 
@@ -553,6 +898,17 @@ class FVMCodegen:
                     self._visit_expr(arg)
             self._emit(_instr(opcode))
             return opcode in _PUSHES
+        # Function pointer call: pb() where pb is a local __funcptr__ slot
+        if (name in self._locals and
+                self._local_types.get(name) == '__funcptr__'):
+            for arg in node.arguments:
+                self._visit_expr(arg)
+            # pb holds PTR(fn_slot); fn_slot holds BYTES(func_name)
+            # LOCAL_GET pb -> PTR(fn_slot); LOCAL_DEREF -> BYTES(func_name)
+            self._emit(_instr(Op.LOCAL_GET, self._locals[name]))
+            self._emit(_instr(Op.LOCAL_DEREF))
+            self._emit(_instr(Op.CALL_PTR, len(node.arguments)))
+            return True
         for arg in node.arguments:
             self._visit_expr(arg)
         self._emit(_instr(Op.CALL, name, len(node.arguments)))
@@ -583,6 +939,22 @@ class FVMCodegen:
             return opcode in _PUSHES
 
         if full_name is not None:
+            # Check if this is a type function call: receiver_var.method_name(args)
+            # The receiver is a local variable; look up its declared type name and
+            # try the __typefunc__<type_name>__<method_name> mangled key.
+            if (isinstance(node.object, Identifier) and
+                    node.object.name in self._local_types):
+                type_name = self._local_types[node.object.name]
+                from fast import TypeFuncDef as _TFD
+                mangled = _TFD.mangle(type_name, node.method_name)
+                if mangled in self.compiled_functions or mangled in self._known_functions:
+                    # Push receiver as first arg (_), then explicit args
+                    self._visit_expr(node.object)
+                    for arg in node.arguments:
+                        self._visit_expr(arg)
+                    self._emit(_instr(Op.CALL, mangled, 1 + len(node.arguments)))
+                    return True
+
             for arg in node.arguments:
                 self._visit_expr(arg)
             self._emit(_instr(Op.CALL, full_name, len(node.arguments)))
@@ -634,6 +1006,118 @@ class FVMCodegen:
         for idx in end_patches:
             self._patch_at(idx, Op.JMP, end_ip)
 
+    def _emit_unpack(self, group: list, src_expr):
+        """
+        Unpack a scalar source into multiple variables.
+        group[0] is the first (highest-bits) variable, group[-1] the last (lowest-bits).
+        Element bit width is inferred from the target element type.
+        """
+        elem_dt = group[0].type_spec.base_type
+        elem_ttag = _datatype_to_ttag(elem_dt)
+        _bits = {
+            DataType.SINT: 32, DataType.UINT: 32,
+            DataType.SLONG: 64, DataType.ULONG: 64,
+            DataType.BYTE: 8, DataType.CHAR: 8, DataType.BOOL: 1,
+        }
+        elem_bits = _bits.get(elem_dt, 32)
+        n = len(group)
+        # Build a mask for elem_bits
+        mask = (1 << elem_bits) - 1
+
+        # Evaluate and store the source once
+        self._visit_expr(src_expr)
+        src_slot = self._alloc_local('__unpack_src__')
+        self._emit(_instr(Op.LOCAL_SET, src_slot))
+
+        for i, decl in enumerate(group):
+            slot = self._alloc_local(decl.name)
+            # group[0] = MSB side: shift = (n-1-i)*elem_bits
+            shift = (n - 1 - i) * elem_bits
+            self._emit(_instr(Op.LOCAL_GET, src_slot))
+            if shift > 0:
+                self._emit(_instr(Op.PUSH, Val(TTag.INT, shift)))
+                self._emit(_instr(Op.SHR))
+            self._emit(_instr(Op.PUSH, Val(TTag.LONG, mask)))
+            self._emit(_instr(Op.BAND))
+            self._emit(_instr(Op.CAST, elem_ttag))
+            self._emit(_instr(Op.LOCAL_SET, slot))
+            # Record type
+            if decl.type_spec is not None and decl.type_spec.base_type is not None:
+                bt = decl.type_spec.base_type
+                self._local_types[decl.name] = bt.value if hasattr(bt, 'value') else str(bt)
+
+    def _emit_pack(self, arr: 'ArrayLiteral', target_type_spec):
+        """
+        Pack an ArrayLiteral into a scalar integer value.
+        Elements are packed from LSB to MSB; the bit width of each element is
+        inferred from the element type on the ArrayLiteral, defaulting to 32 bits
+        (int-sized) per element.  The result is left on the stack as the target type.
+        """
+        target_ttag = _datatype_to_ttag(
+            target_type_spec.base_type if target_type_spec else DataType.SLONG
+        )
+        # Determine per-element bit width from element_type or default to 32
+        elem_bits = 32
+        if arr.element_type is not None and arr.element_type.base_type is not None:
+            _eb = {
+                DataType.SINT: 32, DataType.UINT: 32,
+                DataType.SLONG: 64, DataType.ULONG: 64,
+                DataType.BYTE: 8,  DataType.CHAR: 8,
+                DataType.BOOL: 1,
+            }
+            elem_bits = _eb.get(arr.element_type.base_type, 32)
+
+        # Total bit width of the target type
+        _total_bits = {
+            DataType.SINT: 32, DataType.UINT: 32,
+            DataType.SLONG: 64, DataType.ULONG: 64,
+            DataType.BYTE: 8, DataType.CHAR: 8,
+        }
+        total_bits = _total_bits.get(
+            target_type_spec.base_type if target_type_spec else DataType.SLONG, 64
+        )
+        n = len(arr.elements)
+        if n == 0:
+            self._emit(_instr(Op.PUSH, Val(target_ttag, 0)))
+            return
+
+        # Evaluate first element as the accumulator; it occupies the HIGH bits.
+        # Element i shifts left by (n - 1 - i) * elem_bits.
+        self._visit_expr(arr.elements[0])
+        shift0 = (n - 1) * elem_bits
+        if shift0 > 0:
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, shift0)))
+            self._emit(_instr(Op.SHL))
+        acc_slot = self._alloc_local('__pack_acc__')
+        self._emit(_instr(Op.LOCAL_SET, acc_slot))
+
+        for i, elem in enumerate(arr.elements[1:], start=1):
+            shift = (n - 1 - i) * elem_bits
+            self._visit_expr(elem)
+            if shift > 0:
+                self._emit(_instr(Op.PUSH, Val(TTag.INT, shift)))
+                self._emit(_instr(Op.SHL))
+            self._emit(_instr(Op.LOCAL_GET, acc_slot))
+            self._emit(_instr(Op.BOR))
+            self._emit(_instr(Op.LOCAL_SET, acc_slot))
+
+        self._emit(_instr(Op.LOCAL_GET, acc_slot))
+        self._emit(_instr(Op.CAST, target_ttag))
+
+    def _visit_fp_decl(self, node: FunctionPointerDeclaration):
+        """
+        Function pointer declaration: def{}* pb() -> void = @bar;
+        @bar stores Val(TTag.BYTES, func_name) in a named slot, then
+        pb holds Val(TTag.PTR, that_slot) — same as @x for variables.
+        """
+        fp_slot = self._alloc_local(node.name)
+        if node.initializer is not None:
+            self._visit_expr(node.initializer)
+        else:
+            self._emit(_instr(Op.PUSH, Val(TTag.PTR, 0)))
+        self._emit(_instr(Op.LOCAL_SET, fp_slot))
+        self._local_types[node.name] = '__funcptr__'
+
     def _visit_function_def(self, node: FunctionDef):
         """
         Compile a comptime function definition and store its bytecode in
@@ -655,9 +1139,269 @@ class FVMCodegen:
             from fvm import TTag as _TTag
             fn_cg._emit(_instr(Op.PUSH, Val(_TTag.VOID, 0)))
             fn_cg._emit(_instr(Op.RET))
+        # Mark the original node so the LLVM codegen skips any template
+        # instantiation that deep-copies it (fparser propagates this flag).
+        node._is_comptime_only = True
         # Propagate nested function definitions upward
         self.compiled_functions.update(fn_cg.compiled_functions)
         self.compiled_functions[node.name] = fn_cg._instructions
+        # Mark the original node so the LLVM codegen skips it unconditionally,
+        # regardless of when _comptime_functions is populated.
+        node._is_comptime_only = True
+
+    def _visit_type_func_def(self, node: TypeFuncDef):
+        """
+        Compile a comptime type function definition.
+        Registered under TypeFuncDef.mangle(type_name, func_name) so that
+        TypeFuncCall sites can find it by the same mangled name.
+        The implicit receiver parameter '_' occupies slot 0.
+        """
+        fn_cg = FVMCodegen()
+        # Slot 0: implicit receiver '_'
+        fn_cg._alloc_local('_')
+        # Explicit parameters follow
+        for param in node.parameters:
+            fn_cg._alloc_local(param.name)
+        body_stmts = (
+            node.body.statements if isinstance(node.body, Block) else [node.body]
+        )
+        fn_cg._visit_body(body_stmts)
+        if not fn_cg._instructions or fn_cg._instructions[-1].op != Op.RET:
+            from fvm import TTag as _TTag
+            fn_cg._emit(_instr(Op.PUSH, Val(_TTag.VOID, 0)))
+            fn_cg._emit(_instr(Op.RET))
+        self.compiled_functions.update(fn_cg.compiled_functions)
+        mangled = TypeFuncDef.mangle(node.type_name, node.func_name)
+        self.compiled_functions[mangled] = fn_cg._instructions
+        node._is_comptime_only = True
+
+    def _type_bit_width(self, ts) -> int:
+        """
+        Compute the bit width of a TypeSystem without llvmlite.
+        Flux structs are tightly packed — no padding.
+        """
+        from ftypesys import DataType as _DT
+        if ts is None:
+            return 32
+        if ts.bit_width is not None:
+            return ts.bit_width
+        if ts.is_pointer:
+            return 64
+        if ts.is_array and ts.array_size and ts.base_type is not None:
+            elem_bits = self._type_bit_width_base(ts.base_type, ts)
+            return elem_bits * ts.array_size
+        if ts.base_type is not None:
+            return self._type_bit_width_base(ts.base_type, ts)
+        if ts.custom_typename is not None:
+            # Nested struct — look up in our own registry
+            layout = self._struct_layouts.get(ts.custom_typename)
+            if layout is not None:
+                return layout.total_size * 8
+        return 32
+
+    def _type_bit_width_base(self, base_type, ts=None) -> int:
+        from ftypesys import DataType as _DT
+        _map = {
+            _DT.SINT: 32, _DT.UINT: 32,
+            _DT.SLONG: 64, _DT.ULONG: 64,
+            _DT.FLOAT: 32, _DT.DOUBLE: 64,
+            _DT.BOOL: 1, _DT.BYTE: 8, _DT.CHAR: 8,
+            _DT.DATA: ts.bit_width if ts and ts.bit_width else 0,
+        }
+        return _map.get(base_type, 32)
+
+    def _type_ttag_from_ts(self, ts) -> TTag:
+        """Map a TypeSystem to the closest VM TTag."""
+        from ftypesys import DataType as _DT
+        if ts is None:
+            return TTag.INT
+        if ts.is_pointer:
+            return TTag.PTR
+        if ts.custom_typename is not None:
+            return TTag.STRUCT
+        if ts.base_type is not None:
+            return _datatype_to_ttag(ts.base_type)
+        return TTag.INT
+
+    def _visit_struct_def(self, node: StructDef, prefix: str = ''):
+        """
+        Compute a StructLayout for this struct and register it.
+        Flux structs are tightly packed — zero padding between fields.
+        Handles nested structs recursively.
+        """
+        from fvm import StructLayout as _SL
+        from ftypesys import DataType as _DT
+
+        full_name = f'{prefix}__{node.name}' if prefix else node.name
+
+        # Recurse into nested structs first so their layouts are available
+        for nested in node.nested_structs:
+            self._visit_struct_def(nested, prefix=full_name)
+
+        fields = []
+        byte_offset = 0
+        for member in node.members:
+            bits = self._type_bit_width(member.type_spec)
+            byte_size = max(1, (bits + 7) // 8)
+            ttag = self._type_ttag_from_ts(member.type_spec)
+            fields.append((member.name, ttag, byte_offset, byte_size))
+            byte_offset += byte_size
+
+        layout = _SL(name=full_name, fields=fields, total_size=byte_offset)
+        self._struct_layouts[full_name] = layout
+        # Also register under bare name for convenience
+        if prefix:
+            self._struct_layouts[node.name] = layout
+        node._is_comptime_only = True
+
+    def _visit_struct_instance(self, node: StructInstance) -> bool:
+        """
+        Push a new struct instance onto the VM heap.
+        If field_values are present, set them.
+        """
+        self._emit(_instr(Op.STRUCT_NEW, node.struct_name))
+        if node.field_values:
+            # Duplicate ptr, set each field
+            tmp_slot = self._alloc_local('__struct_tmp__')
+            self._emit(_instr(Op.LOCAL_SET, tmp_slot))
+            for fname, fexpr in node.field_values.items():
+                self._emit(_instr(Op.LOCAL_GET, tmp_slot))
+                self._visit_expr(fexpr)
+                self._emit(_instr(Op.FIELD_SET, fname))
+            self._emit(_instr(Op.LOCAL_GET, tmp_slot))
+        return True
+
+    def _visit_struct_literal(self, node: StructLiteral) -> bool:
+        """
+        Struct literal {field=val, ...} — requires struct_type to be set.
+        """
+        if node.struct_type is None:
+            raise FVMCodegenError(
+                'fvmcodegen: StructLiteral has no struct_type in comptime', node)
+        self._emit(_instr(Op.STRUCT_NEW, node.struct_type))
+        tmp_slot = self._alloc_local('__struct_lit_tmp__')
+        self._emit(_instr(Op.LOCAL_SET, tmp_slot))
+        # Named fields
+        for fname, fexpr in (node.field_values or {}).items():
+            self._emit(_instr(Op.LOCAL_GET, tmp_slot))
+            self._visit_expr(fexpr)
+            self._emit(_instr(Op.FIELD_SET, fname))
+        # Positional fields — need the field order from layout
+        if node.positional_values:
+            layout = self._struct_layouts.get(node.struct_type)
+            if layout:
+                for (fname, _, _, _), fexpr in zip(layout.fields, node.positional_values):
+                    self._emit(_instr(Op.LOCAL_GET, tmp_slot))
+                    self._visit_expr(fexpr)
+                    self._emit(_instr(Op.FIELD_SET, fname))
+        self._emit(_instr(Op.LOCAL_GET, tmp_slot))
+        return True
+
+    def _visit_member_access(self, node: MemberAccess) -> bool:
+        """
+        obj.member — struct field access or namespace path component.
+        """
+        # Try to resolve as a struct field access on a local variable
+        if isinstance(node.object, Identifier):
+            var_name = node.object.name
+            type_name = self._local_types.get(var_name)
+            if type_name is not None and type_name in self._struct_layouts:
+                self._visit_expr(node.object)
+                self._emit(_instr(Op.FIELD_GET, node.member))
+                return True
+            # Identifier not a known local — namespace path prefix, push nothing
+            if var_name not in self._locals:
+                return False
+        elif isinstance(node.object, MemberAccess):
+            # Nested: try inner first; if it produced a value, FIELD_GET the member
+            produced = self._visit_member_access(node.object)
+            if produced:
+                self._emit(_instr(Op.FIELD_GET, node.member))
+                return True
+            return False
+        # Generic: evaluate object and FIELD_GET
+        self._visit_expr(node.object)
+        self._emit(_instr(Op.FIELD_GET, node.member))
+        return True
+
+    def _visit_struct_field_access(self, node: StructFieldAccess) -> bool:
+        self._visit_expr(node.struct_instance)
+        self._emit(_instr(Op.FIELD_GET, node.field_name))
+        return True
+
+    def _visit_struct_field_assign(self, node: StructFieldAssign):
+        self._visit_expr(node.struct_instance)
+        self._visit_expr(node.value)
+        self._emit(_instr(Op.FIELD_SET, node.field_name))
+
+    def _visit_enum_def(self, node: EnumDef):
+        """
+        Enum definition: register each value as a comptime local integer.
+        e.g. enum MyEnum { Thing1, Thing2, Thing3 } ->
+             Thing1=0, Thing2=1, Thing3=2 as INT locals.
+        Also guards the LLVM codegen from visiting this node.
+        """
+        for name, value in node.values.items():
+            slot = self._alloc_local(name)
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, int(value))))
+            self._emit(_instr(Op.LOCAL_SET, slot))
+            self._local_types[name] = 'int'
+        node._is_comptime_only = True
+
+    def _visit_union_def(self, node: UnionDef):
+        """
+        Compute a StructLayout for a union.
+        All members share offset 0; total size is the largest member size.
+        Uses the same VM machinery as structs (STRUCT_NEW, FIELD_GET, FIELD_SET).
+        """
+        from fvm import StructLayout as _SL
+
+        fields = []
+        max_byte_size = 0
+        for member in node.members:
+            bits = self._type_bit_width(member.type_spec)
+            byte_size = max(1, (bits + 7) // 8)
+            ttag = self._type_ttag_from_ts(member.type_spec)
+            fields.append((member.name, ttag, 0, byte_size))  # all at offset 0
+            max_byte_size = max(max_byte_size, byte_size)
+
+        layout = _SL(name=node.name, fields=fields, total_size=max_byte_size)
+        self._struct_layouts[node.name] = layout
+        node._is_comptime_only = True
+
+    def _visit_namespace_def(self, node: NamespaceDef, prefix: str = ''):
+        """
+        Compile a comptime namespace definition.
+
+        Functions are registered under their fully-qualified mangled name
+        (e.g. A__foo for namespace A { def foo... }).  Nested namespaces
+        are recursed with the accumulated prefix.  Structs, objects, enums,
+        and unions are ignored — they have no runtime representation in the VM.
+        """
+        ns_name = f'{prefix}__{node.name}' if prefix else node.name
+        node._is_comptime_only = True
+
+        for func in node.functions:
+            if func is None:
+                continue
+            fn_cg = FVMCodegen(known_functions=self._known_functions)
+            for param in func.parameters:
+                fn_cg._alloc_local(param.name)
+            body_stmts = (
+                func.body.statements if isinstance(func.body, Block) else [func.body]
+            )
+            fn_cg._visit_body(body_stmts)
+            if not fn_cg._instructions or fn_cg._instructions[-1].op != Op.RET:
+                from fvm import TTag as _TTag
+                fn_cg._emit(_instr(Op.PUSH, Val(_TTag.VOID, 0)))
+                fn_cg._emit(_instr(Op.RET))
+            self.compiled_functions.update(fn_cg.compiled_functions)
+            mangled = f'{ns_name}__{func.name}'
+            self.compiled_functions[mangled] = fn_cg._instructions
+            func._is_comptime_only = True
+
+        for nested in node.nested_namespaces:
+            self._visit_namespace_def(nested, prefix=ns_name)
 
     def _visit_switch(self, node: SwitchStatement):
         """
@@ -792,11 +1536,72 @@ class FVMCodegen:
         for idx in continue_patches:
             self._patch_at(idx, Op.JMP, loop_start)
 
+    def _visit_label(self, node: LabelStatement):
+        """Record the current IP as the target for this label name."""
+        self._labels[node.name] = self._current_ip()
+        # Resolve any forward gotos that were waiting for this label
+        remaining = []
+        for idx, target in self._goto_patches:
+            if target == node.name:
+                self._patch_at(idx, Op.JMP, self._current_ip())
+            else:
+                remaining.append((idx, target))
+        self._goto_patches = remaining
+
+    def _visit_goto(self, node: GotoStatement):
+        """Emit a JMP to the target label, patching later if forward reference."""
+        if node.target in self._labels:
+            self._emit(_instr(Op.JMP, self._labels[node.target]))
+        else:
+            patch_idx = self._emit(_instr(Op.JMP, 0))
+            self._goto_patches.append((patch_idx, node.target))
+
+    def _visit_jump(self, node: JumpStatement):
+        """
+        jump expr — low-level jump to an address expression.
+        In the VM context, if the expression is a label address we resolve it;
+        otherwise treat as a goto to whatever the expression evaluates to.
+        """
+        from fast import Identifier as _Id
+        if isinstance(node.target, _Id) and node.target.name in self._labels:
+            self._emit(_instr(Op.JMP, self._labels[node.target.name]))
+        elif isinstance(node.target, _Id):
+            patch_idx = self._emit(_instr(Op.JMP, 0))
+            self._goto_patches.append((patch_idx, node.target.name))
+        else:
+            # Dynamic address — evaluate and jump (best-effort)
+            self._visit_expr(node.target)
+            # No direct indirect-jump in VM; fall through silently
+
+    def _resolve_goto_patches(self):
+        """Resolve any remaining goto patches after a body is fully emitted."""
+        for idx, target in self._goto_patches:
+            if target in self._labels:
+                self._patch_at(idx, Op.JMP, self._labels[target])
+        self._goto_patches = [(i, t) for i, t in self._goto_patches
+                              if t not in self._labels]
+
     def _visit_do(self, node: DoLoop):
-        """Plain do loop: body executes once."""
-        self._visit_body(
+        """Plain do loop: infinite loop, only exits via break."""
+        loop_start = self._current_ip()
+        break_patches: List[int] = []
+        continue_patches: List[int] = []
+        body_stmts = (
             node.body.statements if isinstance(node.body, Block) else [node.body]
         )
+        for stmt in body_stmts:
+            if stmt is None:
+                continue
+            if type(stmt) is BreakStatement:
+                break_patches.append(self._emit(_instr(Op.JMP, 0)))
+            elif type(stmt) is ContinueStatement:
+                continue_patches.append(self._emit(_instr(Op.JMP, loop_start)))
+            else:
+                self._visit_stmt(stmt)
+        self._emit(_instr(Op.JMP, loop_start))
+        after_loop = self._current_ip()
+        for idx in break_patches:
+            self._patch_at(idx, Op.JMP, after_loop)
 
     def _visit_do_while(self, node: DoWhileLoop):
         loop_start = self._current_ip()

@@ -4,7 +4,7 @@ using standard::io::console;
 
 byte* z = "f";
 
-constra MyCS(A,B)
+constraint MyCS(A,B)
 {
     A ~= B
 };

@@ -2560,11 +2560,17 @@ class FluxParser:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
                                    is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
                                    is_recursive, is_inline)
+            if self._in_comptime > 0:
+                func_def._is_comptime_only = True
             self._templates.register(name, 'function', template_params, func_def,
                                      constraints=_func_constraints or {},
                                      relational=_func_relations or [],
                                      defaults=_func_defaults or {},
                                      no_default=_func_no_default or set())
+            # Comptime template functions must be returned so the VM codegen sees
+            # the definition and compiles it into compiled_functions.
+            if self._in_comptime > 0:
+                return func_def
             return None
 
         return FunctionDef(name, real_parameters, return_type, body, is_const,
@@ -3060,6 +3066,9 @@ class FluxParser:
         sd.set_location(tok.line, tok.column)
         if template_params:
             self._templates.register(name, 'struct', template_params, sd)
+            if self._in_comptime > 0:
+                sd._is_comptime_only = True
+                return sd
             return None  # no immediate emission; instantiated on use
         return sd
     
@@ -6625,6 +6634,8 @@ class FluxParser:
             concrete = self._substitute_template(template_sd, mapping)
             concrete.name = mangled
             concrete.template_params = []
+            if getattr(template_sd, '_is_comptime_only', False):
+                concrete._is_comptime_only = True
             self._template_struct_instances.append(concrete)
         return mangled
 
@@ -6916,6 +6927,8 @@ class FluxParser:
             # Deep-copy + substitute
             concrete_func = self._substitute_template(template_func, mapping)
             concrete_func.name = func_name  # Keep original name; normal mangling handles uniqueness
+            if getattr(template_func, '_is_comptime_only', False):
+                concrete_func._is_comptime_only = True
             concrete_func.no_mangle = False
             # Tag with the originating namespace so the codegen can restore context
             # when emitting the body (template instances are emitted at top level,

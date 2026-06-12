@@ -248,6 +248,7 @@ class TokenType(Enum):
     COMMA = auto()          # ,
     DOT = auto()            # .
     BACKSLASH = auto()      # \
+    TAG = auto()            # #
 
     # Special
     EOF = auto()
@@ -363,7 +364,8 @@ single_char_tokens = {
     '~': TokenType.TIE,
     '$': TokenType.STRINGIFY,
     '\\': TokenType.BACKSLASH,
-    '`': TokenType.BACKTICK
+    '`': TokenType.BACKTICK,
+    '#': TokenType.TAG
 }
 
 _TOKEN_TYPE_TO_STR: dict = {

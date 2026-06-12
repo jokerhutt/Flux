@@ -283,6 +283,10 @@ class CodegenVisitor:
         # Comptime function bytecodes that persist across all comptime blocks
         # in the current compilation unit: name -> List[Instr]
         self._comptime_functions: dict = {}
+        # Struct layouts computed during comptime: name -> StructLayout
+        self._comptime_struct_layouts: dict = {}
+        # Comptime locals persisted across blocks: name -> Val
+        self._comptime_locals: dict = {}
 
     # ------------------------------------------------------------------
     # Core dispatcher
@@ -3488,6 +3492,8 @@ class CodegenVisitor:
         receives ``_`` as its first (implicit) parameter, whose type is the
         receiver type.  All other parameters follow in declaration order.
         """
+        if getattr(node, '_is_comptime_only', False):
+            return None
         from fast import Parameter, FunctionDef, Block, FStringLiteral as _FSL
         # Resolve f-string func names at compile time, same as visit_FunctionDef.
         if isinstance(node.func_name, _FSL):
@@ -5411,6 +5417,11 @@ class CodegenVisitor:
         return None
 
     def visit_FunctionDef(self, node, builder, module):
+        # Functions defined inside comptime blocks belong only to the VM;
+        # they must not be emitted as LLVM IR.
+        if (getattr(node, '_is_comptime_only', False) or
+                getattr(node, 'name', None) in self._comptime_functions):
+            return None
         # Resolve f-string function names at compile time.
         # A plain string literal name (e.g. def "foo"()) is already resolved to a
         # str by the parser.  An f-string name (e.g. def f"{x} {y}"()) arrives as a
@@ -5677,6 +5688,8 @@ class CodegenVisitor:
             f"FunctionPointerAssignment has no codegen implementation", node, module)
 
     def visit_EnumDef(self, node, builder, module):
+        if getattr(node, '_is_comptime_only', False):
+            return None
         if not hasattr(module, '_enum_types'):
             module._enum_types = {}
 
@@ -5715,6 +5728,8 @@ class CodegenVisitor:
                     type_spec=None, llvm_type=ir.IntType(32), llvm_value=global_const)
 
     def visit_UnionDef(self, node, builder, module):
+        if getattr(node, '_is_comptime_only', False):
+            return None
         member_types = []
         member_names = []
         max_size = 0
@@ -5802,6 +5817,8 @@ class CodegenVisitor:
         return union_type
 
     def visit_StructDef(self, node, builder, module):
+        if getattr(node, '_is_comptime_only', False):
+            return None
         StructTypeHandler.initialize_struct_storage(module)
 
         if node.name in module._struct_types:
@@ -6285,6 +6302,8 @@ class CodegenVisitor:
         return
 
     def visit_NamespaceDef(self, node, builder, module):
+        if getattr(node, '_is_comptime_only', False):
+            return None
         if hasattr(module, '_excluded_namespaces'):
             if node.name in module._excluded_namespaces:
                 #print(f"[NAMESPACE] Skipping excluded namespace: {node.name}", file=sys.stdout)
@@ -7759,8 +7778,8 @@ class CodegenVisitor:
         from flexer import FluxLexer
         from fparser import FluxParser
 
-        # Build a captured scope from module-level integer constants
-        captured_scope: dict = {}
+        # Build a captured scope: module-level constants + previously persisted comptime locals
+        captured_scope: dict = dict(self._comptime_locals)
         if module is not None:
             for name, gv in module.globals.items():
                 try:
@@ -7772,11 +7791,14 @@ class CodegenVisitor:
                     pass
 
         # Compile comptime block to VM bytecode
-        cg = FVMCodegen()
+        cg = FVMCodegen(known_functions=self._comptime_functions,
+                        known_struct_layouts=self._comptime_struct_layouts)
         try:
             bc = cg.compile(node, captured_scope)
         except Exception as e:
-            raise FluxCodegenError(f'comptime codegen failed: {e}', node, module)
+            from fvmcodegen import FVMCodegenError as _FVMErr
+            err_node = e.source_node if isinstance(e, _FVMErr) and e.source_node is not None else node
+            raise FluxCodegenError(f'comptime codegen failed: {e}', err_node, module)
 
         # Build struct layouts from module for VM struct access
         struct_layouts = {}
@@ -7806,15 +7828,30 @@ class CodegenVisitor:
                     pass
 
         # Execute
-        vm = FluxVM(struct_layouts=struct_layouts)
+        vm = FluxVM(struct_layouts={**struct_layouts, **cg._struct_layouts})
         # Register all comptime functions: previously accumulated + newly compiled
         self._comptime_functions.update(cg.compiled_functions)
+        self._comptime_struct_layouts.update(cg._struct_layouts)
         for fn_name, fn_instrs in self._comptime_functions.items():
             vm.register_function(fn_name, fn_instrs)
         try:
             vm.execute(bc.instructions, bc.local_count)
         except Exception as e:
             raise FluxCodegenError(f'comptime execution failed: {e}', node, module)
+
+        # Persist locals for subsequent comptime blocks (scalars only — PTR values
+        # point into the VM heap which is not shared between blocks)
+        from fvm import TTag as _TTag
+        _scalar_tags = {_TTag.INT, _TTag.UINT, _TTag.LONG, _TTag.ULONG,
+                        _TTag.FLOAT, _TTag.DOUBLE, _TTag.BOOL, _TTag.BYTE,
+                        _TTag.CHAR, _TTag.DATA}
+        for name, slot in cg._locals.items():
+            if name.startswith('__'):
+                continue  # skip internal temporaries
+            if slot < len(vm.last_locals) and vm.last_locals[slot] is not None:
+                val = vm.last_locals[slot]
+                if val.tag in _scalar_tags:
+                    self._comptime_locals[name] = val
 
         # Process emissions
         for entry in vm.emit_results:

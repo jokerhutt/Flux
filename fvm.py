@@ -75,12 +75,15 @@ class Op(Enum):
     JNF         = auto()   # JNF <addr>  - jump if falsy
     JTABLE      = auto()   # JTABLE <default_addr> [addr0, addr1, ...] - jump table dispatch
     CALL        = auto()   # CALL <name> <argc>
+    CALL_PTR    = auto()   # CALL_PTR <argc> - pop BYTES(func_name), call it
     RET         = auto()
     HALT        = auto()
 
     # Locals
-    LOCAL_GET   = auto()   # LOCAL_GET <slot>
-    LOCAL_SET   = auto()   # LOCAL_SET <slot>
+    LOCAL_GET      = auto()   # LOCAL_GET <slot>
+    LOCAL_SET      = auto()   # LOCAL_SET <slot>
+    LOCAL_DEREF    = auto()   # LOCAL_DEREF    - pop PTR(slot), push locals[slot]
+    LOCAL_DEREF_SET = auto()  # LOCAL_DEREF_SET - pop val, pop PTR(slot), locals[slot]=val
 
     # Memory
     ALLOC       = auto()   # ALLOC - pop size, push pointer
@@ -92,6 +95,7 @@ class Op(Enum):
     # Structs / arrays
     STRUCT_NEW  = auto()   # STRUCT_NEW <type_name>
     ARRAY_NEW   = auto()   # ARRAY_NEW <type_name> <count>
+    ARRAY_LEN   = auto()   # ARRAY_LEN  - pop array PTR, push element count
     FIELD_GET   = auto()   # FIELD_GET <field_name>
     FIELD_SET   = auto()   # FIELD_SET <field_name>
     INDEX_GET   = auto()
@@ -352,6 +356,8 @@ class FluxVM:
         self._functions: Dict[str, List[Instr]]  = {}
         # Pending LLVM emission results accumulated during execute()
         self.emit_results: List[Any] = []
+        # Locals snapshot from the most recently executed top-level block
+        self.last_locals: List[Any] = []
 
     # ------------------------------------------------------------------
     # Public API
@@ -449,12 +455,18 @@ class FluxVM:
         elif op == Op.JNF:        self._jif(o[0], truthy=False)
         elif op == Op.JTABLE:     self._op_jtable(o[0], o[1])
         elif op == Op.CALL:       self._call(o[0], o[1])
+        elif op == Op.CALL_PTR:   self._call_ptr(o[0])
         elif op == Op.RET:        self._ret()
-        elif op == Op.HALT:       self.frames.clear()
+        elif op == Op.HALT:
+            if self.frames:
+                self.last_locals = list(self.frames[0].locals)
+            self.frames.clear()
 
         # Locals
-        elif op == Op.LOCAL_GET:  self._push(self.frames[-1].locals[o[0]])
-        elif op == Op.LOCAL_SET:  self.frames[-1].locals[o[0]] = self._pop()
+        elif op == Op.LOCAL_GET:      self._push(self.frames[-1].locals[o[0]])
+        elif op == Op.LOCAL_SET:      self.frames[-1].locals[o[0]] = self._pop()
+        elif op == Op.LOCAL_DEREF:    self._op_local_deref()
+        elif op == Op.LOCAL_DEREF_SET: self._op_local_deref_set()
 
         # Memory
         elif op == Op.ALLOC:      self._op_alloc()
@@ -466,6 +478,7 @@ class FluxVM:
         # Structs / arrays
         elif op == Op.STRUCT_NEW: self._op_struct_new(o[0])
         elif op == Op.ARRAY_NEW:  self._op_array_new(o[0], o[1])
+        elif op == Op.ARRAY_LEN:  self._op_array_len()
         elif op == Op.FIELD_GET:  self._op_field_get(o[0])
         elif op == Op.FIELD_SET:  self._op_field_set(o[0])
         elif op == Op.INDEX_GET:  self._op_index_get()
@@ -586,6 +599,14 @@ class FluxVM:
         )
         self.frames.append(frame)
 
+    def _call_ptr(self, argc: int):
+        """Pop BYTES(func_name) then call that function with argc args."""
+        name_val = self._pop()
+        name = (name_val.data.decode('utf-8')
+                if isinstance(name_val.data, (bytes, bytearray))
+                else str(name_val.data))
+        self._call(name, argc)
+
     def _ret(self):
         frame = self.frames.pop()
         # Return value stays on the stack (already pushed by callee)
@@ -593,6 +614,22 @@ class FluxVM:
     # ------------------------------------------------------------------
     # Stack ops
     # ------------------------------------------------------------------
+
+    def _op_local_deref(self):
+        """Pop a PTR(slot) and push the value at that local slot."""
+        ptr_val = self._pop()
+        slot = int(ptr_val.data)
+        val = self.frames[-1].locals[slot]
+        if val is None:
+            val = Val(TTag.INT, 0)
+        self._push(val)
+
+    def _op_local_deref_set(self):
+        """Pop val and PTR(slot), store val into locals[slot]."""
+        val     = self._pop()
+        ptr_val = self._pop()
+        slot    = int(ptr_val.data)
+        self.frames[-1].locals[slot] = val
 
     def _op_rot(self):
         # a b c -> b c a
@@ -730,6 +767,11 @@ class FluxVM:
         ptr    = self.heap.alloc(layout.total_size, TTag.STRUCT)
         self.heap._tags[ptr] = TTag.STRUCT
         self._push(Val(TTag.PTR, ptr, meta={'struct_type': type_name}))
+
+    def _op_array_len(self):
+        ptr_val = self._pop()
+        count = ptr_val.meta.get('count', 0)
+        self._push(Val(TTag.INT, count))
 
     def _op_array_new(self, type_name: str, count: int):
         elem_size = self._type_byte_size(type_name)
@@ -915,7 +957,10 @@ class FluxVM:
 
     def _op_compiler_print(self):
         val = self._pop()
-        text = self._read_vm_string(val)
+        if val.tag in (TTag.BYTES, TTag.PTR, TTag.CHAR) or isinstance(val.data, (str, bytes, bytearray)):
+            text = self._read_vm_string(val)
+        else:
+            text = str(val.data)
         sys.stdout.write(text)
         sys.stdout.flush()
 
@@ -1025,8 +1070,18 @@ class FluxVM:
         self._push(Val(TTag.INT, idx))
 
     def _op_int_to_str(self):
-        val    = self._pop()
-        result = str(int(val.data)).encode('utf-8')
+        val = self._pop()
+        if val.tag in (TTag.BYTES,) or isinstance(val.data, (bytes, bytearray)):
+            result = val.data if isinstance(val.data, (bytes, bytearray)) else val.data.encode('utf-8')
+        elif val.tag == TTag.PTR:
+            text = self._read_vm_string(val)
+            result = text.encode('utf-8')
+        elif isinstance(val.data, str):
+            result = val.data.encode('utf-8')
+        elif val.tag == TTag.CHAR:
+            result = chr(int(val.data)).encode('utf-8')
+        else:
+            result = str(int(val.data)).encode('utf-8')
         ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
         self.heap.write(ptr, result + b'\x00')
         self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
@@ -1048,6 +1103,9 @@ class FluxVM:
         val = self._pop()
         src = val.tag
         d   = val.data
+        # Coerce single-character strings to their ordinal for numeric casts
+        if isinstance(d, str) and len(d) == 1:
+            d = ord(d)
         if target in (TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG, TTag.BYTE, TTag.CHAR, TTag.DATA):
             self._push(Val(target, int(d)))
         elif target == TTag.FLOAT:
@@ -1244,6 +1302,8 @@ class FluxVM:
     def _read_vm_string(self, val: Val) -> str:
         if isinstance(val.data, str):
             return val.data
+        if val.tag == TTag.CHAR:
+            return chr(int(val.data))
         if val.tag == TTag.BYTES and isinstance(val.data, (bytes, bytearray)):
             return val.data.decode('utf-8', errors='replace')
         if val.tag == TTag.PTR:
