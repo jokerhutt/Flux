@@ -21,9 +21,10 @@ from fast import (
     VariableDeclaration,
     Assignment, CompoundAssignment,
     BinaryOp, UnaryOp,
-    Literal, Identifier, StringLiteral,
+    Literal, Identifier, StringLiteral, FStringLiteral,
     FunctionCall, MethodCall, MemberAccess,
     ArrayLiteral,
+    AddressOf, CastExpression, TypeConvertExpression,
     IfStatement,
     WhileLoop, DoLoop, DoWhileLoop,
     ForLoop,
@@ -32,6 +33,8 @@ from fast import (
     ExpressionStatement,
     Block,
     ArrayAccess,
+    SwitchStatement, Case,
+    FunctionDef, FunctionDefStatement,
 )
 from ftypesys import DataType, Operator
 
@@ -43,9 +46,9 @@ from ftypesys import DataType, Operator
 def _datatype_to_ttag(dt: DataType) -> TTag:
     """Map a Flux DataType to the closest VM TTag."""
     _map = {
-        DataType.INT:    TTag.INT,
+        DataType.SINT:    TTag.INT,
         DataType.UINT:   TTag.UINT,
-        DataType.LONG:   TTag.LONG,
+        DataType.SLONG:   TTag.LONG,
         DataType.ULONG:  TTag.ULONG,
         DataType.FLOAT:  TTag.FLOAT,
         DataType.DOUBLE: TTag.DOUBLE,
@@ -92,6 +95,8 @@ class FVMCodegen:
         self._local_count: int = 0
         # Loop-level break/continue patch lists (list of instruction indices)
         self._loop_patches: List[Tuple[int, str]] = []
+        # Compiled comptime functions: name -> List[Instr]
+        self.compiled_functions: Dict[str, List[Instr]] = {}
 
     # ------------------------------------------------------------------
     # Public API
@@ -173,6 +178,9 @@ class FVMCodegen:
         elif t is BreakStatement:        self._visit_break(node)
         elif t is ContinueStatement:     self._visit_continue(node)
         elif t is Block:                 self._visit_body(node.statements)
+        elif t is SwitchStatement:       self._visit_switch(node)
+        elif t is FunctionDef:           self._visit_function_def(node)
+        elif t is FunctionDefStatement:  self._visit_function_def(node.function_def)
         elif t is EmitFlux:              self._visit_emitflux(node)
         elif t is ComptimeBlock:         self._visit_body(node.body)
         elif isinstance(node, list):     self._visit_body(node)
@@ -192,7 +200,7 @@ class FVMCodegen:
         else:
             # Zero-initialise (all Flux variables are zero-init by default)
             ttag = _datatype_to_ttag(
-                node.type_spec.base_type if node.type_spec else DataType.INT
+                node.type_spec.base_type if node.type_spec else DataType.SINT
             )
             self._emit(_instr(Op.PUSH, Val(ttag, 0)))
         self._emit(_instr(Op.LOCAL_SET, slot))
@@ -269,6 +277,7 @@ class FVMCodegen:
         t = type(node)
         if t is Literal:               return self._visit_literal(node)
         elif t is StringLiteral:       return self._visit_string_literal(node)
+        elif t is FStringLiteral:      return self._visit_fstring_literal(node)
         elif t is ArrayLiteral:        return self._visit_array_literal(node)
         elif t is Identifier:          return self._visit_identifier(node)
         elif t is BinaryOp:            return self._visit_binary_op(node)
@@ -276,6 +285,9 @@ class FVMCodegen:
         elif t is FunctionCall:        return self._visit_function_call(node)
         elif t is MethodCall:          return self._visit_method_call(node)
         elif t is ArrayAccess:         return self._visit_array_access(node)
+        elif t is AddressOf:           return self._visit_address_of(node)
+        elif t is CastExpression:      return self._visit_cast(node)
+        elif t is TypeConvertExpression: return self._visit_cast(node)
         else:
             raise NotImplementedError(
                 f'fvmcodegen: unsupported expression in comptime: {type(node).__name__}'
@@ -298,6 +310,40 @@ class FVMCodegen:
 
     def _visit_string_literal(self, node: StringLiteral):
         self._emit(_instr(Op.PUSH, Val(TTag.BYTES, node.value.encode('utf-8'))))
+        return True
+
+    def _visit_fstring_literal(self, node: FStringLiteral) -> bool:
+        """
+        f-string: each part is either a plain str or an Expression.
+        Strategy: push each part as a BYTES value (converting expressions via
+        INT_TO_STR), then STR_CAT them pairwise into a single string.
+        An empty f-string pushes an empty BYTES value.
+        """
+        parts = node.parts
+        if not parts:
+            self._emit(_instr(Op.PUSH, Val(TTag.BYTES, b'')))
+            return True
+
+        # Strip f" prefix from first string part and closing " from last string part
+        # when parse_f_string was called from primary_expression without pre-stripping.
+        if parts and isinstance(parts[0], str) and parts[0].startswith('f"'):
+            parts = list(parts)
+            parts[0] = parts[0][2:]  # strip f"
+        if parts and isinstance(parts[-1], str) and parts[-1].endswith('"'):
+            parts = list(parts)
+            parts[-1] = parts[-1][:-1]  # strip closing "
+
+        def _emit_part(part):
+            if isinstance(part, str):
+                self._emit(_instr(Op.PUSH, Val(TTag.BYTES, part.encode('utf-8'))))
+            else:
+                self._visit_expr(part)
+                self._emit(_instr(Op.INT_TO_STR))
+
+        _emit_part(parts[0])
+        for part in parts[1:]:
+            _emit_part(part)
+            self._emit(_instr(Op.STR_CAT))
         return True
 
     def _visit_array_literal(self, node: ArrayLiteral):
@@ -425,6 +471,51 @@ class FVMCodegen:
         self._emit(_instr(vm_op))
         return True
 
+    def _visit_address_of(self, node: AddressOf) -> bool:
+        """
+        @x in comptime: push Val(TTag.PTR, slot_index).
+        The slot index serves as the VM-level pointer to the local variable.
+        Only simple identifier operands are supported.
+        """
+        if not isinstance(node.expression, Identifier):
+            raise NotImplementedError(
+                'fvmcodegen: address-of only supported on simple identifiers in comptime'
+            )
+        name = node.expression.name
+        if name not in self._locals:
+            raise NameError(f'fvmcodegen: undefined comptime variable {name!r}')
+        slot = self._locals[name]
+        self._emit(_instr(Op.PUSH, Val(TTag.PTR, slot)))
+        return True
+
+    def _visit_cast(self, node) -> bool:
+        """
+        Type cast / type conversion expression: ulong(x), int(y), float(z), etc.
+        Evaluates the inner expression then emits a CAST opcode to coerce the
+        top-of-stack value to the target TTag.
+        """
+        self._visit_expr(node.expression)
+        from ftypesys import DataType as _DT
+        _dt_to_ttag = {
+            _DT.SINT:   TTag.INT,
+            _DT.UINT:   TTag.UINT,
+            _DT.SLONG:  TTag.LONG,
+            _DT.ULONG:  TTag.ULONG,
+            _DT.FLOAT:  TTag.FLOAT,
+            _DT.DOUBLE: TTag.DOUBLE,
+            _DT.BOOL:   TTag.BOOL,
+            _DT.BYTE:   TTag.BYTE,
+            _DT.CHAR:   TTag.CHAR,
+        }
+        ts = node.target_type
+        if ts.base_type is not None and ts.base_type in _dt_to_ttag:
+            target_ttag = _dt_to_ttag[ts.base_type]
+        else:
+            # Pointer cast or unknown — treat as PTR
+            target_ttag = TTag.PTR
+        self._emit(_instr(Op.CAST, target_ttag))
+        return True
+
     def _flatten_dotted_name(self, node) -> Optional[str]:
         """
         Flatten a chain of MethodCall / MemberAccess / Identifier nodes into a
@@ -542,6 +633,95 @@ class FVMCodegen:
         end_ip = self._current_ip()
         for idx in end_patches:
             self._patch_at(idx, Op.JMP, end_ip)
+
+    def _visit_function_def(self, node: FunctionDef):
+        """
+        Compile a comptime function definition and store its bytecode in
+        self.compiled_functions so the caller (visit_ComptimeBlock in fcodegen.py)
+        can register it with the VM before execute().
+        Parameters are pre-loaded into local slots 0..N-1 by the VM _call() mechanism.
+        """
+        fn_cg = FVMCodegen()
+        # Allocate a slot for each parameter so LOCAL_GET/SET work by name
+        for param in node.parameters:
+            fn_cg._alloc_local(param.name)
+        # Compile the body
+        body_stmts = (
+            node.body.statements if isinstance(node.body, Block) else [node.body]
+        )
+        fn_cg._visit_body(body_stmts)
+        # Ensure every path ends with a RET
+        if not fn_cg._instructions or fn_cg._instructions[-1].op != Op.RET:
+            from fvm import TTag as _TTag
+            fn_cg._emit(_instr(Op.PUSH, Val(_TTag.VOID, 0)))
+            fn_cg._emit(_instr(Op.RET))
+        # Propagate nested function definitions upward
+        self.compiled_functions.update(fn_cg.compiled_functions)
+        self.compiled_functions[node.name] = fn_cg._instructions
+
+    def _visit_switch(self, node: SwitchStatement):
+        """
+        Compile a switch statement.
+
+        Strategy: evaluate the subject once into a temp slot, then for each
+        non-default case emit CMP_EQ + JNF to skip the body.  The default
+        case (Case.value is None) is emitted last and always falls through.
+        break inside a case body jumps past the entire switch.
+        """
+        # Evaluate subject expression and store in a temp local
+        self._visit_expr(node.expression)
+        subject_slot = self._alloc_local('__switch_subject__')
+        self._emit(_instr(Op.LOCAL_SET, subject_slot))
+
+        break_patches: List[int] = []
+        default_case: Optional[Case] = None
+
+        for case in node.cases:
+            if case.value is None:
+                # defer default to end
+                default_case = case
+                continue
+
+            # Push subject and case value, compare
+            self._emit(_instr(Op.LOCAL_GET, subject_slot))
+            self._visit_expr(case.value)
+            self._emit(_instr(Op.CMP_EQ))
+            skip_patch = self._emit(_instr(Op.JNF, 0))
+
+            # Emit case body; intercept break
+            body_stmts = (
+                case.body.statements if isinstance(case.body, Block) else [case.body]
+            )
+            for stmt in body_stmts:
+                if stmt is None:
+                    continue
+                if type(stmt) is BreakStatement:
+                    break_patches.append(self._emit(_instr(Op.JMP, 0)))
+                else:
+                    self._visit_stmt(stmt)
+
+            # Jump past the switch after a matched (non-breaking) case body
+            break_patches.append(self._emit(_instr(Op.JMP, 0)))
+            self._patch_at(skip_patch, Op.JNF, self._current_ip())
+
+        # Emit default case body if present
+        if default_case is not None:
+            body_stmts = (
+                default_case.body.statements
+                if isinstance(default_case.body, Block)
+                else [default_case.body]
+            )
+            for stmt in body_stmts:
+                if stmt is None:
+                    continue
+                if type(stmt) is BreakStatement:
+                    break_patches.append(self._emit(_instr(Op.JMP, 0)))
+                else:
+                    self._visit_stmt(stmt)
+
+        after_switch = self._current_ip()
+        for idx in break_patches:
+            self._patch_at(idx, Op.JMP, after_switch)
 
     def _visit_for(self, node: ForLoop):
         if node.init is not None:

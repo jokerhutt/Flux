@@ -1,16 +1,6 @@
 #import <standard.fx>;
  
 using standard::io::console;
-
-comptime
-{
-    compiler.io.console.print("Hello from comptime!\n");
-
-    emitflux
-    {
-        def comp() -> void { println("Comptime generated func."); };
-    };
-};
  
 byte.my_byte_func<T>(T x) -> byte
 {
@@ -41,7 +31,5 @@ def main() -> int
     t = t.my_tstru_func(2);
     println([a, "\0"]);
     println([t.x, "\0"]);
-
-    comp();
     return 0;
 };

@@ -70,7 +70,7 @@ class TokenType(Enum):
     CATCH = auto()        # "        catch
     COMPT = auto()        # "        compt
     CONST = auto()        # "        const
-    CONSTRA = auto()      # "        constra
+    CONSTRAINT = auto()   # "        constraint
     CONTINUE = auto()     # "        continue
     CONTRACT = auto()     # "        contract
     DATA = auto()         # "        data
@@ -391,7 +391,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.CATCH:      'catch',
     TokenType.COMPT:      'compt',
     TokenType.CONST:      'const',
-    TokenType.CONSTRA:    'constra',
+    TokenType.CONSTRAINT: 'constraint',
     TokenType.CONTINUE:   'continue',
     TokenType.CONTRACT:   'contract',
     TokenType.DATA:       'data',
@@ -531,7 +531,7 @@ class FluxLexer:
             'char': TokenType.CHAR,
             'compt': TokenType.COMPT,
             'const': TokenType.CONST,
-            'constra': TokenType.CONSTRA,
+            'constraint': TokenType.CONSTRAINT,
             'continue': TokenType.CONTINUE,
             'contract': TokenType.CONTRACT,
             'data': TokenType.DATA,

@@ -26,6 +26,8 @@ class Op(Enum):
     POP         = auto()
     DUP         = auto()
     SWAP        = auto()
+    ROT         = auto()   # ROT  - a b c -> b c a
+    OVER        = auto()   # OVER - a b   -> a b a
 
     # Arithmetic
     ADD         = auto()
@@ -35,6 +37,10 @@ class Op(Enum):
     MOD         = auto()
     NEG         = auto()
     POW         = auto()
+    ABS         = auto()   # ABS  - absolute value
+    MIN         = auto()   # MIN  - pop two, push min
+    MAX         = auto()   # MAX  - pop two, push max
+    CLAMP       = auto()   # CLAMP - pop (val, lo, hi), push clamped
 
     # Bitwise
     BAND        = auto()
@@ -43,6 +49,12 @@ class Op(Enum):
     BNOT        = auto()
     SHL         = auto()
     SHR         = auto()
+    ROTL        = auto()   # ROTL <width>  - rotate left by width bits
+    ROTR        = auto()   # ROTR <width>  - rotate right by width bits
+    BITREV      = auto()   # BITREV <width> - reverse bits within width
+    POPCOUNT    = auto()   # POPCOUNT      - count set bits
+    CLZ         = auto()   # CLZ <width>   - count leading zeros within width
+    CTZ         = auto()   # CTZ <width>   - count trailing zeros
 
     # Comparison
     CMP_EQ      = auto()
@@ -61,6 +73,7 @@ class Op(Enum):
     JMP         = auto()   # JMP <addr>
     JIF         = auto()   # JIF <addr>  - jump if truthy
     JNF         = auto()   # JNF <addr>  - jump if falsy
+    JTABLE      = auto()   # JTABLE <default_addr> [addr0, addr1, ...] - jump table dispatch
     CALL        = auto()   # CALL <name> <argc>
     RET         = auto()
     HALT        = auto()
@@ -107,6 +120,24 @@ class Op(Enum):
     COMPILER_INPUT      = auto()   # compiler.io.console.input() -> byte*
     COMPILER_READFILE   = auto()   # compiler.io.readfile(path: byte*) -> byte*
     COMPILER_WRITEFILE  = auto()   # compiler.io.writefile(path: byte*, content: byte*, flags: byte*)
+
+    # String ops
+    STR_LEN     = auto()   # STR_LEN     - push length of top string
+    STR_CAT     = auto()   # STR_CAT     - pop two strings, push concatenated
+    STR_SLICE   = auto()   # STR_SLICE   - pop (str, start, len), push substring
+    STR_EQ      = auto()   # STR_EQ      - pop two strings, push 1 if equal
+    STR_FIND    = auto()   # STR_FIND    - pop (haystack, needle), push offset or -1
+    INT_TO_STR  = auto()   # INT_TO_STR  - pop integer, push string representation
+    STR_TO_INT  = auto()   # STR_TO_INT  - pop string, push integer
+
+    # Type conversion
+    CAST        = auto()   # CAST <ttag>    - convert top value to target type
+    BITCAST     = auto()   # BITCAST <ttag> - reinterpret bytes as target type
+
+    # Diagnostics
+    ASSERT      = auto()   # ASSERT      - pop value; if falsy abort with message
+    WARN        = auto()   # WARN        - pop string; emit compiler warning
+    PANIC       = auto()   # PANIC       - pop string; unconditional abort
 
     # Boundary crossing
     EMIT_CONST  = auto()   # pop value  -> ir.Constant
@@ -369,6 +400,8 @@ class FluxVM:
         elif op == Op.POP:        self._pop()
         elif op == Op.DUP:        self.stack.append(self.stack[-1])
         elif op == Op.SWAP:       self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
+        elif op == Op.ROT:        self._op_rot()
+        elif op == Op.OVER:       self._push(self.stack[-2])
 
         # Arithmetic
         elif op == Op.ADD:        self._binop(lambda a, b: a + b)
@@ -378,6 +411,10 @@ class FluxVM:
         elif op == Op.MOD:        self._binop(lambda a, b: a % b)
         elif op == Op.NEG:        self._unop(lambda a: -a)
         elif op == Op.POW:        self._binop(lambda a, b: a ** b)
+        elif op == Op.ABS:        self._unop(lambda a: abs(a))
+        elif op == Op.MIN:        self._binop(lambda a, b: a if a < b else b)
+        elif op == Op.MAX:        self._binop(lambda a, b: a if a > b else b)
+        elif op == Op.CLAMP:      self._op_clamp()
 
         # Bitwise
         elif op == Op.BAND:       self._binop(lambda a, b: a & b)
@@ -386,6 +423,12 @@ class FluxVM:
         elif op == Op.BNOT:       self._unop(lambda a: ~a)
         elif op == Op.SHL:        self._binop(lambda a, b: a << b)
         elif op == Op.SHR:        self._binop(lambda a, b: a >> b)
+        elif op == Op.ROTL:       self._op_rotl(o[0])
+        elif op == Op.ROTR:       self._op_rotr(o[0])
+        elif op == Op.BITREV:     self._op_bitrev(o[0])
+        elif op == Op.POPCOUNT:   self._unop(lambda a: bin(a & ((1 << 64) - 1)).count('1'))
+        elif op == Op.CLZ:        self._op_clz(o[0])
+        elif op == Op.CTZ:        self._op_ctz(o[0])
 
         # Comparison
         elif op == Op.CMP_EQ:     self._cmp(lambda a, b: a == b)
@@ -404,6 +447,7 @@ class FluxVM:
         elif op == Op.JMP:        self.frames[-1].ip = o[0]
         elif op == Op.JIF:        self._jif(o[0], truthy=True)
         elif op == Op.JNF:        self._jif(o[0], truthy=False)
+        elif op == Op.JTABLE:     self._op_jtable(o[0], o[1])
         elif op == Op.CALL:       self._call(o[0], o[1])
         elif op == Op.RET:        self._ret()
         elif op == Op.HALT:       self.frames.clear()
@@ -450,6 +494,24 @@ class FluxVM:
         elif op == Op.COMPILER_INPUT:     self._op_compiler_input()
         elif op == Op.COMPILER_READFILE:  self._op_compiler_readfile()
         elif op == Op.COMPILER_WRITEFILE: self._op_compiler_writefile()
+
+        # String ops
+        elif op == Op.STR_LEN:    self._op_str_len()
+        elif op == Op.STR_CAT:    self._op_str_cat()
+        elif op == Op.STR_SLICE:  self._op_str_slice()
+        elif op == Op.STR_EQ:     self._op_str_eq()
+        elif op == Op.STR_FIND:   self._op_str_find()
+        elif op == Op.INT_TO_STR: self._op_int_to_str()
+        elif op == Op.STR_TO_INT: self._op_str_to_int()
+
+        # Type conversion
+        elif op == Op.CAST:       self._op_cast(o[0])
+        elif op == Op.BITCAST:    self._op_bitcast(o[0])
+
+        # Diagnostics
+        elif op == Op.ASSERT:     self._op_assert()
+        elif op == Op.WARN:       self._op_warn()
+        elif op == Op.PANIC:      self._op_panic()
 
         # Boundary crossing
         elif op == Op.EMIT_CONST:  self._op_emit_const()
@@ -527,6 +589,105 @@ class FluxVM:
     def _ret(self):
         frame = self.frames.pop()
         # Return value stays on the stack (already pushed by callee)
+
+    # ------------------------------------------------------------------
+    # Stack ops
+    # ------------------------------------------------------------------
+
+    def _op_rot(self):
+        # a b c -> b c a
+        if len(self.stack) < 3:
+            raise VMError('ROT: stack underflow')
+        c = self.stack.pop()
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(b)
+        self.stack.append(c)
+        self.stack.append(a)
+
+    # ------------------------------------------------------------------
+    # Arithmetic ops
+    # ------------------------------------------------------------------
+
+    def _op_clamp(self):
+        hi  = self._pop()
+        lo  = self._pop()
+        val = self._pop()
+        tag = val.tag
+        v = val.data
+        lo_v = lo.data
+        hi_v = hi.data
+        if v < lo_v:
+            v = lo_v
+        elif v > hi_v:
+            v = hi_v
+        self._push(Val(tag, v))
+
+    # ------------------------------------------------------------------
+    # Bitwise ops
+    # ------------------------------------------------------------------
+
+    def _op_rotl(self, width: int):
+        shift_val = self._pop()
+        val       = self._pop()
+        n     = int(val.data)   & ((1 << width) - 1)
+        shift = int(shift_val.data) % width
+        result = ((n << shift) | (n >> (width - shift))) & ((1 << width) - 1)
+        self._push(Val(val.tag, result))
+
+    def _op_rotr(self, width: int):
+        shift_val = self._pop()
+        val       = self._pop()
+        n     = int(val.data)   & ((1 << width) - 1)
+        shift = int(shift_val.data) % width
+        result = ((n >> shift) | (n << (width - shift))) & ((1 << width) - 1)
+        self._push(Val(val.tag, result))
+
+    def _op_bitrev(self, width: int):
+        val    = self._pop()
+        n      = int(val.data) & ((1 << width) - 1)
+        result = 0
+        for _ in range(width):
+            result = (result << 1) | (n & 1)
+            n >>= 1
+        self._push(Val(val.tag, result))
+
+    def _op_clz(self, width: int):
+        val = self._pop()
+        n   = int(val.data) & ((1 << width) - 1)
+        if n == 0:
+            self._push(Val(TTag.UINT, width))
+            return
+        count = 0
+        mask  = 1 << (width - 1)
+        while mask and not (n & mask):
+            count += 1
+            mask >>= 1
+        self._push(Val(TTag.UINT, count))
+
+    def _op_ctz(self, width: int):
+        val = self._pop()
+        n   = int(val.data) & ((1 << width) - 1)
+        if n == 0:
+            self._push(Val(TTag.UINT, width))
+            return
+        count = 0
+        while not (n & 1):
+            count += 1
+            n >>= 1
+        self._push(Val(TTag.UINT, count))
+
+    # ------------------------------------------------------------------
+    # Control flow ops
+    # ------------------------------------------------------------------
+
+    def _op_jtable(self, default_addr: int, table: list):
+        idx_val = self._pop()
+        idx     = int(idx_val.data)
+        if 0 <= idx < len(table):
+            self.frames[-1].ip = table[idx]
+        else:
+            self.frames[-1].ip = default_addr
 
     # ------------------------------------------------------------------
     # Memory ops
@@ -816,6 +977,125 @@ class FluxVM:
                 fh.write(raw if 'b' in mode else raw.decode('utf-8', errors='replace'))
         except OSError as e:
             raise VMError(f'compiler.io.writefile: {e}')
+
+    # ------------------------------------------------------------------
+    # String ops
+    # ------------------------------------------------------------------
+
+    def _op_str_len(self):
+        val = self._pop()
+        s   = self._read_vm_string(val)
+        self._push(Val(TTag.UINT, len(s)))
+
+    def _op_str_cat(self):
+        b_val = self._pop()
+        a_val = self._pop()
+        a = self._read_vm_string(a_val)
+        b = self._read_vm_string(b_val)
+        result = (a + b).encode('utf-8')
+        ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
+        self.heap.write(ptr, result + b'\x00')
+        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
+
+    def _op_str_slice(self):
+        length_val = self._pop()
+        start_val  = self._pop()
+        str_val    = self._pop()
+        s      = self._read_vm_string(str_val)
+        start  = int(start_val.data)
+        length = int(length_val.data)
+        result = s[start:start + length].encode('utf-8')
+        ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
+        self.heap.write(ptr, result + b'\x00')
+        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
+
+    def _op_str_eq(self):
+        b_val = self._pop()
+        a_val = self._pop()
+        a = self._read_vm_string(a_val)
+        b = self._read_vm_string(b_val)
+        self._push(Val(TTag.BOOL, int(a == b)))
+
+    def _op_str_find(self):
+        needle_val   = self._pop()
+        haystack_val = self._pop()
+        haystack = self._read_vm_string(haystack_val)
+        needle   = self._read_vm_string(needle_val)
+        idx = haystack.find(needle)
+        self._push(Val(TTag.INT, idx))
+
+    def _op_int_to_str(self):
+        val    = self._pop()
+        result = str(int(val.data)).encode('utf-8')
+        ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
+        self.heap.write(ptr, result + b'\x00')
+        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
+
+    def _op_str_to_int(self):
+        val = self._pop()
+        s   = self._read_vm_string(val)
+        try:
+            n = int(s.strip(), 0)
+        except ValueError:
+            raise VMError(f'STR_TO_INT: cannot convert {s!r} to integer')
+        self._push(Val(TTag.INT, n))
+
+    # ------------------------------------------------------------------
+    # Type conversion ops
+    # ------------------------------------------------------------------
+
+    def _op_cast(self, target: TTag):
+        val = self._pop()
+        src = val.tag
+        d   = val.data
+        if target in (TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG, TTag.BYTE, TTag.CHAR, TTag.DATA):
+            self._push(Val(target, int(d)))
+        elif target == TTag.FLOAT:
+            self._push(Val(target, float(d)))
+        elif target == TTag.DOUBLE:
+            self._push(Val(target, float(d)))
+        elif target == TTag.BOOL:
+            self._push(Val(target, int(bool(d))))
+        else:
+            self._push(Val(target, d))
+
+    def _op_bitcast(self, target: TTag):
+        val     = self._pop()
+        raw     = self._val_to_bytes(val, self._ttag_byte_size(val.tag))
+        result  = self._bytes_to_val(raw, target, self._ttag_byte_size(target))
+        self._push(Val(target, result))
+
+    def _ttag_byte_size(self, tag: TTag) -> int:
+        _sizes = {
+            TTag.BOOL: 1, TTag.BYTE: 1, TTag.CHAR: 1,
+            TTag.INT: 4,  TTag.UINT: 4,
+            TTag.LONG: 8, TTag.ULONG: 8,
+            TTag.FLOAT: 4, TTag.DOUBLE: 8,
+            TTag.PTR: 8,
+        }
+        return _sizes.get(tag, 4)
+
+    # ------------------------------------------------------------------
+    # Diagnostic ops
+    # ------------------------------------------------------------------
+
+    def _op_assert(self):
+        msg_val  = self._pop()
+        cond_val = self._pop()
+        if not bool(cond_val.data):
+            msg = self._read_vm_string(msg_val) if msg_val.tag in (TTag.BYTES, TTag.PTR) else str(msg_val.data)
+            raise VMError(f'comptime assertion failed: {msg}')
+
+    def _op_warn(self):
+        val = self._pop()
+        msg = self._read_vm_string(val) if val.tag in (TTag.BYTES, TTag.PTR) else str(val.data)
+        sys.stderr.write(f'comptime warning: {msg}\n')
+        sys.stderr.flush()
+
+    def _op_panic(self):
+        val = self._pop()
+        msg = self._read_vm_string(val) if val.tag in (TTag.BYTES, TTag.PTR) else str(val.data)
+        raise VMError(f'comptime panic: {msg}')
 
     # ------------------------------------------------------------------
     # Boundary crossing ops

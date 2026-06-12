@@ -2112,14 +2112,14 @@ C !~= D !~= B & [A !@ A] !~= C !`< D !-= A
 
 Just place the relationship in an open position.
 
-No one wants to see that long expression in their template definition, that's why `constra` exists.  
-`constra` creates named, generic and parameterized relational expression sets that can be used with a template like so:
+No one wants to see that long expression in their template definition, that's why `constraint` exists.  
+`constraint` creates named, generic and parameterized relational expression sets that can be used with a template like so:
 ```
 #import <standard.fx>;
  
 using standard::io::console;
 
-constra MyCS(A)
+constraint MyCS(A)
 {
     A !`< A    // This is a unary expression, read as the relation !`< "between A types"
 };
@@ -2899,21 +2899,158 @@ vectorcall{}* someSIMDfunc() -> u64*;
 
 ---
 
+<a id="compile-time-execution-with-comptime"></a>
+# Compile-Time Execution with `comptime`
+Flux can execute itself at compile time. It is capable of performing I/O as well.  
+For now Flux will be limited to standard I/O and file I/O. Networking will come in a future update.
+
+A dedicated VM was created to handle compile time execution, and is what powers the REPL (coming soon).
+
+To perform compile time code execution in Flux, wrap code in a `comptime` block.
+
+Compile-time code has no main function, the start of execution is at the first statement.  
+Here's an example of programming at compile time:
+```
+#import <standard.fx>;
+
+comptime
+{
+    def foo() -> void
+    {
+        compiler.io.console.print("Hello from compile time!\n");
+    };
+};
+
+def main() -> int
+{
+    return 0;
+};
+```
+
+This program will do nothing, because `foo()` was not called.  
+The compiler will not automatically call a function that it sees, simply call it afterwards.
+
+```
+#import <standard.fx>;
+
+comptime
+{
+    def foo() -> void
+    {
+        compiler.io.console.print("Hello from compile time!\n");
+    };
+
+    foo();
+};
+
+def main() -> int
+{
+    return 0;
+};
+```
+Result:
+```
+[INFO] [lexer] ► Lexical analysis
+[INFO] [parser] ► Parsing
+[INFO] [parser] ► AST generated.
+[INFO] [codegen] ► LLVM IR code generation
+[AST] Begining codegen for Flux program ...
+[AST] Total statements in AST: 45
+[AST] Namespace definitions: 10
+[AST] Pass 1: Processing using statements...
+[AST] Pass 2: Processing not using statements...
+[AST] Pre-pass: Registering all object types and extern blocks...
+[AST] Pass 3: Processing all other statements...
+Hello from compile time!
+[AST] Pass 4: Re-emitting pending bodies...
+[INFO] [compiler] ► Compiling to object file (Windows)
+[INFO] [llc] opt IR optimization pass complete
+[INFO] [linker] ► Linking executable: ./test.exe
+✓ Compilation completed: ./test.exe
+```
+
+You can spread functions across `comptime` blocks like so:
+```
+#import <standard.fx>;
+ 
+using standard::io::console;
+
+comptime
+{
+    def foo() -> void
+    {
+        compiler.io.console.print("comptime foo!!!\n");
+    };
+};
+
+comptime
+{
+    foo();
+
+    int x;
+    int* px = @x;
+
+    compiler.io.console.print(f"Hello from comptime! {ulong(px)}\n");
+};
+
+def main() -> int
+{
+    return 0;
+};
+```
+Result:
+```
+[INFO] [lexer] ► Lexical analysis
+[INFO] [parser] ► Parsing
+[INFO] [parser] ► AST generated.
+[INFO] [codegen] ► LLVM IR code generation
+[AST] Begining codegen for Flux program ...
+[AST] Total statements in AST: 47
+[AST] Namespace definitions: 10
+[AST] Pass 1: Processing using statements...
+[AST] Pass 2: Processing not using statements...
+[AST] Pre-pass: Registering all object types and extern blocks...
+[AST] Pass 3: Processing all other statements...
+comptime foo!!!
+Hello from comptime! 17
+[AST] Pass 4: Re-emitting pending bodies...
+```
+
+You may use any keyword inside `comptime` blocks except for `comptime` itself.  
+Yes, you may write an infinite loop at compile time.  
+
+
+
 ---
 
 <a id="keyword-list"></a>
 # Keyword list:
 ```
-alignof, and, as, asm, assert, auto, bool, break, byte, case, catch,
-cdecl, char, const, constra, continue, contract, data, def, default, defer,
-deprecate, do, double, elif, else, enum, escape, export, extern,
-false, fastcall, float, for, global, goto, heap, if, is, in, inline, int, interface,
+and, as, asm, assert, auto, bool, break, byte, case, catch,
+cdecl, char, comptime, const, constraint, continue, contract, data, def, default, defer,
+deprecate, do, double, elif, else, emitflux, enum, escape, export, extern,
+false, fastcall, float, for, from, global, goto, heap, if, in, inline, int, interface, is,  
 jump, label, local, long, macro, namespace, noinit, noreturn, not, object,
-operator, or, private, public, register, return, signed, singinit, sizeof,
+operator, or, private, public, register, return, signed, singinit,
 stack, stdcall, struct, switch, this, thiscall, throw, trait, true,
-try, typeof, uint, ulong, union, unsigned, using,  vectorcall, void,
+try, uint, ulong, union, unsigned, using, vectorcall, void,
 volatile, while, xor
 ```
+
+<a id="compiler-builtins"></a>
+# Compiler Built-Ins:
+- `typeof()`  
+- `sizeof()`  
+- `alignof()`  
+- `endianof()`  
+
+
+## The `compiler.` namespace:
+- `compiler.io.console.print(byte*)`  
+- `compiler.io.console.input()->byte*`  
+- `compiler.io.file.readall(path)->byte*`  
+- `compiler.io.file.write(path,content,flags)`  
+
 
 <a id="operator-list"></a>
 # Operator list:

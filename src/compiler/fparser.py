@@ -1109,7 +1109,7 @@ class FluxParser:
             return self.export_statement()
         elif self.expect(TokenType.CONTRACT):
             return self.contract_def()
-        elif self.expect(TokenType.CONSTRA):
+        elif self.expect(TokenType.CONSTRAINT):
             return self.constra_def()
         elif self.expect(TokenType.INLINE):
             return self.function_def()
@@ -1766,7 +1766,7 @@ class FluxParser:
         Mutex pairs (~= / !~= and !`<= / !`>=) are detected at merge time.
         """
         tok = self.current_token
-        self.consume(TokenType.CONSTRA)
+        self.consume(TokenType.CONSTRAINT)
         name = self.consume(TokenType.IDENTIFIER).value
         # Optional rename param list before '=': constra A(M,N) = B + C;
         rename_params = None

@@ -67,6 +67,22 @@ def test_swap():
     _, r = run([push(i(1)), push(i(2)), p(Op.SWAP), p(Op.HALT)])
     assert r.data == 1
 
+def test_rot():
+    # a=1 b=2 c=3 -> b=2 c=3 a=1; top should be 1
+    instrs = [push(i(1)), push(i(2)), push(i(3)), p(Op.ROT), p(Op.HALT)]
+    vm, r = run(instrs)
+    assert r.data == 1
+    assert vm.stack[-2].data == 3
+    assert vm.stack[-3].data == 2
+
+def test_over():
+    # a=10 b=20 -> a=10 b=20 a=10; top should be 10
+    instrs = [push(i(10)), push(i(20)), p(Op.OVER), p(Op.HALT)]
+    vm, r = run(instrs)
+    assert r.data == 10
+    assert vm.stack[-2].data == 20
+    assert vm.stack[-3].data == 10
+
 
 # ---------------------------------------------------------------------------
 # Arithmetic
@@ -111,6 +127,37 @@ def test_pow():
     _, r = run([push(i(2)), push(i(10)), p(Op.POW), p(Op.HALT)])
     assert r.data == 1024
 
+def test_abs_positive():
+    _, r = run([push(i(7)), p(Op.ABS), p(Op.HALT)])
+    assert r.data == 7
+
+def test_abs_negative():
+    _, r = run([push(i(-9)), p(Op.ABS), p(Op.HALT)])
+    assert r.data == 9
+
+def test_min():
+    _, r = run([push(i(3)), push(i(7)), p(Op.MIN), p(Op.HALT)])
+    assert r.data == 3
+
+def test_max():
+    _, r = run([push(i(3)), push(i(7)), p(Op.MAX), p(Op.HALT)])
+    assert r.data == 7
+
+def test_clamp_in_range():
+    # clamp(5, 1, 10) = 5
+    _, r = run([push(i(5)), push(i(1)), push(i(10)), p(Op.CLAMP), p(Op.HALT)])
+    assert r.data == 5
+
+def test_clamp_below():
+    # clamp(-3, 0, 10) = 0
+    _, r = run([push(i(-3)), push(i(0)), push(i(10)), p(Op.CLAMP), p(Op.HALT)])
+    assert r.data == 0
+
+def test_clamp_above():
+    # clamp(15, 0, 10) = 10
+    _, r = run([push(i(15)), push(i(0)), push(i(10)), p(Op.CLAMP), p(Op.HALT)])
+    assert r.data == 10
+
 
 # ---------------------------------------------------------------------------
 # Bitwise
@@ -139,6 +186,64 @@ def test_shl():
 def test_shr():
     _, r = run([push(i(16)), push(i(2)), p(Op.SHR), p(Op.HALT)])
     assert r.data == 4
+
+def test_rotl():
+    # rotl(0b0001, 2, width=8) = 0b0100 = 4
+    _, r = run([push(u(0b00000001)), push(u(2)), p(Op.ROTL, 8), p(Op.HALT)])
+    assert r.data == 0b00000100
+
+def test_rotl_wraparound():
+    # rotl(0b10000000, 1, width=8) = 0b00000001
+    _, r = run([push(u(0b10000000)), push(u(1)), p(Op.ROTL, 8), p(Op.HALT)])
+    assert r.data == 0b00000001
+
+def test_rotr():
+    # rotr(0b10000000, 2, width=8) = 0b00100000
+    _, r = run([push(u(0b10000000)), push(u(2)), p(Op.ROTR, 8), p(Op.HALT)])
+    assert r.data == 0b00100000
+
+def test_rotr_wraparound():
+    # rotr(0b00000001, 1, width=8) = 0b10000000
+    _, r = run([push(u(0b00000001)), push(u(1)), p(Op.ROTR, 8), p(Op.HALT)])
+    assert r.data == 0b10000000
+
+def test_bitrev():
+    # bitrev(0b10110000, width=8) = 0b00001101
+    _, r = run([push(u(0b10110000)), p(Op.BITREV, 8), p(Op.HALT)])
+    assert r.data == 0b00001101, f'expected 0b00001101 got {r.data:08b}'
+
+def test_bitrev_32():
+    # bitrev(0x80000000, width=32) = 0x00000001
+    _, r = run([push(u(0x80000000)), p(Op.BITREV, 32), p(Op.HALT)])
+    assert r.data == 0x00000001, f'expected 1 got {r.data:#010x}'
+
+def test_popcount():
+    _, r = run([push(u(0b10110101)), p(Op.POPCOUNT), p(Op.HALT)])
+    assert r.data == 5
+
+def test_popcount_zero():
+    _, r = run([push(u(0)), p(Op.POPCOUNT), p(Op.HALT)])
+    assert r.data == 0
+
+def test_clz():
+    # clz(0b00001000, width=8) = 4
+    _, r = run([push(u(0b00001000)), p(Op.CLZ, 8), p(Op.HALT)])
+    assert r.data == 4
+
+def test_clz_zero():
+    # clz(0, width=8) = 8
+    _, r = run([push(u(0)), p(Op.CLZ, 8), p(Op.HALT)])
+    assert r.data == 8
+
+def test_ctz():
+    # ctz(0b00101000, width=8) = 3
+    _, r = run([push(u(0b00101000)), p(Op.CTZ, 8), p(Op.HALT)])
+    assert r.data == 3
+
+def test_ctz_zero():
+    # ctz(0, width=8) = 8
+    _, r = run([push(u(0)), p(Op.CTZ, 8), p(Op.HALT)])
+    assert r.data == 8
 
 
 # ---------------------------------------------------------------------------
@@ -249,6 +354,35 @@ def test_jnf_taken():
     ]
     _, r = run(instrs)
     assert r.data == 0
+
+def test_jtable_hit():
+    # JTABLE with 3 entries; index=1 should jump to addr for case 1
+    # layout: 0=push idx, 1=jtable, 2=case0 result, 3=jmp end, 4=case1 result, 5=jmp end, 6=case2 result, 7=halt
+    instrs = [
+        push(i(1)),                        # 0  index = 1
+        p(Op.JTABLE, 7, [2, 4, 6]),        # 1  dispatch
+        push(i(100)),                      # 2  case 0
+        p(Op.JMP, 7),                      # 3
+        push(i(200)),                      # 4  case 1
+        p(Op.JMP, 7),                      # 5
+        push(i(300)),                      # 6  case 2
+        p(Op.HALT),                        # 7
+    ]
+    _, r = run(instrs)
+    assert r.data == 200, f'expected 200 got {r.data}'
+
+def test_jtable_default():
+    # Index out of range -> default addr
+    instrs = [
+        push(i(5)),                        # 0  index = 5 (out of range)
+        p(Op.JTABLE, 4, [2, 3]),           # 1  dispatch; default=4
+        push(i(10)),                       # 2  case 0
+        push(i(20)),                       # 3  case 1
+        push(i(99)),                       # 4  default
+        p(Op.HALT),                        # 5
+    ]
+    _, r = run(instrs)
+    assert r.data == 99, f'expected 99 got {r.data}'
 
 def test_loop():
     # Sum 1..5 using a loop
@@ -988,6 +1122,199 @@ def test_compiler_readfile_missing():
 
 
 # ---------------------------------------------------------------------------
+# String ops
+# ---------------------------------------------------------------------------
+
+def test_str_len():
+    _, r = run([push(Val(TTag.BYTES, b'hello')), p(Op.STR_LEN), p(Op.HALT)])
+    assert r.data == 5
+
+def test_str_len_empty():
+    _, r = run([push(Val(TTag.BYTES, b'')), p(Op.STR_LEN), p(Op.HALT)])
+    assert r.data == 0
+
+def test_str_cat():
+    vm, r = run([
+        push(Val(TTag.BYTES, b'foo')),
+        push(Val(TTag.BYTES, b'bar')),
+        p(Op.STR_CAT),
+        p(Op.HALT),
+    ])
+    text = vm._read_vm_string(r)
+    assert text == 'foobar', f'got {text!r}'
+
+def test_str_slice():
+    vm, r = run([
+        push(Val(TTag.BYTES, b'hello world')),
+        push(i(6)),
+        push(i(5)),
+        p(Op.STR_SLICE),
+        p(Op.HALT),
+    ])
+    text = vm._read_vm_string(r)
+    assert text == 'world', f'got {text!r}'
+
+def test_str_eq_true():
+    _, r = run([
+        push(Val(TTag.BYTES, b'flux')),
+        push(Val(TTag.BYTES, b'flux')),
+        p(Op.STR_EQ),
+        p(Op.HALT),
+    ])
+    assert r.data == 1
+
+def test_str_eq_false():
+    _, r = run([
+        push(Val(TTag.BYTES, b'flux')),
+        push(Val(TTag.BYTES, b'rust')),
+        p(Op.STR_EQ),
+        p(Op.HALT),
+    ])
+    assert r.data == 0
+
+def test_str_find_found():
+    _, r = run([
+        push(Val(TTag.BYTES, b'hello world')),
+        push(Val(TTag.BYTES, b'world')),
+        p(Op.STR_FIND),
+        p(Op.HALT),
+    ])
+    assert r.data == 6
+
+def test_str_find_not_found():
+    _, r = run([
+        push(Val(TTag.BYTES, b'hello world')),
+        push(Val(TTag.BYTES, b'xyz')),
+        p(Op.STR_FIND),
+        p(Op.HALT),
+    ])
+    assert r.data == -1
+
+def test_int_to_str():
+    vm, r = run([push(i(42)), p(Op.INT_TO_STR), p(Op.HALT)])
+    text = vm._read_vm_string(r)
+    assert text == '42', f'got {text!r}'
+
+def test_int_to_str_negative():
+    vm, r = run([push(i(-7)), p(Op.INT_TO_STR), p(Op.HALT)])
+    text = vm._read_vm_string(r)
+    assert text == '-7', f'got {text!r}'
+
+def test_str_to_int():
+    _, r = run([push(Val(TTag.BYTES, b'1234')), p(Op.STR_TO_INT), p(Op.HALT)])
+    assert r.data == 1234
+
+def test_str_to_int_hex():
+    _, r = run([push(Val(TTag.BYTES, b'0xFF')), p(Op.STR_TO_INT), p(Op.HALT)])
+    assert r.data == 255
+
+def test_str_to_int_invalid():
+    try:
+        run([push(Val(TTag.BYTES, b'notanumber')), p(Op.STR_TO_INT), p(Op.HALT)])
+        assert False, 'should have raised'
+    except VMError:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Type conversion
+# ---------------------------------------------------------------------------
+
+def test_cast_int_to_float():
+    _, r = run([push(i(7)), p(Op.CAST, TTag.FLOAT), p(Op.HALT)])
+    assert r.tag == TTag.FLOAT
+    assert abs(r.data - 7.0) < 1e-6
+
+def test_cast_float_to_int():
+    _, r = run([push(f(3.9)), p(Op.CAST, TTag.INT), p(Op.HALT)])
+    assert r.tag == TTag.INT
+    assert r.data == 3
+
+def test_cast_int_to_bool():
+    _, r = run([push(i(5)), p(Op.CAST, TTag.BOOL), p(Op.HALT)])
+    assert r.tag == TTag.BOOL
+    assert r.data == 1
+
+def test_cast_zero_to_bool():
+    _, r = run([push(i(0)), p(Op.CAST, TTag.BOOL), p(Op.HALT)])
+    assert r.tag == TTag.BOOL
+    assert r.data == 0
+
+def test_bitcast_float_to_int():
+    import struct
+    bits = struct.unpack('<I', struct.pack('<f', 1.0))[0]
+    _, r = run([push(f(1.0)), p(Op.BITCAST, TTag.UINT), p(Op.HALT)])
+    assert r.tag == TTag.UINT
+    assert r.data == bits, f'expected {bits:#010x} got {r.data:#010x}'
+
+def test_bitcast_int_to_float():
+    import struct
+    bits = struct.unpack('<I', struct.pack('<f', 1.0))[0]
+    _, r = run([push(u(bits)), p(Op.BITCAST, TTag.FLOAT), p(Op.HALT)])
+    assert r.tag == TTag.FLOAT
+    assert abs(r.data - 1.0) < 1e-6
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics
+# ---------------------------------------------------------------------------
+
+def test_assert_pass():
+    instrs = [
+        push(b(1)),
+        push(Val(TTag.BYTES, b'should not fire')),
+        p(Op.ASSERT),
+        push(i(1)),
+        p(Op.HALT),
+    ]
+    _, r = run(instrs)
+    assert r.data == 1
+
+def test_assert_fail():
+    instrs = [
+        push(b(0)),
+        push(Val(TTag.BYTES, b'invariant violated')),
+        p(Op.ASSERT),
+        push(i(0)),
+        p(Op.HALT),
+    ]
+    try:
+        run(instrs)
+        assert False, 'should have raised'
+    except VMError as e:
+        assert 'invariant violated' in str(e)
+
+def test_warn():
+    import io as _io
+    old_stderr = sys.stderr
+    sys.stderr = _io.StringIO()
+    try:
+        run([
+            push(Val(TTag.BYTES, b'test warning message')),
+            p(Op.WARN),
+            push(i(0)),
+            p(Op.HALT),
+        ])
+        output = sys.stderr.getvalue()
+    finally:
+        sys.stderr = old_stderr
+    assert 'test warning message' in output
+
+def test_panic():
+    instrs = [
+        push(Val(TTag.BYTES, b'fatal comptime error')),
+        p(Op.PANIC),
+        push(i(0)),
+        p(Op.HALT),
+    ]
+    try:
+        run(instrs)
+        assert False, 'should have raised'
+    except VMError as e:
+        assert 'fatal comptime error' in str(e)
+
+
+# ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
 
@@ -997,6 +1324,8 @@ def main():
             ('PUSH / HALT',        test_push_pop),
             ('DUP',                test_dup),
             ('SWAP',               test_swap),
+            ('ROT',                test_rot),
+            ('OVER',               test_over),
         ]),
         ('Arithmetic', [
             ('ADD',                test_add),
@@ -1008,6 +1337,13 @@ def main():
             ('MOD',                test_mod),
             ('NEG',                test_neg),
             ('POW',                test_pow),
+            ('ABS positive',       test_abs_positive),
+            ('ABS negative',       test_abs_negative),
+            ('MIN',                test_min),
+            ('MAX',                test_max),
+            ('CLAMP in range',     test_clamp_in_range),
+            ('CLAMP below',        test_clamp_below),
+            ('CLAMP above',        test_clamp_above),
         ]),
         ('Bitwise', [
             ('BAND',               test_band),
@@ -1016,6 +1352,18 @@ def main():
             ('BNOT',               test_bnot),
             ('SHL',                test_shl),
             ('SHR',                test_shr),
+            ('ROTL',               test_rotl),
+            ('ROTL wraparound',    test_rotl_wraparound),
+            ('ROTR',               test_rotr),
+            ('ROTR wraparound',    test_rotr_wraparound),
+            ('BITREV 8-bit',       test_bitrev),
+            ('BITREV 32-bit',      test_bitrev_32),
+            ('POPCOUNT',           test_popcount),
+            ('POPCOUNT zero',      test_popcount_zero),
+            ('CLZ',                test_clz),
+            ('CLZ zero',           test_clz_zero),
+            ('CTZ',                test_ctz),
+            ('CTZ zero',           test_ctz_zero),
         ]),
         ('Comparison', [
             ('CMP_EQ true',        test_cmp_eq_true),
@@ -1039,6 +1387,8 @@ def main():
             ('JIF taken',          test_jif_taken),
             ('JIF not taken',      test_jif_not_taken),
             ('JNF taken',          test_jnf_taken),
+            ('JTABLE hit',         test_jtable_hit),
+            ('JTABLE default',     test_jtable_default),
             ('LOOP sum 1..5',      test_loop),
         ]),
         ('Locals', [
@@ -1101,6 +1451,35 @@ def main():
             ('compiler.io.writefile text',   test_compiler_writefile_text),
             ('compiler.io.writefile append', test_compiler_writefile_append),
             ('readfile missing',             test_compiler_readfile_missing),
+        ]),
+        ('String Ops', [
+            ('STR_LEN',            test_str_len),
+            ('STR_LEN empty',      test_str_len_empty),
+            ('STR_CAT',            test_str_cat),
+            ('STR_SLICE',          test_str_slice),
+            ('STR_EQ true',        test_str_eq_true),
+            ('STR_EQ false',       test_str_eq_false),
+            ('STR_FIND found',     test_str_find_found),
+            ('STR_FIND not found', test_str_find_not_found),
+            ('INT_TO_STR',         test_int_to_str),
+            ('INT_TO_STR negative',test_int_to_str_negative),
+            ('STR_TO_INT',         test_str_to_int),
+            ('STR_TO_INT hex',     test_str_to_int_hex),
+            ('STR_TO_INT invalid', test_str_to_int_invalid),
+        ]),
+        ('Type Conversion', [
+            ('CAST int->float',    test_cast_int_to_float),
+            ('CAST float->int',    test_cast_float_to_int),
+            ('CAST int->bool',     test_cast_int_to_bool),
+            ('CAST zero->bool',    test_cast_zero_to_bool),
+            ('BITCAST float->uint',test_bitcast_float_to_int),
+            ('BITCAST uint->float',test_bitcast_int_to_float),
+        ]),
+        ('Diagnostics', [
+            ('ASSERT pass',        test_assert_pass),
+            ('ASSERT fail',        test_assert_fail),
+            ('WARN',               test_warn),
+            ('PANIC',              test_panic),
         ]),
         ('Edge Cases', [
             ('Stack underflow',    test_stack_underflow),

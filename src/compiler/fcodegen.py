@@ -279,6 +279,11 @@ class CodegenVisitor:
     Visitor that drives LLVM IR generation for every Flux AST node.
     """
 
+    def __init__(self):
+        # Comptime function bytecodes that persist across all comptime blocks
+        # in the current compilation unit: name -> List[Instr]
+        self._comptime_functions: dict = {}
+
     # ------------------------------------------------------------------
     # Core dispatcher
     # ------------------------------------------------------------------
@@ -7802,6 +7807,10 @@ class CodegenVisitor:
 
         # Execute
         vm = FluxVM(struct_layouts=struct_layouts)
+        # Register all comptime functions: previously accumulated + newly compiled
+        self._comptime_functions.update(cg.compiled_functions)
+        for fn_name, fn_instrs in self._comptime_functions.items():
+            vm.register_function(fn_name, fn_instrs)
         try:
             vm.execute(bc.instructions, bc.local_count)
         except Exception as e:
