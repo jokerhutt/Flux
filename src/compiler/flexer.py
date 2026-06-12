@@ -144,6 +144,10 @@ class TokenType(Enum):
     THISCALL = auto()     # "        thiscall
     VECTORCALL = auto()   # "        vectorcall
 
+    # Comptime
+    COMPTIME = auto()     # "        comptime
+    EMITFLUX = auto()     # "        emitflux
+
     # Regular Operators
     PLUS = auto()           # +
     MINUS = auto()          # -
@@ -458,6 +462,8 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.FASTCALL:   'fastcall',
     TokenType.THISCALL:   'thiscall',
     TokenType.VECTORCALL: 'vectorcall',
+    TokenType.COMPTIME:   'comptime',
+    TokenType.EMITFLUX:   'emitflux',
     # Literals / special
     TokenType.SINT_LITERAL:   '<int>',
     TokenType.UINT_LITERAL:   '<uint>',
@@ -599,6 +605,8 @@ class FluxLexer:
             'fastcall': TokenType.FASTCALL,
             'thiscall': TokenType.THISCALL,
             'vectorcall': TokenType.VECTORCALL,
+            'comptime': TokenType.COMPTIME,
+            'emitflux': TokenType.EMITFLUX,
         }
     
     def current_char(self) -> Optional[str]:

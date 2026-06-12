@@ -479,6 +479,7 @@ class FluxParser:
         self._in_trait = 0        # Tracks nesting depth inside trait bodies (prototypes only)
         self._default_byte_width = default_byte_width if default_byte_width is not None else _get_byte_width(_flux_config)
         self._comptime_strings: Dict[str, str] = {}  # var_name -> string value, for ~$ codify splicing
+        self._in_comptime: int = 0  # Nesting depth inside comptime blocks
         # Populated by from_file after preprocessing; maps global line index (0-based) -> (filename, local_line 1-based)
         self._line_map: List[tuple] = []
 
@@ -1235,6 +1236,12 @@ class FluxParser:
                 elif stmt is not None:
                     sub_stmts.append(stmt)
             return sub_stmts if sub_stmts else None
+        elif self.expect(TokenType.COMPTIME):
+            return self.comptime_block()
+        elif self.expect(TokenType.EMITFLUX):
+            if self._in_comptime == 0:
+                self.error("'emitflux' is only valid inside a 'comptime' block")
+            return self.emitflux_statement()
         elif self.expect(TokenType.ASM):
             return self.asm_statement()
         else:
@@ -5363,6 +5370,89 @@ class FluxParser:
             constraints=constraints
         )).set_location(tok.line, tok.column)
     
+    def comptime_block(self) -> ComptimeBlock:
+        """
+        comptime_block -> 'comptime' '{' statement* '}' ';'
+        Parses a compile-time execution block. The body may contain any valid
+        Flux statements plus emitflux blocks.
+        """
+        tok = self.current_token
+        self.consume(TokenType.COMPTIME)
+        self.consume(TokenType.LEFT_BRACE)
+        self._in_comptime += 1
+        body = []
+        while not self.expect(TokenType.RIGHT_BRACE):
+            if self.expect(TokenType.EOF):
+                self.error("Unexpected EOF inside 'comptime' block")
+            stmt = self.statement()
+            if isinstance(stmt, list):
+                body.extend(s for s in stmt if s is not None)
+            elif stmt is not None:
+                body.append(stmt)
+        self._in_comptime -= 1
+        self.consume(TokenType.RIGHT_BRACE)
+        self.consume(TokenType.SEMICOLON)
+        return ComptimeBlock(body=body).set_location(tok.line, tok.column)
+
+    def _token_to_source(self, t) -> str:
+        """
+        Reconstruct the source text of a single token as it would appear in Flux source.
+        Used by emitflux_statement to capture the raw body text.
+        """
+        tt = t.type
+        if tt == TokenType.STRING_LITERAL:
+            # Re-add quotes; escape any contained double-quotes and backslashes
+            escaped = t.value.replace('\\', '\\\\').replace('"', '\\"')
+            return f'"{escaped}"'
+        if tt == TokenType.CHAR:
+            escaped = t.value.replace('\\', '\\\\').replace("'", "\\'")
+            return f"'{escaped}'"
+        if tt == TokenType.F_STRING:
+            # F-string token value includes the f" prefix and closing "
+            return t.value
+        if tt == TokenType.I_STRING:
+            return t.value
+        # For all other tokens the value is already the source text
+        # (keywords, identifiers, numeric literals, operators)
+        if t.value:
+            return t.value
+        # Fall back to the reverse token-type map
+        from flexer import _TOKEN_TYPE_TO_STR
+        return _TOKEN_TYPE_TO_STR.get(tt, '')
+
+    def emitflux_statement(self) -> EmitFlux:
+        """
+        emitflux_statement -> 'emitflux' '{' <raw source text> '}' ';'
+        Captures the raw Flux source text between braces without parsing it.
+        Nested braces are handled by depth counting.
+        """
+        tok = self.current_token
+        self.consume(TokenType.EMITFLUX)
+        self.consume(TokenType.LEFT_BRACE)
+        # Scan the token stream for the matching closing brace, collecting source text.
+        depth = 1
+        parts = []
+        while depth > 0:
+            if self.expect(TokenType.EOF):
+                self.error("Unexpected EOF inside 'emitflux' block")
+            if self.expect(TokenType.LEFT_BRACE):
+                depth += 1
+                parts.append('{')
+            elif self.expect(TokenType.RIGHT_BRACE):
+                depth -= 1
+                if depth > 0:
+                    parts.append('}')
+                else:
+                    # Matching close brace — advance past it and stop
+                    self.advance()
+                    break
+            else:
+                parts.append(self._token_to_source(self.current_token))
+            self.advance()
+        self.consume(TokenType.SEMICOLON)
+        source_text = ' '.join(parts)
+        return EmitFlux(source_text=source_text).set_location(tok.line, tok.column)
+
     def parse_operand_list(self) -> str:
         """
         Parse operand list like: "=r" (variable), "m" (memory)

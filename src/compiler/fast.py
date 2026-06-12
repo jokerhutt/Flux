@@ -1666,6 +1666,31 @@ class TypeFuncCall(Expression):
 
 
 @dataclass
+class EmitFlux(ASTNode):
+    """
+    emitflux { ... } -- raw Flux source text captured inside a comptime block.
+    The source_text is substituted with comptime variable values and parsed
+    into AST nodes that are spliced at the position of the enclosing comptime block.
+    """
+    source_text: str
+
+    def __repr__(self) -> str:
+        return f'EmitFlux({self.source_text!r})'
+
+
+@dataclass
+class ComptimeBlock(ASTNode):
+    """
+    comptime { ... } -- a block of statements executed at compile time via fvm.py.
+    The body may contain regular Flux statements and EmitFlux nodes.
+    """
+    body: List[ASTNode] = field(default_factory=list)
+
+    def __repr__(self) -> str:
+        return f'ComptimeBlock({len(self.body)} statements)'
+
+
+@dataclass
 class Program(ASTNode):
     symbol_table: 'SymbolTable'  # Forward reference since SymbolTable is in ftypesys
     statements: List[Statement] = field(default_factory=list)
