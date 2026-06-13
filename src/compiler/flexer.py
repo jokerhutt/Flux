@@ -147,6 +147,8 @@ class TokenType(Enum):
     # Comptime
     COMPTIME = auto()     # "        comptime
     EMITFLUX = auto()     # "        emitflux
+    FLUXVM = auto()       # "        fluxvm
+    FLUXVM_BLOCK = auto() # {fluxvm bytecode content}
 
     # Regular Operators
     PLUS = auto()           # +
@@ -466,6 +468,8 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.VECTORCALL: 'vectorcall',
     TokenType.COMPTIME:   'comptime',
     TokenType.EMITFLUX:   'emitflux',
+    TokenType.FLUXVM:     'fluxvm',
+    TokenType.FLUXVM_BLOCK: '<fluxvm>',
     # Literals / special
     TokenType.SINT_LITERAL:   '<int>',
     TokenType.UINT_LITERAL:   '<uint>',
@@ -609,6 +613,7 @@ class FluxLexer:
             'vectorcall': TokenType.VECTORCALL,
             'comptime': TokenType.COMPTIME,
             'emitflux': TokenType.EMITFLUX,
+            'fluxvm': TokenType.FLUXVM,
         }
     
     def current_char(self) -> Optional[str]:
@@ -683,6 +688,27 @@ class FluxLexer:
         
         return Token(TokenType.ASM_BLOCK, result, start_pos[0], start_pos[1])
     
+    def read_fluxvm_block_content(self) -> 'Token':
+        """Read a fluxvm block between braces { ... }"""
+        start_pos = (self.line, self.column)
+        while self.current_char() and self.current_char() in ' \t\r\n':
+            self.advance()
+        if not self.current_char() or self.current_char() != '{':
+            raise ValueError("Expected '{' after 'fluxvm' keyword")
+        self.advance()  # skip opening brace
+        brace_depth = 1
+        result = ""
+        while self.current_char() and brace_depth > 0:
+            char = self.current_char()
+            if char == '{':
+                brace_depth += 1
+            elif char == '}':
+                brace_depth -= 1
+            if brace_depth > 0:
+                result += char
+            self.advance()
+        return Token(TokenType.FLUXVM_BLOCK, result.strip(), start_pos[0], start_pos[1])
+
     def read_string(self, quote_char: str) -> str:
         result = ""
         self.advance()  # Skip opening quote
@@ -1073,8 +1099,19 @@ class FluxLexer:
                         asm_block_token = self.read_asm_block_content()
                         tokens.append(asm_block_token)
                         continue
+
+                # Special handling for FLUXVM keyword followed by brace
+                if token.type == TokenType.FLUXVM:
+                    saved_pos = self.position
+                    saved_line = self.line
+                    saved_col = self.column
+                    while self.current_char() and self.current_char() in ' \t\r\n':
+                        self.advance()
+                    if self.current_char() == '{':
+                        fluxvm_block_token = self.read_fluxvm_block_content()
+                        tokens.append(fluxvm_block_token)
+                        continue
                     else:
-                        # Not an ASM block, restore position and continue normally
                         self.position = saved_pos
                         self.line = saved_line
                         self.column = saved_col

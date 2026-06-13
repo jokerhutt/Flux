@@ -77,6 +77,7 @@ class Op(Enum):
     CALL        = auto()   # CALL <name> <argc>
     CALL_PTR    = auto()   # CALL_PTR <argc> - pop BYTES(func_name), call it
     RET         = auto()
+    TAIL_SELF   = auto()   # TAIL_SELF <argc> - reset ip=0, reload args into slots 0..N-1, reuse frame
     HALT        = auto()
 
     # Locals
@@ -124,6 +125,7 @@ class Op(Enum):
     COMPILER_INPUT      = auto()   # compiler.io.console.input() -> byte*
     COMPILER_READFILE   = auto()   # compiler.io.readfile(path: byte*) -> byte*
     COMPILER_WRITEFILE  = auto()   # compiler.io.writefile(path: byte*, content: byte*, flags: byte*)
+    COMPILER_FVM_DUMP   = auto()   # compiler.fvm.dump(path: byte*) - serialise current comptime to .fvm
 
     # String ops
     STR_LEN     = auto()   # STR_LEN     - push length of top string
@@ -323,6 +325,7 @@ class StructLayout:
     fields:     List[Tuple[str, TTag, int, int]]  # (name, tag, byte_offset, byte_size)
     total_size: int
     endian:     str = 'little'
+    total_bits: int = 0  # True bit-packed size (sum of raw field bit widths, no padding)
 
 
 # ---------------------------------------------------------------------------
@@ -358,6 +361,9 @@ class FluxVM:
         self.emit_results: List[Any] = []
         # Locals snapshot from the most recently executed top-level block
         self.last_locals: List[Any] = []
+        # Accumulated instruction log across all execute() calls, for compiler.fvm.dump
+        self._comptime_log: List[List[Instr]] = []   # one entry per execute() call
+        self._comptime_log_locals: int   = 0   # high-water local count across all blocks
 
     # ------------------------------------------------------------------
     # Public API
@@ -372,6 +378,8 @@ class FluxVM:
         Execute a flat instruction list as the top-level comptime block.
         Returns the top-of-stack value after HALT, or None.
         """
+        if local_count > self._comptime_log_locals:
+            self._comptime_log_locals = local_count
         frame = CallFrame(
             func_name='<comptime>',
             instructions=instructions,
@@ -379,6 +387,8 @@ class FluxVM:
         )
         self.frames.append(frame)
         result = self._run()
+        block = [instr for instr in instructions if instr.op != Op.HALT]
+        self._comptime_log.append(block)
         return result
 
     # ------------------------------------------------------------------
@@ -457,6 +467,7 @@ class FluxVM:
         elif op == Op.CALL:       self._call(o[0], o[1])
         elif op == Op.CALL_PTR:   self._call_ptr(o[0])
         elif op == Op.RET:        self._ret()
+        elif op == Op.TAIL_SELF:  self._tail_self(o[0])
         elif op == Op.HALT:
             if self.frames:
                 self.last_locals = list(self.frames[0].locals)
@@ -531,6 +542,7 @@ class FluxVM:
         elif op == Op.EMIT_GLOBAL: self._op_emit_global(o[0])
         elif op == Op.EMIT_TYPE:   self._op_emit_type()
         elif op == Op.EMITFLUX:    self._op_emitflux(o[0], o[1])
+        elif op == Op.COMPILER_FVM_DUMP:  self._op_compiler_fvm_dump()
 
         else:
             raise VMError(f'Unknown opcode: {op}')
@@ -610,6 +622,18 @@ class FluxVM:
     def _ret(self):
         frame = self.frames.pop()
         # Return value stays on the stack (already pushed by callee)
+
+    def _tail_self(self, argc: int):
+        """TAIL_SELF <argc> - zero-stack-growth self tail-call.
+        Pop argc args, reload them into slots 0..argc-1 of the current frame,
+        then reset ip to 0. The current frame is reused entirely.
+        """
+        args = [self._pop() for _ in range(argc)]
+        args.reverse()
+        frame = self.frames[-1]
+        for i, arg in enumerate(args):
+            frame.locals[i] = arg
+        frame.ip = 0
 
     # ------------------------------------------------------------------
     # Stack ops
@@ -787,6 +811,24 @@ class FluxVM:
             raise VMError(f'FIELD_GET: pointer has no struct_type meta')
         layout    = self._get_layout(type_name)
         f         = self._find_field(layout, field_name)
+        if ptr_val.meta.get('stack_slot'):
+            # Stack-slot pointer: ptr is a locals index, value is an integer
+            # whose bits are packed LSB-first matching the struct layout.
+            src_val   = self.frames[-1].locals[ptr]
+            raw_int   = int(src_val.data) if src_val is not None else 0
+            bit_offset = ptr_val.meta.get('field_bit_offsets', {}).get(f[0], 0)
+            _precise  = {TTag.BOOL: 1, TTag.BYTE: 8, TTag.CHAR: 8,
+                         TTag.INT: 32, TTag.UINT: 32,
+                         TTag.LONG: 64, TTag.ULONG: 64,
+                         TTag.FLOAT: 32, TTag.DOUBLE: 64}
+            fbit_width = _precise.get(f[1], f[3] * 8)
+            mask      = (1 << fbit_width) - 1
+            field_int = (raw_int >> bit_offset) & mask
+            if f[1] == TTag.BOOL:
+                self._push(Val(TTag.BOOL, bool(field_int)))
+            else:
+                self._push(Val(f[1], field_int))
+            return
         field_ptr = ptr + f[2]
         raw       = self.heap.read(field_ptr, f[3])
         data      = self._bytes_to_val(raw, f[1], f[3])
@@ -801,6 +843,21 @@ class FluxVM:
             raise VMError(f'FIELD_SET: pointer has no struct_type meta')
         layout    = self._get_layout(type_name)
         f         = self._find_field(layout, field_name)
+        if ptr_val.meta.get('stack_slot'):
+            # Stack-slot pointer: pack field bits back into the integer in the slot.
+            src_val   = self.frames[-1].locals[ptr]
+            raw_int   = int(src_val.data) if src_val is not None else 0
+            bit_offset = ptr_val.meta.get('field_bit_offsets', {}).get(f[0], 0)
+            _precise  = {TTag.BOOL: 1, TTag.BYTE: 8, TTag.CHAR: 8,
+                         TTag.INT: 32, TTag.UINT: 32,
+                         TTag.LONG: 64, TTag.ULONG: 64,
+                         TTag.FLOAT: 32, TTag.DOUBLE: 64}
+            fbit_width = _precise.get(f[1], f[3] * 8)
+            mask      = (1 << fbit_width) - 1
+            field_int = int(val.data) & mask
+            raw_int   = (raw_int & ~(mask << bit_offset)) | (field_int << bit_offset)
+            self.frames[-1].locals[ptr] = Val(src_val.tag if src_val else TTag.INT, raw_int)
+            return
         field_ptr = ptr + f[2]
         raw       = self._val_to_bytes(val, f[3])
         self.heap.write(field_ptr, raw)
@@ -885,10 +942,7 @@ class FluxVM:
         raw        = fh.read(size) if size > 0 else fh.read()
         if isinstance(raw, str):
             raw = raw.encode()
-        # Allocate on VM heap and return pointer
-        ptr = self.heap.alloc(len(raw) + 1, TTag.BYTES)
-        self.heap.write(ptr, raw + b'\x00')
-        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(raw), 'elem_size': 1}))
+        self._push(Val(TTag.BYTES, raw))
 
     def _op_io_write(self):
         size_val   = self._pop()
@@ -967,9 +1021,7 @@ class FluxVM:
     def _op_compiler_input(self):
         line = sys.stdin.readline()
         raw  = line.encode('utf-8')
-        ptr  = self.heap.alloc(len(raw) + 1, TTag.BYTES)
-        self.heap.write(ptr, raw + b'\x00')
-        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(raw), 'elem_size': 1}))
+        self._push(Val(TTag.BYTES, raw))
 
     def _op_compiler_readfile(self):
         path_val = self._pop()
@@ -1023,6 +1075,34 @@ class FluxVM:
         except OSError as e:
             raise VMError(f'compiler.io.writefile: {e}')
 
+
+    def _op_compiler_fvm_dump(self):
+        path_val = self._pop()
+        path     = self._read_vm_string(path_val)
+        path     = path.replace('\\', '/')
+        current_ip     = self.frames[0].ip if self.frames else 0
+        current_instrs = self.frames[0].instructions if self.frames else []
+        before_dump = [
+            instr for instr in current_instrs[:current_ip - 2]
+            if instr.op != Op.HALT
+        ]
+        # Rebase each logged block's jump targets to global indices
+        all_instrs = []
+        for block in self._comptime_log:
+            rebased = _rebase_block(block, len(all_instrs))
+            all_instrs.extend(rebased)
+        # Rebase the current block's pre-dump instructions
+        if before_dump:
+            before_rebased = _rebase_block(before_dump, len(all_instrs))
+            all_instrs.extend(before_rebased)
+        local_count = self._comptime_log_locals
+        text = serialise_fvm(all_instrs, local_count, self._functions, self.struct_layouts)
+        try:
+            with open(path, 'w', encoding='utf-8') as fh:
+                fh.write(text)
+        except OSError as e:
+            raise VMError(f'compiler.fvm.dump: {e}')
+
     # ------------------------------------------------------------------
     # String ops
     # ------------------------------------------------------------------
@@ -1037,10 +1117,7 @@ class FluxVM:
         a_val = self._pop()
         a = self._read_vm_string(a_val)
         b = self._read_vm_string(b_val)
-        result = (a + b).encode('utf-8')
-        ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
-        self.heap.write(ptr, result + b'\x00')
-        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
+        self._push(Val(TTag.BYTES, (a + b).encode('utf-8')))
 
     def _op_str_slice(self):
         length_val = self._pop()
@@ -1049,10 +1126,7 @@ class FluxVM:
         s      = self._read_vm_string(str_val)
         start  = int(start_val.data)
         length = int(length_val.data)
-        result = s[start:start + length].encode('utf-8')
-        ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
-        self.heap.write(ptr, result + b'\x00')
-        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
+        self._push(Val(TTag.BYTES, s[start:start + length].encode('utf-8')))
 
     def _op_str_eq(self):
         b_val = self._pop()
@@ -1074,17 +1148,14 @@ class FluxVM:
         if val.tag in (TTag.BYTES,) or isinstance(val.data, (bytes, bytearray)):
             result = val.data if isinstance(val.data, (bytes, bytearray)) else val.data.encode('utf-8')
         elif val.tag == TTag.PTR:
-            text = self._read_vm_string(val)
-            result = text.encode('utf-8')
+            result = self._read_vm_string(val).encode('utf-8')
         elif isinstance(val.data, str):
             result = val.data.encode('utf-8')
         elif val.tag == TTag.CHAR:
             result = chr(int(val.data)).encode('utf-8')
         else:
             result = str(int(val.data)).encode('utf-8')
-        ptr = self.heap.alloc(len(result) + 1, TTag.BYTES)
-        self.heap.write(ptr, result + b'\x00')
-        self._push(Val(TTag.PTR, ptr, meta={'elem_type': 'byte', 'count': len(result), 'elem_size': 1}))
+        self._push(Val(TTag.BYTES, result))
 
     def _op_str_to_int(self):
         val = self._pop()
@@ -1346,3 +1417,646 @@ def _str_to_ttag(type_name: str) -> TTag:
         'data': TTag.DATA, 'ptr': TTag.PTR, 'void': TTag.VOID,
     }
     return _map.get(type_name, TTag.PTR)
+
+# ---------------------------------------------------------------------------
+# .fvm serialiser
+# ---------------------------------------------------------------------------
+
+def _serialise_val(v) -> str:
+    """Render a Val as a type:value token suitable for a PUSH operand.
+
+    For PTR values carrying struct meta (stack_slot pointer), the meta is
+    encoded as a bracketed suffix so it can be round-tripped through .fvm:
+
+        ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2]
+
+    Items in the bracket:
+        struct_type=NAME      -- the Flux struct/type name
+        stack_slot            -- flag: pointer addresses a frame local slot
+        NAME:OFFSET           -- field_bit_offsets entries (name:bit_offset)
+    """
+    tag = v.tag
+    d   = v.data
+    if tag == TTag.BYTES:
+        if isinstance(d, (bytes, bytearray)):
+            text = d.decode('utf-8', errors='replace')
+        else:
+            text = str(d)
+        escaped = (text.replace('\\', '\\\\')
+                       .replace('"',  '\\"')
+                       .replace('\n', '\\n')
+                       .replace('\r', '\\r')
+                       .replace('\t', '\\t'))
+        return f'bytes:"{escaped}"'
+    if tag == TTag.BOOL:
+        return f'bool:{"true" if d else "false"}'
+    if tag in (TTag.FLOAT, TTag.DOUBLE):
+        return f'{tag.value}:{repr(float(d))}'
+    if tag == TTag.VOID:
+        return 'void:0'
+    if tag == TTag.PTR and v.meta:
+        parts = []
+        if 'struct_type' in v.meta:
+            parts.append(f'struct_type={v.meta["struct_type"]}')
+        if v.meta.get('stack_slot'):
+            parts.append('stack_slot')
+        for fname, foffset in v.meta.get('field_bit_offsets', {}).items():
+            parts.append(f'{fname}:{foffset}')
+        if parts:
+            return 'ptr:' + str(d) + '[' + ','.join(parts) + ']'
+    return f'{tag.value}:{d}'
+
+
+def _serialise_instr(instr) -> str:
+    """Render one Instr as a .fvm source line."""
+    op = instr.op
+    o  = instr.operands
+
+    # Zero-operand
+    _zero = {
+        Op.POP, Op.DUP, Op.SWAP, Op.ROT, Op.OVER,
+        Op.ADD, Op.SUB, Op.MUL, Op.DIV, Op.MOD, Op.NEG, Op.POW,
+        Op.ABS, Op.MIN, Op.MAX, Op.CLAMP,
+        Op.BAND, Op.BOR, Op.BXOR, Op.BNOT, Op.SHL, Op.SHR, Op.POPCOUNT,
+        Op.CMP_EQ, Op.CMP_NE, Op.CMP_LT, Op.CMP_LE, Op.CMP_GT, Op.CMP_GE,
+        Op.AND, Op.OR, Op.NOT,
+        Op.RET, Op.HALT,
+        Op.LOCAL_DEREF, Op.LOCAL_DEREF_SET,
+        Op.ALLOC, Op.FREE, Op.OFFSET,
+        Op.ARRAY_LEN, Op.INDEX_GET, Op.INDEX_SET,
+        Op.TYPEOF,
+        Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
+        Op.FFI_FREE,
+        Op.COMPILER_PRINT, Op.COMPILER_INPUT,
+        Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
+        Op.STR_LEN, Op.STR_CAT, Op.STR_SLICE, Op.STR_EQ, Op.STR_FIND,
+        Op.INT_TO_STR, Op.STR_TO_INT,
+        Op.ASSERT, Op.WARN, Op.PANIC,
+        Op.EMIT_CONST, Op.EMIT_TYPE,
+    }
+    if op in _zero:
+        return op.name
+
+    if op == Op.PUSH:
+        return f'PUSH {_serialise_val(o[0])}'
+
+    if op == Op.CALL_PTR:
+        return f'CALL_PTR {o[0]}'
+
+    if op in (Op.JMP, Op.JIF, Op.JNF):
+        return f'{op.name} {o[0]}'
+
+    if op == Op.JTABLE:
+        table_str = ' '.join(str(a) for a in o[1])
+        return f'JTABLE {o[0]} {table_str}'
+
+    if op == Op.CALL:
+        return f'CALL {o[0]} {o[1]}'
+
+    if op == Op.TAIL_SELF:
+        return f'TAIL_SELF {o[0]}'
+
+    if op in (Op.LOCAL_GET, Op.LOCAL_SET):
+        return f'{op.name} {o[0]}'
+
+    if op in (Op.ROTL, Op.ROTR, Op.BITREV, Op.CLZ, Op.CTZ):
+        return f'{op.name} {o[0]}'
+
+    if op in (Op.SIZEOF, Op.ALIGNOF, Op.ENDIANOF, Op.STRUCT_NEW):
+        return f'{op.name} {o[0]}'
+
+    if op in (Op.FIELD_GET, Op.FIELD_SET):
+        return f'{op.name} {o[0]}'
+
+    if op == Op.ARRAY_NEW:
+        return f'ARRAY_NEW {o[0]} {o[1]}'
+
+    if op in (Op.LOAD, Op.STORE):
+        return f'{op.name} {o[0].value} {o[1]}'
+
+    if op in (Op.CAST, Op.BITCAST):
+        return f'{op.name} {o[0].value}'
+
+    if op == Op.EMIT_GLOBAL:
+        return f'EMIT_GLOBAL {o[0]}'
+
+    if op == Op.FFI_LOAD:
+        return f'FFI_LOAD {o[0]}'
+
+    if op == Op.FFI_SYM:
+        return f'FFI_SYM {o[0]}'
+
+    if op == Op.FFI_CALL:
+        return f'FFI_CALL {o[0]} {o[1].value}'
+
+    if op == Op.EMITFLUX:
+        src_text = o[0].replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        bindings = ' '.join(f'{n}:{s}' for n, s in o[1])
+        return f'EMITFLUX "{src_text}" {bindings}'.rstrip()
+
+    if op == Op.COMPILER_FVM_DUMP:
+        return 'COMPILER_FVM_DUMP'
+
+    # Fallback: emit op name only (unknown operand shape)
+    return op.name
+
+
+def _rebase_block(instrs, offset):
+    """Return a copy of instrs with all jump targets shifted by offset."""
+    result = []
+    for instr in instrs:
+        op = instr.op
+        if op in (Op.JMP, Op.JIF, Op.JNF):
+            result.append(Instr(op, [instr.operands[0] + offset]))
+        elif op == Op.JTABLE:
+            new_table = [t + offset for t in instr.operands[1]]
+            result.append(Instr(op, [instr.operands[0] + offset, new_table]))
+        else:
+            result.append(instr)
+    return result
+
+
+def serialise_fvm(
+    instructions:    'List[Instr]',
+    local_count:     int,
+    functions:       'Dict[str, List[Instr]]',
+    struct_layouts:  'Dict[str, StructLayout]' = None,
+) -> str:
+    """
+    Serialise a set of VM instructions and function definitions to .fvm text.
+    This is the inverse of parse_fvm_source().
+    """
+    lines = ['# Generated by compiler.fvm.dump', '']
+
+    # Struct layouts
+    for layout in (struct_layouts or {}).values():
+        lines.append(f'struct {layout.name} {layout.endian} {layout.total_size} {layout.total_bits}')
+        for fname, fttag, foff, fsz in layout.fields:
+            lines.append(f'    field {fname} {fttag.value} {foff} {fsz}')
+        lines.append('endstruct')
+        lines.append('')
+
+    # Functions
+    for name, instrs in functions.items():
+        lines.append(f'func {name}')
+        for instr in instrs:
+            lines.append(f'    {_serialise_instr(instr)}')
+        lines.append('endfunc')
+        lines.append('')
+
+    # Main block
+    if local_count:
+        lines.append(f'locals {local_count}')
+    for instr in instructions:
+        lines.append(_serialise_instr(instr))
+
+    # Always terminate the main block with HALT so the file is self-contained
+    if not lines or lines[-1].strip() != 'HALT':
+        lines.append('HALT')
+    return '\n'.join(lines) + '\n'
+
+
+
+
+# ---------------------------------------------------------------------------
+# .fvm source file parser
+# ---------------------------------------------------------------------------
+
+def _parse_fvm_val(token: str) -> Val:
+    """
+    Parse a typed literal token into a Val.
+
+    Syntax:
+        type:value        e.g.  int:42   float:3.14   bool:1   bytes:"hello"
+        "string"          shorthand for bytes:"string"  (BYTES tag, UTF-8)
+        ptr:N[meta]       PTR with meta dict encoded as a bracketed suffix
+
+    PTR meta bracket format: [struct_type=NAME,stack_slot,field:offset,...]
+    """
+    # Bare quoted string -> BYTES
+    if token.startswith('"') and token.endswith('"') and len(token) >= 2:
+        raw = token[1:-1].encode('utf-8').decode('unicode_escape').encode('utf-8')
+        return Val(TTag.BYTES, raw)
+
+    if ':' not in token:
+        raise VMError(f'.fvm: cannot parse value token {token!r} (expected type:value)')
+
+    type_str, _, rest = token.partition(':')
+    type_str = type_str.strip().lower()
+
+    # Strip and parse optional [meta] bracket from the value portion
+    meta = {}
+    raw  = rest
+    if '[' in rest:
+        bracket_start = rest.index('[')
+        raw = rest[:bracket_start]
+        bracket_content = rest[bracket_start + 1:].rstrip(']')
+        for item in bracket_content.split(','):
+            item = item.strip()
+            if not item:
+                continue
+            if item == 'stack_slot':
+                meta['stack_slot'] = True
+            elif item.startswith('struct_type='):
+                meta['struct_type'] = item[len('struct_type='):]
+            elif ':' in item:
+                fname, _, foffset = item.partition(':')
+                if 'field_bit_offsets' not in meta:
+                    meta['field_bit_offsets'] = {}
+                meta['field_bit_offsets'][fname] = int(foffset)
+
+    if type_str == 'bytes':
+        if raw.startswith('"') and raw.endswith('"') and len(raw) >= 2:
+            raw = raw[1:-1].encode('utf-8').decode('unicode_escape').encode('utf-8')
+        else:
+            raw = raw.encode('utf-8')
+        return Val(TTag.BYTES, raw)
+
+    tag_map = {
+        'int':    TTag.INT,    'uint':   TTag.UINT,
+        'long':   TTag.LONG,   'ulong':  TTag.ULONG,
+        'float':  TTag.FLOAT,  'double': TTag.DOUBLE,
+        'bool':   TTag.BOOL,   'byte':   TTag.BYTE,
+        'char':   TTag.CHAR,   'ptr':    TTag.PTR,
+        'void':   TTag.VOID,
+    }
+    if type_str not in tag_map:
+        raise VMError(f'.fvm: unknown type tag {type_str!r} in {token!r}')
+
+    tag = tag_map[type_str]
+    if tag in (TTag.FLOAT, TTag.DOUBLE):
+        return Val(tag, float(raw))
+    elif tag == TTag.VOID:
+        return Val(tag, 0)
+    elif tag == TTag.BOOL:
+        if raw.lower() in ('true', '1'):
+            return Val(tag, 1)
+        elif raw.lower() in ('false', '0'):
+            return Val(tag, 0)
+        raise VMError(f'.fvm: invalid bool value {raw!r}')
+    else:
+        return Val(tag, int(raw, 0), meta)
+
+
+def _parse_ttag(token: str) -> TTag:
+    """Parse a bare type-tag name into a TTag."""
+    _map = {t.value: t for t in TTag}
+    if token not in _map:
+        raise VMError(f'.fvm: unknown TTag {token!r}')
+    return _map[token]
+
+
+class FVMParseError(Exception):
+    def __init__(self, message: str, lineno: int):
+        super().__init__(f'line {lineno}: {message}')
+        self.lineno = lineno
+
+
+def _fvm_split(line: str) -> list:
+    """
+    Split a .fvm source line into tokens, keeping quoted strings and
+    bracketed meta suffixes intact.
+
+    Token forms:
+      - bare word
+      - "quoted string" (may contain spaces)
+      - word:"quoted string"   (e.g. bytes:"hello world")
+      - type:value[meta...]    (e.g. ptr:29[struct_type=TB,stack_slot,a:0])
+        The [...] portion is part of the same token.
+    """
+    tokens = []
+    i = 0
+    n = len(line)
+    while i < n:
+        if line[i].isspace():
+            i += 1
+            continue
+        j = i
+        # Consume non-whitespace prefix up to a quote or end
+        while j < n and not line[j].isspace() and line[j] != '"':
+            j += 1
+        prefix = line[i:j]
+        if j < n and line[j] == '"':
+            # Quoted section: absorb into current token
+            j += 1
+            while j < n:
+                if line[j] == '\\':
+                    j += 2
+                    continue
+                if line[j] == '"':
+                    j += 1
+                    break
+                j += 1
+            tokens.append(line[i:j])
+        else:
+            if prefix:
+                tokens.append(prefix)
+        i = j
+    return tokens
+
+
+def parse_fvm_source(source: str):
+    """
+    Parse a .fvm text file into (instructions, local_count, functions, struct_layouts).
+    """
+    instructions: List[Instr] = []
+    functions:    Dict[str, List[Instr]] = {}
+    struct_layouts: Dict[str, StructLayout] = {}
+    local_count   = 0
+    in_func       = False
+    func_name     = ''
+    func_instrs:  List[Instr] = []
+    in_struct     = False
+    struct_name   = ''
+    struct_endian = 'little'
+    struct_total_size = 0
+    struct_total_bits = 0
+    struct_fields: list = []
+
+    op_by_name: Dict[str, Op] = {o.name: o for o in Op}
+    lines_src = source.splitlines()
+
+    for lineno, raw_line in enumerate(lines_src, start=1):
+        line = raw_line.split('#', 1)[0].strip()
+        if not line:
+            continue
+
+        tokens = _fvm_split(line)
+        if not tokens:
+            continue
+        directive = tokens[0].upper()
+
+        if directive == 'LOCALS':
+            if len(tokens) != 2:
+                raise FVMParseError("'locals' requires exactly one argument", lineno)
+            if not in_func:
+                local_count = int(tokens[1], 0)
+            continue
+
+        if directive == 'STRUCT':
+            if in_struct:
+                raise FVMParseError("nested 'struct' is not allowed", lineno)
+            if len(tokens) < 2:
+                raise FVMParseError("'struct' requires a name", lineno)
+            in_struct         = True
+            struct_name       = tokens[1]
+            struct_endian     = tokens[2] if len(tokens) > 2 else 'little'
+            struct_total_size = int(tokens[3], 0) if len(tokens) > 3 else 0
+            struct_total_bits = int(tokens[4], 0) if len(tokens) > 4 else 0
+            struct_fields     = []
+            continue
+
+        if directive == 'FIELD':
+            if not in_struct:
+                raise FVMParseError("'field' outside 'struct' block", lineno)
+            if len(tokens) < 5:
+                raise FVMParseError("'field' requires fname ttag byte_offset byte_size", lineno)
+            fname   = tokens[1]
+            fttag   = _parse_ttag(tokens[2])
+            foff    = int(tokens[3], 0)
+            fsz     = int(tokens[4], 0)
+            struct_fields.append((fname, fttag, foff, fsz))
+            continue
+
+        if directive == 'ENDSTRUCT':
+            if not in_struct:
+                raise FVMParseError("'endstruct' without matching 'struct'", lineno)
+            layout = StructLayout(
+                name=struct_name,
+                fields=struct_fields,
+                total_size=struct_total_size,
+                endian=struct_endian,
+                total_bits=struct_total_bits,
+            )
+            struct_layouts[struct_name] = layout
+            in_struct = False
+            continue
+
+        if directive == 'FUNC':
+            if in_func:
+                raise FVMParseError("nested 'func' is not allowed", lineno)
+            if len(tokens) < 2:
+                raise FVMParseError("'func' requires a name", lineno)
+            in_func     = True
+            func_name   = tokens[1]
+            func_instrs = []
+            continue
+
+        if directive == 'ENDFUNC':
+            if not in_func:
+                raise FVMParseError("'endfunc' without matching 'func'", lineno)
+            functions[func_name] = func_instrs
+            in_func   = False
+            func_name = ''
+            continue
+
+        op_name = tokens[0].upper()
+        if op_name not in op_by_name:
+            raise FVMParseError(f'unknown opcode {tokens[0]!r}', lineno)
+        op = op_by_name[op_name]
+
+        try:
+            operands = _parse_operands(op, tokens[1:], lineno)
+        except FVMParseError:
+            raise
+        except Exception as e:
+            raise FVMParseError(str(e), lineno)
+
+        instr = Instr(op, operands)
+        if in_func:
+            func_instrs.append(instr)
+        else:
+            instructions.append(instr)
+
+    if in_func:
+        raise FVMParseError(f"unterminated 'func {func_name}' at end of file", len(lines_src))
+    if in_struct:
+        raise FVMParseError(f"unterminated 'struct {struct_name}' at end of file", len(lines_src))
+
+    return instructions, local_count, functions, struct_layouts
+
+def _parse_operand_token(token: str):
+    if (token.startswith('"') and token.endswith('"')) or ':' in token:
+        return _parse_fvm_val(token)
+    try:
+        return int(token, 0)
+    except ValueError:
+        return token
+
+
+def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
+    _zero_op = {
+        Op.POP, Op.DUP, Op.SWAP, Op.ROT, Op.OVER,
+        Op.ADD, Op.SUB, Op.MUL, Op.DIV, Op.MOD, Op.NEG, Op.POW,
+        Op.ABS, Op.MIN, Op.MAX, Op.CLAMP,
+        Op.BAND, Op.BOR, Op.BXOR, Op.BNOT, Op.SHL, Op.SHR,
+        Op.POPCOUNT,
+        Op.CMP_EQ, Op.CMP_NE, Op.CMP_LT, Op.CMP_LE, Op.CMP_GT, Op.CMP_GE,
+        Op.AND, Op.OR, Op.NOT,
+        Op.RET, Op.HALT,
+        Op.LOCAL_DEREF, Op.LOCAL_DEREF_SET,
+        Op.ALLOC, Op.FREE, Op.OFFSET,
+        Op.ARRAY_LEN, Op.INDEX_GET, Op.INDEX_SET,
+        Op.TYPEOF,
+        Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
+        Op.FFI_FREE,
+        Op.COMPILER_PRINT, Op.COMPILER_INPUT,
+        Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
+        Op.COMPILER_FVM_DUMP,
+        Op.STR_LEN, Op.STR_CAT, Op.STR_SLICE, Op.STR_EQ, Op.STR_FIND,
+        Op.INT_TO_STR, Op.STR_TO_INT,
+        Op.ASSERT, Op.WARN, Op.PANIC,
+        Op.EMIT_CONST, Op.EMIT_TYPE,
+    }
+    if op in _zero_op:
+        return []
+
+    if op == Op.PUSH:
+        if not raw_tokens:
+            raise FVMParseError('PUSH requires a value operand', lineno)
+        return [_parse_fvm_val(raw_tokens[0])]
+
+    if op == Op.CALL_PTR:
+        if not raw_tokens:
+            raise FVMParseError('CALL_PTR requires an argc operand', lineno)
+        return [int(raw_tokens[0], 0)]
+
+    _single_int_op = {
+        Op.JMP, Op.JIF, Op.JNF,
+        Op.LOCAL_GET, Op.LOCAL_SET,
+        Op.TAIL_SELF,
+        Op.EMIT_GLOBAL,
+    }
+    if op in _single_int_op:
+        if not raw_tokens:
+            raise FVMParseError(f'{op.name} requires an integer operand', lineno)
+        return [int(raw_tokens[0], 0)]
+
+    _width_op = {Op.ROTL, Op.ROTR, Op.BITREV, Op.CLZ, Op.CTZ}
+    if op in _width_op:
+        if not raw_tokens:
+            raise FVMParseError(f'{op.name} requires a width operand', lineno)
+        return [int(raw_tokens[0], 0)]
+
+    _type_name_op = {Op.SIZEOF, Op.ALIGNOF, Op.ENDIANOF, Op.STRUCT_NEW}
+    if op in _type_name_op:
+        if not raw_tokens:
+            raise FVMParseError(f'{op.name} requires a type name operand', lineno)
+        return [raw_tokens[0]]
+
+    if op in (Op.FIELD_GET, Op.FIELD_SET):
+        if not raw_tokens:
+            raise FVMParseError(f'{op.name} requires a field name operand', lineno)
+        return [raw_tokens[0]]
+
+    if op == Op.ARRAY_NEW:
+        if len(raw_tokens) < 2:
+            raise FVMParseError('ARRAY_NEW requires type_name and count', lineno)
+        return [raw_tokens[0], int(raw_tokens[1], 0)]
+
+    if op in (Op.LOAD, Op.STORE):
+        if len(raw_tokens) < 2:
+            raise FVMParseError(f'{op.name} requires ttag and byte_size', lineno)
+        return [_parse_ttag(raw_tokens[0]), int(raw_tokens[1], 0)]
+
+    if op in (Op.CAST, Op.BITCAST):
+        if not raw_tokens:
+            raise FVMParseError(f'{op.name} requires a type tag operand', lineno)
+        return [_parse_ttag(raw_tokens[0])]
+
+    if op == Op.CALL:
+        if len(raw_tokens) < 2:
+            raise FVMParseError('CALL requires name and argc', lineno)
+        return [raw_tokens[0], int(raw_tokens[1], 0)]
+
+    if op == Op.FFI_LOAD:
+        if not raw_tokens:
+            raise FVMParseError('FFI_LOAD requires a library path', lineno)
+        return [raw_tokens[0].strip('"')]
+
+    if op == Op.FFI_SYM:
+        if not raw_tokens:
+            raise FVMParseError('FFI_SYM requires a symbol name', lineno)
+        return [raw_tokens[0]]
+
+    if op == Op.FFI_CALL:
+        if len(raw_tokens) < 2:
+            raise FVMParseError('FFI_CALL requires argc and ret_type_tag', lineno)
+        return [int(raw_tokens[0], 0), _parse_ttag(raw_tokens[1])]
+
+    if op == Op.JTABLE:
+        if len(raw_tokens) < 1:
+            raise FVMParseError('JTABLE requires at least a default address', lineno)
+        default = int(raw_tokens[0], 0)
+        table   = [int(t, 0) for t in raw_tokens[1:]]
+        return [default, table]
+
+    if op == Op.EMITFLUX:
+        if not raw_tokens:
+            raise FVMParseError('EMITFLUX requires a source text operand', lineno)
+        src_text = raw_tokens[0].strip('"').encode('utf-8').decode('unicode_escape')
+        var_names = []
+        for tok in raw_tokens[1:]:
+            if ':' in tok:
+                n, _, s = tok.partition(':')
+                var_names.append((n, int(s, 0)))
+        return [src_text, var_names]
+
+    if op == Op.STR_SLICE:
+        return []
+
+    raise FVMParseError(f'unhandled operand encoding for {op.name}', lineno)
+
+
+# ---------------------------------------------------------------------------
+# CLI entry point
+# ---------------------------------------------------------------------------
+
+def _fvm_main():
+    import sys as _sys
+
+    if len(_sys.argv) < 2:
+        print('Flux VM')
+        print('Usage: python fvm.py <program.fvm>')
+        print()
+        print('Runs a .fvm opcode file on the Flux Virtual Machine.')
+        _sys.exit(0)
+
+    path = _sys.argv[1]
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            source = fh.read()
+    except OSError as e:
+        print(f'fvm: cannot open {path!r}: {e}', file=_sys.stderr)
+        _sys.exit(1)
+
+    try:
+        instructions, local_count, functions, struct_layouts = parse_fvm_source(source)
+    except FVMParseError as e:
+        print(f'fvm: parse error in {path}: {e}', file=_sys.stderr)
+        _sys.exit(1)
+
+    vm = FluxVM(struct_layouts=struct_layouts)
+    for name, instrs in functions.items():
+        vm.register_function(name, instrs)
+
+    try:
+        result = vm.execute(instructions, local_count)
+    except VMError as e:
+        print(f'fvm: runtime error: {e}', file=_sys.stderr)
+        _sys.exit(1)
+
+    for entry in vm.emit_results:
+        kind = entry[0]
+        if kind == 'const':
+            print(f'[emit:const] {entry[1]}')
+        elif kind == 'global':
+            print(f'[emit:global] {entry[1].hex()}')
+        elif kind == 'type':
+            print(f'[emit:type] {entry[1]}')
+        elif kind == 'flux':
+            print(f'[emit:flux] {entry[1]}')
+
+
+if __name__ == '__main__':
+    _fvm_main()

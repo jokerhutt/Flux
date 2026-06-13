@@ -72,6 +72,12 @@ comptime
     compiler.io.console.print(f"{d}\n");
     compiler.io.console.print(f"{e}\n");
     compiler.io.console.print(f"{f[0]}\n");
+
+    a = a xor b;
+    b = b xor a;
+    a = a xor b;
+
+    compiler.io.console.print(f"{a} {b}\n");
 };
 
 comptime
@@ -91,6 +97,32 @@ comptime
 
 comptime
 {
+    struct TB
+    {
+        bool a,b,c,d,e;
+    };
+    bool tb = true;
+
+    signed data{5} as i5;
+
+    i5 my5 = 0b10110;
+
+    TB mytb from my5;
+
+    compiler.io.console.print(f"mytb.c = {mytb.c}\n");
+
+    if (typeof(tb) == typeof(bool))
+    {
+        compiler.io.console.print("tb is bool\n");
+    };
+
+    compiler.io.console.print("Size of TB: ");
+    compiler.io.console.print(sizeof(TB));
+    compiler.io.console.print("\n");
+};
+
+comptime
+{
     def bar() -> void
     {
         compiler.io.console.print("bar!!!\n");
@@ -101,7 +133,9 @@ comptime
     pb();
 
     ulong abar = *pb;
-    compiler.io.console.print(f"Address of bar() = {abar}\n");
+    compiler.io.console.print(f"Address of bar() at comptime = {abar}\n");
+
+    //jump abar;
 };
 
 comptime
@@ -130,6 +164,58 @@ comptime
         compiler.io.console.print("!=\n");
     };
 };
+
+comptime
+{
+    int zk;
+    if (zk is void)
+    {
+        compiler.io.console.print("zk is void\n");
+    };
+
+    ulong x = 69;
+
+    void* vpx @= x;
+
+    long lx = long(*vpx);
+
+    compiler.io.console.print(f"{lx}\n");
+};
+
+comptime
+{
+    int x = 5;
+
+    fluxvm
+    {
+        LOCAL_GET x
+        PUSH 10
+        ADD
+        LOCAL_SET x
+    };
+
+    compiler.io.console.print(f"FluxVM modified int x = {x}\n");
+};
+
+comptime
+{
+    def zod() -> void
+    {
+    };
+
+    def zed() <~ void
+    {
+        compiler.io.console.print("Infinity!\n");
+        escape zod();
+    };
+    compiler.io.console.print("before zed()\n");
+    zed();
+    compiler.io.console.print("after zod()\n");
+    // execution escapes here
+    compiler.fvm.dump("C:\\Users\\kvthw\\Flux\\test.fvm");
+};
+
+
 
 def main() -> int
 {

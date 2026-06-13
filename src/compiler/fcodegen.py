@@ -287,6 +287,9 @@ class CodegenVisitor:
         self._comptime_struct_layouts: dict = {}
         # Comptime locals persisted across blocks: name -> Val
         self._comptime_locals: dict = {}
+        # Persistent VM instance reused across all comptime blocks so that
+        # _comptime_log accumulates the full history for compiler.fvm.dump
+        self._comptime_vm = None
 
     # ------------------------------------------------------------------
     # Core dispatcher
@@ -7827,8 +7830,13 @@ class CodegenVisitor:
                 except Exception:
                     pass
 
-        # Execute
-        vm = FluxVM(struct_layouts={**struct_layouts, **cg._struct_layouts})
+        # Execute - reuse the persistent VM so _comptime_log accumulates
+        # across all blocks, enabling compiler.fvm.dump to see the full history.
+        if self._comptime_vm is None:
+            self._comptime_vm = FluxVM(struct_layouts={**struct_layouts, **cg._struct_layouts})
+        else:
+            self._comptime_vm.struct_layouts.update({**struct_layouts, **cg._struct_layouts})
+        vm = self._comptime_vm
         # Register all comptime functions: previously accumulated + newly compiled
         self._comptime_functions.update(cg.compiled_functions)
         self._comptime_struct_layouts.update(cg._struct_layouts)
@@ -7842,15 +7850,17 @@ class CodegenVisitor:
         # Persist locals for subsequent comptime blocks (scalars only — PTR values
         # point into the VM heap which is not shared between blocks)
         from fvm import TTag as _TTag
-        _scalar_tags = {_TTag.INT, _TTag.UINT, _TTag.LONG, _TTag.ULONG,
-                        _TTag.FLOAT, _TTag.DOUBLE, _TTag.BOOL, _TTag.BYTE,
-                        _TTag.CHAR, _TTag.DATA}
+        # The VM is now persistent across blocks so PTR values remain valid;
+        # persist them along with their meta so struct field access works.
+        _persist_tags = {_TTag.INT, _TTag.UINT, _TTag.LONG, _TTag.ULONG,
+                         _TTag.FLOAT, _TTag.DOUBLE, _TTag.BOOL, _TTag.BYTE,
+                         _TTag.CHAR, _TTag.DATA, _TTag.PTR}
         for name, slot in cg._locals.items():
             if name.startswith('__'):
                 continue  # skip internal temporaries
             if slot < len(vm.last_locals) and vm.last_locals[slot] is not None:
                 val = vm.last_locals[slot]
-                if val.tag in _scalar_tags:
+                if val.tag in _persist_tags:
                     self._comptime_locals[name] = val
 
         # Process emissions

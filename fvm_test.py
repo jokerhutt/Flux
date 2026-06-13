@@ -83,6 +83,11 @@ def test_over():
     assert vm.stack[-2].data == 20
     assert vm.stack[-3].data == 10
 
+def test_pop():
+    # push 1, push 2, POP, HALT -> top is 1
+    _, r = run([push(i(1)), push(i(2)), p(Op.POP), p(Op.HALT)])
+    assert r.data == 1
+
 
 # ---------------------------------------------------------------------------
 # Arithmetic
@@ -431,6 +436,32 @@ def test_locals():
     _, r = run(instrs, local_count=2)
     assert r.data == 300
 
+def test_local_deref():
+    # Push PTR(slot=0), LOCAL_DEREF should yield locals[0]
+    instrs = [
+        push(i(42)),
+        p(Op.LOCAL_SET, 0),
+        push(Val(TTag.PTR, 0)),   # PTR(slot=0)
+        p(Op.LOCAL_DEREF),
+        p(Op.HALT),
+    ]
+    _, r = run(instrs, local_count=1)
+    assert r.data == 42
+
+def test_local_deref_set():
+    # Push PTR(slot=1), value 77; LOCAL_DEREF_SET stores 77 into locals[1]
+    instrs = [
+        push(i(0)),
+        p(Op.LOCAL_SET, 1),       # locals[1] = 0
+        push(Val(TTag.PTR, 1)),   # PTR(slot=1)
+        push(i(77)),
+        p(Op.LOCAL_DEREF_SET),
+        p(Op.LOCAL_GET, 1),
+        p(Op.HALT),
+    ]
+    _, r = run(instrs, local_count=2)
+    assert r.data == 77
+
 
 # ---------------------------------------------------------------------------
 # Function call / return
@@ -477,6 +508,51 @@ def test_call_recursive():
     ]
     _, r = run_fn(instrs, {'fact': fact_body})
     assert r.data == 720, f'expected 720 got {r.data}'
+
+def test_call_ptr():
+    # CALL_PTR: push argument, then function name as BYTES, then CALL_PTR
+    double_body = [
+        p(Op.LOCAL_GET, 0),
+        push(i(2)),
+        p(Op.MUL),
+        p(Op.RET),
+    ]
+    instrs = [
+        push(i(9)),                          # argument
+        push(Val(TTag.BYTES, b'double')),    # function name (popped first by CALL_PTR)
+        p(Op.CALL_PTR, 1),
+        p(Op.HALT),
+    ]
+    _, r = run_fn(instrs, {'double': double_body})
+    assert r.data == 18, f'expected 18 got {r.data}'
+
+def test_tail_self():
+    # TAIL_SELF: iterative sum via tail-call; count_sum(n, acc) -> sum 1..5
+    # local 0 = n, local 1 = acc
+    # if n==0 return acc; else tail_self(n-1, acc+n)
+    count_body = [
+        p(Op.LOCAL_GET, 0),    # 0  n
+        push(i(0)),            # 1
+        p(Op.CMP_EQ),          # 2  n == 0
+        p(Op.JNF, 6),          # 3  if n != 0, jump to 6
+        p(Op.LOCAL_GET, 1),    # 4  return acc
+        p(Op.RET),             # 5
+        p(Op.LOCAL_GET, 0),    # 6  n
+        push(i(1)),            # 7
+        p(Op.SUB),             # 8  n - 1  (new arg0)
+        p(Op.LOCAL_GET, 1),    # 9  acc
+        p(Op.LOCAL_GET, 0),    # 10 n
+        p(Op.ADD),             # 11 acc + n  (new arg1)
+        p(Op.TAIL_SELF, 2),    # 12 reuse frame with new (n-1, acc+n)
+    ]
+    instrs = [
+        push(i(5)),
+        push(i(0)),
+        p(Op.CALL, 'count_sum', 2),
+        p(Op.HALT),
+    ]
+    _, r = run_fn(instrs, {'count_sum': count_body})
+    assert r.data == 15, f'expected 15 got {r.data}'
 
 
 # ---------------------------------------------------------------------------
@@ -646,6 +722,58 @@ def test_index_set_get():
     ]
     _, r = run(instrs, local_count=1)
     assert r.data == 99
+
+def test_array_len():
+    instrs = [
+        p(Op.ARRAY_NEW, 'int', 7),
+        p(Op.ARRAY_LEN),
+        p(Op.HALT),
+    ]
+    _, r = run(instrs)
+    assert r.data == 7, f'expected 7 got {r.data}'
+
+
+# ---------------------------------------------------------------------------
+# Heap free-list
+# ---------------------------------------------------------------------------
+
+def test_heap_free_list_reuse():
+    # Alloc a block, free it, alloc same size again; pointer should be reused
+    vm = FluxVM()
+    instrs = [
+        push(i(16)),
+        p(Op.ALLOC),
+        p(Op.LOCAL_SET, 0),
+        p(Op.LOCAL_GET, 0),
+        p(Op.FREE),
+        push(i(16)),
+        p(Op.ALLOC),
+        p(Op.HALT),
+    ]
+    _, r = run(instrs, local_count=1)
+    # The VM heap free-list must have supplied the previously freed block
+    assert r.tag == TTag.PTR
+
+
+# ---------------------------------------------------------------------------
+# last_locals
+# ---------------------------------------------------------------------------
+
+def test_last_locals_after_halt():
+    # HALT should snapshot the top-level frame's locals into vm.last_locals
+    vm = FluxVM()
+    instrs = [
+        push(i(55)),
+        p(Op.LOCAL_SET, 0),
+        push(i(66)),
+        p(Op.LOCAL_SET, 1),
+        push(i(0)),
+        p(Op.HALT),
+    ]
+    vm.execute(instrs, local_count=2)
+    assert len(vm.last_locals) == 2
+    assert vm.last_locals[0].data == 55
+    assert vm.last_locals[1].data == 66
 
 
 # ---------------------------------------------------------------------------
@@ -1028,8 +1156,8 @@ def test_compiler_input():
         result = vm.execute(instrs)
     finally:
         sys.stdin = old_stdin
-    assert result.tag == TTag.PTR
-    # Read back from heap
+    assert result.tag == TTag.BYTES
+    # Read back the string value
     text = vm._read_vm_string(result)
     assert text == 'test input\n', f'got {text!r}'
 
@@ -1254,6 +1382,32 @@ def test_bitcast_int_to_float():
     assert r.tag == TTag.FLOAT
     assert abs(r.data - 1.0) < 1e-6
 
+def test_cast_int_to_long():
+    _, r = run([push(i(999)), p(Op.CAST, TTag.LONG), p(Op.HALT)])
+    assert r.tag == TTag.LONG
+    assert r.data == 999
+
+def test_cast_int_to_ulong():
+    _, r = run([push(i(1)), p(Op.CAST, TTag.ULONG), p(Op.HALT)])
+    assert r.tag == TTag.ULONG
+    assert r.data == 1
+
+def test_cast_int_to_double():
+    _, r = run([push(i(3)), p(Op.CAST, TTag.DOUBLE), p(Op.HALT)])
+    assert r.tag == TTag.DOUBLE
+    assert abs(r.data - 3.0) < 1e-9
+
+def test_cast_int_to_char():
+    _, r = run([push(i(65)), p(Op.CAST, TTag.CHAR), p(Op.HALT)])
+    assert r.tag == TTag.CHAR
+    assert r.data == 65
+
+def test_int_to_str_char():
+    # INT_TO_STR on a CHAR value should produce the character string
+    vm, r = run([push(Val(TTag.CHAR, ord('A'))), p(Op.INT_TO_STR), p(Op.HALT)])
+    text = vm._read_vm_string(r)
+    assert text == 'A', f'got {text!r}'
+
 
 # ---------------------------------------------------------------------------
 # Diagnostics
@@ -1326,6 +1480,7 @@ def main():
             ('SWAP',               test_swap),
             ('ROT',                test_rot),
             ('OVER',               test_over),
+            ('POP',                test_pop),
         ]),
         ('Arithmetic', [
             ('ADD',                test_add),
@@ -1393,10 +1548,14 @@ def main():
         ]),
         ('Locals', [
             ('LOCAL_GET / SET',    test_locals),
+            ('LOCAL_DEREF',        test_local_deref),
+            ('LOCAL_DEREF_SET',    test_local_deref_set),
         ]),
         ('Functions', [
             ('CALL / RET',         test_call_ret),
             ('Recursive factorial',test_call_recursive),
+            ('CALL_PTR',           test_call_ptr),
+            ('TAIL_SELF',          test_tail_self),
         ]),
         ('Memory', [
             ('ALLOC / FREE',       test_alloc_free),
@@ -1404,6 +1563,12 @@ def main():
             ('STORE / LOAD float', test_store_load_float),
             ('OFFSET',             test_offset),
             ('OOB access',         test_oob_access),
+        ]),
+        ('Heap', [
+            ('Free-list reuse',    test_heap_free_list_reuse),
+        ]),
+        ('Execute State', [
+            ('last_locals after HALT', test_last_locals_after_halt),
         ]),
         ('Structs', [
             ('STRUCT_NEW',         test_struct_new),
@@ -1413,6 +1578,7 @@ def main():
         ('Arrays', [
             ('ARRAY_NEW',          test_array_new),
             ('INDEX_SET / GET',    test_index_set_get),
+            ('ARRAY_LEN',          test_array_len),
         ]),
         ('Type Introspection', [
             ('SIZEOF int',         test_sizeof_int),
@@ -1463,6 +1629,7 @@ def main():
             ('STR_FIND not found', test_str_find_not_found),
             ('INT_TO_STR',         test_int_to_str),
             ('INT_TO_STR negative',test_int_to_str_negative),
+            ('INT_TO_STR char',    test_int_to_str_char),
             ('STR_TO_INT',         test_str_to_int),
             ('STR_TO_INT hex',     test_str_to_int_hex),
             ('STR_TO_INT invalid', test_str_to_int_invalid),
@@ -1472,6 +1639,10 @@ def main():
             ('CAST float->int',    test_cast_float_to_int),
             ('CAST int->bool',     test_cast_int_to_bool),
             ('CAST zero->bool',    test_cast_zero_to_bool),
+            ('CAST int->long',     test_cast_int_to_long),
+            ('CAST int->ulong',    test_cast_int_to_ulong),
+            ('CAST int->double',   test_cast_int_to_double),
+            ('CAST int->char',     test_cast_int_to_char),
             ('BITCAST float->uint',test_bitcast_float_to_int),
             ('BITCAST uint->float',test_bitcast_int_to_float),
         ]),

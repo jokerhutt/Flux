@@ -29,11 +29,12 @@ from fast import (
     PointerDeref,
     InExpression,
     SizeOf,
+    TypeOf,
     IfStatement,
     WhileLoop, DoLoop, DoWhileLoop,
     ForLoop,
     ReturnStatement,
-    BreakStatement, ContinueStatement,
+    BreakStatement, ContinueStatement, EscapeStatement,
     LabelStatement, GotoStatement, JumpStatement,
     ExpressionStatement,
     Block,
@@ -44,10 +45,11 @@ from fast import (
     TypeFuncDef, TypeFuncCall,
     NamespaceDef, NamespaceDefStatement,
     StructDef, StructDefStatement, StructMember, StructInstance, StructLiteral,
-    StructFieldAccess, StructFieldAssign,
+    StructFieldAccess, StructFieldAssign, StructRecast,
     UnionDef, UnionDefStatement,
     ConstraDef,
     EnumDef, EnumDefStatement,
+    FluxVMBlock,
 )
 from ftypesys import DataType, Operator
 
@@ -128,6 +130,10 @@ class FVMCodegen:
         self._labels: Dict[str, int] = {}
         # Goto patches: list of (instr_idx, label_name) to resolve after body
         self._goto_patches: List[Tuple[int, str]] = []
+        # Name of the enclosing <~ strict-recursive function, or None.
+        # When set, self-calls and returns emit TAIL_SELF instead of CALL/RET.
+        self._tail_call_self: Optional[str] = None
+        self._tail_call_argc: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -256,6 +262,7 @@ class FVMCodegen:
         elif t is DoWhileLoop:           self._visit_do_while(node)
         elif t is ReturnStatement:       self._visit_return(node)
         elif t is BreakStatement:        self._visit_break(node)
+        elif t is EscapeStatement:       self._visit_escape(node)
         elif t is ContinueStatement:     self._visit_continue(node)
         elif t is Block:                 self._visit_body(node.statements)
         elif t is SwitchStatement:       self._visit_switch(node)
@@ -277,6 +284,7 @@ class FVMCodegen:
         elif t is GotoStatement:         self._visit_goto(node)
         elif t is JumpStatement:         self._visit_jump(node)
         elif t is EmitFlux:              self._visit_emitflux(node)
+        elif t is FluxVMBlock:           self._visit_fluxvm_block(node)
         elif t is ComptimeBlock:         self._visit_body(node.body)
         elif isinstance(node, list):     self._visit_body(node)
         else:
@@ -401,11 +409,20 @@ class FVMCodegen:
         """Map a compound-assignment operator token to its base binary opcode."""
         from flexer import TokenType
         _map = {
-            TokenType.PLUS_ASSIGN:    Op.ADD,
-            TokenType.MINUS_ASSIGN:   Op.SUB,
-            TokenType.STAR_ASSIGN:    Op.MUL,
-            TokenType.SLASH_ASSIGN:   Op.DIV,
-            TokenType.PERCENT_ASSIGN: Op.MOD,
+            TokenType.PLUS_ASSIGN:            Op.ADD,
+            TokenType.MINUS_ASSIGN:           Op.SUB,
+            TokenType.MULTIPLY_ASSIGN:        Op.MUL,
+            TokenType.DIVIDE_ASSIGN:          Op.DIV,
+            TokenType.MODULO_ASSIGN:          Op.MOD,
+            TokenType.POWER_ASSIGN:           Op.POW,
+            TokenType.AND_ASSIGN:             Op.BAND,
+            TokenType.OR_ASSIGN:              Op.BOR,
+            TokenType.XOR_ASSIGN:             Op.BXOR,
+            TokenType.BITAND_ASSIGN:          Op.BAND,
+            TokenType.BITOR_ASSIGN:           Op.BOR,
+            TokenType.BITXOR_ASSIGN:          Op.BXOR,
+            TokenType.BITSHIFT_LEFT_ASSIGN:   Op.SHL,
+            TokenType.BITSHIFT_RIGHT_ASSIGN:  Op.SHR,
         }
         oc = _map.get(op_token)
         if oc:
@@ -450,11 +467,14 @@ class FVMCodegen:
         elif t is StructFieldAccess:   return self._visit_struct_field_access(node)
         elif t is StructInstance:      return self._visit_struct_instance(node)
         elif t is StructLiteral:       return self._visit_struct_literal(node)
+        elif t is StructRecast:        return self._visit_struct_recast(node)
         elif t is MemberAccess:        return self._visit_member_access(node)
         elif t is Assignment:          self._visit_assignment(node); return False
+        elif t is CompoundAssignment:  self._visit_compound_assign(node); return False
         elif t is AddressOf:           return self._visit_address_of(node)
         elif t is PointerDeref:        return self._visit_pointer_deref(node)
         elif t is SizeOf:              return self._visit_sizeof(node)
+        elif t is TypeOf:              return self._visit_typeof(node)
         elif t is InExpression:        return self._visit_in_expression(node)
         elif t is CastExpression:      return self._visit_cast(node)
         elif t is TypeConvertExpression: return self._visit_cast(node)
@@ -588,6 +608,7 @@ class FVMCodegen:
             return True
         self._visit_expr(node.left)
         self._visit_expr(node.right)
+        # Single-opcode operators
         _op_map = {
             Operator.ADD:            Op.ADD,
             Operator.SUB:            Op.SUB,
@@ -595,6 +616,7 @@ class FVMCodegen:
             Operator.DIV:            Op.DIV,
             Operator.MOD:            Op.MOD,
             Operator.POWER:          Op.POW,
+            Operator.XOR:            Op.BXOR,
             Operator.BITAND:         Op.BAND,
             Operator.BITOR:          Op.BOR,
             Operator.BITXOR:         Op.BXOR,
@@ -608,12 +630,27 @@ class FVMCodegen:
             Operator.GREATER_EQUAL:  Op.CMP_GE,
         }
         vm_op = _op_map.get(op)
-        if vm_op is None:
-            raise NotImplementedError(
-                f'fvmcodegen: binary operator {op!r} not supported in comptime'
-            )
-        self._emit(_instr(vm_op))
-        return True
+        if vm_op is not None:
+            self._emit(_instr(vm_op))
+            return True
+        # Composite operators: base op + BNOT
+        _composite_map = {
+            Operator.NAND:     Op.BAND,   # !(a & b)
+            Operator.NOR:      Op.BOR,    # !(a | b)
+            Operator.BITNAND:  Op.BAND,   # ~(a `& b)
+            Operator.BITNOR:   Op.BOR,    # ~(a `| b)
+            Operator.BITXNOT:  Op.BXOR,   # ~(a `^^ b)
+            Operator.BITXNAND: Op.BAND,   # ~(xor(a,b) & ...)
+            Operator.BITXNOR:  Op.BOR,    # ~(xor(a,b) | ...)
+        }
+        base_op = _composite_map.get(op)
+        if base_op is not None:
+            self._emit(_instr(base_op))
+            self._emit(_instr(Op.BNOT))
+            return True
+        raise NotImplementedError(
+            f'fvmcodegen: binary operator {op!r} not supported in comptime'
+        )
 
     def _visit_unary_op(self, node: UnaryOp):
         op = node.operator
@@ -642,6 +679,7 @@ class FVMCodegen:
             Operator.SUB:    Op.NEG,
             Operator.NOT:    Op.NOT,
             Operator.BITNOT: Op.BNOT,
+            Operator.BITXNOT: Op.BNOT,
         }
         vm_op = _op_map.get(op)
         if vm_op is None:
@@ -703,12 +741,58 @@ class FVMCodegen:
             if bits is None:
                 layout = self._struct_layouts.get(target.name)
                 if layout is not None:
-                    bits = layout.total_size * 8
+                    bits = layout.total_bits if layout.total_bits else layout.total_size * 8
 
         if bits is None:
             bits = 0  # unknown — emit 0 rather than crash
 
         self._emit(_instr(Op.PUSH, Val(TTag.ULONG, bits)))
+        return True
+
+    def _visit_typeof(self, node: TypeOf) -> bool:
+        """
+        typeof(expr) returns an integer kind constant matching the TypeOf.KIND_* values.
+        typeof(bool), typeof(int), etc. resolve the bare type name.
+        typeof(var) resolves from the variable's recorded local type.
+        """
+        from ftypesys import DataType as _DT
+        # KIND constants mirror fast.TypeOf
+        _KIND = {
+            'int':    1,  'uint':   2,  'float':  3,  'double': 4,
+            'bool':   5,  'char':   6,  'byte':   7,
+            'long':   8,  'ulong':  9,
+        }
+        _DT_KIND = {
+            _DT.SINT:   1, _DT.UINT:   2, _DT.FLOAT:  3, _DT.DOUBLE: 4,
+            _DT.BOOL:   5, _DT.CHAR:   6, _DT.BYTE:   7,
+            _DT.SLONG:  8, _DT.ULONG:  9,
+            _DT.STRUCT: 12, _DT.OBJECT: 13, _DT.VOID: 14,
+        }
+        kind = 0  # KIND_UNKNOWN
+        expr = node.expression
+
+        if isinstance(expr, Identifier):
+            name = expr.name
+            # Bare type keyword used as typeof argument (e.g. typeof(bool))
+            if name in _KIND:
+                kind = _KIND[name]
+            # Known struct type
+            elif name in self._struct_layouts:
+                kind = 12  # KIND_STRUCT
+            # Variable whose type was recorded
+            else:
+                type_name = self._local_types.get(name)
+                if type_name is not None:
+                    kind = _KIND.get(type_name, 0)
+                    if kind == 0 and type_name in self._struct_layouts:
+                        kind = 12  # KIND_STRUCT
+        else:
+            # For a TypeSystem target (e.g. typeof(bool) parsed as TS)
+            from ftypesys import TypeSystem as _TS
+            if isinstance(expr, _TS):
+                kind = _DT_KIND.get(expr.base_type, 0)
+
+        self._emit(_instr(Op.PUSH, Val(TTag.INT, kind)))
         return True
 
     def _visit_in_expression(self, node: InExpression) -> bool:
@@ -887,6 +971,8 @@ class FVMCodegen:
             'compiler.io.readfile':          Op.COMPILER_READFILE,
             'compiler__io__writefile':       Op.COMPILER_WRITEFILE,
             'compiler.io.writefile':         Op.COMPILER_WRITEFILE,
+            'compiler.fvm.dump':              Op.COMPILER_FVM_DUMP,
+            'compiler__fvm__dump':            Op.COMPILER_FVM_DUMP,
         }
         # Opcodes that push a return value onto the stack
         _PUSHES = {Op.COMPILER_INPUT, Op.COMPILER_READFILE}
@@ -911,8 +997,11 @@ class FVMCodegen:
             return True
         for arg in node.arguments:
             self._visit_expr(arg)
-        self._emit(_instr(Op.CALL, name, len(node.arguments)))
-        return True  # CALL always pushes a return value
+        if self._tail_call_self is not None and name == self._tail_call_self:
+            self._emit(_instr(Op.TAIL_SELF, len(node.arguments)))
+        else:
+            self._emit(_instr(Op.CALL, name, len(node.arguments)))
+        return True  # CALL/TAIL_SELF always pushes or loops
 
     def _visit_method_call(self, node: MethodCall):
         """
@@ -925,6 +1014,7 @@ class FVMCodegen:
             'compiler.io.console.input':  Op.COMPILER_INPUT,
             'compiler.io.readfile':       Op.COMPILER_READFILE,
             'compiler.io.writefile':      Op.COMPILER_WRITEFILE,
+            'compiler.fvm.dump':           Op.COMPILER_FVM_DUMP,
         }
         _PUSHES = {Op.COMPILER_INPUT, Op.COMPILER_READFILE}
 
@@ -1129,16 +1219,29 @@ class FVMCodegen:
         # Allocate a slot for each parameter so LOCAL_GET/SET work by name
         for param in node.parameters:
             fn_cg._alloc_local(param.name)
+        # <~ strict recursion: self-calls and returns in this body emit TAIL_SELF
+        if node.is_recursive:
+            fn_cg._tail_call_self = node.name
+            fn_cg._tail_call_argc = len(node.parameters)
         # Compile the body
         body_stmts = (
             node.body.statements if isinstance(node.body, Block) else [node.body]
         )
         fn_cg._visit_body(body_stmts)
-        # Ensure every path ends with a RET
-        if not fn_cg._instructions or fn_cg._instructions[-1].op != Op.RET:
-            from fvm import TTag as _TTag
-            fn_cg._emit(_instr(Op.PUSH, Val(_TTag.VOID, 0)))
-            fn_cg._emit(_instr(Op.RET))
+        if node.is_recursive:
+            # <~ function: _visit_return already emits TAIL_SELF inline.
+            # If the body did not explicitly terminate, append the implicit
+            # self tail-call (mirrors the runtime musttail insertion).
+            argc = len(node.parameters)
+            last = fn_cg._instructions[-1].op if fn_cg._instructions else None
+            if last not in (Op.TAIL_SELF, Op.RET):
+                fn_cg._emit(_instr(Op.TAIL_SELF, argc))
+        else:
+            # Normal function: ensure every path ends with RET.
+            if not fn_cg._instructions or fn_cg._instructions[-1].op != Op.RET:
+                from fvm import TTag as _TTag
+                fn_cg._emit(_instr(Op.PUSH, Val(_TTag.VOID, 0)))
+                fn_cg._emit(_instr(Op.RET))
         # Mark the original node so the LLVM codegen skips any template
         # instantiation that deep-copies it (fparser propagates this flag).
         node._is_comptime_only = True
@@ -1196,7 +1299,7 @@ class FVMCodegen:
             # Nested struct — look up in our own registry
             layout = self._struct_layouts.get(ts.custom_typename)
             if layout is not None:
-                return layout.total_size * 8
+                return layout.total_bits if layout.total_bits else layout.total_size * 8
         return 32
 
     def _type_bit_width_base(self, base_type, ts=None) -> int:
@@ -1240,14 +1343,16 @@ class FVMCodegen:
 
         fields = []
         byte_offset = 0
+        total_bits = 0
         for member in node.members:
             bits = self._type_bit_width(member.type_spec)
             byte_size = max(1, (bits + 7) // 8)
             ttag = self._type_ttag_from_ts(member.type_spec)
             fields.append((member.name, ttag, byte_offset, byte_size))
             byte_offset += byte_size
+            total_bits += bits
 
-        layout = _SL(name=full_name, fields=fields, total_size=byte_offset)
+        layout = _SL(name=full_name, fields=fields, total_size=byte_offset, total_bits=total_bits)
         self._struct_layouts[full_name] = layout
         # Also register under bare name for convenience
         if prefix:
@@ -1295,6 +1400,59 @@ class FVMCodegen:
                     self._visit_expr(fexpr)
                     self._emit(_instr(Op.FIELD_SET, fname))
         self._emit(_instr(Op.LOCAL_GET, tmp_slot))
+        return True
+
+    def _visit_struct_recast(self, node: StructRecast) -> bool:
+        """
+        StructRecast: T t from src
+        Zero-copy reinterpretation. The destination slot receives a
+        Val(TTag.PTR, src_slot, meta={struct_type, stack_slot, field_bit_offsets})
+        pointing directly at the source frame slot. No heap allocation,
+        no data movement. FIELD_GET/FIELD_SET on a stack_slot pointer
+        extract/pack bits from the integer value in that slot directly.
+        Source is invalidated by name.
+        """
+        layout = self._struct_layouts.get(node.target_type)
+        if layout is None:
+            raise FVMCodegenError(
+                f'fvmcodegen: StructRecast: unknown struct type {node.target_type!r}', node)
+
+        if not isinstance(node.source_expr, Identifier):
+            raise FVMCodegenError(
+                f'fvmcodegen: StructRecast source must be a simple identifier in comptime', node)
+
+        src_name = node.source_expr.name
+        if src_name not in self._locals:
+            raise FVMCodegenError(
+                f'fvmcodegen: StructRecast: source {src_name!r} not found in locals', node)
+        src_slot = self._locals[src_name]
+
+        # Pre-compute bit offsets for each field (LSB-first packed layout)
+        _precise = {TTag.BOOL: 1, TTag.BYTE: 8, TTag.CHAR: 8,
+                    TTag.INT: 32, TTag.UINT: 32,
+                    TTag.LONG: 64, TTag.ULONG: 64,
+                    TTag.FLOAT: 32, TTag.DOUBLE: 64}
+        field_bit_offsets = {}
+        bit_cursor = 0
+        for fname, fttag, _byte_off, fbyte_size in layout.fields:
+            field_bit_offsets[fname] = bit_cursor
+            bit_cursor += _precise.get(fttag, fbyte_size * 8)
+
+        # Push a stack-slot pointer: PTR whose data is the slot index,
+        # tagged so FIELD_GET/FIELD_SET know to read from the locals array.
+        self._emit(_instr(Op.PUSH, Val(TTag.PTR, src_slot, meta={
+            'struct_type':       node.target_type,
+            'stack_slot':        True,
+            'field_bit_offsets': field_bit_offsets,
+        })))
+
+        # Invalidate source by name; slot index still exists but unreachable.
+        if not getattr(node, 'suppress_invalidate', False):
+            if src_name in self._locals:
+                del self._locals[src_name]
+            if src_name in self._local_types:
+                del self._local_types[src_name]
+
         return True
 
     def _visit_member_access(self, node: MemberAccess) -> bool:
@@ -1633,6 +1791,24 @@ class FVMCodegen:
             self._visit_expr(node.value)
         else:
             self._emit(_instr(Op.PUSH, Val(TTag.VOID, 0)))
+        # Inside a <~ function every return is a re-entry, not an exit.
+        # escape bypasses this by calling _visit_escape directly.
+        if self._tail_call_self is not None:
+            self._emit(_instr(Op.TAIL_SELF, self._tail_call_argc))
+        else:
+            self._emit(_instr(Op.RET))
+
+    def _visit_escape(self, node: EscapeStatement):
+        """
+        escape call; -- exits strict recursion by making a normal non-tail call.
+        Temporarily clears _tail_call_self so the inner call emits CALL not TAIL_SELF,
+        then restores it. The return value of the escaped call becomes the return
+        value of the <~ function, ending the tail-call loop.
+        """
+        saved = self._tail_call_self
+        self._tail_call_self = None
+        self._visit_expr(node.call)
+        self._tail_call_self = saved
         self._emit(_instr(Op.RET))
 
     def _visit_break(self, node: BreakStatement):
@@ -1644,6 +1820,79 @@ class FVMCodegen:
     # ------------------------------------------------------------------
     # emitflux
     # ------------------------------------------------------------------
+
+    def _visit_fluxvm_block(self, node: FluxVMBlock):
+        """
+        fluxvm { OP [operands...] } -- inline FVM bytecode.
+        Each non-empty line is one instruction:
+          first token  = Op name  resolved via Op[name]
+          remaining    = operands: integer literals, quoted strings,
+                         local variable names (resolved to slot index),
+                         or TTag names (resolved via TTag[name]).
+        Op names are taken directly from the Op enum so no separate
+        table is needed -- adding a new Op automatically makes it available.
+        """
+        from fvm import Op as _Op, TTag as _TTag
+        for raw_line in node.body.splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith('//'):
+                continue
+            # Strip inline comment
+            if '/' in line:
+                line = line[:line.index('/')].strip()
+            if not line:
+                continue
+            parts = line.split()
+            op_name = parts[0].upper()
+            try:
+                op = _Op[op_name]
+            except KeyError:
+                raise FVMCodegenError(
+                    f'fluxvm: unknown opcode {op_name!r}', node)
+            raw_operands = []
+            for tok in parts[1:]:
+                # Integer literal (decimal or hex or binary)
+                try:
+                    raw_operands.append(int(tok, 0))
+                    continue
+                except ValueError:
+                    pass
+                # Quoted string literal
+                if (tok.startswith('"') and tok.endswith('"')) or \
+                   (tok.startswith("'") and tok.endswith("'")):
+                    raw_operands.append(tok[1:-1])
+                    continue
+                # TTag name (e.g. INT, BOOL, ULONG)
+                try:
+                    raw_operands.append(_TTag[tok.upper()])
+                    continue
+                except KeyError:
+                    pass
+                # Local variable name -> slot index
+                if tok in self._locals:
+                    raw_operands.append(self._locals[tok])
+                    continue
+                raise FVMCodegenError(
+                    f'fluxvm: unresolved operand {tok!r} on line {line!r}', node)
+            # PUSH requires a Val, not a raw value.
+            # Syntax: PUSH <value> [TTAG]  -- TTAG defaults to INT for integers,
+            #         BYTES for strings.
+            if op == _Op.PUSH:
+                if not raw_operands:
+                    raise FVMCodegenError('fluxvm: PUSH requires a value operand', node)
+                value = raw_operands[0]
+                if len(raw_operands) >= 2 and isinstance(raw_operands[1], _TTag):
+                    ttag = raw_operands[1]
+                elif isinstance(value, str):
+                    ttag = _TTag.BYTES
+                    value = value.encode('utf-8')
+                elif isinstance(value, float):
+                    ttag = _TTag.DOUBLE
+                else:
+                    ttag = _TTag.INT
+                self._emit(_instr(op, Val(ttag, value)))
+            else:
+                self._emit(_instr(op, *raw_operands))
 
     def _visit_emitflux(self, node: EmitFlux):
         """

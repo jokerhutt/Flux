@@ -1244,6 +1244,10 @@ class FluxParser:
             return self.emitflux_statement()
         elif self.expect(TokenType.ASM):
             return self.asm_statement()
+        elif self.expect(TokenType.FLUXVM):
+            if self._in_comptime == 0:
+                self.error("'fluxvm' is only valid inside a 'comptime' block")
+            return self.fluxvm_statement()
         else:
             return self.expression_statement()
     
@@ -5379,6 +5383,20 @@ class FluxParser:
             constraints=constraints
         )).set_location(tok.line, tok.column)
     
+    def fluxvm_statement(self) -> 'FluxVMBlock':
+        """
+        fluxvm_statement -> 'fluxvm' FLUXVM_BLOCK ';'
+        Parses inline FVM bytecode. The block content is stored as raw text
+        for assembly by fvmcodegen._visit_fluxvm_block at comptime.
+        """
+        from fast import FluxVMBlock
+        from flexer import TokenType
+        tok = self.current_token
+        self.consume(TokenType.FLUXVM)
+        block_token = self.consume(TokenType.FLUXVM_BLOCK)
+        self.consume(TokenType.SEMICOLON)
+        return FluxVMBlock(body=block_token.value).set_location(tok.line, tok.column)
+
     def comptime_block(self) -> ComptimeBlock:
         """
         comptime_block -> 'comptime' '{' statement* '}' ';'

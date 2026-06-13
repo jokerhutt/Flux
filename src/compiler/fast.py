@@ -899,6 +899,15 @@ class Parameter(ASTNode):
             self.original_type_name = str(self.type_spec.base_type)
 
 @dataclass
+class FluxVMBlock(Statement):
+    """Inline FVM bytecode block: fluxvm { OP [operands] ... }"""
+    body: str          # raw text content of the block
+
+    def __repr__(self) -> str:
+        return f"fluxvm {{ {self.body} }}"
+
+
+@dataclass
 class InlineAsm(Expression):
     """Represents inline assembly block"""
     body: str
