@@ -7895,8 +7895,8 @@ class CodegenVisitor:
                                 _lines = _fh.readlines()
                             if 1 <= _local_ln <= len(_lines):
                                 _raw = _lines[_local_ln - 1].rstrip('\n')
-                                _indent = len(_raw) - len(_raw.lstrip())
-                                snippet = f'\n[{_fname}:{_local_ln}]\n{_raw}\n{" " * _indent}^'
+                                _stripped = _raw.lstrip()
+                                snippet = f'\n[{_fname}:{_local_ln}]\n    {_stripped}\n    ^'
                         except OSError:
                             pass
             import traceback as _tb; _tb.print_exc()

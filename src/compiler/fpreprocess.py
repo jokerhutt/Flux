@@ -100,7 +100,9 @@ class FXPreprocessor:
     def _strip_comments(self, content: str) -> str:
         """Strip all comments from content: // and /// ... ///
         String literals (double or single quoted) are passed through unchanged
-        so that URLs like https:// inside strings are not treated as comments."""
+        so that URLs like https:// inside strings are not treated as comments.
+        Newlines inside block comments are preserved so that line numbers in the
+        stripped output always match line numbers in the original source."""
         result = []
         i = 0
         n = len(content)
@@ -134,6 +136,8 @@ class FXPreprocessor:
                     if i + 2 < n and content[i] == '/' and content[i+1] == '/' and content[i+2] == '/':
                         i += 3
                         break
+                    if content[i] == '\n':
+                        result.append('\n')
                     i += 1
                 continue
 

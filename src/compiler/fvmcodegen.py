@@ -120,7 +120,21 @@ class ComptimeBytecode:
 class FVMCodegenError(Exception):
     """Carries both a message and the AST node that caused the failure."""
     def __init__(self, message: str, node=None):
-        super().__init__(message)
+        loc = ''
+        self.override_src_text = None
+        if node is not None:
+            line = getattr(node, 'source_line', None)
+            col  = getattr(node, 'source_col',  None)
+            if line:
+                loc = f' [{line}:{col}]'
+            # For InlineAsm, build a rich display from the node's own body/constraints
+            from fast import InlineAsm as _IA
+            if isinstance(node, _IA):
+                prefix = 'volatile asm' if node.is_volatile else 'asm'
+                body_indented = '\n'.join('    ' + l for l in node.body.splitlines())
+                constraints = f' : {node.constraints}' if node.constraints else ''
+                self.override_src_text = f'{prefix}\n{{\n{body_indented}\n}}{constraints};'
+        super().__init__(message + loc)
         self.source_node = node
 
 
@@ -599,8 +613,9 @@ class FVMCodegen:
     def _visit_compound_assign(self, node: CompoundAssignment):
         """Desugar compound assignment: x op= val  ->  x = x op val"""
         if not isinstance(node.target, Identifier):
+            loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
             raise NotImplementedError(
-                'fvmcodegen: only simple identifier compound-assignment in comptime'
+                f'fvmcodegen: only simple identifier compound-assignment in comptime{loc}'
             )
         name = node.target.name
         slot = self._alloc_local(name)
@@ -811,7 +826,8 @@ class FVMCodegen:
         if name in self._block_globals:
             self._emit(_instr(Op.GLOBAL_GET, name))
             return True
-        raise NameError(f'fvmcodegen: undefined comptime variable {name!r}')
+        loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
+        raise NameError(f'fvmcodegen: undefined comptime variable {name!r}{loc}')
 
     def _visit_binary_op(self, node: BinaryOp):
         op = node.operator
@@ -874,16 +890,44 @@ class FVMCodegen:
             self._emit(_instr(base_op))
             self._emit(_instr(Op.BNOT))
             return True
+        loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
         raise NotImplementedError(
-            f'fvmcodegen: binary operator {op!r} not supported in comptime'
+            f'fvmcodegen: binary operator {op!r} not supported in comptime{loc}'
         )
 
     def _visit_unary_op(self, node: UnaryOp):
         op = node.operator
         if op in (Operator.INCREMENT, Operator.DECREMENT):
+            if isinstance(node.operand, MemberAccess) and isinstance(node.operand.object, Identifier):
+                # struct.field++ / struct.field-- on a simple identifier receiver
+                var_name = node.operand.object.name
+                field    = node.operand.member
+                slot     = self._alloc_local(var_name)
+                delta    = Val(TTag.INT, 1)
+                arith    = Op.ADD if op == Operator.INCREMENT else Op.SUB
+                if node.is_postfix:
+                    # push old value for expression result
+                    self._emit(_instr(Op.LOCAL_GET, slot))
+                    self._emit(_instr(Op.STRUCT_LOAD, field))
+                # compute new value
+                self._emit(_instr(Op.LOCAL_GET, slot))
+                self._emit(_instr(Op.STRUCT_LOAD, field))
+                self._emit(_instr(Op.PUSH, delta))
+                self._emit(_instr(arith))
+                if not node.is_postfix:
+                    self._emit(_instr(Op.DUP))
+                # store new value back into the struct
+                self._emit(_instr(Op.LOCAL_GET, slot))
+                self._emit(_instr(Op.SWAP))  # stack: struct, new_val
+                self._emit(_instr(Op.STRUCT_STORE, field))
+                self._emit(_instr(Op.LOCAL_SET, slot))
+                if var_name in self._block_globals:
+                    self._emit(_instr(Op.GLOBAL_SET, var_name))
+                return True
             if not isinstance(node.operand, Identifier):
+                loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
                 raise NotImplementedError(
-                    'fvmcodegen: ++/-- only on simple identifiers in comptime'
+                    f'fvmcodegen: ++/-- only on simple identifiers in comptime{loc}'
                 )
             name = node.operand.name
             if name in self._outer_globals:
@@ -922,8 +966,9 @@ class FVMCodegen:
         }
         vm_op = _op_map.get(op)
         if vm_op is None:
+            loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
             raise NotImplementedError(
-                f'fvmcodegen: unary operator {op!r} not supported in comptime'
+                f'fvmcodegen: unary operator {op!r} not supported in comptime{loc}'
             )
         self._emit(_instr(vm_op))
         return True
@@ -1334,8 +1379,9 @@ class FVMCodegen:
             self._emit(_instr(Op.CALL, full_name, len(node.arguments)))
             return True
 
+        loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
         raise NotImplementedError(
-            f'fvmcodegen: method call on complex receiver not supported in comptime: {node!r}'
+            f'fvmcodegen: method call on complex receiver not supported in comptime: {node!r}{loc}'
         )
 
     def _visit_macro_call(self, node) -> bool:

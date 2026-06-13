@@ -1,14 +1,11 @@
-#import "standard.fx";
-
-using standard::io::console;
-
-def main() -> int
+comptime
 {
-	byte x = 55;
+	compiler.import.stdlib("standard.fx");
 
-	x[0``7] = x[7``0];
+	def main() -> int
+	{
+		return 0;
+	};
 
-	println(int(x));
-
-	return 0;
+	main();
 };

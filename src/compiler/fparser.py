@@ -5377,11 +5377,13 @@ class FluxParser:
             # Join with colons for LLVM format
             constraints = ":".join(constraint_parts)
         
-        return ExpressionStatement(InlineAsm(
+        asm_node = InlineAsm(
             body=asm_body,
             is_volatile=is_volatile,
             constraints=constraints
-        )).set_location(tok.line, tok.column)
+        )
+        asm_node.set_location(tok.line, tok.column)
+        return ExpressionStatement(asm_node).set_location(tok.line, tok.column)
     
     def fluxvm_statement(self) -> 'FluxVMBlock':
         """

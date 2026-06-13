@@ -1262,17 +1262,20 @@ class FluxVM:
     def _op_compiler_import_stdlib(self):
         path = self._read_vm_string(self._pop())
         try:
-            processed = self._preprocess_import(path, 'stdlib')
-            self._compile_imported_source(processed)
+            processed, line_map = self._preprocess_import(path, 'stdlib')
+            self._compile_imported_source(processed, path, line_map)
         except VMError as e:
-            raise VMError(f'{e} (stdlib: {path})') from e
+            import re as _re, os as _os
+            m = _re.search(r'\[([^\]]+\.fx):', str(e))
+            real = _os.path.basename(m.group(1)) if m else path
+            raise VMError(f'{e} (stdlib: {real})') from e
         self.emit_results.append(('import_stdlib', processed, path))
 
     def _op_compiler_import_local(self):
         path = self._read_vm_string(self._pop())
         try:
-            processed = self._preprocess_import(path, 'local')
-            self._compile_imported_source(processed)
+            processed, line_map = self._preprocess_import(path, 'local')
+            self._compile_imported_source(processed, path, line_map)
         except VMError as e:
             raise VMError(f'{e} (local: {path})') from e
         self.emit_results.append(('import_local', processed, path))
@@ -1280,13 +1283,13 @@ class FluxVM:
     def _op_compiler_fpm_package(self):
         path = self._read_vm_string(self._pop())
         try:
-            processed = self._preprocess_import(path, 'package')
-            self._compile_imported_source(processed)
+            processed, line_map = self._preprocess_import(path, 'package')
+            self._compile_imported_source(processed, path, line_map)
         except VMError as e:
             raise VMError(f'{e} (package: {path})') from e
         self.emit_results.append(('import_package', processed, path))
 
-    def _compile_imported_source(self, source: str):
+    def _compile_imported_source(self, source: str, filename: str = '<import>', line_map: list = None):
         """
         Lex, parse, and compile comptime-relevant declarations from preprocessed
         Flux source into self._functions so CALL instructions in the current block
@@ -1327,6 +1330,7 @@ class FluxVM:
 
         if not source or not source.strip():
             return
+        source_lines = source.splitlines()
         tokens = _Lexer(source).tokenize()
         program = _Parser(tokens).parse()
 
@@ -1338,16 +1342,17 @@ class FluxVM:
 
         # Pre-pass: register global const variables so function bodies can access
         # them as outer globals during compilation (e.g. TIME_NS_PER_SEC in timing.fx).
-        from fast import VariableDeclaration as _VD, Literal as _Lit, NamespaceDef as _NS, NamespaceDefStatement as _NSS
+        from fast import VariableDeclaration as _VD, Literal as _Lit, NamespaceDef as _NS, NamespaceDefStatement as _NSS, CastExpression as _Cast, AddressOf as _AddrOf
         def _collect_global_consts(stmts):
             for s in stmts:
                 if isinstance(s, (_NS, _NSS)):
                     ns = s.namespace_def if isinstance(s, _NSS) else s
                     _collect_global_consts(ns.variables)
-                    for nested in ns.nested_namespaces:
-                        _collect_global_consts(nested.variables)
-                elif isinstance(s, _VD) and s.is_global and s.initial_value is not None:
-                    if isinstance(s.initial_value, _Lit):
+                    _collect_global_consts(ns.nested_namespaces)
+                elif isinstance(s, _VD):
+                    if s.initial_value is None:
+                        self._globals[s.name] = Val(TTag.PTR, 0)
+                    elif isinstance(s.initial_value, _Lit):
                         try:
                             v = s.initial_value.value
                             if isinstance(v, str):
@@ -1363,6 +1368,12 @@ class FluxVM:
                                 self._globals[s.name] = Val(TTag.DOUBLE, v)
                         except Exception:
                             pass
+                    elif isinstance(s.initial_value, _Cast) and isinstance(s.initial_value.expression, _AddrOf):
+                        inner = s.initial_value.expression.expression
+                        if isinstance(inner, _Lit) and inner.value in (0, 'void', False, None, '0'):
+                            self._globals[s.name] = Val(TTag.PTR, 0)
+                    else:
+                        self._globals[s.name] = Val(TTag.PTR, 0)
         _collect_global_consts(program.statements)
 
         cg = _CG(known_functions=dict(self._functions),
@@ -1374,12 +1385,38 @@ class FluxVM:
                 try:
                     cg._visit_stmt(stmt)
                 except Exception as e:
-                    # Re-raise with source location from the imported AST node
-                    node = getattr(e, 'source_node', stmt)
-                    line = getattr(node, 'line', None)
-                    col  = getattr(node, 'col',  None)
-                    loc  = f' [imported line {line}:{col}]' if line is not None else ''
-                    raise VMError(f'compiler.import (compiling imported declarations): {e}{loc}') from e
+                    import re as _re, os as _os
+                    line_no = col_no = None
+                    m = _re.search(r'\[(\d+):(\d+)\]', str(e))
+                    if m:
+                        line_no = int(m.group(1))
+                        col_no  = int(m.group(2))
+                    real_file = filename
+                    real_line_no = line_no
+                    if line_map is not None and line_no is not None and 1 <= line_no <= len(line_map):
+                        real_file, real_line_no = line_map[line_no - 1]
+                        real_file = _os.path.basename(real_file)
+                    override = getattr(e, 'override_src_text', None)
+                    src_text = ''
+                    if override is not None:
+                        src_text = '\n' + '\n'.join('\t' + l for l in override.splitlines())
+                    elif real_line_no is not None:
+                        real_lines = source_lines
+                        if line_map is not None and line_no is not None and 1 <= line_no <= len(line_map):
+                            orig_file = line_map[line_no - 1][0]
+                            try:
+                                with open(orig_file, 'r', encoding='utf-8', errors='replace') as _fh:
+                                    real_lines = _fh.read().splitlines()
+                            except OSError:
+                                real_lines = source_lines
+                        if 1 <= real_line_no <= len(real_lines):
+                            raw_line = real_lines[real_line_no - 1]
+                            stripped = raw_line.strip()
+                            indent = len(raw_line) - len(raw_line.lstrip())
+                            caret_pos = max(0, (col_no - 1) - indent) if col_no is not None else 0
+                            src_text = f'\n\t{stripped}\n\t{" " * caret_pos}^'
+                    e_msg = _re.sub(r' \[\d+:\d+\]', '', str(e))
+                    raise VMError(f'compiler.import (compiling imported declarations): {e_msg} [{real_file}:{real_line_no}:{col_no}]{src_text}') from e
 
         # Register all compiled functions with the VM immediately
         for name, instrs in cg.compiled_functions.items():
@@ -1388,10 +1425,11 @@ class FluxVM:
         # Accumulate struct layouts so STRUCT_NEW / FIELD_GET work
         self.struct_layouts.update(cg._struct_layouts)
 
-    def _preprocess_import(self, path: str, kind: str) -> str:
+    def _preprocess_import(self, path: str, kind: str):
         """
         Resolve, read, and preprocess a Flux source file for a compiler.import.*
-        or compiler.fpm.package call. Returns the fully preprocessed source text.
+        or compiler.fpm.package call. Returns (preprocessed_source, line_map).
+        line_map is a list of (filename, local_line_number) for each output line.
         kind: 'stdlib' | 'local' | 'package'
         """
         try:
@@ -1426,11 +1464,12 @@ class FluxVM:
             tmp.close()
             preprocessor = FXPreprocessor(tmp.name, compiler_constants=self._compiler_constants)
             result = preprocessor.process()
+            line_map = preprocessor.line_map
         except FileNotFoundError as e:
             raise VMError(f'compiler.import: {e}')
         finally:
             os.unlink(tmp.name)
-        return result
+        return result, line_map
 
     # ------------------------------------------------------------------
     # String ops
