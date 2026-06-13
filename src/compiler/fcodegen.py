@@ -7792,6 +7792,26 @@ class CodegenVisitor:
                             captured_scope[name] = Val(TTag.INT, init.constant)
                 except Exception:
                     pass
+            # Inject preprocessor #def constants (e.g. CURRENT_OS, FLUX_STANDARD) so that
+            # fvmcodegen can resolve them as locals during comptime identifier lookup.
+            if hasattr(module, '_flux_compiler_macros'):
+                for name, value in module._flux_compiler_macros.items():
+                    if name not in captured_scope:
+                        if isinstance(value, bool):
+                            captured_scope[name] = Val(TTag.BOOL, int(value))
+                        elif isinstance(value, int):
+                            captured_scope[name] = Val(TTag.INT, value)
+                        elif isinstance(value, float):
+                            captured_scope[name] = Val(TTag.DOUBLE, value)
+                        elif isinstance(value, str):
+                            # Preprocessor stores all constants as strings; try numeric parse first
+                            try:
+                                captured_scope[name] = Val(TTag.INT, int(value, 0))
+                            except (ValueError, TypeError):
+                                try:
+                                    captured_scope[name] = Val(TTag.DOUBLE, float(value))
+                                except (ValueError, TypeError):
+                                    captured_scope[name] = Val(TTag.BYTES, value.encode('utf-8'))
 
         # Compile comptime block to VM bytecode
         cg = FVMCodegen(known_functions=self._comptime_functions,
@@ -7801,6 +7821,7 @@ class CodegenVisitor:
         except Exception as e:
             from fvmcodegen import FVMCodegenError as _FVMErr
             err_node = e.source_node if isinstance(e, _FVMErr) and e.source_node is not None else node
+            import traceback as _tb; _tb.print_exc()
             raise FluxCodegenError(f'comptime codegen failed: {e}', err_node, module)
 
         # Build struct layouts from module for VM struct access
@@ -7832,10 +7853,26 @@ class CodegenVisitor:
 
         # Execute - reuse the persistent VM so _comptime_log accumulates
         # across all blocks, enabling compiler.fvm.dump to see the full history.
+        # Extract source file path from line map so compiler.import.* can resolve paths
+        _line_map = getattr(module, '_flux_line_map', None)
+        _source_file = None
+        if _line_map:
+            for entry in _line_map:
+                if entry and entry[0]:
+                    _source_file = entry[0]
+                    break
         if self._comptime_vm is None:
-            self._comptime_vm = FluxVM(struct_layouts={**struct_layouts, **cg._struct_layouts})
+            self._comptime_vm = FluxVM(
+                struct_layouts={**struct_layouts, **cg._struct_layouts},
+                source_file=_source_file,
+            )
+            self._comptime_vm._codegen_class = FVMCodegen
+            if hasattr(module, '_flux_compiler_macros'):
+                self._comptime_vm._compiler_constants = module._flux_compiler_macros
         else:
             self._comptime_vm.struct_layouts.update({**struct_layouts, **cg._struct_layouts})
+            if _source_file and not self._comptime_vm.source_file:
+                self._comptime_vm.source_file = _source_file
         vm = self._comptime_vm
         # Register all comptime functions: previously accumulated + newly compiled
         self._comptime_functions.update(cg.compiled_functions)
@@ -7845,7 +7882,25 @@ class CodegenVisitor:
         try:
             vm.execute(bc.instructions, bc.local_count)
         except Exception as e:
-            raise FluxCodegenError(f'comptime execution failed: {e}', node, module)
+            # Append the source line that was executing when the error occurred.
+            last_line = getattr(vm, '_last_src_line', 0)
+            snippet = ''
+            if last_line:
+                _lm = getattr(module, '_flux_line_map', None)
+                if _lm and 1 <= last_line <= len(_lm):
+                    _fname, _local_ln = _lm[last_line - 1]
+                    if _fname:
+                        try:
+                            with open(_fname, 'r', encoding='utf-8', errors='replace') as _fh:
+                                _lines = _fh.readlines()
+                            if 1 <= _local_ln <= len(_lines):
+                                _raw = _lines[_local_ln - 1].rstrip('\n')
+                                _indent = len(_raw) - len(_raw.lstrip())
+                                snippet = f'\n[{_fname}:{_local_ln}]\n{_raw}\n{" " * _indent}^'
+                        except OSError:
+                            pass
+            import traceback as _tb; _tb.print_exc()
+            raise FluxCodegenError(f'comptime execution failed: {e}{snippet}', node, module)
 
         # Persist locals for subsequent comptime blocks (scalars only — PTR values
         # point into the VM heap which is not shared between blocks)

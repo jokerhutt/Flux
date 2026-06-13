@@ -212,9 +212,82 @@ comptime
     zed();
     compiler.io.console.print("after zod()\n");
     // execution escapes here
-    compiler.fvm.dump("C:\\Users\\kvthw\\Flux\\test.fvm");
 };
 
+comptime
+{
+    int g_pass, g_fail;
+    def pass(noopstr name) -> void
+    {
+        compiler.io.console.print("  [PASS] \0");
+        compiler.io.console.print(f"{name}\n");
+        g_pass++;
+    };
+
+    def fail(noopstr name) -> void
+    {
+        compiler.io.console.print("  [FAIL] \0");
+        compiler.io.console.print(f"{name}\n");
+        g_fail++;
+    };
+
+    compiler.import.stdlib("datetime.fx");
+    using standard::datetime;
+    DateTime dt;
+    dt = dt_from_unix_ms(0);
+    if (dt.year == 1970 & dt.month == 1 & dt.day == 1 &
+        dt.hour == 0 & dt.minute == 0 & dt.second == 0 & dt.ms == 0)
+    {
+        pass("epoch 0 -> 1970-01-01T00:00:00.000\0");
+    }
+    else { fail("epoch 0 -> 1970-01-01T00:00:00.000\0"); };
+
+    extern def !!malloc(size_t) -> void*;
+    byte* tbp = malloc(2);
+    tbp[0] = "A";
+    compiler.io.console.print(f"{tbp}\n");
+    namespace CTTest
+    {
+        global int ctti = 69;
+    };
+
+    compiler.io.console.print(f"{ctti}\n");
+};
+
+comptime
+{
+    macro MacNZ(A)
+    {
+        A != 0
+    };
+
+    if (MacNZ(1))
+    {
+        compiler.io.console.print("Nonzero!\n");
+    };
+};
+
+comptime
+{
+    def bez(int x) -> int
+    {
+        local int yyy = x;
+        return x; //yyy;
+    };
+
+    int zzz;
+
+    zzz = bez(22);
+
+    heap int x5 = 5;
+    compiler.io.console.print(f"{x5}\n");
+    heap int[5] x25 = [1,2,3,4,5];
+    compiler.io.console.print(f"{sizeof(x25)}\n");
+
+    singinit int si = 1;
+    compiler.io.console.print(f"{si}\n");
+    compiler.fvm.dump("C:\\Users\\kvthw\\Flux\\test.fvm");
+};
 
 
 def main() -> int

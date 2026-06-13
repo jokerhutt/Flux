@@ -111,13 +111,13 @@ namespace standard
 
         struct DateTime
         {
-            i32 year;
-            i32 month;    // 1-12
-            i32 day;      // 1-31
-            i32 hour;     // 0-23
-            i32 minute;   // 0-59
-            i32 second;   // 0-59
-            i32 ms;       // 0-999
+            i32 year,
+                month,    // 1-12
+                day,      // 1-31
+                hour,     // 0-23
+                minute,   // 0-59
+                second,   // 0-59
+                ms;       // 0-999
         };
 
         struct Date

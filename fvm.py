@@ -85,6 +85,8 @@ class Op(Enum):
     LOCAL_SET      = auto()   # LOCAL_SET <slot>
     LOCAL_DEREF    = auto()   # LOCAL_DEREF    - pop PTR(slot), push locals[slot]
     LOCAL_DEREF_SET = auto()  # LOCAL_DEREF_SET - pop val, pop PTR(slot), locals[slot]=val
+    GLOBAL_GET      = auto()   # GLOBAL_GET <name>  - push vm._globals[name]
+    GLOBAL_SET      = auto()   # GLOBAL_SET <name>  - pop val, vm._globals[name] = val
 
     # Memory
     ALLOC       = auto()   # ALLOC - pop size, push pointer
@@ -94,13 +96,16 @@ class Op(Enum):
     OFFSET      = auto()   # OFFSET - pop (ptr, n), push ptr+n
 
     # Structs / arrays
-    STRUCT_NEW  = auto()   # STRUCT_NEW <type_name>
-    ARRAY_NEW   = auto()   # ARRAY_NEW <type_name> <count>
-    ARRAY_LEN   = auto()   # ARRAY_LEN  - pop array PTR, push element count
-    FIELD_GET   = auto()   # FIELD_GET <field_name>
-    FIELD_SET   = auto()   # FIELD_SET <field_name>
-    INDEX_GET   = auto()
-    INDEX_SET   = auto()
+    STRUCT_NEW   = auto()   # STRUCT_NEW <type_name>  - push zero struct value (TTag.STRUCT)
+    STRUCT_LOAD  = auto()   # STRUCT_LOAD <field>     - pop struct, push field value
+    STRUCT_STORE = auto()   # STRUCT_STORE <field>    - pop val, pop struct, push updated struct
+    ENUM_NEW     = auto()   # ENUM_NEW <type_name>    - push zero enum value (TTag.ENUM)
+    ENUM_LOAD    = auto()   # ENUM_LOAD               - pop enum, push integer value
+    ENUM_STORE   = auto()   # ENUM_STORE              - pop int, pop enum, push updated enum
+    ARRAY_NEW    = auto()   # ARRAY_NEW <type_name> <count>
+    ARRAY_LEN    = auto()   # ARRAY_LEN  - pop array, push element count
+    ARRAY_LOAD   = auto()   # ARRAY_LOAD  - pop array, pop idx, push element
+    ARRAY_STORE  = auto()   # ARRAY_STORE - pop val, pop idx, pop array, push updated array
 
     # Type introspection
     SIZEOF      = auto()   # SIZEOF <type_name>  - pushes size in bits
@@ -124,8 +129,12 @@ class Op(Enum):
     COMPILER_PRINT      = auto()   # compiler.io.console.print(byte*)
     COMPILER_INPUT      = auto()   # compiler.io.console.input() -> byte*
     COMPILER_READFILE   = auto()   # compiler.io.readfile(path: byte*) -> byte*
-    COMPILER_WRITEFILE  = auto()   # compiler.io.writefile(path: byte*, content: byte*, flags: byte*)
-    COMPILER_FVM_DUMP   = auto()   # compiler.fvm.dump(path: byte*) - serialise current comptime to .fvm
+    COMPILER_WRITEFILE      = auto()   # compiler.io.writefile(path: byte*, content: byte*, flags: byte*)
+    COMPILER_FVM_DUMP       = auto()   # compiler.fvm.dump(path: byte*) - serialise current comptime to .fvm
+    COMPILER_IMPORT_STDLIB  = auto()   # compiler.import.stdlib(path)
+    COMPILER_IMPORT_LOCAL   = auto()   # compiler.import.local(path)
+    COMPILER_FPM_PACKAGE    = auto()   # compiler.fpm.package(path)
+    EXTERN_DECL             = auto()   # EXTERN_DECL <name> <ret_ttag> - register extern proto
 
     # String ops
     STR_LEN     = auto()   # STR_LEN     - push length of top string
@@ -172,6 +181,7 @@ class TTag(Enum):
     PTR      = 'ptr'
     VOID     = 'void'
     STRUCT   = 'struct'
+    ENUM     = 'enum'
     ARRAY    = 'array'
     BYTES    = 'bytes'    # raw VM heap bytes (IO read results)
     FFI_LIB  = 'ffi_lib'
@@ -214,6 +224,7 @@ class Val:
 class Instr:
     op:      Op
     operands: List[Any] = field(default_factory=list)
+    src_line: int = field(default=0, compare=False, repr=False)
 
     def __repr__(self):
         if self.operands:
@@ -346,6 +357,7 @@ class FluxVM:
         struct_layouts: Dict[str, StructLayout] = None,
         type_sizes:     Dict[str, int]          = None,
         heap_size:      int                     = VMHeap.DEFAULT_SIZE,
+        source_file:    str                     = None,
     ):
         self.heap            = VMHeap(heap_size)
         self.stack:  List[Val]       = []
@@ -357,13 +369,26 @@ class FluxVM:
         self._io_next_handle: int                = 1
         # Registered comptime functions: name -> List[Instr]
         self._functions: Dict[str, List[Instr]]  = {}
+        # Source file path - used by compiler.import.* for relative path resolution
+        self.source_file: str = source_file
+        # FVMCodegen class injected by the host compiler for use in compiler.import.*
+        self._codegen_class = None
+        # Compiler macros (#def constants) from the host preprocessor
+        self._compiler_constants: dict = {}
         # Pending LLVM emission results accumulated during execute()
         self.emit_results: List[Any] = []
         # Locals snapshot from the most recently executed top-level block
         self.last_locals: List[Any] = []
-        # Accumulated instruction log across all execute() calls, for compiler.fvm.dump
-        self._comptime_log: List[List[Instr]] = []   # one entry per execute() call
-        self._comptime_log_locals: int   = 0   # high-water local count across all blocks
+        self._comptime_log: List[List[Instr]] = []
+        self._comptime_log_locals: int   = 0
+        # Comptime block-level variables accessible across function call frames
+        self._globals: dict = {}
+        # Extern function prototypes registered via ExternBlock: name -> ret TTag
+        self._extern_protos: dict = {}
+        # OS-allocated pointers (from extern malloc etc.) tracked separately from VM heap
+        self._os_ptrs: set = set()
+        # Last source line number seen during execution (for error reporting)
+        self._last_src_line: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -404,6 +429,8 @@ class FluxVM:
                 continue
             instr = frame.instructions[frame.ip]
             frame.ip += 1
+            if instr.src_line:
+                self._last_src_line = instr.src_line
             self._dispatch(instr)
         return self.stack[-1] if self.stack else None
 
@@ -478,6 +505,8 @@ class FluxVM:
         elif op == Op.LOCAL_SET:      self.frames[-1].locals[o[0]] = self._pop()
         elif op == Op.LOCAL_DEREF:    self._op_local_deref()
         elif op == Op.LOCAL_DEREF_SET: self._op_local_deref_set()
+        elif op == Op.GLOBAL_GET:     self._push(self._globals.get(o[0], Val(TTag.INT, 0)))
+        elif op == Op.GLOBAL_SET:     self._globals[o[0]] = self._pop()
 
         # Memory
         elif op == Op.ALLOC:      self._op_alloc()
@@ -487,13 +516,16 @@ class FluxVM:
         elif op == Op.OFFSET:     self._op_offset()
 
         # Structs / arrays
-        elif op == Op.STRUCT_NEW: self._op_struct_new(o[0])
-        elif op == Op.ARRAY_NEW:  self._op_array_new(o[0], o[1])
-        elif op == Op.ARRAY_LEN:  self._op_array_len()
-        elif op == Op.FIELD_GET:  self._op_field_get(o[0])
-        elif op == Op.FIELD_SET:  self._op_field_set(o[0])
-        elif op == Op.INDEX_GET:  self._op_index_get()
-        elif op == Op.INDEX_SET:  self._op_index_set()
+        elif op == Op.STRUCT_NEW:   self._op_struct_new(o[0])
+        elif op == Op.STRUCT_LOAD:  self._op_struct_load(o[0])
+        elif op == Op.STRUCT_STORE: self._op_struct_store(o[0])
+        elif op == Op.ENUM_NEW:     self._op_enum_new(o[0])
+        elif op == Op.ENUM_LOAD:    self._op_enum_load()
+        elif op == Op.ENUM_STORE:   self._op_enum_store()
+        elif op == Op.ARRAY_NEW:    self._op_array_new(o[0], o[1])
+        elif op == Op.ARRAY_LEN:    self._op_array_len()
+        elif op == Op.ARRAY_LOAD:   self._op_array_load()
+        elif op == Op.ARRAY_STORE:  self._op_array_store()
 
         # Type introspection
         elif op == Op.SIZEOF:     self._op_sizeof(o[0])
@@ -541,8 +573,12 @@ class FluxVM:
         elif op == Op.EMIT_CONST:  self._op_emit_const()
         elif op == Op.EMIT_GLOBAL: self._op_emit_global(o[0])
         elif op == Op.EMIT_TYPE:   self._op_emit_type()
-        elif op == Op.EMITFLUX:    self._op_emitflux(o[0], o[1])
-        elif op == Op.COMPILER_FVM_DUMP:  self._op_compiler_fvm_dump()
+        elif op == Op.EMITFLUX:             self._op_emitflux(o[0], o[1])
+        elif op == Op.COMPILER_FVM_DUMP:    self._op_compiler_fvm_dump()
+        elif op == Op.COMPILER_IMPORT_STDLIB: self._op_compiler_import_stdlib()
+        elif op == Op.COMPILER_IMPORT_LOCAL:  self._op_compiler_import_local()
+        elif op == Op.COMPILER_FPM_PACKAGE:   self._op_compiler_fpm_package()
+        elif op == Op.EXTERN_DECL:            self._extern_protos[o[0]] = o[1]
 
         else:
             raise VMError(f'Unknown opcode: {op}')
@@ -600,7 +636,63 @@ class FluxVM:
 
     def _call(self, name: str, argc: int):
         if name not in self._functions:
-            raise VMError(f'Unknown comptime function: {name!r}')
+            # Suffix-match against namespace-qualified names registered at runtime
+            # e.g. 'dt_from_unix_ms' matches 'standard__datetime__dt_from_unix_ms'
+            suffix = '__' + name
+            matches = [k for k in self._functions if k.endswith(suffix)]
+            if len(matches) == 1:
+                name = matches[0]
+            elif len(matches) > 1:
+                raise VMError(
+                    f'Ambiguous comptime function: {name!r} matches {matches}')
+            elif name in self._extern_protos:
+                pass  # handled below via ctypes
+            else:
+                raise VMError(f'Unknown comptime function: {name!r}')
+        if name in self._extern_protos:
+            ret_tag = self._extern_protos[name]
+            args = [self._pop() for _ in range(argc)]
+            args.reverse()
+            # Resolve symbol from process or platform C runtime
+            sym = None
+            import sys as _sys
+            _runtime_libs = (['msvcrt'] if _sys.platform == 'win32' else [None, 'c', 'libc.so.6'])
+            for _lib in _runtime_libs:
+                try:
+                    _dll = ctypes.CDLL(_lib)
+                    sym = getattr(_dll, name, None)
+                    if sym is not None:
+                        # Set restype to c_void_p for PTR returns to avoid sign-extension
+                        if ret_tag == TTag.PTR:
+                            sym.restype = ctypes.c_void_p
+                        break
+                except OSError:
+                    continue
+            if sym is None:
+                raise VMError(f'extern: symbol {name!r} not found in C runtime')
+            c_args = [self._val_to_ctype(a) for a in args]
+            try:
+                result = sym(*c_args)
+            except Exception as e:
+                raise VMError(f'extern call {name!r}: {e}')
+            if ret_tag == TTag.VOID:
+                self._push(Val(TTag.VOID, 0))
+            elif ret_tag == TTag.PTR:
+                addr = int(result or 0) & 0xFFFFFFFFFFFFFFFF
+                if addr:
+                    self._os_ptrs.add(addr)
+                    # Zero-initialize: Flux default behavior
+                    # We track size from the call args if possible; use arg[0] as size hint
+                    try:
+                        _sz = int(args[0].data) if args else 0
+                        if _sz > 0:
+                            ctypes.memset(addr, 0, _sz)
+                    except Exception:
+                        pass
+                self._push(Val(TTag.PTR, addr))
+            else:
+                self._push(Val(ret_tag, result))
+            return
         args = [self._pop() for _ in range(argc)]
         args.reverse()
         instrs = self._functions[name]
@@ -786,11 +878,66 @@ class FluxVM:
     # Struct / array ops
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Struct ops
+    # ------------------------------------------------------------------
+
     def _op_struct_new(self, type_name: str):
         layout = self._get_layout(type_name)
-        ptr    = self.heap.alloc(layout.total_size, TTag.STRUCT)
-        self.heap._tags[ptr] = TTag.STRUCT
-        self._push(Val(TTag.PTR, ptr, meta={'struct_type': type_name}))
+        _zero  = {TTag.BOOL: 0, TTag.BYTE: 0, TTag.CHAR: 0,
+                  TTag.INT: 0, TTag.UINT: 0, TTag.LONG: 0, TTag.ULONG: 0,
+                  TTag.FLOAT: 0.0, TTag.DOUBLE: 0.0, TTag.DATA: 0}
+        fields = {f[0]: Val(f[1], _zero.get(f[1], 0)) for f in layout.fields}
+        self._push(Val(TTag.STRUCT, type_name, meta={'fields': fields}))
+
+    def _op_struct_load(self, field: str):
+        sv = self._pop()
+        if sv.tag == TTag.STRUCT:
+            fields = sv.meta.get('fields', {})
+            if field not in fields:
+                raise VMError(f'STRUCT_LOAD: field {field!r} not found in struct {sv.data!r}')
+            self._push(fields[field])
+        else:
+            raise VMError(f'STRUCT_LOAD: expected STRUCT value, got {sv.tag}')
+
+    def _op_struct_store(self, field: str):
+        val = self._pop()
+        sv  = self._pop()
+        if sv.tag == TTag.STRUCT:
+            import copy
+            new_fields = dict(sv.meta.get('fields', {}))
+            new_fields[field] = val
+            self._push(Val(TTag.STRUCT, sv.data, meta={'fields': new_fields}))
+        else:
+            raise VMError(f'STRUCT_STORE: expected STRUCT value, got {sv.tag}')
+
+    # ------------------------------------------------------------------
+    # Enum ops
+    # ------------------------------------------------------------------
+
+    def _op_enum_new(self, type_name: str):
+        self._push(Val(TTag.ENUM, 0, meta={'enum_type': type_name}))
+
+    def _op_enum_load(self):
+        ev = self._pop()
+        if ev.tag != TTag.ENUM:
+            raise VMError(f'ENUM_LOAD: expected enum value, got {ev.tag}')
+        self._push(Val(TTag.INT, int(ev.data)))
+
+    def _op_enum_store(self):
+        val = self._pop()
+        ev  = self._pop()
+        if ev.tag != TTag.ENUM:
+            raise VMError(f'ENUM_STORE: expected enum value, got {ev.tag}')
+        # val may be a type-name bytes tag (union discriminant) or an integer
+        if isinstance(val.data, (bytes, bytearray)):
+            stored = val.data.decode('utf-8', errors='replace')
+        elif isinstance(val.data, str):
+            stored = val.data
+        else:
+            stored = int(val.data)
+        self._push(Val(TTag.ENUM, stored, meta=dict(ev.meta)))
+
 
     def _op_array_len(self):
         ptr_val = self._pop()
@@ -799,89 +946,107 @@ class FluxVM:
 
     def _op_array_new(self, type_name: str, count: int):
         elem_size = self._type_byte_size(type_name)
-        total     = elem_size * count
-        ptr       = self.heap.alloc(total, TTag.ARRAY)
-        self._push(Val(TTag.PTR, ptr, meta={'elem_type': type_name, 'count': count, 'elem_size': elem_size}))
+        etag      = _str_to_ttag(type_name)
+        _zero     = {TTag.FLOAT: 0.0, TTag.DOUBLE: 0.0}
+        elements  = [Val(etag, _zero.get(etag, 0)) for _ in range(count)]
+        self._push(Val(TTag.ARRAY, count, meta={'elem_type': type_name, 'count': count,
+                                                 'elem_size': elem_size, 'elements': elements}))
 
-    def _op_field_get(self, field_name: str):
-        ptr_val   = self._pop()
-        ptr       = int(ptr_val.data)
-        type_name = ptr_val.meta.get('struct_type')
-        if not type_name:
-            raise VMError(f'FIELD_GET: pointer has no struct_type meta')
-        layout    = self._get_layout(type_name)
-        f         = self._find_field(layout, field_name)
-        if ptr_val.meta.get('stack_slot'):
-            # Stack-slot pointer: ptr is a locals index, value is an integer
-            # whose bits are packed LSB-first matching the struct layout.
-            src_val   = self.frames[-1].locals[ptr]
-            raw_int   = int(src_val.data) if src_val is not None else 0
-            bit_offset = ptr_val.meta.get('field_bit_offsets', {}).get(f[0], 0)
-            _precise  = {TTag.BOOL: 1, TTag.BYTE: 8, TTag.CHAR: 8,
-                         TTag.INT: 32, TTag.UINT: 32,
-                         TTag.LONG: 64, TTag.ULONG: 64,
-                         TTag.FLOAT: 32, TTag.DOUBLE: 64}
-            fbit_width = _precise.get(f[1], f[3] * 8)
-            mask      = (1 << fbit_width) - 1
-            field_int = (raw_int >> bit_offset) & mask
-            if f[1] == TTag.BOOL:
-                self._push(Val(TTag.BOOL, bool(field_int)))
-            else:
-                self._push(Val(f[1], field_int))
-            return
-        field_ptr = ptr + f[2]
-        raw       = self.heap.read(field_ptr, f[3])
-        data      = self._bytes_to_val(raw, f[1], f[3])
-        self._push(Val(f[1], data))
+    def _ptr_is_os(self, addr: int) -> bool:
+        """Return True if addr is an OS-allocated pointer (not a VM heap or slot address)."""
+        return addr in self._os_ptrs or addr > self.heap._size
 
-    def _op_field_set(self, field_name: str):
-        val       = self._pop()
-        ptr_val   = self._pop()
-        ptr       = int(ptr_val.data)
-        type_name = ptr_val.meta.get('struct_type')
-        if not type_name:
-            raise VMError(f'FIELD_SET: pointer has no struct_type meta')
-        layout    = self._get_layout(type_name)
-        f         = self._find_field(layout, field_name)
-        if ptr_val.meta.get('stack_slot'):
-            # Stack-slot pointer: pack field bits back into the integer in the slot.
-            src_val   = self.frames[-1].locals[ptr]
-            raw_int   = int(src_val.data) if src_val is not None else 0
-            bit_offset = ptr_val.meta.get('field_bit_offsets', {}).get(f[0], 0)
-            _precise  = {TTag.BOOL: 1, TTag.BYTE: 8, TTag.CHAR: 8,
-                         TTag.INT: 32, TTag.UINT: 32,
-                         TTag.LONG: 64, TTag.ULONG: 64,
-                         TTag.FLOAT: 32, TTag.DOUBLE: 64}
-            fbit_width = _precise.get(f[1], f[3] * 8)
-            mask      = (1 << fbit_width) - 1
-            field_int = int(val.data) & mask
-            raw_int   = (raw_int & ~(mask << bit_offset)) | (field_int << bit_offset)
-            self.frames[-1].locals[ptr] = Val(src_val.tag if src_val else TTag.INT, raw_int)
-            return
-        field_ptr = ptr + f[2]
-        raw       = self._val_to_bytes(val, f[3])
-        self.heap.write(field_ptr, raw)
+    def _os_read_byte(self, addr: int) -> int:
+        return ctypes.string_at(addr, 1)[0]
 
-    def _op_index_get(self):
+    def _os_write_byte(self, addr: int, byte_val: int):
+        ctypes.memmove(addr, bytes([byte_val & 0xFF]), 1)
+
+    def _op_array_load(self):
         idx_val = self._pop()
-        ptr_val = self._pop()
-        ptr     = int(ptr_val.data)
+        av      = self._pop()
         idx     = int(idx_val.data)
-        esz     = ptr_val.meta.get('elem_size', 1)
-        etag    = _str_to_ttag(ptr_val.meta.get('elem_type', 'byte'))
-        raw     = self.heap.read(ptr + idx * esz, esz)
-        data    = self._bytes_to_val(raw, etag, esz)
-        self._push(Val(etag, data))
+        if av.tag == TTag.PTR and isinstance(av.data, int):
+            addr = int(av.data)
+            # OS pointer (e.g. from malloc): use ctypes
+            if self._ptr_is_os(addr):
+                self._push(Val(TTag.BYTE, self._os_read_byte(addr + idx)))
+                return
+            # Slot-based PTR (from @var): deref slot then index
+            frame = self.frames[-1] if self.frames else None
+            if frame and addr < len(frame.locals):
+                inner = frame.locals[addr]
+                if inner is not None and inner.tag == TTag.PTR and self._ptr_is_os(int(inner.data)):
+                    self._push(Val(TTag.BYTE, self._os_read_byte(int(inner.data) + idx)))
+                    return
+                if inner is not None and inner.tag == TTag.ARRAY:
+                    av = inner
+                elif inner is not None and inner.tag == TTag.PTR:
+                    raw = self.heap.read(int(inner.data) + idx, 1)
+                    self._push(Val(TTag.BYTE, raw[0]))
+                    return
+            else:
+                raw = self.heap.read(addr + idx, 1)
+                self._push(Val(TTag.BYTE, raw[0]))
+                return
+        elements = (av.meta or {}).get('elements')
+        if elements is None:
+            raise VMError('ARRAY_LOAD: array has no elements storage')
+        if idx < 0 or idx >= len(elements):
+            raise VMError(f'ARRAY_LOAD: index {idx} out of bounds (len={len(elements)})')
+        self._push(elements[idx])
 
-    def _op_index_set(self):
+    def _op_array_store(self):
         val     = self._pop()
         idx_val = self._pop()
-        ptr_val = self._pop()
-        ptr     = int(ptr_val.data)
+        av      = self._pop()
         idx     = int(idx_val.data)
-        esz     = ptr_val.meta.get('elem_size', 1)
-        raw     = self._val_to_bytes(val, esz)
-        self.heap.write(ptr + idx * esz, raw)
+        def _to_byte(v):
+            if isinstance(v.data, int): return v.data & 0xFF
+            if isinstance(v.data, (bytes, bytearray)): return v.data[0] & 0xFF
+            if isinstance(v.data, str): return ord(v.data[0]) & 0xFF
+            return 0
+        if av.tag == TTag.PTR and isinstance(av.data, int):
+            addr = int(av.data)
+            # OS pointer (e.g. from malloc): use ctypes
+            if self._ptr_is_os(addr):
+                self._os_write_byte(addr + idx, _to_byte(val))
+                self._push(av)
+                return
+            # Slot-based PTR: deref slot
+            frame = self.frames[-1] if self.frames else None
+            if frame and addr < len(frame.locals):
+                inner = frame.locals[addr]
+                if inner is not None and inner.tag == TTag.PTR:
+                    inner_addr = int(inner.data)
+                    if self._ptr_is_os(inner_addr):
+                        self._os_write_byte(inner_addr + idx, _to_byte(val))
+                    else:
+                        self.heap.write(inner_addr + idx, bytes([_to_byte(val)]))
+                    self._push(av)
+                    return
+                if inner is not None and inner.tag == TTag.ARRAY:
+                    elements = list(inner.meta.get('elements', []))
+                    if idx < 0 or idx >= len(elements):
+                        raise VMError(f'ARRAY_STORE: index {idx} out of bounds (len={len(elements)})')
+                    elements[idx] = val
+                    new_meta = dict(inner.meta)
+                    new_meta['elements'] = elements
+                    frame.locals[addr] = Val(TTag.ARRAY, inner.data, meta=new_meta)
+                    self._push(av)
+                    return
+            else:
+                self.heap.write(addr + idx, bytes([_to_byte(val)]))
+                self._push(av)
+                return
+        elements = list((av.meta or {}).get('elements', []))
+        if idx < 0 or idx >= len(elements):
+            raise VMError(f'ARRAY_STORE: index {idx} out of bounds (len={len(elements)})')
+        elements[idx] = val
+        new_meta = dict(av.meta)
+        new_meta['elements'] = elements
+        self._push(Val(TTag.ARRAY, av.data, meta=new_meta))
+
 
     # ------------------------------------------------------------------
     # Type introspection
@@ -1015,7 +1180,7 @@ class FluxVM:
             text = self._read_vm_string(val)
         else:
             text = str(val.data)
-        sys.stdout.write(text)
+        sys.stdout.write(text.replace('\x00', ''))
         sys.stdout.flush()
 
     def _op_compiler_input(self):
@@ -1075,33 +1240,189 @@ class FluxVM:
         except OSError as e:
             raise VMError(f'compiler.io.writefile: {e}')
 
-
     def _op_compiler_fvm_dump(self):
         path_val = self._pop()
         path     = self._read_vm_string(path_val)
         path     = path.replace('\\', '/')
         current_ip     = self.frames[0].ip if self.frames else 0
         current_instrs = self.frames[0].instructions if self.frames else []
-        before_dump = [
-            instr for instr in current_instrs[:current_ip - 2]
-            if instr.op != Op.HALT
-        ]
-        # Rebase each logged block's jump targets to global indices
+        before_dump = [i for i in current_instrs[:current_ip - 2] if i.op != Op.HALT]
         all_instrs = []
         for block in self._comptime_log:
-            rebased = _rebase_block(block, len(all_instrs))
-            all_instrs.extend(rebased)
-        # Rebase the current block's pre-dump instructions
+            all_instrs.extend(_rebase_block(block, len(all_instrs)))
         if before_dump:
-            before_rebased = _rebase_block(before_dump, len(all_instrs))
-            all_instrs.extend(before_rebased)
-        local_count = self._comptime_log_locals
-        text = serialise_fvm(all_instrs, local_count, self._functions, self.struct_layouts)
+            all_instrs.extend(_rebase_block(before_dump, len(all_instrs)))
+        text = serialise_fvm(all_instrs, self._comptime_log_locals, self._functions, self.struct_layouts)
         try:
             with open(path, 'w', encoding='utf-8') as fh:
                 fh.write(text)
         except OSError as e:
             raise VMError(f'compiler.fvm.dump: {e}')
+
+    def _op_compiler_import_stdlib(self):
+        path = self._read_vm_string(self._pop())
+        try:
+            processed = self._preprocess_import(path, 'stdlib')
+            self._compile_imported_source(processed)
+        except VMError as e:
+            raise VMError(f'{e} (stdlib: {path})') from e
+        self.emit_results.append(('import_stdlib', processed, path))
+
+    def _op_compiler_import_local(self):
+        path = self._read_vm_string(self._pop())
+        try:
+            processed = self._preprocess_import(path, 'local')
+            self._compile_imported_source(processed)
+        except VMError as e:
+            raise VMError(f'{e} (local: {path})') from e
+        self.emit_results.append(('import_local', processed, path))
+
+    def _op_compiler_fpm_package(self):
+        path = self._read_vm_string(self._pop())
+        try:
+            processed = self._preprocess_import(path, 'package')
+            self._compile_imported_source(processed)
+        except VMError as e:
+            raise VMError(f'{e} (package: {path})') from e
+        self.emit_results.append(('import_package', processed, path))
+
+    def _compile_imported_source(self, source: str):
+        """
+        Lex, parse, and compile comptime-relevant declarations from preprocessed
+        Flux source into self._functions so CALL instructions in the current block
+        can find them immediately.
+
+        Only comptime-compilable nodes are processed: function definitions,
+        namespace definitions, struct/union/enum definitions.
+        Everything else (extern blocks, LLVM IR declarations, etc.) is skipped.
+        """
+        import sys as _sys, types as _types
+        if 'llvmlite' not in _sys.modules:
+            class _IrStubMod(_types.ModuleType):
+                class _S:
+                    def __init__(self, *a, **kw): pass
+                    def __call__(self, *a, **kw): return type(self)()
+                    def __getattr__(self, n): return type(self)()
+                    def __class_getitem__(cls, i): return cls
+                def __getattr__(self, name): return self._S
+            _ir_stub  = _IrStubMod('llvmlite.ir')
+            _ll_stub  = _types.ModuleType('llvmlite')
+            _ll_stub.ir = _ir_stub
+            _sys.modules['llvmlite']                 = _ll_stub
+            _sys.modules['llvmlite.ir']              = _ir_stub
+            _sys.modules['llvmlite.ir.instructions'] = _types.ModuleType('llvmlite.ir.instructions')
+        _CG = self._codegen_class
+        if _CG is None:
+            raise VMError('compiler.import: no codegen class registered on VM')
+        try:
+            from flexer import FluxLexer as _Lexer
+            from fparser import FluxParser as _Parser
+            from fast import (
+                FunctionDef, FunctionDefStatement, NamespaceDef, NamespaceDefStatement,
+                StructDef, StructDefStatement, UnionDef, UnionDefStatement,
+                EnumDef, EnumDefStatement, TypeFuncDef, ExternBlock,
+            )
+        except ImportError as e:
+            raise VMError(f'compiler.import: missing module: {e}')
+
+        if not source or not source.strip():
+            return
+        tokens = _Lexer(source).tokenize()
+        program = _Parser(tokens).parse()
+
+        _decl_types = (
+            FunctionDef, FunctionDefStatement, NamespaceDef, NamespaceDefStatement,
+            StructDef, StructDefStatement, UnionDef, UnionDefStatement,
+            EnumDef, EnumDefStatement, TypeFuncDef, ExternBlock,
+        )
+
+        # Pre-pass: register global const variables so function bodies can access
+        # them as outer globals during compilation (e.g. TIME_NS_PER_SEC in timing.fx).
+        from fast import VariableDeclaration as _VD, Literal as _Lit, NamespaceDef as _NS, NamespaceDefStatement as _NSS
+        def _collect_global_consts(stmts):
+            for s in stmts:
+                if isinstance(s, (_NS, _NSS)):
+                    ns = s.namespace_def if isinstance(s, _NSS) else s
+                    _collect_global_consts(ns.variables)
+                    for nested in ns.nested_namespaces:
+                        _collect_global_consts(nested.variables)
+                elif isinstance(s, _VD) and s.is_global and s.initial_value is not None:
+                    if isinstance(s.initial_value, _Lit):
+                        try:
+                            v = s.initial_value.value
+                            if isinstance(v, str):
+                                try: v = int(v, 0)
+                                except (ValueError, TypeError):
+                                    try: v = float(v)
+                                    except (ValueError, TypeError): pass
+                            if isinstance(v, bool):
+                                self._globals[s.name] = Val(TTag.BOOL, int(v))
+                            elif isinstance(v, int):
+                                self._globals[s.name] = Val(TTag.LONG, v)
+                            elif isinstance(v, float):
+                                self._globals[s.name] = Val(TTag.DOUBLE, v)
+                        except Exception:
+                            pass
+        _collect_global_consts(program.statements)
+
+        cg = _CG(known_functions=dict(self._functions),
+                 known_struct_layouts=dict(self.struct_layouts))
+        # Expose pre-registered globals to function bodies compiled inside this import
+        cg._block_globals = set(self._globals.keys())
+        for stmt in program.statements:
+            if isinstance(stmt, _decl_types):
+                try:
+                    cg._visit_stmt(stmt)
+                except Exception as e:
+                    # Re-raise with source location from the imported AST node
+                    node = getattr(e, 'source_node', stmt)
+                    line = getattr(node, 'line', None)
+                    col  = getattr(node, 'col',  None)
+                    loc  = f' [imported line {line}:{col}]' if line is not None else ''
+                    raise VMError(f'compiler.import (compiling imported declarations): {e}{loc}') from e
+
+        # Register all compiled functions with the VM immediately
+        for name, instrs in cg.compiled_functions.items():
+            self.register_function(name, instrs)
+
+        # Accumulate struct layouts so STRUCT_NEW / FIELD_GET work
+        self.struct_layouts.update(cg._struct_layouts)
+
+    def _preprocess_import(self, path: str, kind: str) -> str:
+        """
+        Resolve, read, and preprocess a Flux source file for a compiler.import.*
+        or compiler.fpm.package call. Returns the fully preprocessed source text.
+        kind: 'stdlib' | 'local' | 'package'
+        """
+        try:
+            from fpreprocess import FXPreprocessor
+        except ImportError:
+            raise VMError('compiler.import: fpreprocess module not available')
+        import tempfile, os
+        src_file = self.source_file or os.path.join(os.getcwd(), '__comptime__.fx')
+        if kind == 'stdlib':
+            wrapper = f'#import <{path}>;\n'
+        elif kind == 'local':
+            wrapper = f'#import "{path}";\n'
+        else:
+            wrapper = f'#package "{path}";\n'
+        # Write wrapper to a temp file anchored in the source directory so
+        # FXPreprocessor resolves relative paths correctly.
+        src_dir = os.path.dirname(os.path.abspath(src_file))
+        tmp = tempfile.NamedTemporaryFile(
+            mode='w', suffix='.fx', dir=src_dir,
+            delete=False, encoding='utf-8'
+        )
+        try:
+            tmp.write(wrapper)
+            tmp.close()
+            preprocessor = FXPreprocessor(tmp.name, compiler_constants=self._compiler_constants)
+            result = preprocessor.process()
+        except FileNotFoundError as e:
+            raise VMError(f'compiler.import: {e}')
+        finally:
+            os.unlink(tmp.name)
+        return result
 
     # ------------------------------------------------------------------
     # String ops
@@ -1148,7 +1469,8 @@ class FluxVM:
         if val.tag in (TTag.BYTES,) or isinstance(val.data, (bytes, bytearray)):
             result = val.data if isinstance(val.data, (bytes, bytearray)) else val.data.encode('utf-8')
         elif val.tag == TTag.PTR:
-            result = self._read_vm_string(val).encode('utf-8')
+            text = self._read_vm_string(val)
+            result = text.encode('utf-8')
         elif isinstance(val.data, str):
             result = val.data.encode('utf-8')
         elif val.tag == TTag.CHAR:
@@ -1379,14 +1701,27 @@ class FluxVM:
             return val.data.decode('utf-8', errors='replace')
         if val.tag == TTag.PTR:
             ptr = int(val.data)
-            # Read null-terminated string from heap
             result = bytearray()
-            while True:
-                b = self.heap.read(ptr, 1)[0]
-                if b == 0:
-                    break
-                result.append(b)
-                ptr += 1
+            if self._ptr_is_os(ptr):
+                # OS pointer: read via ctypes, cap at 4096 bytes to avoid runaway
+                i = 0
+                try:
+                    while i < 4096:
+                        b = self._os_read_byte(ptr + i)
+                        if b == 0:
+                            break
+                        result.append(b)
+                        i += 1
+                except Exception:
+                    pass
+            else:
+                # VM heap pointer: read null-terminated from heap
+                while True:
+                    b = self.heap.read(ptr, 1)[0]
+                    if b == 0:
+                        break
+                    result.append(b)
+                    ptr += 1
             return result.decode('utf-8', errors='replace')
         raise VMError(f'_read_vm_string: cannot read string from {val}')
 
@@ -1446,7 +1781,8 @@ def _serialise_val(v) -> str:
                        .replace('"',  '\\"')
                        .replace('\n', '\\n')
                        .replace('\r', '\\r')
-                       .replace('\t', '\\t'))
+                       .replace('\t', '\\t')
+                       .replace('\x00', '\\0'))
         return f'bytes:"{escaped}"'
     if tag == TTag.BOOL:
         return f'bool:{"true" if d else "false"}'
@@ -1462,6 +1798,18 @@ def _serialise_val(v) -> str:
             parts.append('stack_slot')
         for fname, foffset in v.meta.get('field_bit_offsets', {}).items():
             parts.append(f'{fname}:{foffset}')
+        # Struct with fields dict: inline each field value
+        if 'fields' in v.meta:
+            for fname, fval in v.meta['fields'].items():
+                parts.append(f'f:{fname}={_serialise_val(fval)}')
+        # Array with elements list: inline each element value
+        if 'elements' in v.meta:
+            elem_type = v.meta.get('elem_type', 'int')
+            count     = v.meta.get('count', len(v.meta['elements']))
+            parts.append(f'elem_type={elem_type}')
+            parts.append(f'count={count}')
+            for i, ev in enumerate(v.meta['elements']):
+                parts.append(f'e:{i}={_serialise_val(ev)}')
         if parts:
             return 'ptr:' + str(d) + '[' + ','.join(parts) + ']'
     return f'{tag.value}:{d}'
@@ -1483,7 +1831,8 @@ def _serialise_instr(instr) -> str:
         Op.RET, Op.HALT,
         Op.LOCAL_DEREF, Op.LOCAL_DEREF_SET,
         Op.ALLOC, Op.FREE, Op.OFFSET,
-        Op.ARRAY_LEN, Op.INDEX_GET, Op.INDEX_SET,
+        Op.ARRAY_LEN, Op.ARRAY_LOAD, Op.ARRAY_STORE,
+        Op.ENUM_LOAD, Op.ENUM_STORE,
         Op.TYPEOF,
         Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
         Op.FFI_FREE,
@@ -1493,9 +1842,16 @@ def _serialise_instr(instr) -> str:
         Op.INT_TO_STR, Op.STR_TO_INT,
         Op.ASSERT, Op.WARN, Op.PANIC,
         Op.EMIT_CONST, Op.EMIT_TYPE,
+        Op.COMPILER_IMPORT_STDLIB, Op.COMPILER_IMPORT_LOCAL, Op.COMPILER_FPM_PACKAGE,
     }
     if op in _zero:
         return op.name
+
+    if op in (Op.GLOBAL_GET, Op.GLOBAL_SET):
+        return f'{op.name} {o[0]}'
+
+    if op == Op.EXTERN_DECL:
+        return f'EXTERN_DECL {o[0]} {o[1].name}'
 
     if op == Op.PUSH:
         return f'PUSH {_serialise_val(o[0])}'
@@ -1522,10 +1878,12 @@ def _serialise_instr(instr) -> str:
     if op in (Op.ROTL, Op.ROTR, Op.BITREV, Op.CLZ, Op.CTZ):
         return f'{op.name} {o[0]}'
 
-    if op in (Op.SIZEOF, Op.ALIGNOF, Op.ENDIANOF, Op.STRUCT_NEW):
+    if op in (Op.SIZEOF, Op.ALIGNOF, Op.ENDIANOF,
+              Op.STRUCT_NEW, Op.STRUCT_LOAD, Op.STRUCT_STORE,
+              Op.ENUM_NEW):
         return f'{op.name} {o[0]}'
 
-    if op in (Op.FIELD_GET, Op.FIELD_SET):
+    if op in (Op.STRUCT_LOAD, Op.STRUCT_STORE):
         return f'{op.name} {o[0]}'
 
     if op == Op.ARRAY_NEW:
@@ -1622,6 +1980,26 @@ def serialise_fvm(
 # .fvm source file parser
 # ---------------------------------------------------------------------------
 
+def _fvm_unescape(s: str) -> bytes:
+    """Unescape a .fvm string literal body (between the quotes) to bytes."""
+    result = bytearray()
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c == '\\' and i + 1 < len(s):
+            n = s[i + 1]
+            if   n == 'n':  result.append(ord('\n')); i += 2
+            elif n == 'r':  result.append(ord('\r')); i += 2
+            elif n == 't':  result.append(ord('\t')); i += 2
+            elif n == '0':  result.append(0);          i += 2
+            elif n == '\\': result.append(ord('\\')); i += 2
+            elif n == '"':  result.append(ord('"'));    i += 2
+            else:           result.extend(c.encode('utf-8')); i += 1
+        else:
+            result.extend(c.encode('utf-8')); i += 1
+    return bytes(result)
+
+
 def _parse_fvm_val(token: str) -> Val:
     """
     Parse a typed literal token into a Val.
@@ -1635,7 +2013,7 @@ def _parse_fvm_val(token: str) -> Val:
     """
     # Bare quoted string -> BYTES
     if token.startswith('"') and token.endswith('"') and len(token) >= 2:
-        raw = token[1:-1].encode('utf-8').decode('unicode_escape').encode('utf-8')
+        raw = _fvm_unescape(token[1:-1])
         return Val(TTag.BYTES, raw)
 
     if ':' not in token:
@@ -1644,12 +2022,22 @@ def _parse_fvm_val(token: str) -> Val:
     type_str, _, rest = token.partition(':')
     type_str = type_str.strip().lower()
 
-    # Strip and parse optional [meta] bracket from the value portion
+    # Strip and parse optional [meta] bracket from the value portion.
+    # Only look for '[' outside of a quoted string value.
     meta = {}
     raw  = rest
     if '[' in rest:
-        bracket_start = rest.index('[')
-        raw = rest[:bracket_start]
+        # Find '[' that is not inside a quoted string
+        _q = rest.find('"')
+        _b = rest.find('[')
+        if _b != -1 and (_q == -1 or _b < _q):
+            bracket_start = _b
+            raw = rest[:bracket_start]
+        else:
+            bracket_start = -1
+    else:
+        bracket_start = -1
+    if bracket_start != -1:
         bracket_content = rest[bracket_start + 1:].rstrip(']')
         for item in bracket_content.split(','):
             item = item.strip()
@@ -1659,6 +2047,25 @@ def _parse_fvm_val(token: str) -> Val:
                 meta['stack_slot'] = True
             elif item.startswith('struct_type='):
                 meta['struct_type'] = item[len('struct_type='):]
+            elif item.startswith('elem_type='):
+                meta['elem_type'] = item[len('elem_type='):]
+            elif item.startswith('count='):
+                meta['count'] = int(item[len('count='):])
+            elif item.startswith('f:'):
+                # Struct field: f:fname=type:value
+                rest = item[2:]
+                fname, _, fval_str = rest.partition('=')
+                if 'fields' not in meta:
+                    meta['fields'] = {}
+                meta['fields'][fname] = _parse_fvm_val(fval_str)
+            elif item.startswith('e:') and '=' in item:
+                # Array element: e:idx=type:value
+                rest = item[2:]
+                idx_str, _, eval_str = rest.partition('=')
+                idx = int(idx_str)
+                if 'elements' not in meta:
+                    meta['elements'] = {}
+                meta['elements'][idx] = _parse_fvm_val(eval_str)
             elif ':' in item:
                 fname, _, foffset = item.partition(':')
                 if 'field_bit_offsets' not in meta:
@@ -1667,7 +2074,7 @@ def _parse_fvm_val(token: str) -> Val:
 
     if type_str == 'bytes':
         if raw.startswith('"') and raw.endswith('"') and len(raw) >= 2:
-            raw = raw[1:-1].encode('utf-8').decode('unicode_escape').encode('utf-8')
+            raw = _fvm_unescape(raw[1:-1])
         else:
             raw = raw.encode('utf-8')
         return Val(TTag.BYTES, raw)
@@ -1695,6 +2102,12 @@ def _parse_fvm_val(token: str) -> Val:
             return Val(tag, 0)
         raise VMError(f'.fvm: invalid bool value {raw!r}')
     else:
+        # Convert elements sparse dict to ordered list
+        if 'elements' in meta and isinstance(meta['elements'], dict):
+            count = meta.get('count', max(meta['elements'].keys()) + 1 if meta['elements'] else 0)
+            etag  = _str_to_ttag(meta.get('elem_type', 'int'))
+            lst   = [meta['elements'].get(j, Val(etag, 0)) for j in range(count)]
+            meta['elements'] = lst
         return Val(tag, int(raw, 0), meta)
 
 
@@ -1896,13 +2309,15 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
         Op.RET, Op.HALT,
         Op.LOCAL_DEREF, Op.LOCAL_DEREF_SET,
         Op.ALLOC, Op.FREE, Op.OFFSET,
-        Op.ARRAY_LEN, Op.INDEX_GET, Op.INDEX_SET,
+        Op.ARRAY_LEN, Op.ARRAY_LOAD, Op.ARRAY_STORE,
+        Op.ENUM_LOAD, Op.ENUM_STORE,
         Op.TYPEOF,
         Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
         Op.FFI_FREE,
         Op.COMPILER_PRINT, Op.COMPILER_INPUT,
         Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
         Op.COMPILER_FVM_DUMP,
+        Op.COMPILER_IMPORT_STDLIB, Op.COMPILER_IMPORT_LOCAL, Op.COMPILER_FPM_PACKAGE,
         Op.STR_LEN, Op.STR_CAT, Op.STR_SLICE, Op.STR_EQ, Op.STR_FIND,
         Op.INT_TO_STR, Op.STR_TO_INT,
         Op.ASSERT, Op.WARN, Op.PANIC,
@@ -1914,7 +2329,15 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
     if op == Op.PUSH:
         if not raw_tokens:
             raise FVMParseError('PUSH requires a value operand', lineno)
-        return [_parse_fvm_val(raw_tokens[0])]
+        token = raw_tokens[0]
+        # Tolerate a missing '[' before meta on PTR tokens:
+        # 'ptr:N struct_type=...' -> fuse into 'ptr:N[struct_type=...]'
+        if token.startswith('ptr:') and '[' not in token and len(raw_tokens) > 1:
+            fused = token + '[' + ','.join(raw_tokens[1:])
+            if not fused.endswith(']'):
+                fused += ']'
+            token = fused
+        return [_parse_fvm_val(token)]
 
     if op == Op.CALL_PTR:
         if not raw_tokens:
@@ -1938,13 +2361,22 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
             raise FVMParseError(f'{op.name} requires a width operand', lineno)
         return [int(raw_tokens[0], 0)]
 
-    _type_name_op = {Op.SIZEOF, Op.ALIGNOF, Op.ENDIANOF, Op.STRUCT_NEW}
+    _type_name_op = {Op.SIZEOF, Op.ALIGNOF, Op.ENDIANOF,
+                     Op.STRUCT_NEW, Op.STRUCT_LOAD, Op.STRUCT_STORE,
+                     Op.ENUM_NEW,
+                     Op.GLOBAL_GET, Op.GLOBAL_SET}
+
+    if op == Op.EXTERN_DECL:
+        if len(raw_tokens) < 2:
+            raise FVMParseError('EXTERN_DECL requires name and ret_tag', lineno)
+        ttag_map = {t.name: t for t in TTag}
+        ret_tag = ttag_map.get(raw_tokens[1].upper(), TTag.VOID)
+        return [raw_tokens[0], ret_tag]
     if op in _type_name_op:
         if not raw_tokens:
             raise FVMParseError(f'{op.name} requires a type name operand', lineno)
         return [raw_tokens[0]]
 
-    if op in (Op.FIELD_GET, Op.FIELD_SET):
         if not raw_tokens:
             raise FVMParseError(f'{op.name} requires a field name operand', lineno)
         return [raw_tokens[0]]
@@ -2037,6 +2469,16 @@ def _fvm_main():
         _sys.exit(1)
 
     vm = FluxVM(struct_layouts=struct_layouts)
+    try:
+        from fvmcodegen import FVMCodegen as _FVMCodegen
+        vm._codegen_class = _FVMCodegen
+    except ImportError:
+        pass
+    try:
+        from fmacros import build_compiler_macros as _build_macros
+        vm._compiler_constants = _build_macros()
+    except ImportError:
+        pass
     for name, instrs in functions.items():
         vm.register_function(name, instrs)
 
@@ -2059,4 +2501,6 @@ def _fvm_main():
 
 
 if __name__ == '__main__':
+    import sys as _sys
+    _sys.modules.setdefault('fvm', _sys.modules['__main__'])
     _fvm_main()

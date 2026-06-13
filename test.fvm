@@ -24,6 +24,71 @@ struct TB little 5 5
     field e bool 4 1
 endstruct
 
+struct SYSTEMTIME little 8 0
+    field wYear uint 0 1
+    field wMonth uint 1 1
+    field wDayOfWeek uint 2 1
+    field wDay uint 3 1
+    field wHour uint 4 1
+    field wMinute uint 5 1
+    field wSecond uint 6 1
+    field wMilliseconds uint 7 1
+endstruct
+
+struct standard__datetime__DateTime little 7 0
+    field year int 0 1
+    field month int 1 1
+    field day int 2 1
+    field hour int 3 1
+    field minute int 4 1
+    field second int 5 1
+    field ms int 6 1
+endstruct
+
+struct standard__datetime__DateTime little 7 0
+    field year int 0 1
+    field month int 1 1
+    field day int 2 1
+    field hour int 3 1
+    field minute int 4 1
+    field second int 5 1
+    field ms int 6 1
+endstruct
+
+struct standard__datetime__Date little 3 0
+    field year int 0 1
+    field month int 1 1
+    field day int 2 1
+endstruct
+
+struct standard__datetime__Date little 3 0
+    field year int 0 1
+    field month int 1 1
+    field day int 2 1
+endstruct
+
+struct standard__datetime__TimeOfDay little 4 0
+    field hour int 0 1
+    field minute int 1 1
+    field second int 2 1
+    field ms int 3 1
+endstruct
+
+struct standard__datetime__TimeOfDay little 4 0
+    field hour int 0 1
+    field minute int 1 1
+    field second int 2 1
+    field ms int 3 1
+endstruct
+
+struct standard__datetime__Duration little 1 0
+    field total_ms long 0 1
+endstruct
+
+struct standard__datetime__Duration little 1 0
+    field total_ms long 0 1
+endstruct
+
 func foo
     PUSH bytes:"comptime "
     LOCAL_GET 0
@@ -67,7 +132,2193 @@ func zed
     RET
 endfunc
 
-locals 39
+func pass
+    PUSH bytes:"  [PASS] \0"
+    COMPILER_PRINT
+    PUSH bytes:""
+    LOCAL_GET 0
+    INT_TO_STR
+    STR_CAT
+    PUSH bytes:"\n"
+    STR_CAT
+    COMPILER_PRINT
+    GLOBAL_GET g_pass
+    PUSH int:1
+    ADD
+    DUP
+    GLOBAL_SET g_pass
+    POP
+    PUSH void:0
+    RET
+endfunc
+
+func fail
+    PUSH bytes:"  [FAIL] \0"
+    COMPILER_PRINT
+    PUSH bytes:""
+    LOCAL_GET 0
+    INT_TO_STR
+    STR_CAT
+    PUSH bytes:"\n"
+    STR_CAT
+    COMPILER_PRINT
+    GLOBAL_GET g_fail
+    PUSH int:1
+    ADD
+    DUP
+    GLOBAL_SET g_fail
+    POP
+    PUSH void:0
+    RET
+endfunc
+
+func standard__datetime___days_in_month_table
+    ARRAY_NEW int 13
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:0
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:1
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:2
+    PUSH int:28
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:3
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:4
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:5
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:6
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:7
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:8
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:9
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:10
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:11
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:12
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET normal
+    ARRAY_NEW int 13
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:0
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:1
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:2
+    PUSH int:29
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:3
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:4
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:5
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:6
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:7
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:8
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:9
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:10
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:11
+    PUSH int:30
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    PUSH int:12
+    PUSH int:31
+    ARRAY_STORE
+    LOCAL_SET 3
+    LOCAL_GET 3
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET leapt
+    LOCAL_GET 0
+    PUSH int:1
+    CMP_LT
+    DUP
+    JIF 151
+    POP
+    LOCAL_GET 0
+    PUSH int:12
+    CMP_GT
+    JNF 155
+    PUSH int:0
+    RET
+    JMP 155
+    LOCAL_GET 1
+    JNF 162
+    LOCAL_GET 4
+    LOCAL_GET 0
+    ARRAY_LOAD
+    RET
+    JMP 162
+    LOCAL_GET 2
+    LOCAL_GET 0
+    ARRAY_LOAD
+    RET
+endfunc
+
+func standard__datetime__dt_is_leap
+    LOCAL_GET 0
+    PUSH int:4
+    MOD
+    PUSH int:0
+    CMP_EQ
+    DUP
+    JNF 13
+    POP
+    LOCAL_GET 0
+    PUSH int:100
+    MOD
+    PUSH int:0
+    CMP_NE
+    DUP
+    JIF 21
+    POP
+    LOCAL_GET 0
+    PUSH int:400
+    MOD
+    PUSH int:0
+    CMP_EQ
+    RET
+endfunc
+
+func standard__datetime__dt_days_in_month
+    LOCAL_GET 1
+    LOCAL_GET 0
+    CALL dt_is_leap 1
+    CALL _days_in_month_table 2
+    RET
+endfunc
+
+func standard__datetime___days_to_year
+    LOCAL_GET 0
+    PUSH int:1
+    SUB
+    CAST ptr
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET y
+    LOCAL_GET 1
+    PUSH int:365
+    MUL
+    LOCAL_GET 1
+    PUSH int:4
+    DIV
+    ADD
+    LOCAL_GET 1
+    PUSH int:100
+    DIV
+    SUB
+    LOCAL_GET 1
+    PUSH int:400
+    DIV
+    ADD
+    PUSH int:1969
+    CAST ptr
+    PUSH int:365
+    MUL
+    PUSH int:1969
+    PUSH int:4
+    DIV
+    ADD
+    PUSH int:1969
+    PUSH int:100
+    DIV
+    SUB
+    PUSH int:1969
+    PUSH int:400
+    DIV
+    ADD
+    SUB
+    RET
+endfunc
+
+func standard__datetime___dt_to_days
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    CALL _days_to_year 1
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET days
+    PUSH int:1
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET m
+    LOCAL_GET 2
+    LOCAL_GET 0
+    STRUCT_LOAD month
+    CMP_LT
+    JNF 33
+    LOCAL_GET 1
+    LOCAL_GET 2
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    CALL dt_is_leap 1
+    CALL _days_in_month_table 2
+    CAST ptr
+    ADD
+    LOCAL_SET 1
+    LOCAL_GET 2
+    LOCAL_GET 2
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET m
+    POP
+    JMP 10
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD day
+    PUSH int:1
+    SUB
+    CAST ptr
+    ADD
+    LOCAL_SET 1
+    LOCAL_GET 1
+    RET
+endfunc
+
+func standard__datetime__dt_from_unix_ms
+    STRUCT_NEW DateTime
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET dt
+    PUSH long:0
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET days
+    PUSH long:0
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET rem_ms
+    PUSH long:0
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET rem_sec
+    PUSH long:0
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET y
+    PUSH long:0
+    DUP
+    LOCAL_SET 6
+    GLOBAL_SET m
+    PUSH int:0
+    DUP
+    LOCAL_SET 7
+    GLOBAL_SET year
+    PUSH int:0
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET month
+    PUSH int:0
+    DUP
+    LOCAL_SET 9
+    GLOBAL_SET day
+    PUSH bool:false
+    DUP
+    LOCAL_SET 10
+    GLOBAL_SET leap
+    LOCAL_GET 0
+    PUSH int:0
+    CMP_GE
+    JNF 57
+    LOCAL_GET 0
+    PUSH int:86400000
+    DIV
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET days
+    LOCAL_GET 0
+    PUSH int:86400000
+    MOD
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET rem_ms
+    JMP 73
+    LOCAL_GET 0
+    PUSH int:86399999
+    SUB
+    PUSH int:86400000
+    DIV
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET days
+    LOCAL_GET 0
+    LOCAL_GET 2
+    PUSH int:86400000
+    MUL
+    SUB
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET rem_ms
+    PUSH long:0
+    DUP
+    LOCAL_SET 11
+    GLOBAL_SET n400
+    PUSH long:0
+    DUP
+    LOCAL_SET 12
+    GLOBAL_SET n100
+    PUSH long:0
+    DUP
+    LOCAL_SET 13
+    GLOBAL_SET n4
+    PUSH long:0
+    DUP
+    LOCAL_SET 14
+    GLOBAL_SET n1
+    PUSH long:0
+    DUP
+    LOCAL_SET 15
+    GLOBAL_SET yday
+    PUSH long:0
+    DUP
+    LOCAL_SET 16
+    GLOBAL_SET d
+    LOCAL_GET 2
+    PUSH int:719468
+    ADD
+    DUP
+    LOCAL_SET 16
+    GLOBAL_SET d
+    LOCAL_GET 16
+    PUSH int:146097
+    DIV
+    DUP
+    LOCAL_SET 11
+    GLOBAL_SET n400
+    LOCAL_GET 16
+    PUSH int:146097
+    MOD
+    DUP
+    LOCAL_SET 16
+    GLOBAL_SET d
+    LOCAL_GET 16
+    PUSH int:0
+    CMP_LT
+    JNF 132
+    LOCAL_GET 16
+    PUSH int:146097
+    ADD
+    LOCAL_SET 16
+    LOCAL_GET 11
+    LOCAL_GET 11
+    PUSH int:1
+    SUB
+    DUP
+    LOCAL_SET 11
+    GLOBAL_SET n400
+    POP
+    JMP 132
+    LOCAL_GET 16
+    PUSH int:36524
+    DIV
+    DUP
+    LOCAL_SET 12
+    GLOBAL_SET n100
+    LOCAL_GET 12
+    PUSH int:4
+    CMP_EQ
+    JNF 147
+    PUSH int:3
+    DUP
+    LOCAL_SET 12
+    GLOBAL_SET n100
+    JMP 147
+    LOCAL_GET 16
+    LOCAL_GET 12
+    PUSH int:36524
+    MUL
+    SUB
+    LOCAL_SET 16
+    LOCAL_GET 16
+    PUSH int:1461
+    DIV
+    DUP
+    LOCAL_SET 13
+    GLOBAL_SET n4
+    LOCAL_GET 16
+    LOCAL_GET 13
+    PUSH int:1461
+    MUL
+    SUB
+    LOCAL_SET 16
+    LOCAL_GET 16
+    PUSH int:365
+    DIV
+    DUP
+    LOCAL_SET 14
+    GLOBAL_SET n1
+    LOCAL_GET 14
+    PUSH int:4
+    CMP_EQ
+    JNF 180
+    PUSH int:3
+    DUP
+    LOCAL_SET 14
+    GLOBAL_SET n1
+    JMP 180
+    LOCAL_GET 16
+    LOCAL_GET 14
+    PUSH int:365
+    MUL
+    SUB
+    LOCAL_SET 16
+    LOCAL_GET 11
+    PUSH int:400
+    MUL
+    LOCAL_GET 12
+    PUSH int:100
+    MUL
+    ADD
+    LOCAL_GET 13
+    PUSH int:4
+    MUL
+    ADD
+    LOCAL_GET 14
+    ADD
+    CAST int
+    DUP
+    LOCAL_SET 7
+    GLOBAL_SET year
+    PUSH long:0
+    DUP
+    LOCAL_SET 17
+    GLOBAL_SET m0
+    LOCAL_GET 16
+    PUSH int:5
+    MUL
+    PUSH int:2
+    ADD
+    PUSH int:153
+    DIV
+    DUP
+    LOCAL_SET 17
+    GLOBAL_SET m0
+    LOCAL_GET 17
+    CAST int
+    PUSH int:3
+    ADD
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET month
+    LOCAL_GET 8
+    PUSH int:12
+    CMP_GT
+    JNF 241
+    LOCAL_GET 8
+    PUSH int:12
+    SUB
+    LOCAL_SET 8
+    LOCAL_GET 7
+    LOCAL_GET 7
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 7
+    GLOBAL_SET year
+    POP
+    JMP 241
+    LOCAL_GET 16
+    LOCAL_GET 17
+    PUSH int:153
+    MUL
+    PUSH int:2
+    ADD
+    PUSH int:5
+    DIV
+    SUB
+    CAST int
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 9
+    GLOBAL_SET day
+    LOCAL_GET 1
+    LOCAL_GET 7
+    STRUCT_STORE year
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 8
+    STRUCT_STORE month
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 9
+    STRUCT_STORE day
+    LOCAL_SET 1
+    LOCAL_GET 3
+    PUSH int:1000
+    DIV
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET rem_sec
+    LOCAL_GET 1
+    LOCAL_GET 3
+    PUSH int:1000
+    MOD
+    CAST ptr
+    STRUCT_STORE ms
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 4
+    PUSH int:60
+    MOD
+    CAST ptr
+    STRUCT_STORE second
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 4
+    PUSH int:60
+    DIV
+    PUSH int:60
+    MOD
+    CAST ptr
+    STRUCT_STORE minute
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 4
+    PUSH int:3600
+    DIV
+    CAST ptr
+    STRUCT_STORE hour
+    LOCAL_SET 1
+    LOCAL_GET 1
+    RET
+endfunc
+
+func standard__datetime__dt_from_unix_sec
+    LOCAL_GET 0
+    PUSH int:1000
+    MUL
+    CALL dt_from_unix_ms 1
+    RET
+endfunc
+
+func standard__datetime__dt_to_unix_ms
+    LOCAL_GET 0
+    CALL _dt_to_days 1
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET days
+    LOCAL_GET 1
+    PUSH int:86400
+    MUL
+    LOCAL_GET 0
+    STRUCT_LOAD hour
+    CAST ptr
+    PUSH int:3600
+    MUL
+    ADD
+    LOCAL_GET 0
+    STRUCT_LOAD minute
+    CAST ptr
+    PUSH int:60
+    MUL
+    ADD
+    LOCAL_GET 0
+    STRUCT_LOAD second
+    CAST ptr
+    ADD
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET secs
+    LOCAL_GET 2
+    PUSH int:1000
+    MUL
+    LOCAL_GET 0
+    STRUCT_LOAD ms
+    CAST ptr
+    ADD
+    RET
+endfunc
+
+func standard__datetime__dt_to_unix_sec
+    LOCAL_GET 0
+    CALL dt_to_unix_ms 1
+    PUSH int:1000
+    DIV
+    RET
+endfunc
+
+func standard__datetime__dt_now_utc
+    PUSH ulong:0
+    DUP
+    LOCAL_SET 0
+    GLOBAL_SET ft
+    PUSH long:0
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET unix_ms
+    PUSH ptr:0
+    CALL GetSystemTimeAsFileTime 1
+    POP
+    LOCAL_GET 0
+    PUSH int:116444736000000000
+    CAST ptr
+    SUB
+    PUSH int:10000
+    CAST ptr
+    DIV
+    CAST ptr
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET unix_ms
+    LOCAL_GET 1
+    CALL dt_from_unix_ms 1
+    RET
+endfunc
+
+func standard__datetime__dt_now_loc
+    STRUCT_NEW SYSTEMTIME
+    DUP
+    LOCAL_SET 0
+    GLOBAL_SET st
+    STRUCT_NEW DateTime
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET dt
+    PUSH ptr:0
+    CAST ptr
+    CALL GetLocalTime 1
+    POP
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wYear
+    CAST ptr
+    STRUCT_STORE year
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wMonth
+    CAST ptr
+    STRUCT_STORE month
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wDay
+    CAST ptr
+    STRUCT_STORE day
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wHour
+    CAST ptr
+    STRUCT_STORE hour
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wMinute
+    CAST ptr
+    STRUCT_STORE minute
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wSecond
+    CAST ptr
+    STRUCT_STORE second
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD wMilliseconds
+    CAST ptr
+    STRUCT_STORE ms
+    LOCAL_SET 1
+    LOCAL_GET 1
+    RET
+endfunc
+
+func standard__datetime__dt_add_ms
+    PUSH long:0
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET epoch
+    LOCAL_GET 0
+    CALL dt_to_unix_ms 1
+    LOCAL_GET 1
+    ADD
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET epoch
+    LOCAL_GET 2
+    CALL dt_from_unix_ms 1
+    RET
+endfunc
+
+func standard__datetime__dt_add_days
+    LOCAL_GET 0
+    LOCAL_GET 1
+    PUSH int:86400000
+    MUL
+    CALL dt_add_ms 2
+    RET
+endfunc
+
+func standard__datetime__dt_diff_ms
+    GLOBAL_GET a
+    CALL dt_to_unix_ms 1
+    GLOBAL_GET b
+    CALL dt_to_unix_ms 1
+    SUB
+    RET
+endfunc
+
+func standard__datetime__dt_diff_days
+    GLOBAL_GET a
+    GLOBAL_GET b
+    CALL dt_diff_ms 2
+    PUSH int:86400000
+    DIV
+    RET
+endfunc
+
+func standard__datetime__dt_day_of_week
+    ARRAY_NEW int 12
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:0
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:1
+    PUSH int:3
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:2
+    PUSH int:2
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:3
+    PUSH int:5
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:4
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:5
+    PUSH int:3
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:6
+    PUSH int:5
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:7
+    PUSH int:1
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:8
+    PUSH int:4
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:9
+    PUSH int:6
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:10
+    PUSH int:2
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    PUSH int:11
+    PUSH int:4
+    ARRAY_STORE
+    LOCAL_SET 2
+    LOCAL_GET 2
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET t
+    PUSH int:0
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET y
+    PUSH int:0
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET m
+    PUSH int:0
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET d
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET y
+    LOCAL_GET 0
+    STRUCT_LOAD month
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET m
+    LOCAL_GET 0
+    STRUCT_LOAD day
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET d
+    LOCAL_GET 4
+    PUSH int:3
+    CMP_LT
+    JNF 106
+    LOCAL_GET 3
+    LOCAL_GET 3
+    PUSH int:1
+    SUB
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET y
+    POP
+    JMP 106
+    LOCAL_GET 3
+    LOCAL_GET 3
+    PUSH int:4
+    DIV
+    ADD
+    LOCAL_GET 3
+    PUSH int:100
+    DIV
+    SUB
+    LOCAL_GET 3
+    PUSH int:400
+    DIV
+    ADD
+    LOCAL_GET 1
+    LOCAL_GET 4
+    PUSH int:1
+    SUB
+    ARRAY_LOAD
+    ADD
+    LOCAL_GET 5
+    ADD
+    PUSH int:7
+    MOD
+    RET
+endfunc
+
+func standard__datetime__dt_day_of_year
+    PUSH int:0
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET total
+    PUSH int:0
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET m
+    PUSH int:1
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET m
+    LOCAL_GET 2
+    LOCAL_GET 0
+    STRUCT_LOAD month
+    CMP_LT
+    JNF 34
+    LOCAL_GET 1
+    LOCAL_GET 2
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    CALL dt_is_leap 1
+    CALL _days_in_month_table 2
+    ADD
+    LOCAL_SET 1
+    LOCAL_GET 2
+    LOCAL_GET 2
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET m
+    POP
+    JMP 12
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_LOAD day
+    ADD
+    RET
+endfunc
+
+func standard__datetime__dt_cmp
+    PUSH long:0
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET diff
+    GLOBAL_GET a
+    CALL dt_to_unix_ms 1
+    GLOBAL_GET b
+    CALL dt_to_unix_ms 1
+    SUB
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET diff
+    LOCAL_GET 2
+    PUSH int:0
+    CMP_LT
+    JNF 20
+    PUSH int:1
+    NEG
+    RET
+    JMP 20
+    LOCAL_GET 2
+    PUSH int:0
+    CMP_GT
+    JNF 27
+    PUSH int:1
+    RET
+    JMP 27
+    PUSH int:0
+    RET
+endfunc
+
+func standard__datetime__dt_eq
+    GLOBAL_GET a
+    CALL dt_to_unix_ms 1
+    GLOBAL_GET b
+    CALL dt_to_unix_ms 1
+    CMP_EQ
+    RET
+endfunc
+
+func standard__datetime__dt_lt
+    GLOBAL_GET a
+    CALL dt_to_unix_ms 1
+    GLOBAL_GET b
+    CALL dt_to_unix_ms 1
+    CMP_LT
+    RET
+endfunc
+
+func standard__datetime___fmt_pad
+    PUSH int:0
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET i
+    LOCAL_GET 3
+    PUSH int:1
+    SUB
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET p
+    PUSH byte:0
+    DUP
+    LOCAL_SET 6
+    GLOBAL_SET tmp
+    LOCAL_GET 5
+    PUSH int:0
+    CMP_GE
+    JNF 41
+    LOCAL_GET 6
+    LOCAL_GET 5
+    PUSH char:48
+    LOCAL_GET 2
+    PUSH int:10
+    MOD
+    ADD
+    CAST byte
+    ARRAY_STORE
+    LOCAL_SET 6
+    LOCAL_GET 2
+    PUSH int:10
+    DIV
+    LOCAL_SET 2
+    LOCAL_GET 5
+    LOCAL_GET 5
+    PUSH int:1
+    SUB
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET p
+    POP
+    JMP 14
+    LOCAL_GET 4
+    LOCAL_GET 3
+    CMP_LT
+    JNF 68
+    LOCAL_GET 0
+    LOCAL_GET 1
+    LOCAL_DEREF
+    LOCAL_GET 6
+    LOCAL_GET 4
+    ARRAY_LOAD
+    ARRAY_STORE
+    LOCAL_SET 0
+    LOCAL_GET 1
+    LOCAL_GET 1
+    LOCAL_DEREF
+    PUSH int:1
+    ADD
+    LOCAL_DEREF_SET
+    LOCAL_GET 4
+    LOCAL_GET 4
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET i
+    POP
+    JMP 41
+    PUSH void:0
+    RET
+endfunc
+
+func standard__datetime___fmt_char
+    LOCAL_GET 0
+    LOCAL_GET 1
+    LOCAL_DEREF
+    GLOBAL_GET c
+    ARRAY_STORE
+    LOCAL_SET 0
+    LOCAL_GET 1
+    LOCAL_GET 1
+    LOCAL_DEREF
+    PUSH int:1
+    ADD
+    LOCAL_DEREF_SET
+    PUSH void:0
+    RET
+endfunc
+
+func standard__datetime__dt_format_iso
+    PUSH int:0
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET pos
+    LOCAL_GET 2
+    PUSH int:25
+    CMP_LT
+    JNF 11
+    PUSH int:0
+    RET
+    JMP 11
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    PUSH int:4
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:45
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD month
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:45
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD day
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:84
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD hour
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:58
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD minute
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:58
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD second
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:46
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD ms
+    PUSH int:3
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:90
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    LOCAL_GET 3
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 1
+    LOCAL_GET 3
+    RET
+endfunc
+
+func standard__datetime__dt_format_date
+    PUSH int:0
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET pos
+    LOCAL_GET 2
+    PUSH int:11
+    CMP_LT
+    JNF 11
+    PUSH int:0
+    RET
+    JMP 11
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    PUSH int:4
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:45
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD month
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:45
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD day
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    LOCAL_GET 3
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 1
+    LOCAL_GET 3
+    RET
+endfunc
+
+func standard__datetime__dt_format_time
+    PUSH int:0
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET pos
+    LOCAL_GET 2
+    PUSH int:13
+    CMP_LT
+    JNF 11
+    PUSH int:0
+    RET
+    JMP 11
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD hour
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:58
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD minute
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:58
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD second
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    PUSH char:46
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:3
+    LOCAL_GET 0
+    STRUCT_LOAD ms
+    PUSH int:3
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    LOCAL_GET 3
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 1
+    LOCAL_GET 3
+    RET
+endfunc
+
+func standard__datetime__dt_format_rfc1123
+    ARRAY_NEW int 7
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:0
+    PUSH bytes:"Sun\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:1
+    PUSH bytes:"Mon\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:2
+    PUSH bytes:"Tue\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:3
+    PUSH bytes:"Wed\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:4
+    PUSH bytes:"Thu\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:5
+    PUSH bytes:"Fri\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:6
+    PUSH bytes:"Sat\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET days
+    ARRAY_NEW int 12
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:0
+    PUSH bytes:"Jan\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:1
+    PUSH bytes:"Feb\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:2
+    PUSH bytes:"Mar\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:3
+    PUSH bytes:"Apr\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:4
+    PUSH bytes:"May\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:5
+    PUSH bytes:"Jun\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:6
+    PUSH bytes:"Jul\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:7
+    PUSH bytes:"Aug\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:8
+    PUSH bytes:"Sep\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:9
+    PUSH bytes:"Oct\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:10
+    PUSH bytes:"Nov\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    PUSH int:11
+    PUSH bytes:"Dec\0"
+    ARRAY_STORE
+    LOCAL_SET 4
+    LOCAL_GET 4
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET months
+    PUSH int:0
+    DUP
+    LOCAL_SET 6
+    GLOBAL_SET pos
+    PUSH int:0
+    DUP
+    LOCAL_SET 7
+    GLOBAL_SET dow
+    PUSH int:0
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET i
+    PUSH byte:0
+    DUP
+    LOCAL_SET 9
+    GLOBAL_SET ds
+    PUSH byte:0
+    DUP
+    LOCAL_SET 10
+    GLOBAL_SET ms
+    LOCAL_GET 2
+    PUSH int:30
+    CMP_LT
+    JNF 134
+    PUSH int:0
+    RET
+    JMP 134
+    LOCAL_GET 0
+    CALL dt_day_of_week 1
+    DUP
+    LOCAL_SET 7
+    GLOBAL_SET dow
+    LOCAL_GET 3
+    LOCAL_GET 7
+    ARRAY_LOAD
+    PUSH int:0
+    ARRAY_LOAD
+    LOCAL_SET 11
+    PUSH ptr:11
+    DUP
+    LOCAL_SET 9
+    GLOBAL_SET ds
+    LOCAL_GET 9
+    LOCAL_GET 8
+    ARRAY_LOAD
+    PUSH int:0
+    CMP_NE
+    JNF 171
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 9
+    LOCAL_GET 8
+    ARRAY_LOAD
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 8
+    LOCAL_GET 8
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET i
+    POP
+    JMP 149
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:44
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:32
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 0
+    STRUCT_LOAD day
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:32
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 5
+    LOCAL_GET 0
+    STRUCT_LOAD month
+    PUSH int:1
+    SUB
+    ARRAY_LOAD
+    PUSH int:0
+    ARRAY_LOAD
+    LOCAL_SET 12
+    PUSH ptr:12
+    DUP
+    LOCAL_SET 10
+    GLOBAL_SET ms
+    PUSH int:0
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET i
+    LOCAL_GET 10
+    LOCAL_GET 8
+    ARRAY_LOAD
+    PUSH int:0
+    CMP_NE
+    JNF 232
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 10
+    LOCAL_GET 8
+    ARRAY_LOAD
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 8
+    LOCAL_GET 8
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET i
+    POP
+    JMP 210
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:32
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 0
+    STRUCT_LOAD year
+    PUSH int:4
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:32
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 0
+    STRUCT_LOAD hour
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:58
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 0
+    STRUCT_LOAD minute
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:58
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    LOCAL_GET 0
+    STRUCT_LOAD second
+    PUSH int:2
+    CALL _fmt_pad 4
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:32
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:71
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:77
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    PUSH ptr:6
+    PUSH char:84
+    CALL _fmt_char 3
+    POP
+    LOCAL_GET 1
+    LOCAL_GET 6
+    PUSH int:0
+    ARRAY_STORE
+    LOCAL_SET 1
+    LOCAL_GET 6
+    RET
+endfunc
+
+func standard__datetime___parse_digits
+    PUSH int:0
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET val
+    PUSH int:0
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET i
+    PUSH byte:0
+    DUP
+    LOCAL_SET 6
+    GLOBAL_SET c
+    LOCAL_GET 5
+    LOCAL_GET 2
+    CMP_LT
+    JNF 60
+    LOCAL_GET 0
+    LOCAL_GET 1
+    LOCAL_DEREF
+    ARRAY_LOAD
+    GLOBAL_SET c
+    GLOBAL_GET c
+    PUSH char:48
+    CMP_LT
+    DUP
+    JIF 30
+    POP
+    GLOBAL_GET c
+    PUSH char:57
+    CMP_GT
+    JNF 34
+    PUSH bool:false
+    RET
+    JMP 34
+    LOCAL_GET 4
+    PUSH int:10
+    MUL
+    GLOBAL_GET c
+    PUSH char:48
+    SUB
+    CAST int
+    ADD
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET val
+    LOCAL_GET 1
+    LOCAL_GET 1
+    LOCAL_DEREF
+    PUSH int:1
+    ADD
+    LOCAL_DEREF_SET
+    LOCAL_GET 5
+    LOCAL_GET 5
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET i
+    POP
+    JMP 12
+    LOCAL_GET 3
+    LOCAL_GET 4
+    LOCAL_DEREF_SET
+    PUSH bool:true
+    RET
+endfunc
+
+func standard__datetime___parse_char
+    LOCAL_GET 0
+    LOCAL_GET 1
+    LOCAL_DEREF
+    ARRAY_LOAD
+    LOCAL_GET 2
+    CMP_NE
+    JNF 10
+    PUSH bool:false
+    RET
+    JMP 10
+    LOCAL_GET 1
+    LOCAL_GET 1
+    LOCAL_DEREF
+    PUSH int:1
+    ADD
+    LOCAL_DEREF_SET
+    PUSH bool:true
+    RET
+endfunc
+
+func standard__datetime__dt_parse_iso
+    PUSH int:0
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET pos
+    PUSH int:0
+    DUP
+    LOCAL_SET 3
+    GLOBAL_SET yr
+    PUSH int:0
+    DUP
+    LOCAL_SET 4
+    GLOBAL_SET mo
+    PUSH int:0
+    DUP
+    LOCAL_SET 5
+    GLOBAL_SET dy
+    PUSH int:0
+    DUP
+    LOCAL_SET 6
+    GLOBAL_SET hr
+    PUSH int:0
+    DUP
+    LOCAL_SET 7
+    GLOBAL_SET mi
+    PUSH int:0
+    DUP
+    LOCAL_SET 8
+    GLOBAL_SET se
+    PUSH int:0
+    DUP
+    LOCAL_SET 9
+    GLOBAL_SET ms
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:4
+    PUSH ptr:3
+    CALL _parse_digits 4
+    NOT
+    JNF 42
+    PUSH bool:false
+    RET
+    JMP 42
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH char:45
+    CALL _parse_char 3
+    NOT
+    JNF 51
+    PUSH bool:false
+    RET
+    JMP 51
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:2
+    PUSH ptr:4
+    CALL _parse_digits 4
+    NOT
+    JNF 61
+    PUSH bool:false
+    RET
+    JMP 61
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH char:45
+    CALL _parse_char 3
+    NOT
+    JNF 70
+    PUSH bool:false
+    RET
+    JMP 70
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:2
+    PUSH ptr:5
+    CALL _parse_digits 4
+    NOT
+    JNF 80
+    PUSH bool:false
+    RET
+    JMP 80
+    LOCAL_GET 0
+    LOCAL_GET 2
+    ARRAY_LOAD
+    PUSH int:0
+    CMP_EQ
+    DUP
+    JIF 93
+    POP
+    LOCAL_GET 0
+    LOCAL_GET 2
+    ARRAY_LOAD
+    PUSH char:90
+    CMP_EQ
+    JNF 109
+    LOCAL_GET 1
+    LOCAL_GET 3
+    STRUCT_STORE year
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 4
+    STRUCT_STORE month
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 5
+    STRUCT_STORE day
+    LOCAL_SET 1
+    PUSH bool:true
+    RET
+    JMP 109
+    LOCAL_GET 0
+    LOCAL_GET 2
+    ARRAY_LOAD
+    PUSH char:84
+    CMP_NE
+    DUP
+    JNF 122
+    POP
+    LOCAL_GET 0
+    LOCAL_GET 2
+    ARRAY_LOAD
+    PUSH char:32
+    CMP_NE
+    JNF 126
+    PUSH bool:false
+    RET
+    JMP 126
+    LOCAL_GET 2
+    LOCAL_GET 2
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET pos
+    POP
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:2
+    PUSH ptr:6
+    CALL _parse_digits 4
+    NOT
+    JNF 144
+    PUSH bool:false
+    RET
+    JMP 144
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH char:58
+    CALL _parse_char 3
+    NOT
+    JNF 153
+    PUSH bool:false
+    RET
+    JMP 153
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:2
+    PUSH ptr:7
+    CALL _parse_digits 4
+    NOT
+    JNF 163
+    PUSH bool:false
+    RET
+    JMP 163
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH char:58
+    CALL _parse_char 3
+    NOT
+    JNF 172
+    PUSH bool:false
+    RET
+    JMP 172
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:2
+    PUSH ptr:8
+    CALL _parse_digits 4
+    NOT
+    JNF 182
+    PUSH bool:false
+    RET
+    JMP 182
+    LOCAL_GET 0
+    LOCAL_GET 2
+    ARRAY_LOAD
+    PUSH char:46
+    CMP_EQ
+    JNF 207
+    LOCAL_GET 2
+    LOCAL_GET 2
+    PUSH int:1
+    ADD
+    DUP
+    LOCAL_SET 2
+    GLOBAL_SET pos
+    POP
+    LOCAL_GET 0
+    PUSH ptr:2
+    PUSH int:3
+    PUSH ptr:9
+    CALL _parse_digits 4
+    NOT
+    JNF 206
+    PUSH bool:false
+    RET
+    JMP 206
+    JMP 207
+    LOCAL_GET 4
+    PUSH int:1
+    CMP_LT
+    DUP
+    JIF 216
+    POP
+    LOCAL_GET 4
+    PUSH int:12
+    CMP_GT
+    JNF 220
+    PUSH bool:false
+    RET
+    JMP 220
+    LOCAL_GET 5
+    PUSH int:1
+    CMP_LT
+    DUP
+    JIF 229
+    POP
+    LOCAL_GET 5
+    PUSH int:31
+    CMP_GT
+    JNF 233
+    PUSH bool:false
+    RET
+    JMP 233
+    LOCAL_GET 6
+    PUSH int:0
+    CMP_LT
+    DUP
+    JIF 242
+    POP
+    LOCAL_GET 6
+    PUSH int:23
+    CMP_GT
+    JNF 246
+    PUSH bool:false
+    RET
+    JMP 246
+    LOCAL_GET 7
+    PUSH int:0
+    CMP_LT
+    DUP
+    JIF 255
+    POP
+    LOCAL_GET 7
+    PUSH int:59
+    CMP_GT
+    JNF 259
+    PUSH bool:false
+    RET
+    JMP 259
+    LOCAL_GET 8
+    PUSH int:0
+    CMP_LT
+    DUP
+    JIF 268
+    POP
+    LOCAL_GET 8
+    PUSH int:59
+    CMP_GT
+    JNF 272
+    PUSH bool:false
+    RET
+    JMP 272
+    LOCAL_GET 9
+    PUSH int:0
+    CMP_LT
+    DUP
+    JIF 281
+    POP
+    LOCAL_GET 9
+    PUSH int:999
+    CMP_GT
+    JNF 285
+    PUSH bool:false
+    RET
+    JMP 285
+    LOCAL_GET 1
+    LOCAL_GET 3
+    STRUCT_STORE year
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 4
+    STRUCT_STORE month
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 5
+    STRUCT_STORE day
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 6
+    STRUCT_STORE hour
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 7
+    STRUCT_STORE minute
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 8
+    STRUCT_STORE second
+    LOCAL_SET 1
+    LOCAL_GET 1
+    LOCAL_GET 9
+    STRUCT_STORE ms
+    LOCAL_SET 1
+    PUSH bool:true
+    RET
+endfunc
+
+func standard__datetime__dur_from_ms
+    STRUCT_NEW Duration
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET d
+    LOCAL_GET 1
+    LOCAL_GET 0
+    STRUCT_STORE total_ms
+    LOCAL_SET 1
+    LOCAL_GET 1
+    RET
+endfunc
+
+func standard__datetime__dur_seconds
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:1000
+    DIV
+    RET
+endfunc
+
+func standard__datetime__dur_minutes
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:60000
+    DIV
+    RET
+endfunc
+
+func standard__datetime__dur_hours
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:3600000
+    DIV
+    RET
+endfunc
+
+func standard__datetime__dur_days
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:86400000
+    DIV
+    RET
+endfunc
+
+func standard__datetime__dur_ms_part
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:1000
+    MOD
+    PUSH int:1000
+    ADD
+    PUSH int:1000
+    MOD
+    RET
+endfunc
+
+func standard__datetime__dur_sec_part
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:1000
+    DIV
+    PUSH int:60
+    MOD
+    PUSH int:60
+    ADD
+    PUSH int:60
+    MOD
+    RET
+endfunc
+
+func standard__datetime__dur_min_part
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:60000
+    DIV
+    PUSH int:60
+    MOD
+    PUSH int:60
+    ADD
+    PUSH int:60
+    MOD
+    RET
+endfunc
+
+func standard__datetime__dur_hr_part
+    LOCAL_GET 0
+    STRUCT_LOAD total_ms
+    PUSH int:3600000
+    DIV
+    PUSH int:24
+    MOD
+    PUSH int:24
+    ADD
+    PUSH int:24
+    MOD
+    RET
+endfunc
+
+func bez
+    LOCAL_GET 0
+    DUP
+    LOCAL_SET 1
+    GLOBAL_SET yyy
+    LOCAL_GET 0
+    RET
+endfunc
+
+locals 105
 PUSH int:-1
 LOCAL_SET 0
 PUSH int:1
@@ -102,19 +2353,145 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
+PUSH int:1
+LOCAL_SET 17
+PUSH int:1
+LOCAL_SET 18
+PUSH int:0
+LOCAL_SET 19
+PUSH int:0
+LOCAL_SET 20
+PUSH int:1
+LOCAL_SET 21
+PUSH int:1
+LOCAL_SET 22
+PUSH int:0
+LOCAL_SET 23
+PUSH int:1
+LOCAL_SET 24
+PUSH int:0
+LOCAL_SET 25
+PUSH int:0
+LOCAL_SET 26
+PUSH int:0
+LOCAL_SET 27
+PUSH int:1
+LOCAL_SET 28
+PUSH int:0
+LOCAL_SET 29
+PUSH int:0
+LOCAL_SET 30
+PUSH int:0
+LOCAL_SET 31
+PUSH int:0
+LOCAL_SET 32
+PUSH int:1
+LOCAL_SET 33
+PUSH int:8
+LOCAL_SET 34
+PUSH int:4
+LOCAL_SET 35
+PUSH int:8
+LOCAL_SET 36
+PUSH int:8
+LOCAL_SET 37
+PUSH int:0
+LOCAL_SET 38
+PUSH int:0
+LOCAL_SET 39
+PUSH int:0
+LOCAL_SET 40
+PUSH int:0
+LOCAL_SET 41
+PUSH int:1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH int:1
+LOCAL_SET 44
+PUSH int:1
+LOCAL_SET 45
+PUSH int:1
+LOCAL_SET 46
+PUSH int:1
+LOCAL_SET 47
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 48
+PUSH int:1
+LOCAL_SET 49
+PUSH int:1
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 52
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 53
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 54
+PUSH int:40
+LOCAL_SET 55
+PUSH int:32
+LOCAL_SET 56
+PUSH bytes:"(size_t)32"
+LOCAL_SET 57
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 58
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 59
+PUSH int:1
+LOCAL_SET 60
+PUSH int:1
+LOCAL_SET 61
+PUSH int:1
+LOCAL_SET 62
+PUSH int:1
+LOCAL_SET 63
+PUSH int:2147483648
+LOCAL_SET 64
+PUSH int:1073741824
+LOCAL_SET 65
+PUSH int:3221225472
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:2
+LOCAL_SET 68
+PUSH int:4
+LOCAL_SET 69
+PUSH int:1
+LOCAL_SET 70
+PUSH int:2
+LOCAL_SET 71
+PUSH int:3
+LOCAL_SET 72
+PUSH int:4
+LOCAL_SET 73
+PUSH int:5
+LOCAL_SET 74
+PUSH int:128
+LOCAL_SET 75
+PUSH int:32
+LOCAL_SET 76
+PUSH int:-1
+LOCAL_SET 77
+PUSH int:1
+LOCAL_SET 78
 PUSH ulong:8
 COMPILER_PRINT
 PUSH bool:true
-LOCAL_SET 17
-LOCAL_GET 17
 DUP
-JIF 43
+LOCAL_SET 79
+GLOBAL_SET k
+LOCAL_GET 79
+DUP
+JIF 169
 POP
-LOCAL_GET 17
-JNF 47
+LOCAL_GET 79
+JNF 173
 PUSH bytes:"k!\n"
 COMPILER_PRINT
-JMP 47
+JMP 173
 PUSH bytes:""
 PUSH ulong:128
 INT_TO_STR
@@ -123,139 +2500,155 @@ PUSH bytes:"\n"
 STR_CAT
 COMPILER_PRINT
 PUSH int:10
-LOCAL_SET 18
+DUP
+LOCAL_SET 80
+GLOBAL_SET a
 PUSH int:20
-LOCAL_SET 19
-LOCAL_GET 18
+DUP
+LOCAL_SET 81
+GLOBAL_SET b
+LOCAL_GET 80
 PUSH int:32
 SHL
-LOCAL_SET 21
-LOCAL_GET 19
-LOCAL_GET 21
+LOCAL_SET 83
+LOCAL_GET 81
+LOCAL_GET 83
 BOR
-LOCAL_SET 21
-LOCAL_GET 21
+LOCAL_SET 83
+LOCAL_GET 83
 CAST long
-LOCAL_SET 20
-LOCAL_GET 20
-LOCAL_SET 22
-LOCAL_GET 22
+DUP
+LOCAL_SET 82
+GLOBAL_SET c
+LOCAL_GET 82
+LOCAL_SET 84
+LOCAL_GET 84
 PUSH int:32
 SHR
 PUSH long:4294967295
 BAND
 CAST int
-LOCAL_SET 23
-LOCAL_GET 22
+LOCAL_SET 85
+LOCAL_GET 84
 PUSH long:4294967295
 BAND
 CAST int
-LOCAL_SET 24
+LOCAL_SET 86
 ARRAY_NEW int 2
-LOCAL_SET 26
-LOCAL_GET 26
+LOCAL_SET 88
+LOCAL_GET 88
 PUSH int:0
-LOCAL_GET 18
-INDEX_SET
-LOCAL_GET 26
+LOCAL_GET 80
+ARRAY_STORE
+LOCAL_SET 88
+LOCAL_GET 88
 PUSH int:1
-LOCAL_GET 19
-INDEX_SET
-LOCAL_GET 26
-LOCAL_SET 25
-LOCAL_GET 18
-LOCAL_SET 27
-LOCAL_GET 25
-LOCAL_SET 28
+LOCAL_GET 81
+ARRAY_STORE
+LOCAL_SET 88
+LOCAL_GET 88
+DUP
+LOCAL_SET 87
+GLOBAL_SET f
+LOCAL_GET 80
+LOCAL_SET 89
+LOCAL_GET 87
+LOCAL_SET 90
 PUSH bool:false
-LOCAL_SET 29
+LOCAL_SET 91
 PUSH int:0
-LOCAL_SET 30
-LOCAL_GET 28
+LOCAL_SET 92
+LOCAL_GET 90
 ARRAY_LEN
-LOCAL_SET 31
-LOCAL_GET 30
-LOCAL_GET 31
+LOCAL_SET 93
+LOCAL_GET 92
+LOCAL_GET 93
 CMP_GE
-JIF 123
-LOCAL_GET 28
-LOCAL_GET 30
-INDEX_GET
-LOCAL_GET 27
+JIF 259
+LOCAL_GET 90
+LOCAL_GET 92
+ARRAY_LOAD
+LOCAL_GET 89
 CMP_EQ
-LOCAL_GET 29
+LOCAL_GET 91
 BOR
-LOCAL_SET 29
-LOCAL_GET 30
+LOCAL_SET 91
+LOCAL_GET 92
 PUSH int:1
 ADD
-LOCAL_SET 30
-JMP 106
-LOCAL_GET 29
-JNF 128
+LOCAL_SET 92
+JMP 242
+LOCAL_GET 91
+JNF 264
 PUSH bytes:"a in f\n"
 COMPILER_PRINT
-JMP 128
+JMP 264
 PUSH bytes:"DO LOOP!\n"
 COMPILER_PRINT
-JMP 133
+JMP 269
 PUSH bool:true
-JIF 128
+JIF 264
 PUSH bool:true
-JNF 139
+JNF 275
 PUSH bytes:"WHILE LOOP!\n"
 COMPILER_PRINT
-JMP 139
-JMP 133
+JMP 275
+JMP 269
 PUSH bytes:""
-LOCAL_GET 20
+LOCAL_GET 82
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
 STR_CAT
 COMPILER_PRINT
 PUSH bytes:""
-LOCAL_GET 23
+LOCAL_GET 85
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
 STR_CAT
 COMPILER_PRINT
 PUSH bytes:""
-LOCAL_GET 24
+LOCAL_GET 86
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
 STR_CAT
 COMPILER_PRINT
 PUSH bytes:""
-LOCAL_GET 25
+LOCAL_GET 87
 PUSH int:0
-INDEX_GET
+ARRAY_LOAD
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
 STR_CAT
 COMPILER_PRINT
-LOCAL_GET 18
-LOCAL_GET 19
+LOCAL_GET 80
+LOCAL_GET 81
 BXOR
-LOCAL_SET 18
-LOCAL_GET 19
-LOCAL_GET 18
+DUP
+LOCAL_SET 80
+GLOBAL_SET a
+LOCAL_GET 81
+LOCAL_GET 80
 BXOR
-LOCAL_SET 19
-LOCAL_GET 18
-LOCAL_GET 19
+DUP
+LOCAL_SET 81
+GLOBAL_SET b
+LOCAL_GET 80
+LOCAL_GET 81
 BXOR
-LOCAL_SET 18
+DUP
+LOCAL_SET 80
+GLOBAL_SET a
 PUSH bytes:""
-LOCAL_GET 18
+LOCAL_GET 80
 INT_TO_STR
 STR_CAT
 PUSH bytes:" "
 STR_CAT
-LOCAL_GET 19
+LOCAL_GET 81
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
@@ -295,30 +2688,156 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 17
-PUSH int:20
+PUSH int:1
 LOCAL_SET 18
-PUSH int:10
+PUSH int:1
 LOCAL_SET 19
-PUSH long:42949672980
+PUSH int:1
 LOCAL_SET 20
-PUSH int:10
+PUSH int:1
 LOCAL_SET 21
-PUSH int:20
+PUSH int:1
 LOCAL_SET 22
-PUSH ptr:8
+PUSH int:40
 LOCAL_SET 23
-PUSH int:0
+PUSH int:32
 LOCAL_SET 24
 PUSH int:1
 LOCAL_SET 25
-PUSH int:2
+PUSH int:1
 LOCAL_SET 26
-PUSH int:0
+PUSH int:1
 LOCAL_SET 27
-PUSH bytes:"MyU1"
+PUSH int:1
 LOCAL_SET 28
+PUSH int:2147483648
+LOCAL_SET 29
+PUSH int:1073741824
+LOCAL_SET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH int:10
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:1
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:0
+LOCAL_SET 52
+PUSH int:0
+LOCAL_SET 53
+PUSH int:1
+LOCAL_SET 54
+PUSH int:1
+LOCAL_SET 55
+PUSH int:0
+LOCAL_SET 56
+PUSH int:1
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:0
+LOCAL_SET 59
+PUSH int:0
+LOCAL_SET 60
+PUSH int:1
+LOCAL_SET 61
+PUSH int:0
+LOCAL_SET 62
+PUSH int:0
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:0
+LOCAL_SET 65
+PUSH int:1
+LOCAL_SET 66
+PUSH int:8
+LOCAL_SET 67
+PUSH int:4
+LOCAL_SET 68
+PUSH int:8
+LOCAL_SET 69
+PUSH int:8
+LOCAL_SET 70
+PUSH int:0
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:0
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:1
+LOCAL_SET 75
+PUSH int:1
+LOCAL_SET 76
+PUSH int:1
+LOCAL_SET 77
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 78
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 79
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 80
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 81
+PUSH bytes:"(size_t)32"
+LOCAL_SET 82
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 83
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 84
+PUSH int:0
+LOCAL_SET 85
+PUSH int:1
+LOCAL_SET 86
+PUSH int:2
+LOCAL_SET 87
+ENUM_NEW MyEnum1
+DUP
+LOCAL_SET 88
+GLOBAL_SET me1
+LOCAL_GET 88
+PUSH bytes:"MyU1"
+ENUM_STORE
+LOCAL_SET 88
 PUSH int:-1
 LOCAL_SET 0
 PUSH int:1
@@ -353,37 +2872,213 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 17
-PUSH int:20
+PUSH int:1
 LOCAL_SET 18
-PUSH int:10
+PUSH int:1
 LOCAL_SET 19
-PUSH long:42949672980
+PUSH int:1
 LOCAL_SET 20
-PUSH int:10
+PUSH int:1
 LOCAL_SET 21
-PUSH int:20
+PUSH int:1
 LOCAL_SET 22
-PUSH ptr:8
+PUSH int:40
 LOCAL_SET 23
-PUSH int:0
+PUSH int:32
 LOCAL_SET 24
 PUSH int:1
 LOCAL_SET 25
-PUSH int:2
+PUSH int:1
 LOCAL_SET 26
-PUSH int:0
+PUSH int:1
 LOCAL_SET 27
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 28
-PUSH int:22
+PUSH int:2147483648
 LOCAL_SET 29
-PUSH ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2,d:3,e:4]
+PUSH int:1073741824
 LOCAL_SET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH int:10
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH int:1
+LOCAL_SET 53
+PUSH int:1
+LOCAL_SET 54
+PUSH int:0
+LOCAL_SET 55
+PUSH int:0
+LOCAL_SET 56
+PUSH int:1
+LOCAL_SET 57
+PUSH int:1
+LOCAL_SET 58
+PUSH int:0
+LOCAL_SET 59
+PUSH int:1
+LOCAL_SET 60
+PUSH int:0
+LOCAL_SET 61
+PUSH int:0
+LOCAL_SET 62
+PUSH int:0
+LOCAL_SET 63
+PUSH int:1
+LOCAL_SET 64
+PUSH int:0
+LOCAL_SET 65
+PUSH int:0
+LOCAL_SET 66
+PUSH int:0
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:1
+LOCAL_SET 69
+PUSH int:8
+LOCAL_SET 70
+PUSH int:4
+LOCAL_SET 71
+PUSH int:8
+LOCAL_SET 72
+PUSH int:8
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:0
+LOCAL_SET 77
+PUSH int:1
+LOCAL_SET 78
+PUSH int:1
+LOCAL_SET 79
+PUSH int:1
+LOCAL_SET 80
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 81
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 82
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 83
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 84
+PUSH bytes:"(size_t)32"
+LOCAL_SET 85
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 86
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 87
+PUSH bool:true
+DUP
+LOCAL_SET 88
+GLOBAL_SET tb
+PUSH int:22
+DUP
+LOCAL_SET 89
+GLOBAL_SET my5
+STRUCT_NEW TB
+LOCAL_SET 91
+LOCAL_GET 89
+PUSH long:1
+BAND
+CAST bool
+LOCAL_GET 91
+SWAP
+STRUCT_STORE a
+LOCAL_SET 91
+LOCAL_GET 89
+PUSH int:1
+SHR
+PUSH long:1
+BAND
+CAST bool
+LOCAL_GET 91
+SWAP
+STRUCT_STORE b
+LOCAL_SET 91
+LOCAL_GET 89
+PUSH int:2
+SHR
+PUSH long:1
+BAND
+CAST bool
+LOCAL_GET 91
+SWAP
+STRUCT_STORE c
+LOCAL_SET 91
+LOCAL_GET 89
+PUSH int:3
+SHR
+PUSH long:1
+BAND
+CAST bool
+LOCAL_GET 91
+SWAP
+STRUCT_STORE d
+LOCAL_SET 91
+LOCAL_GET 89
+PUSH int:4
+SHR
+PUSH long:1
+BAND
+CAST bool
+LOCAL_GET 91
+SWAP
+STRUCT_STORE e
+LOCAL_SET 91
+LOCAL_GET 91
+DUP
+LOCAL_SET 90
+GLOBAL_SET mytb
 PUSH bytes:"mytb.c = "
-LOCAL_GET 30
-FIELD_GET c
+LOCAL_GET 90
+STRUCT_LOAD c
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
@@ -392,10 +3087,10 @@ COMPILER_PRINT
 PUSH int:5
 PUSH int:5
 CMP_EQ
-JNF 328
+JNF 772
 PUSH bytes:"tb is bool\n"
 COMPILER_PRINT
-JMP 328
+JMP 772
 PUSH bytes:"Size of TB: "
 COMPILER_PRINT
 PUSH ulong:5
@@ -436,45 +3131,165 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 17
-PUSH int:20
+PUSH int:1
 LOCAL_SET 18
-PUSH int:10
+PUSH int:1
 LOCAL_SET 19
-PUSH long:42949672980
+PUSH int:1
 LOCAL_SET 20
-PUSH int:10
+PUSH int:1
 LOCAL_SET 21
-PUSH int:20
+PUSH int:1
 LOCAL_SET 22
-PUSH ptr:8
+PUSH int:40
 LOCAL_SET 23
-PUSH int:0
+PUSH int:32
 LOCAL_SET 24
 PUSH int:1
 LOCAL_SET 25
-PUSH int:2
+PUSH int:1
 LOCAL_SET 26
-PUSH int:0
+PUSH int:1
 LOCAL_SET 27
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 28
-PUSH ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2,d:3,e:4]
+PUSH int:2147483648
 LOCAL_SET 29
-PUSH bytes:"bar"
-LOCAL_SET 31
-PUSH ptr:31
+PUSH int:1073741824
 LOCAL_SET 30
-LOCAL_GET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH int:10
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH int:1
+LOCAL_SET 54
+PUSH int:1
+LOCAL_SET 55
+PUSH int:0
+LOCAL_SET 56
+PUSH int:0
+LOCAL_SET 57
+PUSH int:1
+LOCAL_SET 58
+PUSH int:1
+LOCAL_SET 59
+PUSH int:0
+LOCAL_SET 60
+PUSH int:1
+LOCAL_SET 61
+PUSH int:0
+LOCAL_SET 62
+PUSH int:0
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:1
+LOCAL_SET 65
+PUSH int:0
+LOCAL_SET 66
+PUSH int:0
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:0
+LOCAL_SET 69
+PUSH int:1
+LOCAL_SET 70
+PUSH int:8
+LOCAL_SET 71
+PUSH int:4
+LOCAL_SET 72
+PUSH int:8
+LOCAL_SET 73
+PUSH int:8
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:0
+LOCAL_SET 77
+PUSH int:0
+LOCAL_SET 78
+PUSH int:1
+LOCAL_SET 79
+PUSH int:1
+LOCAL_SET 80
+PUSH int:1
+LOCAL_SET 81
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 82
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 83
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 84
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 85
+PUSH bytes:"(size_t)32"
+LOCAL_SET 86
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 87
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 88
+PUSH bytes:"bar"
+LOCAL_SET 90
+PUSH ptr:90
+LOCAL_SET 89
+LOCAL_GET 89
 LOCAL_DEREF
 CALL_PTR 0
 POP
-LOCAL_GET 30
+LOCAL_GET 89
 CAST ulong
-LOCAL_SET 32
+DUP
+LOCAL_SET 91
+GLOBAL_SET abar
 PUSH bytes:"Address of bar() at comptime = "
-LOCAL_GET 32
+LOCAL_GET 91
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
@@ -514,76 +3329,203 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 17
-PUSH int:20
+PUSH int:1
 LOCAL_SET 18
-PUSH int:10
+PUSH int:1
 LOCAL_SET 19
-PUSH long:42949672980
+PUSH int:1
 LOCAL_SET 20
-PUSH int:10
+PUSH int:1
 LOCAL_SET 21
-PUSH int:20
+PUSH int:1
 LOCAL_SET 22
-PUSH ptr:8
+PUSH int:40
 LOCAL_SET 23
-PUSH int:0
+PUSH int:32
 LOCAL_SET 24
 PUSH int:1
 LOCAL_SET 25
-PUSH int:2
+PUSH int:1
 LOCAL_SET 26
-PUSH int:0
+PUSH int:1
 LOCAL_SET 27
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 28
-PUSH ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2,d:3,e:4]
+PUSH int:2147483648
 LOCAL_SET 29
-PUSH ptr:31
+PUSH int:1073741824
 LOCAL_SET 30
-PUSH ulong:31
+PUSH int:3221225472
 LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH int:10
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH int:1
+LOCAL_SET 56
+PUSH int:1
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:0
+LOCAL_SET 59
+PUSH int:1
+LOCAL_SET 60
+PUSH int:1
+LOCAL_SET 61
+PUSH int:0
+LOCAL_SET 62
+PUSH int:1
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:0
+LOCAL_SET 65
+PUSH int:0
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:0
+LOCAL_SET 69
+PUSH int:0
+LOCAL_SET 70
+PUSH int:0
+LOCAL_SET 71
+PUSH int:1
+LOCAL_SET 72
+PUSH int:8
+LOCAL_SET 73
+PUSH int:4
+LOCAL_SET 74
+PUSH int:8
+LOCAL_SET 75
+PUSH int:8
+LOCAL_SET 76
+PUSH int:0
+LOCAL_SET 77
+PUSH int:0
+LOCAL_SET 78
+PUSH int:0
+LOCAL_SET 79
+PUSH int:0
+LOCAL_SET 80
+PUSH int:1
+LOCAL_SET 81
+PUSH int:1
+LOCAL_SET 82
+PUSH int:1
+LOCAL_SET 83
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 84
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 85
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 86
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 87
+PUSH bytes:"(size_t)32"
+LOCAL_SET 88
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 89
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 90
 PUSH bytes:"Hello World!"
 CALL foo 1
 POP
 PUSH char:98
-LOCAL_SET 19
-PUSH ptr:18
-LOCAL_SET 32
-LOCAL_GET 32
+DUP
+LOCAL_SET 46
+GLOBAL_SET b
+PUSH ptr:45
+DUP
+LOCAL_SET 91
+GLOBAL_SET pp
+LOCAL_GET 91
 LOCAL_DEREF
-LOCAL_SET 33
-LOCAL_GET 33
-LOCAL_GET 18
+DUP
+LOCAL_SET 92
+GLOBAL_SET aa
+LOCAL_GET 92
+LOCAL_GET 45
 CMP_EQ
-JNF 493
+JNF 1181
 PUSH bytes:"AA\n"
 COMPILER_PRINT
-JMP 493
+JMP 1181
 STRUCT_NEW MyStructA
-LOCAL_SET 34
-LOCAL_GET 34
+DUP
+LOCAL_SET 93
+GLOBAL_SET ns
+LOCAL_GET 93
 PUSH int:25
-FIELD_SET a
-LOCAL_GET 19
+STRUCT_STORE a
+LOCAL_SET 93
+LOCAL_GET 46
 CALL __typefunc__char__mybfunc 1
 COMPILER_PRINT
 PUSH bytes:""
-LOCAL_GET 34
-FIELD_GET a
+LOCAL_GET 93
+STRUCT_LOAD a
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
 STR_CAT
 COMPILER_PRINT
-LOCAL_GET 18
-LOCAL_GET 19
+LOCAL_GET 45
+LOCAL_GET 46
 CMP_NE
-JNF 516
+JNF 1207
 PUSH bytes:"!=\n"
 COMPILER_PRINT
-JMP 516
+JMP 1207
 PUSH int:-1
 LOCAL_SET 0
 PUSH int:1
@@ -618,152 +3560,185 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 17
-PUSH int:20
+PUSH int:1
 LOCAL_SET 18
-PUSH char:98
+PUSH int:1
 LOCAL_SET 19
-PUSH long:42949672980
+PUSH int:1
 LOCAL_SET 20
-PUSH int:10
+PUSH int:1
 LOCAL_SET 21
-PUSH int:20
+PUSH int:1
 LOCAL_SET 22
-PUSH ptr:8
+PUSH int:40
 LOCAL_SET 23
-PUSH int:0
+PUSH int:32
 LOCAL_SET 24
 PUSH int:1
 LOCAL_SET 25
-PUSH int:2
+PUSH int:1
 LOCAL_SET 26
-PUSH int:0
+PUSH int:1
 LOCAL_SET 27
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 28
-PUSH ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2,d:3,e:4]
+PUSH int:2147483648
 LOCAL_SET 29
-PUSH ptr:31
+PUSH int:1073741824
 LOCAL_SET 30
-PUSH ulong:31
+PUSH int:3221225472
 LOCAL_SET 31
-PUSH ptr:18
+PUSH int:1
 LOCAL_SET 32
-PUSH int:20
-LOCAL_SET 33
-PUSH ptr:16[struct_type=MyStructA]
-LOCAL_SET 34
-PUSH int:0
-LOCAL_SET 35
-LOCAL_GET 35
-PUSH int:0
-CMP_EQ
-JNF 595
-PUSH bytes:"zk is void\n"
-COMPILER_PRINT
-JMP 595
-PUSH int:69
-LOCAL_SET 36
-PUSH ptr:36
-LOCAL_SET 37
-LOCAL_GET 37
-LOCAL_DEREF
-CAST long
-LOCAL_SET 38
-PUSH bytes:""
-LOCAL_GET 38
-INT_TO_STR
-STR_CAT
-PUSH bytes:"\n"
-STR_CAT
-COMPILER_PRINT
-PUSH int:-1
-LOCAL_SET 0
-PUSH int:1
-LOCAL_SET 1
-PUSH int:0
-LOCAL_SET 2
-PUSH int:4194304
-LOCAL_SET 3
-PUSH int:67108864
-LOCAL_SET 4
-PUSH int:0
-LOCAL_SET 5
-PUSH int:0
-LOCAL_SET 6
-PUSH int:0
-LOCAL_SET 7
-PUSH int:0
-LOCAL_SET 8
-PUSH int:1000
-LOCAL_SET 9
-PUSH int:1000000
-LOCAL_SET 10
-PUSH int:1000000000
-LOCAL_SET 11
-PUSH int:0
-LOCAL_SET 12
-PUSH int:1
-LOCAL_SET 13
 PUSH int:2
-LOCAL_SET 14
-PUSH int:0
-LOCAL_SET 15
-PUSH int:1
-LOCAL_SET 16
-PUSH bool:true
-LOCAL_SET 17
-PUSH int:20
-LOCAL_SET 18
-PUSH char:98
-LOCAL_SET 19
-PUSH long:42949672980
-LOCAL_SET 20
-PUSH int:10
-LOCAL_SET 21
-PUSH int:20
-LOCAL_SET 22
-PUSH ptr:8
-LOCAL_SET 23
-PUSH int:0
-LOCAL_SET 24
-PUSH int:1
-LOCAL_SET 25
-PUSH int:2
-LOCAL_SET 26
-PUSH int:0
-LOCAL_SET 27
-PUSH bool:true
-LOCAL_SET 28
-PUSH ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2,d:3,e:4]
-LOCAL_SET 29
-PUSH ptr:31
-LOCAL_SET 30
-PUSH ulong:31
-LOCAL_SET 31
-PUSH ptr:18
-LOCAL_SET 32
-PUSH int:20
 LOCAL_SET 33
-PUSH ptr:16[struct_type=MyStructA]
+PUSH int:4
 LOCAL_SET 34
-PUSH int:0
+PUSH int:1
 LOCAL_SET 35
-PUSH int:69
+PUSH int:2
 LOCAL_SET 36
-PUSH ptr:36
+PUSH int:3
 LOCAL_SET 37
-PUSH long:69
+PUSH int:4
 LOCAL_SET 38
 PUSH int:5
-LOCAL_SET 36
-LOCAL_GET 36
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH char:98
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
 PUSH int:10
-ADD
-LOCAL_SET 36
-PUSH bytes:"FluxVM modified int x = "
-LOCAL_GET 36
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH ptr:45
+LOCAL_SET 56
+PUSH int:20
+LOCAL_SET 57
+PUSH int:1
+LOCAL_SET 58
+PUSH int:1
+LOCAL_SET 59
+PUSH int:0
+LOCAL_SET 60
+PUSH int:0
+LOCAL_SET 61
+PUSH int:1
+LOCAL_SET 62
+PUSH int:1
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:1
+LOCAL_SET 65
+PUSH int:0
+LOCAL_SET 66
+PUSH int:0
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:1
+LOCAL_SET 69
+PUSH int:0
+LOCAL_SET 70
+PUSH int:0
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:0
+LOCAL_SET 73
+PUSH int:1
+LOCAL_SET 74
+PUSH int:8
+LOCAL_SET 75
+PUSH int:4
+LOCAL_SET 76
+PUSH int:8
+LOCAL_SET 77
+PUSH int:8
+LOCAL_SET 78
+PUSH int:0
+LOCAL_SET 79
+PUSH int:0
+LOCAL_SET 80
+PUSH int:0
+LOCAL_SET 81
+PUSH int:0
+LOCAL_SET 82
+PUSH int:1
+LOCAL_SET 83
+PUSH int:1
+LOCAL_SET 84
+PUSH int:1
+LOCAL_SET 85
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 86
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 87
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 88
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 89
+PUSH bytes:"(size_t)32"
+LOCAL_SET 90
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 91
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 92
+PUSH int:0
+DUP
+LOCAL_SET 93
+GLOBAL_SET zk
+LOCAL_GET 93
+PUSH int:0
+CMP_EQ
+JNF 1404
+PUSH bytes:"zk is void\n"
+COMPILER_PRINT
+JMP 1404
+PUSH int:69
+DUP
+LOCAL_SET 94
+GLOBAL_SET x
+PUSH ptr:94
+DUP
+LOCAL_SET 95
+GLOBAL_SET vpx
+LOCAL_GET 95
+LOCAL_DEREF
+CAST long
+DUP
+LOCAL_SET 96
+GLOBAL_SET lx
+PUSH bytes:""
+LOCAL_GET 96
 INT_TO_STR
 STR_CAT
 PUSH bytes:"\n"
@@ -803,54 +3778,1164 @@ PUSH int:0
 LOCAL_SET 15
 PUSH int:1
 LOCAL_SET 16
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 17
-PUSH int:20
+PUSH int:1
 LOCAL_SET 18
-PUSH char:98
+PUSH int:1
 LOCAL_SET 19
-PUSH long:42949672980
+PUSH int:1
 LOCAL_SET 20
-PUSH int:10
+PUSH int:1
 LOCAL_SET 21
-PUSH int:20
+PUSH int:1
 LOCAL_SET 22
-PUSH ptr:8
+PUSH int:40
 LOCAL_SET 23
-PUSH int:0
+PUSH int:32
 LOCAL_SET 24
 PUSH int:1
 LOCAL_SET 25
-PUSH int:2
+PUSH int:1
 LOCAL_SET 26
-PUSH int:0
+PUSH int:1
 LOCAL_SET 27
-PUSH bool:true
+PUSH int:1
 LOCAL_SET 28
-PUSH ptr:29[struct_type=TB,stack_slot,a:0,b:1,c:2,d:3,e:4]
+PUSH int:2147483648
 LOCAL_SET 29
-PUSH ptr:31
+PUSH int:1073741824
 LOCAL_SET 30
-PUSH ulong:31
+PUSH int:3221225472
 LOCAL_SET 31
-PUSH ptr:18
+PUSH int:1
 LOCAL_SET 32
-PUSH int:20
+PUSH int:2
 LOCAL_SET 33
-PUSH ptr:16[struct_type=MyStructA]
+PUSH int:4
 LOCAL_SET 34
-PUSH int:0
+PUSH int:1
 LOCAL_SET 35
-PUSH int:15
+PUSH int:2
 LOCAL_SET 36
-PUSH ptr:36
+PUSH int:3
 LOCAL_SET 37
-PUSH long:69
+PUSH int:4
 LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH char:98
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH ptr:45
+LOCAL_SET 56
+PUSH int:20
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:69
+LOCAL_SET 59
+PUSH ptr:94
+LOCAL_SET 60
+PUSH long:69
+LOCAL_SET 61
+PUSH int:1
+LOCAL_SET 62
+PUSH int:1
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:0
+LOCAL_SET 65
+PUSH int:1
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:1
+LOCAL_SET 69
+PUSH int:0
+LOCAL_SET 70
+PUSH int:0
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:1
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:0
+LOCAL_SET 77
+PUSH int:1
+LOCAL_SET 78
+PUSH int:8
+LOCAL_SET 79
+PUSH int:4
+LOCAL_SET 80
+PUSH int:8
+LOCAL_SET 81
+PUSH int:8
+LOCAL_SET 82
+PUSH int:0
+LOCAL_SET 83
+PUSH int:0
+LOCAL_SET 84
+PUSH int:0
+LOCAL_SET 85
+PUSH int:0
+LOCAL_SET 86
+PUSH int:1
+LOCAL_SET 87
+PUSH int:1
+LOCAL_SET 88
+PUSH int:1
+LOCAL_SET 89
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 90
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 91
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 92
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 93
+PUSH bytes:"(size_t)32"
+LOCAL_SET 94
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 95
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 96
+PUSH int:5
+DUP
+LOCAL_SET 59
+GLOBAL_SET x
+LOCAL_GET 59
+PUSH int:10
+ADD
+LOCAL_SET 59
+PUSH bytes:"FluxVM modified int x = "
+LOCAL_GET 59
+INT_TO_STR
+STR_CAT
+PUSH bytes:"\n"
+STR_CAT
+COMPILER_PRINT
+PUSH int:-1
+LOCAL_SET 0
+PUSH int:1
+LOCAL_SET 1
+PUSH int:0
+LOCAL_SET 2
+PUSH int:4194304
+LOCAL_SET 3
+PUSH int:67108864
+LOCAL_SET 4
+PUSH int:0
+LOCAL_SET 5
+PUSH int:0
+LOCAL_SET 6
+PUSH int:0
+LOCAL_SET 7
+PUSH int:0
+LOCAL_SET 8
+PUSH int:1000
+LOCAL_SET 9
+PUSH int:1000000
+LOCAL_SET 10
+PUSH int:1000000000
+LOCAL_SET 11
+PUSH int:0
+LOCAL_SET 12
+PUSH int:1
+LOCAL_SET 13
+PUSH int:2
+LOCAL_SET 14
+PUSH int:0
+LOCAL_SET 15
+PUSH int:1
+LOCAL_SET 16
+PUSH int:1
+LOCAL_SET 17
+PUSH int:1
+LOCAL_SET 18
+PUSH int:1
+LOCAL_SET 19
+PUSH int:1
+LOCAL_SET 20
+PUSH int:1
+LOCAL_SET 21
+PUSH int:1
+LOCAL_SET 22
+PUSH int:40
+LOCAL_SET 23
+PUSH int:32
+LOCAL_SET 24
+PUSH int:1
+LOCAL_SET 25
+PUSH int:1
+LOCAL_SET 26
+PUSH int:1
+LOCAL_SET 27
+PUSH int:1
+LOCAL_SET 28
+PUSH int:2147483648
+LOCAL_SET 29
+PUSH int:1073741824
+LOCAL_SET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH char:98
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH ptr:45
+LOCAL_SET 56
+PUSH int:20
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:15
+LOCAL_SET 59
+PUSH ptr:94
+LOCAL_SET 60
+PUSH long:69
+LOCAL_SET 61
+PUSH int:1
+LOCAL_SET 62
+PUSH int:1
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:0
+LOCAL_SET 65
+PUSH int:1
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:1
+LOCAL_SET 69
+PUSH int:0
+LOCAL_SET 70
+PUSH int:0
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:1
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:0
+LOCAL_SET 77
+PUSH int:1
+LOCAL_SET 78
+PUSH int:8
+LOCAL_SET 79
+PUSH int:4
+LOCAL_SET 80
+PUSH int:8
+LOCAL_SET 81
+PUSH int:8
+LOCAL_SET 82
+PUSH int:0
+LOCAL_SET 83
+PUSH int:0
+LOCAL_SET 84
+PUSH int:0
+LOCAL_SET 85
+PUSH int:0
+LOCAL_SET 86
+PUSH int:1
+LOCAL_SET 87
+PUSH int:1
+LOCAL_SET 88
+PUSH int:1
+LOCAL_SET 89
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 90
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 91
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 92
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 93
+PUSH bytes:"(size_t)32"
+LOCAL_SET 94
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 95
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 96
 PUSH bytes:"before zed()\n"
 COMPILER_PRINT
 CALL zed 0
 POP
 PUSH bytes:"after zod()\n"
+COMPILER_PRINT
+PUSH int:-1
+LOCAL_SET 0
+PUSH int:1
+LOCAL_SET 1
+PUSH int:0
+LOCAL_SET 2
+PUSH int:4194304
+LOCAL_SET 3
+PUSH int:67108864
+LOCAL_SET 4
+PUSH int:0
+LOCAL_SET 5
+PUSH int:0
+LOCAL_SET 6
+PUSH int:0
+LOCAL_SET 7
+PUSH int:0
+LOCAL_SET 8
+PUSH int:1000
+LOCAL_SET 9
+PUSH int:1000000
+LOCAL_SET 10
+PUSH int:1000000000
+LOCAL_SET 11
+PUSH int:0
+LOCAL_SET 12
+PUSH int:1
+LOCAL_SET 13
+PUSH int:2
+LOCAL_SET 14
+PUSH int:0
+LOCAL_SET 15
+PUSH int:1
+LOCAL_SET 16
+PUSH int:1
+LOCAL_SET 17
+PUSH int:1
+LOCAL_SET 18
+PUSH int:1
+LOCAL_SET 19
+PUSH int:1
+LOCAL_SET 20
+PUSH int:1
+LOCAL_SET 21
+PUSH int:1
+LOCAL_SET 22
+PUSH int:40
+LOCAL_SET 23
+PUSH int:32
+LOCAL_SET 24
+PUSH int:1
+LOCAL_SET 25
+PUSH int:1
+LOCAL_SET 26
+PUSH int:1
+LOCAL_SET 27
+PUSH int:1
+LOCAL_SET 28
+PUSH int:2147483648
+LOCAL_SET 29
+PUSH int:1073741824
+LOCAL_SET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH char:98
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH ptr:45
+LOCAL_SET 56
+PUSH int:20
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:15
+LOCAL_SET 59
+PUSH ptr:94
+LOCAL_SET 60
+PUSH long:69
+LOCAL_SET 61
+PUSH int:1
+LOCAL_SET 62
+PUSH int:1
+LOCAL_SET 63
+PUSH int:0
+LOCAL_SET 64
+PUSH int:0
+LOCAL_SET 65
+PUSH int:1
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:1
+LOCAL_SET 69
+PUSH int:0
+LOCAL_SET 70
+PUSH int:0
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:1
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:0
+LOCAL_SET 77
+PUSH int:1
+LOCAL_SET 78
+PUSH int:8
+LOCAL_SET 79
+PUSH int:4
+LOCAL_SET 80
+PUSH int:8
+LOCAL_SET 81
+PUSH int:8
+LOCAL_SET 82
+PUSH int:0
+LOCAL_SET 83
+PUSH int:0
+LOCAL_SET 84
+PUSH int:0
+LOCAL_SET 85
+PUSH int:0
+LOCAL_SET 86
+PUSH int:1
+LOCAL_SET 87
+PUSH int:1
+LOCAL_SET 88
+PUSH int:1
+LOCAL_SET 89
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 90
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 91
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 92
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 93
+PUSH bytes:"(size_t)32"
+LOCAL_SET 94
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 95
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 96
+PUSH int:0
+DUP
+LOCAL_SET 97
+GLOBAL_SET g_pass
+PUSH int:0
+DUP
+LOCAL_SET 98
+GLOBAL_SET g_fail
+PUSH bytes:"datetime.fx"
+COMPILER_IMPORT_STDLIB
+STRUCT_NEW DateTime
+DUP
+LOCAL_SET 99
+GLOBAL_SET dt
+PUSH int:0
+CALL dt_from_unix_ms 1
+DUP
+LOCAL_SET 99
+GLOBAL_SET dt
+LOCAL_GET 99
+STRUCT_LOAD year
+PUSH int:1970
+CMP_EQ
+DUP
+JNF 2058
+POP
+LOCAL_GET 99
+STRUCT_LOAD month
+PUSH int:1
+CMP_EQ
+DUP
+JNF 2065
+POP
+LOCAL_GET 99
+STRUCT_LOAD day
+PUSH int:1
+CMP_EQ
+DUP
+JNF 2072
+POP
+LOCAL_GET 99
+STRUCT_LOAD hour
+PUSH int:0
+CMP_EQ
+DUP
+JNF 2079
+POP
+LOCAL_GET 99
+STRUCT_LOAD minute
+PUSH int:0
+CMP_EQ
+DUP
+JNF 2086
+POP
+LOCAL_GET 99
+STRUCT_LOAD second
+PUSH int:0
+CMP_EQ
+DUP
+JNF 2093
+POP
+LOCAL_GET 99
+STRUCT_LOAD ms
+PUSH int:0
+CMP_EQ
+JNF 2098
+PUSH bytes:"epoch 0 -> 1970-01-01T00:00:00.000\0"
+CALL pass 1
+POP
+JMP 2101
+PUSH bytes:"epoch 0 -> 1970-01-01T00:00:00.000\0"
+CALL fail 1
+POP
+EXTERN_DECL malloc PTR
+PUSH int:2
+CALL malloc 1
+DUP
+LOCAL_SET 100
+GLOBAL_SET tbp
+LOCAL_GET 100
+PUSH int:0
+PUSH bytes:"A"
+ARRAY_STORE
+LOCAL_SET 100
+PUSH bytes:""
+LOCAL_GET 100
+INT_TO_STR
+STR_CAT
+PUSH bytes:"\n"
+STR_CAT
+COMPILER_PRINT
+PUSH int:69
+DUP
+LOCAL_SET 101
+GLOBAL_SET ctti
+PUSH bytes:""
+LOCAL_GET 101
+INT_TO_STR
+STR_CAT
+PUSH bytes:"\n"
+STR_CAT
+COMPILER_PRINT
+PUSH int:-1
+LOCAL_SET 0
+PUSH int:1
+LOCAL_SET 1
+PUSH int:0
+LOCAL_SET 2
+PUSH int:4194304
+LOCAL_SET 3
+PUSH int:67108864
+LOCAL_SET 4
+PUSH int:0
+LOCAL_SET 5
+PUSH int:0
+LOCAL_SET 6
+PUSH int:0
+LOCAL_SET 7
+PUSH int:0
+LOCAL_SET 8
+PUSH int:1000
+LOCAL_SET 9
+PUSH int:1000000
+LOCAL_SET 10
+PUSH int:1000000000
+LOCAL_SET 11
+PUSH int:0
+LOCAL_SET 12
+PUSH int:1
+LOCAL_SET 13
+PUSH int:2
+LOCAL_SET 14
+PUSH int:0
+LOCAL_SET 15
+PUSH int:1
+LOCAL_SET 16
+PUSH int:1
+LOCAL_SET 17
+PUSH int:1
+LOCAL_SET 18
+PUSH int:1
+LOCAL_SET 19
+PUSH int:1
+LOCAL_SET 20
+PUSH int:1
+LOCAL_SET 21
+PUSH int:1
+LOCAL_SET 22
+PUSH int:40
+LOCAL_SET 23
+PUSH int:32
+LOCAL_SET 24
+PUSH int:1
+LOCAL_SET 25
+PUSH int:1
+LOCAL_SET 26
+PUSH int:1
+LOCAL_SET 27
+PUSH int:1
+LOCAL_SET 28
+PUSH int:2147483648
+LOCAL_SET 29
+PUSH int:1073741824
+LOCAL_SET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH char:98
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH ptr:45
+LOCAL_SET 56
+PUSH int:20
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:15
+LOCAL_SET 59
+PUSH ptr:94
+LOCAL_SET 60
+PUSH long:69
+LOCAL_SET 61
+PUSH int:0
+LOCAL_SET 62
+PUSH int:0
+LOCAL_SET 63
+PUSH ptr:1409889103760
+LOCAL_SET 64
+PUSH int:69
+LOCAL_SET 65
+PUSH int:1
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:0
+LOCAL_SET 69
+PUSH int:1
+LOCAL_SET 70
+PUSH int:1
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:1
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:1
+LOCAL_SET 77
+PUSH int:0
+LOCAL_SET 78
+PUSH int:0
+LOCAL_SET 79
+PUSH int:0
+LOCAL_SET 80
+PUSH int:0
+LOCAL_SET 81
+PUSH int:1
+LOCAL_SET 82
+PUSH int:8
+LOCAL_SET 83
+PUSH int:4
+LOCAL_SET 84
+PUSH int:8
+LOCAL_SET 85
+PUSH int:8
+LOCAL_SET 86
+PUSH int:0
+LOCAL_SET 87
+PUSH int:0
+LOCAL_SET 88
+PUSH int:0
+LOCAL_SET 89
+PUSH int:0
+LOCAL_SET 90
+PUSH int:1
+LOCAL_SET 91
+PUSH int:1
+LOCAL_SET 92
+PUSH int:1
+LOCAL_SET 93
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 94
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 95
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 96
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 97
+PUSH bytes:"(size_t)32"
+LOCAL_SET 98
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 99
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 100
+PUSH int:1
+PUSH int:0
+CMP_NE
+JNF 2339
+PUSH bytes:"Nonzero!\n"
+COMPILER_PRINT
+JMP 2339
+PUSH int:-1
+LOCAL_SET 0
+PUSH int:1
+LOCAL_SET 1
+PUSH int:0
+LOCAL_SET 2
+PUSH int:4194304
+LOCAL_SET 3
+PUSH int:67108864
+LOCAL_SET 4
+PUSH int:0
+LOCAL_SET 5
+PUSH int:0
+LOCAL_SET 6
+PUSH int:0
+LOCAL_SET 7
+PUSH int:0
+LOCAL_SET 8
+PUSH int:1000
+LOCAL_SET 9
+PUSH int:1000000
+LOCAL_SET 10
+PUSH int:1000000000
+LOCAL_SET 11
+PUSH int:0
+LOCAL_SET 12
+PUSH int:1
+LOCAL_SET 13
+PUSH int:2
+LOCAL_SET 14
+PUSH int:0
+LOCAL_SET 15
+PUSH int:1
+LOCAL_SET 16
+PUSH int:1
+LOCAL_SET 17
+PUSH int:1
+LOCAL_SET 18
+PUSH int:1
+LOCAL_SET 19
+PUSH int:1
+LOCAL_SET 20
+PUSH int:1
+LOCAL_SET 21
+PUSH int:1
+LOCAL_SET 22
+PUSH int:40
+LOCAL_SET 23
+PUSH int:32
+LOCAL_SET 24
+PUSH int:1
+LOCAL_SET 25
+PUSH int:1
+LOCAL_SET 26
+PUSH int:1
+LOCAL_SET 27
+PUSH int:1
+LOCAL_SET 28
+PUSH int:2147483648
+LOCAL_SET 29
+PUSH int:1073741824
+LOCAL_SET 30
+PUSH int:3221225472
+LOCAL_SET 31
+PUSH int:1
+LOCAL_SET 32
+PUSH int:2
+LOCAL_SET 33
+PUSH int:4
+LOCAL_SET 34
+PUSH int:1
+LOCAL_SET 35
+PUSH int:2
+LOCAL_SET 36
+PUSH int:3
+LOCAL_SET 37
+PUSH int:4
+LOCAL_SET 38
+PUSH int:5
+LOCAL_SET 39
+PUSH int:128
+LOCAL_SET 40
+PUSH int:32
+LOCAL_SET 41
+PUSH int:-1
+LOCAL_SET 42
+PUSH int:1
+LOCAL_SET 43
+PUSH bool:true
+LOCAL_SET 44
+PUSH int:20
+LOCAL_SET 45
+PUSH char:98
+LOCAL_SET 46
+PUSH long:42949672980
+LOCAL_SET 47
+PUSH int:10
+LOCAL_SET 48
+PUSH int:20
+LOCAL_SET 49
+PUSH int:0
+LOCAL_SET 50
+PUSH int:1
+LOCAL_SET 51
+PUSH int:2
+LOCAL_SET 52
+PUSH bool:true
+LOCAL_SET 53
+PUSH ptr:90
+LOCAL_SET 54
+PUSH ulong:90
+LOCAL_SET 55
+PUSH ptr:45
+LOCAL_SET 56
+PUSH int:20
+LOCAL_SET 57
+PUSH int:0
+LOCAL_SET 58
+PUSH int:15
+LOCAL_SET 59
+PUSH ptr:94
+LOCAL_SET 60
+PUSH long:69
+LOCAL_SET 61
+PUSH int:0
+LOCAL_SET 62
+PUSH int:0
+LOCAL_SET 63
+PUSH ptr:1409889103760
+LOCAL_SET 64
+PUSH int:69
+LOCAL_SET 65
+PUSH int:1
+LOCAL_SET 66
+PUSH int:1
+LOCAL_SET 67
+PUSH int:0
+LOCAL_SET 68
+PUSH int:0
+LOCAL_SET 69
+PUSH int:1
+LOCAL_SET 70
+PUSH int:1
+LOCAL_SET 71
+PUSH int:0
+LOCAL_SET 72
+PUSH int:1
+LOCAL_SET 73
+PUSH int:0
+LOCAL_SET 74
+PUSH int:0
+LOCAL_SET 75
+PUSH int:0
+LOCAL_SET 76
+PUSH int:1
+LOCAL_SET 77
+PUSH int:0
+LOCAL_SET 78
+PUSH int:0
+LOCAL_SET 79
+PUSH int:0
+LOCAL_SET 80
+PUSH int:0
+LOCAL_SET 81
+PUSH int:1
+LOCAL_SET 82
+PUSH int:8
+LOCAL_SET 83
+PUSH int:4
+LOCAL_SET 84
+PUSH int:8
+LOCAL_SET 85
+PUSH int:8
+LOCAL_SET 86
+PUSH int:0
+LOCAL_SET 87
+PUSH int:0
+LOCAL_SET 88
+PUSH int:0
+LOCAL_SET 89
+PUSH int:0
+LOCAL_SET 90
+PUSH int:1
+LOCAL_SET 91
+PUSH int:1
+LOCAL_SET 92
+PUSH int:1
+LOCAL_SET 93
+PUSH bytes:"STDLIB_GVP"
+LOCAL_SET 94
+PUSH bytes:"(BlockEntry*)0"
+LOCAL_SET 95
+PUSH bytes:"(FreeNode*)0"
+LOCAL_SET 96
+PUSH bytes:"(Slab*)0"
+LOCAL_SET 97
+PUSH bytes:"(size_t)32"
+LOCAL_SET 98
+PUSH bytes:"(size_t)1048576"
+LOCAL_SET 99
+PUSH bytes:"(size_t)67108864"
+LOCAL_SET 100
+PUSH int:0
+DUP
+LOCAL_SET 101
+GLOBAL_SET zzz
+PUSH int:22
+CALL bez 1
+DUP
+LOCAL_SET 101
+GLOBAL_SET zzz
+PUSH uint:4
+ALLOC
+DUP
+PUSH int:5
+STORE int 4
+LOCAL_SET 102
+PUSH bytes:""
+LOCAL_GET 102
+LOAD int 4
+INT_TO_STR
+STR_CAT
+PUSH bytes:"\n"
+STR_CAT
+COMPILER_PRINT
+PUSH uint:20
+ALLOC
+DUP
+PUSH uint:0
+ADD
+PUSH int:1
+STORE int 4
+DUP
+PUSH uint:4
+ADD
+PUSH int:2
+STORE int 4
+DUP
+PUSH uint:8
+ADD
+PUSH int:3
+STORE int 4
+DUP
+PUSH uint:12
+ADD
+PUSH int:4
+STORE int 4
+DUP
+PUSH uint:16
+ADD
+PUSH int:5
+STORE int 4
+LOCAL_SET 103
+PUSH bytes:""
+PUSH ulong:160
+INT_TO_STR
+STR_CAT
+PUSH bytes:"\n"
+STR_CAT
+COMPILER_PRINT
+GLOBAL_GET __singinit_guard__si
+PUSH int:0
+CMP_EQ
+JNF 2610
+PUSH int:1
+DUP
+LOCAL_SET 104
+GLOBAL_SET si
+PUSH int:1
+GLOBAL_SET __singinit_guard__si
+JMP 2612
+GLOBAL_GET si
+LOCAL_SET 104
+PUSH bytes:""
+LOCAL_GET 104
+INT_TO_STR
+STR_CAT
+PUSH bytes:"\n"
+STR_CAT
 COMPILER_PRINT
 HALT

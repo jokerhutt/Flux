@@ -656,23 +656,29 @@ def test_struct_new():
         p(Op.HALT),
     ]
     _, r = run(instrs, struct_layouts=_point_layout)
-    assert r.tag == TTag.PTR
-    assert r.meta.get('struct_type') == 'Point'
+    assert r.tag == TTag.STRUCT
+    assert r.data == 'Point'
 
 def test_field_set_get():
+    # STRUCT_STORE returns updated struct; store back with LOCAL_SET
     instrs = [
         p(Op.STRUCT_NEW, 'Point'),
         p(Op.LOCAL_SET, 0),
+        # s.x = 7
         p(Op.LOCAL_GET, 0),
         push(i(7)),
-        p(Op.FIELD_SET, 'x'),
+        p(Op.STRUCT_STORE, 'x'),
+        p(Op.LOCAL_SET, 0),
+        # s.y = 13
         p(Op.LOCAL_GET, 0),
         push(i(13)),
-        p(Op.FIELD_SET, 'y'),
+        p(Op.STRUCT_STORE, 'y'),
+        p(Op.LOCAL_SET, 0),
+        # s.x + s.y
         p(Op.LOCAL_GET, 0),
-        p(Op.FIELD_GET, 'x'),
+        p(Op.STRUCT_LOAD, 'x'),
         p(Op.LOCAL_GET, 0),
-        p(Op.FIELD_GET, 'y'),
+        p(Op.STRUCT_LOAD, 'y'),
         p(Op.ADD),
         p(Op.HALT),
     ]
@@ -682,7 +688,7 @@ def test_field_set_get():
 def test_field_not_found():
     instrs = [
         p(Op.STRUCT_NEW, 'Point'),
-        p(Op.FIELD_GET, 'z'),
+        p(Op.STRUCT_LOAD, 'z'),
         p(Op.HALT),
     ]
     try:
@@ -702,22 +708,23 @@ def test_array_new():
         p(Op.HALT),
     ]
     _, r = run(instrs)
-    assert r.tag == TTag.PTR
+    assert r.tag == TTag.ARRAY
     assert r.meta.get('count') == 8
 
 def test_index_set_get():
     instrs = [
         p(Op.ARRAY_NEW, 'int', 4),
         p(Op.LOCAL_SET, 0),
-        # arr[2] = 99
+        # arr[2] = 99  -> ARRAY_STORE returns updated array; write back
         p(Op.LOCAL_GET, 0),
         push(i(2)),
         push(i(99)),
-        p(Op.INDEX_SET),
+        p(Op.ARRAY_STORE),
+        p(Op.LOCAL_SET, 0),
         # arr[2]
         p(Op.LOCAL_GET, 0),
         push(i(2)),
-        p(Op.INDEX_GET),
+        p(Op.ARRAY_LOAD),
         p(Op.HALT),
     ]
     _, r = run(instrs, local_count=1)
@@ -1409,6 +1416,38 @@ def test_int_to_str_char():
     assert text == 'A', f'got {text!r}'
 
 
+
+class _NullCG:
+    def __init__(self, **kw): self.compiled_functions = {}; self._struct_layouts = {}
+    def _visit_stmt(self, n): pass
+
+def test_compiler_import_stdlib():
+    vm = FluxVM()
+    vm._preprocess_import = lambda path, kind: ''
+    vm._codegen_class = _NullCG
+    instrs = [push(Val(TTag.BYTES, b'math.fx')), p(Op.COMPILER_IMPORT_STDLIB), p(Op.HALT)]
+    vm.execute(instrs)
+    assert vm.emit_results[-1][0] == 'import_stdlib'
+    assert vm.emit_results[-1][2] == 'math.fx'
+
+def test_compiler_import_local():
+    vm = FluxVM()
+    vm._preprocess_import = lambda path, kind: ''
+    vm._codegen_class = _NullCG
+    instrs = [push(Val(TTag.BYTES, b'./utils.fx')), p(Op.COMPILER_IMPORT_LOCAL), p(Op.HALT)]
+    vm.execute(instrs)
+    assert vm.emit_results[-1][0] == 'import_local'
+    assert vm.emit_results[-1][2] == './utils.fx'
+
+def test_compiler_fpm_package():
+    vm = FluxVM()
+    vm._preprocess_import = lambda path, kind: ''
+    vm._codegen_class = _NullCG
+    instrs = [push(Val(TTag.BYTES, b'flux/json')), p(Op.COMPILER_FPM_PACKAGE), p(Op.HALT)]
+    vm.execute(instrs)
+    assert vm.emit_results[-1][0] == 'import_package'
+    assert vm.emit_results[-1][2] == 'flux/json'
+
 # ---------------------------------------------------------------------------
 # Diagnostics
 # ---------------------------------------------------------------------------
@@ -1572,12 +1611,12 @@ def main():
         ]),
         ('Structs', [
             ('STRUCT_NEW',         test_struct_new),
-            ('FIELD_SET / GET',    test_field_set_get),
+            ('STRUCT_STORE / LOAD', test_field_set_get),
             ('Field not found',    test_field_not_found),
         ]),
         ('Arrays', [
             ('ARRAY_NEW',          test_array_new),
-            ('INDEX_SET / GET',    test_index_set_get),
+            ('ARRAY_STORE / LOAD',  test_index_set_get),
             ('ARRAY_LEN',          test_array_len),
         ]),
         ('Type Introspection', [
@@ -1617,6 +1656,9 @@ def main():
             ('compiler.io.writefile text',   test_compiler_writefile_text),
             ('compiler.io.writefile append', test_compiler_writefile_append),
             ('readfile missing',             test_compiler_readfile_missing),
+            ('compiler.import.stdlib',       test_compiler_import_stdlib),
+            ('compiler.import.local',        test_compiler_import_local),
+            ('compiler.fpm.package',         test_compiler_fpm_package),
         ]),
         ('String Ops', [
             ('STR_LEN',            test_str_len),

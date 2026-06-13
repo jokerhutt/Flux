@@ -508,7 +508,7 @@ class FluxParser:
         Create a parser by preprocessing and lexing a source file.
         """
         # Step 1: Preprocess
-        preprocessor = FXPreprocessor(source_file, compiler_macros or {})
+        preprocessor = FXPreprocessor(source_file, compiler_constants=compiler_macros or {})
         preprocessed_source = preprocessor.process()
 
         # Step 2: Lex

@@ -301,6 +301,9 @@ class FluxCompiler:
             # Attach the line map to the module so codegen can produce accurate
             # per-file error locations instead of global merged-source line numbers.
             self.module._flux_line_map = parser._line_map
+            self.module._flux_compiler_macros = dict(self.predefined_macros)
+            if hasattr(parser, '_preprocessor_macros'):
+                self.module._flux_compiler_macros.update(parser._preprocessor_macros)
 
             #print("*"*40)
             #print("==== PARSER GENERATED SYMBOL TABLE ====")
@@ -827,7 +830,7 @@ class FluxCompiler:
             })
             
             # Preprocessing
-            preprocessor = FXPreprocessor(filename, compiler_macros=self.predefined_macros)
+            preprocessor = FXPreprocessor(filename, compiler_constants=self.predefined_macros)
             result = preprocessor.process()
             
             # Lexical analysis
