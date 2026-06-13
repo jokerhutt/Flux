@@ -1406,11 +1406,19 @@ class FluxVM:
             wrapper = f'#import "{path}";\n'
         else:
             wrapper = f'#package "{path}";\n'
-        # Write wrapper to a temp file anchored in the source directory so
-        # FXPreprocessor resolves relative paths correctly.
-        src_dir = os.path.dirname(os.path.abspath(src_file))
+        # For local imports the temp file must sit next to the user's source
+        # so FXPreprocessor resolves relative #import paths correctly via its
+        # _dir_stack.  For stdlib/package the temp file location doesn't
+        # matter for resolution, so use cwd (/sandbox in the container) which
+        # is always writable — this avoids a PermissionError when the line map
+        # points to a stdlib file and src_dir resolves to the read-only
+        # /opt/flux/src/stdlib/ directory.
+        if kind == 'local':
+            tmp_dir = os.path.dirname(os.path.abspath(src_file))
+        else:
+            tmp_dir = os.getcwd()
         tmp = tempfile.NamedTemporaryFile(
-            mode='w', suffix='.fx', dir=src_dir,
+            mode='w', suffix='.fx', dir=tmp_dir,
             delete=False, encoding='utf-8'
         )
         try:
