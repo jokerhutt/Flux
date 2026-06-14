@@ -284,7 +284,7 @@ namespace standard
                     size_t idx = table_hash(key, cap);
                     while (tbl[idx].key != 0)
                     {
-                        idx = (idx + 1) & (cap - 1);
+                        idx = (idx + 1) `& (cap - 1);
                     };
                     tbl[idx].key  = key;
                     tbl[idx].size = size;
@@ -354,7 +354,7 @@ namespace standard
                                 g_table_count--;
                                 // Backward-shift deletion to close the gap
                                 rm_hole = rm_idx;
-                                rm_next = (rm_idx + 1) & (new_cap - 1);
+                                rm_next = (rm_idx + 1) `& (new_cap - 1);
                                 while (new_tbl[rm_next].key != 0)
                                 {
                                     rm_natural = table_hash(new_tbl[rm_next].key, new_cap);
@@ -414,14 +414,14 @@ namespace standard
                                         }
                                         default {};
                                     };
-                                    rm_next = (rm_next + 1) & (new_cap - 1);
+                                    rm_next = (rm_next + 1) `& (new_cap - 1);
                                 };
                                 rm_found = true;
                             }
                             default {};
                         };
                         switch (rm_found) { case (1) { break; } default {}; };
-                        rm_idx = (rm_idx + 1) & (new_cap - 1);
+                        rm_idx = (rm_idx + 1) `& (new_cap - 1);
                     };
 
                     heap_os_free((u64)g_table, g_table_slab_cap);
@@ -511,7 +511,7 @@ namespace standard
                             case (1) { return @g_table[idx]; }
                             default  {};
                         };
-                        idx = (idx + 1) & (g_table_cap - 1);
+                        idx = (idx + 1) `& (g_table_cap - 1);
                     };
                     return NP_BLOCKENTRY;
                 };
@@ -537,7 +537,7 @@ namespace standard
                                 // back if its natural home is at or before the vacant slot,
                                 // stopping when we reach an empty slot or wrap all the way around.
                                 hole = idx;
-                                next = (idx + 1) & (g_table_cap - 1);
+                                next = (idx + 1) `& (g_table_cap - 1);
                                 while (g_table[next].key != 0)
                                 {
                                     natural = table_hash(g_table[next].key, g_table_cap);
@@ -612,20 +612,20 @@ namespace standard
                                         }
                                         default {};
                                     };
-                                    next = (next + 1) & (g_table_cap - 1);
+                                    next = (next + 1) `& (g_table_cap - 1);
                                 };
                                 return;
                             }
                             default {};
                         };
-                        idx = (idx + 1) & (g_table_cap - 1);
+                        idx = (idx + 1) `& (g_table_cap - 1);
                     };
                 };
 
                 def heap_new_slab(size_t min_capacity) -> Slab*
                 {
                     size_t sz = g_next_slab_size;
-                    size_t header_size = (SLAB_HEADER_SIZE + 15) & `!15;
+                    size_t header_size = (SLAB_HEADER_SIZE + 15) `& `!15;
                     switch (min_capacity + header_size > sz)
                     {
                         case (1) { sz = min_capacity + header_size; }
@@ -660,7 +660,7 @@ namespace standard
                     Slab* slab = g_slab_head;
                     bool b = slab == NP_SLAB;
                     if (b) { return 0; };
-                    bool ret = ((slab != NP_SLAB) & (slab.frontier + bytes <= slab.capacity));
+                    bool ret = ((slab != NP_SLAB) `& (slab.frontier + bytes <= slab.capacity));
                     u64 ptr       = (u64)((byte*)slab.base + slab.frontier);
                     slab.frontier = slab.frontier + bytes;
                     return ptr * ret;
@@ -1364,7 +1364,7 @@ namespace standard
                 //   cap          : 64 MB per chunk maximum
                 //   growth       : doubles each new chunk until cap
                 //
-                // All allocations are 8-byte aligned via (size + 7) & ~7, inlined.
+                // All allocations are 8-byte aligned via (size + 7) `& ~7, inlined.
                 // No per-alloc accounting -- total_allocated removed entirely.
                 // Zero OS memory consumed until first alloc call.
                 // Backed entirely by stdheap::fmalloc / stdheap::ffree.
@@ -1448,7 +1448,7 @@ namespace standard
                     size_t      aligned, new_offset;
                     ArenaChunk* c;
                     u64         ptr;
-                    aligned = (sz + (size_t)7) & (`!7);
+                    aligned = (sz + (size_t)7) `& (`!7);
                     c       = a.head;
                     switch ((u64)c != 0)
                     {

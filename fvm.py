@@ -131,7 +131,11 @@ class Op(Enum):
     COMPILER_READFILE   = auto()   # compiler.io.readfile(path: byte*) -> byte*
     COMPILER_WRITEFILE      = auto()   # compiler.io.writefile(path: byte*, content: byte*, flags: byte*)
     COMPILER_FVM_DUMP       = auto()   # compiler.fvm.dump(path: byte*) - serialise current comptime to .fvm
+    COMPILER_FVM_TRACE_BEGIN = auto()  # compiler.fvm.trace.begin() - enable per-instruction VM tracing
+    COMPILER_FVM_TRACE_END   = auto()  # compiler.fvm.trace.end() - disable per-instruction VM tracing
+    COMPILER_FVM_SETBP       = auto()  # compiler.fvm.setbp() - comptime breakpoint: print stack and pause
     COMPILER_IMPORT_STDLIB  = auto()   # compiler.import.stdlib(path)
+    COMPILER_LOADLIB        = auto()   # compiler.fvm.loadlib(name, ext) - load a native library for asm symbol resolution
     COMPILER_IMPORT_LOCAL   = auto()   # compiler.import.local(path)
     COMPILER_FPM_PACKAGE    = auto()   # compiler.fpm.package(path)
     EXTERN_DECL             = auto()   # EXTERN_DECL <name> <ret_ttag> - register extern proto
@@ -161,6 +165,8 @@ class Op(Enum):
     EMITFLUX    = auto()   # EMITFLUX <source_text> <var_names>
                            # Substitutes comptime locals into source_text and appends
                            # ('flux', substituted_text) to emit_results.
+    INLINE_ASM  = auto()   # INLINE_ASM <body> <constraints> <n_inputs> <n_outputs> <output_names>
+                           # Assembles and executes x86-64 AT&T inline asm at comptime.
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +375,7 @@ class FluxVM:
         self._io_next_handle: int                = 1
         # Registered comptime functions: name -> List[Instr]
         self._functions: Dict[str, List[Instr]]  = {}
+        self._function_overloads: Dict[str, list] = {}
         # Source file path - used by compiler.import.* for relative path resolution
         self.source_file: str = source_file
         # FVMCodegen class injected by the host compiler for use in compiler.import.*
@@ -377,6 +384,9 @@ class FluxVM:
         self._compiler_constants: dict = {}
         # Pending LLVM emission results accumulated during execute()
         self.emit_results: List[Any] = []
+        # Per-instruction VM tracing, toggled via compiler.fvm.trace.begin()/end()
+        self._trace_enabled: bool = False
+        self._trace_remaining: int = 0
         # Locals snapshot from the most recently executed top-level block
         self.last_locals: List[Any] = []
         self._comptime_log: List[List[Instr]] = []
@@ -389,6 +399,7 @@ class FluxVM:
         self._os_ptrs: set = set()
         # Last source line number seen during execution (for error reporting)
         self._last_src_line: int = 0
+        self._imported_sources: list = []  # list of (source_lines, line_map, filename)
 
     # ------------------------------------------------------------------
     # Public API
@@ -421,6 +432,10 @@ class FluxVM:
     # ------------------------------------------------------------------
 
     def _run(self) -> Optional[Val]:
+        import time as _time
+        _watchdog_start = _time.monotonic()
+        _watchdog_limit = 5.0  # seconds
+        _instr_count = 0
         while self.frames:
             frame = self.frames[-1]
             if frame.ip >= len(frame.instructions):
@@ -431,6 +446,33 @@ class FluxVM:
             frame.ip += 1
             if instr.src_line:
                 self._last_src_line = instr.src_line
+            _instr_count += 1
+            if self._trace_enabled and self._trace_remaining > 0:
+                _locals_dump = ', '.join(
+                    f'[{i}]={v!r}' for i, v in enumerate(frame.locals) if v is not None
+                )
+                _stack_dump = ', '.join(repr(v) for v in self.stack[-4:])
+                print(f'[VMTRACE] func={frame.func_name} line={instr.src_line} '
+                      f'op={instr.op.name} operands={instr.operands} '
+                      f'locals=[{_locals_dump}] stack=[{_stack_dump}]', flush=True)
+                self._trace_remaining -= 1
+                if self._trace_remaining == 0:
+                    self._trace_enabled = False
+                    print('[VMTRACE] trace limit reached, auto-disabling', flush=True)
+            if _instr_count % 50000 == 0:
+                if _time.monotonic() - _watchdog_start > _watchdog_limit:
+                    _locals_dump = ', '.join(
+                        f'[{i}]={v!r}' for i, v in enumerate(frame.locals) if v is not None
+                    )
+                    _stack_dump = ', '.join(repr(v) for v in self.stack[-6:])
+                    raise VMError(
+                        f'comptime execution exceeded {_watchdog_limit:.0f}s '
+                        f'({_instr_count} instructions executed) in function '
+                        f'{frame.func_name!r} at ip={frame.ip} — likely an infinite loop.\n'
+                        f'  locals: {_locals_dump}\n'
+                        f'  stack (top 6): {_stack_dump}\n'
+                        f'Last executed source line is shown below.'
+                    )
             self._dispatch(instr)
         return self.stack[-1] if self.stack else None
 
@@ -505,14 +547,18 @@ class FluxVM:
         elif op == Op.LOCAL_SET:      self.frames[-1].locals[o[0]] = self._pop()
         elif op == Op.LOCAL_DEREF:    self._op_local_deref()
         elif op == Op.LOCAL_DEREF_SET: self._op_local_deref_set()
-        elif op == Op.GLOBAL_GET:     self._push(self._globals.get(o[0], Val(TTag.INT, 0)))
-        elif op == Op.GLOBAL_SET:     self._globals[o[0]] = self._pop()
+        elif op == Op.GLOBAL_GET:
+            _gval = self._globals.get(o[0], Val(TTag.INT, 0))
+            self._push(_gval)
+        elif op == Op.GLOBAL_SET:
+            _sv = self._pop()
+            self._globals[o[0]] = _sv
 
         # Memory
         elif op == Op.ALLOC:      self._op_alloc()
         elif op == Op.FREE:       self._op_free()
-        elif op == Op.LOAD:       self._op_load(o[0], o[1])
-        elif op == Op.STORE:      self._op_store(o[0], o[1])
+        elif op == Op.LOAD:       self._op_load(o[0], o[1], o[2] if len(o) > 2 else None)
+        elif op == Op.STORE:      self._op_store(o[0], o[1], o[2] if len(o) > 2 else '')
         elif op == Op.OFFSET:     self._op_offset()
 
         # Structs / arrays
@@ -561,7 +607,7 @@ class FluxVM:
         elif op == Op.STR_TO_INT: self._op_str_to_int()
 
         # Type conversion
-        elif op == Op.CAST:       self._op_cast(o[0])
+        elif op == Op.CAST:       self._op_cast(o[0], o[1] if len(o) > 1 else None)
         elif op == Op.BITCAST:    self._op_bitcast(o[0])
 
         # Diagnostics
@@ -575,10 +621,19 @@ class FluxVM:
         elif op == Op.EMIT_TYPE:   self._op_emit_type()
         elif op == Op.EMITFLUX:             self._op_emitflux(o[0], o[1])
         elif op == Op.COMPILER_FVM_DUMP:    self._op_compiler_fvm_dump()
+        elif op == Op.COMPILER_FVM_TRACE_BEGIN:
+            self._trace_enabled = True
+            self._trace_remaining = 2000
+        elif op == Op.COMPILER_FVM_TRACE_END:
+            self._trace_enabled = False
+            self._trace_remaining = 0
+        elif op == Op.COMPILER_FVM_SETBP:    self._op_compiler_fvm_setbp()
         elif op == Op.COMPILER_IMPORT_STDLIB: self._op_compiler_import_stdlib()
+        elif op == Op.COMPILER_LOADLIB:       self._op_compiler_loadlib()
         elif op == Op.COMPILER_IMPORT_LOCAL:  self._op_compiler_import_local()
         elif op == Op.COMPILER_FPM_PACKAGE:   self._op_compiler_fpm_package()
         elif op == Op.EXTERN_DECL:            self._extern_protos[o[0]] = o[1]
+        elif op == Op.INLINE_ASM:            self._op_inline_asm(o[0], o[1], o[2], o[3], o[4])
 
         else:
             raise VMError(f'Unknown opcode: {op}')
@@ -604,7 +659,44 @@ class FluxVM:
         b = self._pop()
         a = self._pop()
         tag = a.tag
-        self._push(Val(tag, fn(a.data, b.data)))
+        # BYTES + int: pointer arithmetic -- pin bytes to native memory and return PTR
+        if tag == TTag.BYTES and b.tag in (TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG):
+            raw = a.data if isinstance(a.data, (bytes, bytearray)) else str(a.data).encode('utf-8')
+            # Ensure null terminator so strlen-style loops terminate correctly
+            if not raw or raw[-1] != 0:
+                raw = raw + b'\x00'
+            if not hasattr(self, '_pinned_bufs'):
+                self._pinned_bufs = []
+            buf = (ctypes.c_char * len(raw))(*raw)
+            self._pinned_bufs.append(buf)
+            base = ctypes.addressof(buf)
+            self._os_ptrs.add(base)
+            offset = int(b.data)
+            self._push(Val(TTag.PTR, base + offset))
+            return
+        result = fn(a.data, b.data)
+        result = self._wrap_int(tag, result)
+        self._push(Val(tag, result))
+
+    def _wrap_int(self, tag: 'TTag', value):
+        """
+        Wrap an arithmetic/bitwise result to the bit width implied by `tag`,
+        matching Flux's fixed-width integer semantics (e.g. u64 multiply,
+        shift, and XOR must wrap at 64 bits rather than growing as Python
+        arbitrary-precision ints). Non-integer tags pass through unchanged.
+        """
+        if not isinstance(value, int) or isinstance(value, bool):
+            return value
+        _unsigned = (TTag.UINT, TTag.ULONG, TTag.BYTE, TTag.CHAR, TTag.BOOL, TTag.PTR, TTag.DATA)
+        _signed   = (TTag.INT, TTag.LONG)
+        if tag in _unsigned or tag in _signed:
+            bits = self._ttag_byte_size(tag) * 8
+            mask = (1 << bits) - 1
+            value &= mask
+            if tag in _signed and value >= (1 << (bits - 1)):
+                value -= (1 << bits)
+            return value
+        return value
 
     def _binop_div(self):
         b = self._pop()
@@ -614,11 +706,11 @@ class FluxVM:
         if a.tag in (TTag.FLOAT, TTag.DOUBLE):
             self._push(Val(a.tag, a.data / b.data))
         else:
-            self._push(Val(a.tag, int(a.data / b.data)))
+            self._push(Val(a.tag, self._wrap_int(a.tag, int(a.data / b.data))))
 
     def _unop(self, fn):
         a = self._pop()
-        self._push(Val(a.tag, fn(a.data)))
+        self._push(Val(a.tag, self._wrap_int(a.tag, fn(a.data))))
 
     def _cmp(self, fn):
         b = self._pop()
@@ -635,6 +727,17 @@ class FluxVM:
     # ------------------------------------------------------------------
 
     def _call(self, name: str, argc: int):
+        self._call_depth = getattr(self, '_call_depth', 0) + 1
+        self._call_counts = getattr(self, '_call_counts', {})
+        self._call_counts[name] = self._call_counts.get(name, 0) + 1
+        if self._call_counts[name] > 500:
+            raise VMError(f'[VM TRACE] infinite loop detected: {name!r} called {self._call_counts[name]} times, stack size={len(self.stack)}')
+        # TEMP DIAGNOSTIC: auto-enable tracing on entry to table_raw_insert
+        # (matches bare or namespace-qualified names like
+        # standard__memory__allocators__stdheap__table_raw_insert).
+        # if name == 'table_raw_insert' or name.endswith('__table_raw_insert'):
+        #     self._trace_enabled = True
+        #     self._trace_remaining = 400
         if name not in self._functions:
             # Suffix-match against namespace-qualified names registered at runtime
             # e.g. 'dt_from_unix_ms' matches 'standard__datetime__dt_from_unix_ms'
@@ -653,26 +756,41 @@ class FluxVM:
             ret_tag = self._extern_protos[name]
             args = [self._pop() for _ in range(argc)]
             args.reverse()
-            # Resolve symbol from process or platform C runtime
+            # Resolve symbol: check explicitly loaded libs first, then C runtime
             sym = None
             import sys as _sys
-            _runtime_libs = (['msvcrt'] if _sys.platform == 'win32' else [None, 'c', 'libc.so.6'])
-            for _lib in _runtime_libs:
+            for _lib in getattr(self, '_asm_libs', {}).values():
                 try:
-                    _dll = ctypes.CDLL(_lib)
-                    sym = getattr(_dll, name, None)
+                    sym = getattr(_lib, name, None)
                     if sym is not None:
-                        # Set restype to c_void_p for PTR returns to avoid sign-extension
                         if ret_tag == TTag.PTR:
                             sym.restype = ctypes.c_void_p
                         break
-                except OSError:
+                except (OSError, AttributeError):
                     continue
             if sym is None:
-                raise VMError(f'extern: symbol {name!r} not found in C runtime')
+                _runtime_libs = (['msvcrt'] if _sys.platform == 'win32' else [None, 'c', 'libc.so.6'])
+                for _lib in _runtime_libs:
+                    try:
+                        _dll = ctypes.CDLL(_lib)
+                        sym = getattr(_dll, name, None)
+                        if sym is not None:
+                            if ret_tag == TTag.PTR:
+                                sym.restype = ctypes.c_void_p
+                            break
+                    except OSError:
+                        continue
+            if sym is None:
+                raise VMError(f'extern: symbol {name!r} not found in any loaded library')
             c_args = [self._val_to_ctype(a) for a in args]
             try:
-                result = sym(*c_args)
+                # Force c_void_p restype so ctypes returns full pointer-width value
+                sym.restype = ctypes.c_void_p
+                _raw = sym(*c_args)
+                result = int(_raw) if _raw is not None else 0
+                # Reinterpret as signed if needed
+                if ret_tag in (TTag.INT, TTag.LONG) and result > 0x7FFFFFFFFFFFFFFF:
+                    result = result - 0x10000000000000000
             except Exception as e:
                 raise VMError(f'extern call {name!r}: {e}')
             if ret_tag == TTag.VOID:
@@ -691,11 +809,83 @@ class FluxVM:
                         pass
                 self._push(Val(TTag.PTR, addr))
             else:
+                # For integer return types, if the value looks like an OS address, track it
+                val = int(result or 0)
+                if ret_tag in (TTag.LONG, TTag.ULONG, TTag.INT, TTag.UINT) and val > 0xFFFF:
+                    self._os_ptrs.add(val & 0xFFFFFFFFFFFFFFFF)
                 self._push(Val(ret_tag, result))
             return
         args = [self._pop() for _ in range(argc)]
         args.reverse()
-        instrs = self._functions[name]
+        # Arity-based overload resolution from __$-suffixed function names.
+        # When calling e.g. 'print' with argc=1, prefer 'print__$byte' over
+        # 'print__$byte_int' (argc=2). Collect all registered overload keys
+        # matching this base name and pick the one whose suffix arg-count matches.
+        _sig_prefix = name + '__$'
+        _sig_suffix = '__' + name + '__$'
+        _sig_matches = [k for k in self._functions if k.startswith(_sig_prefix)]
+        if not _sig_matches:
+            _sig_matches = [k for k in self._functions if '__$' in k and k[:k.index('__$')].endswith('__' + name)]
+        if _sig_matches:
+            def _sig_argc(key):
+                sig = key[key.index('__$') + 3:]
+                return len(sig.split('_')) if sig else 0
+            _arity_matches = [k for k in _sig_matches if _sig_argc(k) == argc]
+            if len(_arity_matches) == 1:
+                name = _arity_matches[0]
+            elif len(_arity_matches) > 1:
+                # Tie-break by matching arg TTags against the sig tokens.
+                # BYTES/PTR args prefer 'arr'/'ptr'-suffixed tokens; scalar args prefer plain tokens.
+                def _sig_score(key):
+                    sig = key[key.index('__$') + 3:]
+                    tokens = sig.split('_') if sig else []
+                    score = 0
+                    for i, a in enumerate(args):
+                        if i >= len(tokens):
+                            break
+                        tok = tokens[i]
+                        if a.tag in (TTag.BYTES,) and tok.endswith('arr'):
+                            score += 2
+                        elif a.tag == TTag.PTR and tok.endswith('ptr'):
+                            score += 2
+                        elif a.tag not in (TTag.BYTES, TTag.PTR) and not tok.endswith(('arr', 'ptr')):
+                            score += 1
+                    return score
+                best = max(_arity_matches, key=_sig_score)
+                name = best
+            # else: no arity matches, fall through to TTag dispatch below
+        # Overload dispatch: if multiple overloads registered, pick best match by arg TTag.
+        _overloads = self._function_overloads
+        instrs = None
+        if name in _overloads and len(_overloads[name]) > 1:
+            _ttag_to_dt = {
+                TTag.BOOL: 'bool', TTag.BYTE: 'byte', TTag.CHAR: 'char',
+                TTag.INT: 'sint', TTag.UINT: 'uint',
+                TTag.LONG: 'slong', TTag.ULONG: 'ulong',
+                TTag.DATA: 'data', TTag.PTR: 'ptr', TTag.VOID: 'void',
+            }
+            arg_tags = [_ttag_to_dt.get(a.tag, '?') for a in args]
+            best = None
+            best_score = -1
+            for _params, _instrs in _overloads[name]:
+                if len(_params) != len(args):
+                    continue
+                score = 0
+                for i, p in enumerate(_params):
+                    pt = str(getattr(getattr(p, 'type_spec', None), 'base_type', '')).split('.')[-1].lower()
+                    if arg_tags[i] == pt:
+                        score += 2
+                    elif arg_tags[i] in ('data', 'ulong', 'uint', 'sint', 'slong') and pt in ('data', 'ulong', 'uint', 'sint', 'slong'):
+                        score += 1
+                if score > best_score:
+                    best_score = score
+                    best = _instrs
+            if best is not None:
+                instrs = best
+        if instrs is None:
+            instrs = self._functions[name]
+        # if name in ('strlen', 'win_print') or 'strlen' in name or 'win_print' in name or ('print' in name and 'console' in name):
+        #     import sys as _sys; _sys.stderr.write(f'[DEBUG CALL] {name} argc={argc} args={args}\n'); _sys.stderr.flush()
         frame  = CallFrame(
             func_name=name,
             instructions=instrs,
@@ -714,6 +904,8 @@ class FluxVM:
     def _ret(self):
         frame = self.frames.pop()
         # Return value stays on the stack (already pushed by callee)
+        # if 'strlen' in frame.func_name or ('print' in frame.func_name and 'console' in frame.func_name):
+        #     import sys as _sys; _sys.stderr.write(f'[DEBUG RET] {frame.func_name} stack_top={self.stack[-1] if self.stack else None}\n'); _sys.stderr.flush()
 
     def _tail_self(self, argc: int):
         """TAIL_SELF <argc> - zero-stack-growth self tail-call.
@@ -732,9 +924,23 @@ class FluxVM:
     # ------------------------------------------------------------------
 
     def _op_local_deref(self):
-        """Pop a PTR(slot) and push the value at that local slot."""
+        """Dereference a pointer: PTR(slot) -> local slot value, PTR(os_addr) -> byte at addr, BYTES -> byte at offset 0."""
         ptr_val = self._pop()
-        slot = int(ptr_val.data)
+        if ptr_val.tag == TTag.BYTES:
+            raw = ptr_val.data if isinstance(ptr_val.data, (bytes, bytearray)) else str(ptr_val.data).encode('utf-8')
+            self._push(Val(TTag.BYTE, raw[0] if raw else 0))
+            return
+        addr = int(ptr_val.data)
+        if self._ptr_is_os(addr):
+            # OS pointer: read one byte
+            try:
+                byte_val = ctypes.string_at(ctypes.c_void_p(addr & 0xFFFFFFFFFFFFFFFF), 1)[0]
+            except Exception:
+                byte_val = 0
+            self._push(Val(TTag.BYTE, byte_val))
+            return
+        # Slot-based deref (small integer = slot index)
+        slot = addr
         val = self.frames[-1].locals[slot]
         if val is None:
             val = Val(TTag.INT, 0)
@@ -855,24 +1061,63 @@ class FluxVM:
         ptr_val = self._pop()
         self.heap.free(int(ptr_val.data))
 
-    def _op_load(self, tag: TTag, byte_size: int):
+    def _op_load(self, tag: TTag, byte_size: int, type_name: str = None):
         ptr_val = self._pop()
-        ptr     = int(ptr_val.data)
-        raw     = self.heap.read(ptr, byte_size)
-        data    = self._bytes_to_val(raw, tag, byte_size)
+        ptr     = int(ptr_val.data) & 0xFFFFFFFFFFFFFFFF
+        if self._ptr_is_os(ptr):
+            raw = ctypes.string_at(ctypes.c_void_p(ptr), byte_size)
+        else:
+            raw = self.heap.read(ptr, byte_size)
+        if tag == TTag.STRUCT:
+            # Reconstruct struct from raw bytes using layout
+            if type_name is None:
+                type_name = ptr_val.meta.get('struct_type') if ptr_val.meta else None
+            if type_name is None:
+                # Find layout by size
+                type_name = next((n for n, l in self.struct_layouts.items()
+                                  if l.total_size == byte_size), None)
+            if type_name and type_name in self.struct_layouts:
+                layout = self.struct_layouts[type_name]
+                fields = {}
+                for fname, ftag, foff, fsz in layout.fields:
+                    fbytes = raw[foff:foff+fsz]
+                    fields[fname] = Val(ftag, self._bytes_to_val(fbytes, ftag, fsz))
+                self._push(Val(TTag.STRUCT, type_name, meta={'fields': fields}))
+                return
+            self._push(Val(TTag.STRUCT, raw))
+            return
+        data = self._bytes_to_val(raw, tag, byte_size)
         self._push(Val(tag, data))
 
-    def _op_store(self, tag: TTag, byte_size: int):
+    def _op_store(self, tag: TTag, byte_size: int, type_name: str = ''):
         val     = self._pop()
         ptr_val = self._pop()
-        ptr     = int(ptr_val.data)
-        raw     = self._val_to_bytes(val, byte_size)
-        self.heap.write(ptr, raw)
+        ptr     = int(ptr_val.data) & 0xFFFFFFFFFFFFFFFF
+        raw     = self._val_to_bytes(val, byte_size, type_name=type_name)
+        if self._ptr_is_os(ptr):
+            ctypes.memmove(ctypes.c_void_p(ptr), raw, len(raw))
+        else:
+            self.heap.write(ptr, raw)
 
     def _op_offset(self):
         n       = self._pop()
         ptr_val = self._pop()
         self._push(Val(TTag.PTR, int(ptr_val.data) + int(n.data)))
+
+    def _mem_read(self, addr: int, byte_size: int) -> bytes:
+        """Read byte_size bytes from either OS memory or the VM heap."""
+        addr = addr & 0xFFFFFFFFFFFFFFFF
+        if self._ptr_is_os(addr):
+            return ctypes.string_at(ctypes.c_void_p(addr), byte_size)
+        return self.heap.read(addr, byte_size)
+
+    def _mem_write(self, addr: int, raw: bytes):
+        """Write raw bytes to either OS memory or the VM heap."""
+        addr = addr & 0xFFFFFFFFFFFFFFFF
+        if self._ptr_is_os(addr):
+            ctypes.memmove(ctypes.c_void_p(addr), raw, len(raw))
+        else:
+            self.heap.write(addr, raw)
 
     # ------------------------------------------------------------------
     # Struct / array ops
@@ -896,7 +1141,20 @@ class FluxVM:
             fields = sv.meta.get('fields', {})
             if field not in fields:
                 raise VMError(f'STRUCT_LOAD: field {field!r} not found in struct {sv.data!r}')
-            self._push(fields[field])
+            result = fields[field]
+            # if field in ('frontier', 'base', 'capacity'):
+            #     import sys as _sys; _sys.stderr.write(f'[DEBUG STRUCT_LOAD] {sv.data}.{field} = {result}\n'); _sys.stderr.flush()
+            self._push(result)
+        elif sv.tag == TTag.PTR and sv.meta and sv.meta.get('struct_type'):
+            type_name = sv.meta['struct_type']
+            layout = self._get_layout(type_name)
+            fname, ftag, foff, fsz = self._find_field(layout, field)
+            addr = int(sv.data) & 0xFFFFFFFFFFFFFFFF
+            raw = self._mem_read(addr + foff, fsz)
+            result = Val(ftag, self._bytes_to_val(raw, ftag, fsz))
+            # if field in ('frontier', 'base', 'capacity'):
+            #     import sys as _sys; _sys.stderr.write(f'[DEBUG STRUCT_LOAD PTR] {type_name}@{hex(addr)}.{field} = {result}\n'); _sys.stderr.flush()
+            self._push(result)
         else:
             raise VMError(f'STRUCT_LOAD: expected STRUCT value, got {sv.tag}')
 
@@ -904,10 +1162,23 @@ class FluxVM:
         val = self._pop()
         sv  = self._pop()
         if sv.tag == TTag.STRUCT:
-            import copy
             new_fields = dict(sv.meta.get('fields', {}))
             new_fields[field] = val
+            # if field in ('frontier', 'base', 'capacity'):
+            #     import sys as _sys; _sys.stderr.write(f'[DEBUG STRUCT_STORE] {sv.data}.{field} = {val}\n'); _sys.stderr.flush()
             self._push(Val(TTag.STRUCT, sv.data, meta={'fields': new_fields}))
+        elif sv.tag == TTag.PTR and sv.meta and sv.meta.get('struct_type'):
+            type_name = sv.meta['struct_type']
+            layout = self._get_layout(type_name)
+            fname, ftag, foff, fsz = self._find_field(layout, field)
+            addr = int(sv.data) & 0xFFFFFFFFFFFFFFFF
+            raw = self._val_to_bytes(val, fsz)
+            # if field in ('frontier', 'base', 'capacity'):
+            #     import sys as _sys; _sys.stderr.write(f'[DEBUG STRUCT_STORE PTR] {type_name}@{hex(addr)}.{field} = {val} raw={raw.hex()}\n'); _sys.stderr.flush()
+            self._mem_write(addr + foff, raw)
+            # Push the pointer back unchanged so a subsequent LOCAL_SET
+            # write-back of `sv` (the pointer itself) is a no-op.
+            self._push(sv)
         else:
             raise VMError(f'STRUCT_STORE: expected STRUCT value, got {sv.tag}')
 
@@ -957,10 +1228,10 @@ class FluxVM:
         return addr in self._os_ptrs or addr > self.heap._size
 
     def _os_read_byte(self, addr: int) -> int:
-        return ctypes.string_at(addr, 1)[0]
+        return ctypes.string_at(ctypes.c_void_p(addr & 0xFFFFFFFFFFFFFFFF), 1)[0]
 
     def _os_write_byte(self, addr: int, byte_val: int):
-        ctypes.memmove(addr, bytes([byte_val & 0xFF]), 1)
+        ctypes.memset(ctypes.c_void_p(addr), byte_val & 0xFF, 1)
 
     def _op_array_load(self):
         idx_val = self._pop()
@@ -986,6 +1257,16 @@ class FluxVM:
                     self._push(Val(TTag.BYTE, raw[0]))
                     return
             else:
+                raw = self.heap.read(addr + idx, 1)
+                self._push(Val(TTag.BYTE, raw[0]))
+                return
+        # Handle native pointer stored with non-PTR tag (e.g. byte* from fmalloc)
+        if isinstance(av.data, int) and av.data != 0:
+            addr = av.data & 0xFFFFFFFFFFFFFFFF
+            if addr > 0xFFFF:
+                if self._ptr_is_os(addr):
+                    self._push(Val(TTag.BYTE, self._os_read_byte(addr + idx)))
+                    return
                 raw = self.heap.read(addr + idx, 1)
                 self._push(Val(TTag.BYTE, raw[0]))
                 return
@@ -1039,9 +1320,20 @@ class FluxVM:
                 self.heap.write(addr + idx, bytes([_to_byte(val)]))
                 self._push(av)
                 return
+        # Handle native pointer stored with non-PTR tag (e.g. byte* from fmalloc)
+        if isinstance(av.data, int) and av.data != 0:
+            addr = av.data & 0xFFFFFFFFFFFFFFFF
+            if addr > 0xFFFF:
+                if self._ptr_is_os(addr):
+                    self._os_write_byte(addr + idx, _to_byte(val))
+                    self._push(av)
+                    return
+                self.heap.write(addr + idx, bytes([_to_byte(val)]))
+                self._push(av)
+                return
         elements = list((av.meta or {}).get('elements', []))
         if idx < 0 or idx >= len(elements):
-            raise VMError(f'ARRAY_STORE: index {idx} out of bounds (len={len(elements)})')
+            raise VMError(f'ARRAY_STORE: index {idx} out of bounds (len={len(elements)}) av.tag={av.tag} av.data={av.data!r}')
         elements[idx] = val
         new_meta = dict(av.meta)
         new_meta['elements'] = elements
@@ -1171,6 +1463,322 @@ class FluxVM:
             del self._ffi_libs[lib_path]
 
     # ------------------------------------------------------------------
+    # Inline ASM execution
+    # ------------------------------------------------------------------
+
+    def _op_inline_asm(self, body: str, constraints: str, n_inputs: int, n_outputs: int, output_names: list):
+        import platform as _platform, struct as _struct, re as _re
+        # Platform / arch check
+        machine = _platform.machine().lower()
+        if machine not in ('x86_64', 'amd64'):
+            raise VMError(f'INLINE_ASM: x86-64 required at comptime, got {machine!r}')
+
+        try:
+            import keystone as _ks
+        except ImportError:
+            raise VMError('INLINE_ASM: keystone-engine is not installed (pip install keystone-engine)')
+
+        # Pop inputs in reverse order (last pushed = last input)
+        input_vals = []
+        for _ in range(n_inputs):
+            input_vals.append(self._pop())
+        input_vals.reverse()   # now input_vals[0] = first input operand ($N_out+0)
+
+        # Windows vs Linux register assignments for integer args
+        system = _platform.system()
+        if system == 'Windows':
+            arg_regs = ['%rcx', '%rdx', '%r8', '%r9']
+        else:
+            arg_regs = ['%rdi', '%rsi', '%rdx', '%rcx', '%r8', '%r9']
+
+        # Build operand substitution table:
+        # $0..$n_outputs-1  -> output operand registers (all %rax for now, one output)
+        # $n_outputs..      -> input operand registers
+        out_reg = '%rax'
+        operand_map = {}
+        for i in range(n_outputs):
+            operand_map[i] = out_reg
+        for i, val in enumerate(input_vals):
+            reg_idx = i
+            if reg_idx < len(arg_regs):
+                operand_map[n_outputs + i] = arg_regs[reg_idx]
+            else:
+                raise VMError(f'INLINE_ASM: too many input operands (max {len(arg_regs)})')
+
+        # Register name maps for different operand sizes
+        _reg64 = {'%rcx': '%rcx', '%rdx': '%rdx', '%r8': '%r8',   '%r9': '%r9',
+                  '%rdi': '%rdi', '%rsi': '%rsi', '%rax': '%rax',
+                  '%r10': '%r10', '%r11': '%r11', '%r12': '%r12',
+                  '%r13': '%r13', '%r14': '%r14', '%r15': '%r15'}
+        _reg32 = {'%rcx': '%ecx', '%rdx': '%edx', '%r8': '%r8d',  '%r9': '%r9d',
+                  '%rdi': '%edi', '%rsi': '%esi', '%rax': '%eax',
+                  '%r10': '%r10d', '%r11': '%r11d', '%r12': '%r12d',
+                  '%r13': '%r13d', '%r14': '%r14d', '%r15': '%r15d'}
+        _reg16 = {'%rcx': '%cx',  '%rdx': '%dx',  '%r8': '%r8w',  '%r9': '%r9w',
+                  '%rdi': '%di',  '%rsi': '%si',  '%rax': '%ax',
+                  '%r10': '%r10w', '%r11': '%r11w', '%r12': '%r12w',
+                  '%r13': '%r13w', '%r14': '%r14w', '%r15': '%r15w'}
+        _reg8  = {'%rcx': '%cl',  '%rdx': '%dl',  '%r8': '%r8b',  '%r9': '%r9b',
+                  '%rdi': '%dil', '%rsi': '%sil', '%rax': '%al',
+                  '%r10': '%r10b', '%r11': '%r11b', '%r12': '%r12b',
+                  '%r13': '%r13b', '%r14': '%r14b', '%r15': '%r15b'}
+
+        # Substitute $N placeholders, choosing register size from instruction mnemonic
+        def _sub_line(line):
+            stripped = line.strip()
+            # Detect size suffix from mnemonic (movl, movw, movb, etc.)
+            mnemonic = stripped.split()[0] if stripped else ''
+            if mnemonic.endswith('l') or mnemonic.endswith('l\t'):
+                reg_map = _reg32
+            elif mnemonic.endswith('w'):
+                reg_map = _reg16
+            elif mnemonic.endswith('b'):
+                reg_map = _reg8
+            else:
+                reg_map = _reg64
+            def _sub_operand(m):
+                idx = int(m.group(1))
+                if idx in operand_map:
+                    r64 = operand_map[idx]
+                    return reg_map.get(r64, r64)
+                raise VMError(f'INLINE_ASM: operand ${idx} out of range')
+            return _re.sub(r'(?<!\$)\$(\d+)', _sub_operand, line)
+
+        # Remap input operands to scratch registers so we can embed values
+        # as movabsq immediates without ABI register shuffling conflicts.
+        # %rax is reserved for output. %r10-%r15 are caller-saved scratch.
+        # %rax is used as call trampoline register.
+        # r10, r11 are caller-saved (safe across calls without save/restore)
+        # r12-r15 are callee-saved -- save/restore them in prologue/epilogue
+        _scratch_regs = ['%r10', '%r11', '%r12', '%r13', '%r14', '%r15']
+        _callee_saved_used = [r for r in _scratch_regs[2:2 + max(0, n_inputs - 2)] ]
+        for i in range(n_inputs):
+            if i < len(_scratch_regs):
+                operand_map[n_outputs + i] = _scratch_regs[i]
+            else:
+                raise VMError(f'INLINE_ASM: too many input operands (max {len(_scratch_regs)})')
+
+        # Single-pass: substitute operands then resolve external calls
+        asm_body = '\n'.join(_sub_line(line) for line in body.splitlines())
+        asm_body = asm_body.replace('$$', '$')
+
+        _sym_addrs = {}
+        _asm_libs = getattr(self, '_asm_libs', {})
+        def _resolve_call(m):
+            sym = m.group(1)
+            if sym not in _sym_addrs:
+                import ctypes as _ct
+                addr = None
+                # Check explicitly loaded libs first
+                for lib in _asm_libs.values():
+                    try:
+                        _fn = getattr(lib, sym, None)
+                        if _fn is not None:
+                            addr = _ct.cast(_fn, _ct.c_void_p).value
+                            break
+                    except (OSError, AttributeError):
+                        continue
+                # Fall back to common system libs
+                if addr is None:
+                    _fallback = (['kernel32', 'msvcrt'] if system == 'Windows'
+                                 else [None, 'c', 'libpthread.so.0'])
+                    for _lib in _fallback:
+                        try:
+                            dll = _ct.CDLL(_lib)
+                            _fn = getattr(dll, sym, None)
+                            if _fn is not None:
+                                addr = _ct.cast(_fn, _ct.c_void_p).value
+                                break
+                        except OSError:
+                            continue
+                if addr is None:
+                    raise VMError(f'INLINE_ASM: cannot resolve symbol {sym!r}')
+                _sym_addrs[sym] = addr
+            addr = _sym_addrs[sym]
+            return f'movabsq ${addr}, %rax\ncallq *%rax'
+        _has_writefile = system == 'Windows' and bool(_re.search(r'\bcall\s+WriteFile\b', asm_body))
+        asm_body = _re.sub(r'\bcall\s+(\w+)', _resolve_call, asm_body)
+
+        # Pin BYTES values in native memory (need addresses for movabsq immediates)
+        _pinned = []
+        c_args = []
+
+        # WriteFile on Windows requires lpNumberOfBytesWritten (r9) to be a valid
+        # pointer when lpOverlapped (5th arg) is NULL. Replace xorq %r9,%r9 with
+        # a movabsq to a pinned scratch DWORD so WriteFile can write the byte count.
+        if _has_writefile:
+            _written_buf = (ctypes.c_uint32 * 1)(0)
+            _pinned.append(_written_buf)
+            _written_addr = ctypes.addressof(_written_buf)
+            asm_body = _re.sub(
+                r'xorq\s+%r9,\s*%r9',
+                f'movabsq ${_written_addr}, %r9',
+                asm_body
+            )
+            # lpOverlapped (5th arg at rsp+32) must remain NULL -- replace
+            # movq %r9, 32(%rsp) with a direct zero store now that r9 != 0.
+            # Use xor+store via a scratch to avoid movq $imm,mem encoding issues.
+            asm_body = asm_body.replace(
+                'movq %r9, 32(%rsp)',
+                'xorq %rax, %rax\nmovq %rax, 32(%rsp)'
+            )
+        for v in input_vals:
+            tag = v.tag
+            if tag in (TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG,
+                       TTag.BYTE, TTag.BOOL, TTag.CHAR, TTag.PTR):
+                c_args.append(int(v.data) & 0xFFFFFFFFFFFFFFFF)
+            elif tag == TTag.BYTES:
+                raw = v.data if isinstance(v.data, (bytes, bytearray)) else str(v.data).encode('utf-8')
+                if not raw or raw[-1] != 0:
+                    raw = raw + b'\x00'
+                buf_pin = (ctypes.c_char * len(raw))(*raw)
+                _pinned.append(buf_pin)
+                c_args.append(ctypes.addressof(buf_pin))
+            elif tag == TTag.FLOAT:
+                c_args.append(int(_struct.unpack('<I', _struct.pack('<f', float(v.data)))[0]))
+            elif tag == TTag.DOUBLE:
+                c_args.append(int(_struct.unpack('<Q', _struct.pack('<d', float(v.data)))[0]))
+            else:
+                c_args.append(0)
+
+        # Emit movabsq to load each input value into its scratch register
+        setup_lines = []
+        for i in range(len(input_vals)):
+            reg = _scratch_regs[i]
+            ival = c_args[i] if i < len(c_args) else 0
+            setup_lines.append(f'movabsq ${ival}, {reg}')
+
+        full_asm = 'pushq %rbp\n'
+        full_asm += 'movq %rsp, %rbp\n'
+        for reg in _callee_saved_used:
+            full_asm += f'pushq {reg}\n'
+        # Re-align stack to 16 bytes if we pushed an odd number of callee-saved regs
+        extra_push = len(_callee_saved_used) % 2 != 0
+        if extra_push:
+            full_asm += 'subq $8, %rsp\n'
+        for line in setup_lines:
+            full_asm += line + '\n'
+        asm_body_clean = '\n'.join(line.strip() for line in asm_body.splitlines() if line.strip())
+        full_asm += asm_body_clean + '\n'
+        if extra_push:
+            full_asm += 'addq $8, %rsp\n'
+        for reg in reversed(_callee_saved_used):
+            full_asm += f'popq {reg}\n'
+        full_asm += 'popq %rbp\n'
+        full_asm += 'retq\n'
+
+        # Assemble with keystone (AT&T syntax, x86-64)
+        ks = _ks.Ks(_ks.KS_ARCH_X86, _ks.KS_MODE_64)
+        ks.syntax = _ks.KS_OPT_SYNTAX_ATT
+        try:
+            encoding, count = ks.asm(full_asm)
+        except _ks.KsError as e:
+            raise VMError(f'INLINE_ASM: assembly failed: {e}\nASM:\n{full_asm}')
+        if encoding is None or len(encoding) == 0:
+            raise VMError(f'INLINE_ASM: assembler returned no bytes (count={count})\nASM:\n{full_asm}')
+
+        machine_code = bytes(encoding)
+
+        # Allocate executable memory and copy code in
+        size = len(machine_code)
+        if system == 'Windows':
+            MEM_COMMIT   = 0x1000
+            MEM_RESERVE  = 0x2000
+            PAGE_EXEC_RW = 0x40
+            kernel32 = ctypes.windll.kernel32
+            kernel32.VirtualAlloc.restype = ctypes.c_void_p
+            kernel32.VirtualAlloc.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong, ctypes.c_ulong]
+            buf = kernel32.VirtualAlloc(None, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXEC_RW)
+            if not buf:
+                raise VMError('INLINE_ASM: VirtualAlloc failed')
+            ctypes.memmove(buf, machine_code, size)
+            kernel32.VirtualFree.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_ulong]
+            free_fn = lambda b: kernel32.VirtualFree(ctypes.c_void_p(b), 0, 0x8000)
+        else:
+            import mmap as _mmap
+            mm = _mmap.mmap(-1, size,
+                            prot=_mmap.PROT_READ | _mmap.PROT_WRITE | _mmap.PROT_EXEC)
+            mm.write(machine_code)
+            mm.seek(0)
+            buf = ctypes.addressof((ctypes.c_char * size).from_buffer(mm))
+            free_fn = lambda b: mm.close()
+
+        # JIT function takes no arguments -- values are embedded as immediates
+        fn_type = ctypes.CFUNCTYPE(ctypes.c_int64)
+        fn = fn_type(buf)
+
+        # import sys as _sys
+        # _sys.stderr.write(f'[ASM]\n{full_asm}\n[ARGS] {c_args}\n')
+        # _sys.stderr.flush()
+        # If this is a WriteFile call, execute it directly via ctypes instead of JIT.
+        # The JIT path crashes due to ABI subtleties; direct ctypes is reliable.
+        if _has_writefile and system == 'Windows':
+            _hnd = c_args[2] if len(c_args) > 2 else 0
+            _msg_ptr = c_args[0] if c_args else 0
+            _msg_len = c_args[1] if len(c_args) > 1 else 0
+            _written2 = (ctypes.c_uint32 * 1)(0)
+            _k32 = ctypes.windll.kernel32
+            _k32.WriteFile.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32,
+                                        ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p]
+            _k32.WriteFile.restype = ctypes.c_int32
+            _k32.WriteFile(ctypes.c_void_p(_hnd), ctypes.c_void_p(_msg_ptr),
+                           ctypes.c_uint32(_msg_len), _written2, None)
+            return
+        try:
+            result = fn()
+        except Exception as _e:
+            free_fn(buf)
+            raise VMError(f'INLINE_ASM: execution failed: {_e}\nASM:\n{full_asm}\nargs: {c_args}') from _e
+        finally:
+            free_fn(buf)
+
+        # Store output: if there are output operands, push rax result
+        if n_outputs > 0 and output_names:
+            out_val = Val(TTag.LONG, int(result))
+            for name in output_names:
+                self._globals[name] = out_val
+            self._push(out_val)
+
+    # ------------------------------------------------------------------
+    # compiler.fvm.loadlib
+    # ------------------------------------------------------------------
+
+    def _op_compiler_loadlib(self):
+        ext_val  = self._pop()
+        name_val = self._pop()
+        name = self._read_vm_string(name_val)
+        ext  = self._read_vm_string(ext_val).lstrip('.')
+        import sys as _sys
+        if _sys.platform == 'win32':
+            lib_file = f'{name}.{ext}' if ext else name
+            try:
+                lib = ctypes.WinDLL(lib_file)
+            except OSError:
+                try:
+                    lib = ctypes.CDLL(lib_file)
+                except OSError as e:
+                    raise VMError(f'compiler.fvm.loadlib: cannot load {lib_file!r}: {e}')
+        else:
+            candidates = []
+            if ext:
+                candidates.append(f'lib{name}.{ext}')
+                candidates.append(f'{name}.{ext}')
+            candidates += [f'lib{name}.so', f'lib{name}.dylib', name]
+            lib = None
+            for c in candidates:
+                try:
+                    lib = ctypes.CDLL(c)
+                    break
+                except OSError:
+                    continue
+            if lib is None:
+                raise VMError(f'compiler.fvm.loadlib: cannot load {name!r}')
+        if not hasattr(self, '_asm_libs'):
+            self._asm_libs = {}
+        self._asm_libs[name] = lib
+        self._asm_libs[name.lower()] = lib
+
+    # ------------------------------------------------------------------
     # compiler.io built-in ops
     # ------------------------------------------------------------------
 
@@ -1239,6 +1847,42 @@ class FluxVM:
                 fh.write(raw if 'b' in mode else raw.decode('utf-8', errors='replace'))
         except OSError as e:
             raise VMError(f'compiler.io.writefile: {e}')
+
+    def _op_compiler_fvm_setbp(self):
+        """compiler.fvm.setbp() -- comptime breakpoint.
+        Prints the current stack and locals, then waits for a keypress."""
+        import sys as _sys
+        frame = self.frames[-1] if self.frames else None
+        _sys.stderr.write('\n[COMPTIME BREAKPOINT]\n')
+        if frame:
+            _sys.stderr.write(f'  func : {frame.func_name}\n')
+            _sys.stderr.write(f'  ip   : {frame.ip}\n')
+            _sys.stderr.write('  locals:\n')
+            for i, v in enumerate(frame.locals):
+                if v is not None:
+                    _sys.stderr.write(f'    [{i}] = {v}\n')
+        _sys.stderr.write('  stack (top first):\n')
+        for i, v in enumerate(reversed(self.stack)):
+            _sys.stderr.write(f'    [{i}] {v}\n')
+            if i >= 15:
+                _sys.stderr.write(f'    ... ({len(self.stack) - 16} more)\n')
+                break
+        _sys.stderr.write('Press any key to continue execution ...')
+        _sys.stderr.flush()
+        try:
+            import msvcrt as _msvcrt
+            _msvcrt.getch()
+        except ImportError:
+            import tty as _tty, termios as _termios
+            fd = _sys.stdin.fileno()
+            old = _termios.tcgetattr(fd)
+            try:
+                _tty.setraw(fd)
+                _sys.stdin.read(1)
+            finally:
+                _termios.tcsetattr(fd, _termios.TCSADRAIN, old)
+        _sys.stderr.write('\n')
+        _sys.stderr.flush()
 
     def _op_compiler_fvm_dump(self):
         path_val = self._pop()
@@ -1351,29 +1995,50 @@ class FluxVM:
                     _collect_global_consts(ns.nested_namespaces)
                 elif isinstance(s, _VD):
                     if s.initial_value is None:
-                        self._globals[s.name] = Val(TTag.PTR, 0)
+                        if s.name not in self._globals:
+                            ts = getattr(s, 'type_spec', None)
+                            if ts is not None and getattr(ts, 'is_array', False):
+                                arr_size = getattr(ts, 'array_size', None)
+                                # array_size may be a parsed Literal AST node rather
+                                # than a plain int (e.g. `FreeNode*[9]`).
+                                if isinstance(arr_size, _Lit):
+                                    lit_val = arr_size.value
+                                    if isinstance(lit_val, str):
+                                        try: lit_val = int(lit_val, 0)
+                                        except (ValueError, TypeError): lit_val = None
+                                    arr_size = lit_val
+                                if isinstance(arr_size, int) and arr_size > 0:
+                                    elems = [Val(TTag.PTR, 0)] * arr_size
+                                    self._globals[s.name] = Val(TTag.ARRAY, 0, meta={'elements': elems})
+                                else:
+                                    self._globals[s.name] = Val(TTag.PTR, 0)
+                            else:
+                                self._globals[s.name] = Val(TTag.PTR, 0)
                     elif isinstance(s.initial_value, _Lit):
-                        try:
-                            v = s.initial_value.value
-                            if isinstance(v, str):
-                                try: v = int(v, 0)
-                                except (ValueError, TypeError):
-                                    try: v = float(v)
-                                    except (ValueError, TypeError): pass
-                            if isinstance(v, bool):
-                                self._globals[s.name] = Val(TTag.BOOL, int(v))
-                            elif isinstance(v, int):
-                                self._globals[s.name] = Val(TTag.LONG, v)
-                            elif isinstance(v, float):
-                                self._globals[s.name] = Val(TTag.DOUBLE, v)
-                        except Exception:
-                            pass
+                        if s.name not in self._globals:
+                            try:
+                                v = s.initial_value.value
+                                if isinstance(v, str):
+                                    try: v = int(v, 0)
+                                    except (ValueError, TypeError):
+                                        try: v = float(v)
+                                        except (ValueError, TypeError): pass
+                                if isinstance(v, bool):
+                                    self._globals[s.name] = Val(TTag.BOOL, int(v))
+                                elif isinstance(v, int):
+                                    self._globals[s.name] = Val(TTag.LONG, v)
+                                elif isinstance(v, float):
+                                    self._globals[s.name] = Val(TTag.DOUBLE, v)
+                            except Exception:
+                                pass
                     elif isinstance(s.initial_value, _Cast) and isinstance(s.initial_value.expression, _AddrOf):
-                        inner = s.initial_value.expression.expression
-                        if isinstance(inner, _Lit) and inner.value in (0, 'void', False, None, '0'):
-                            self._globals[s.name] = Val(TTag.PTR, 0)
+                        if s.name not in self._globals:
+                            inner = s.initial_value.expression.expression
+                            if isinstance(inner, _Lit) and inner.value in (0, 'void', False, None, '0'):
+                                self._globals[s.name] = Val(TTag.PTR, 0)
                     else:
-                        self._globals[s.name] = Val(TTag.PTR, 0)
+                        if s.name not in self._globals:
+                            self._globals[s.name] = Val(TTag.PTR, 0)
         _collect_global_consts(program.statements)
 
         cg = _CG(known_functions=dict(self._functions),
@@ -1418,12 +2083,28 @@ class FluxVM:
                     e_msg = _re.sub(r' \[\d+:\d+\]', '', str(e))
                     raise VMError(f'compiler.import (compiling imported declarations): {e_msg} [{real_file}:{real_line_no}:{col_no}]{src_text}') from e
 
-        # Register all compiled functions with the VM immediately
+        # Register all compiled functions with the VM immediately.
+        # Do not overwrite functions already registered -- imported prototypes
+        # (forward declarations with no body) must not clobber user definitions.
         for name, instrs in cg.compiled_functions.items():
-            self.register_function(name, instrs)
+            if name not in self._functions:
+                self.register_function(name, instrs)
+
+        # Register extern protos from EXTERN_DECL instructions emitted during import.
+        # These appear in the top-level cg instruction stream and inside function bodies.
+        def _collect_extern_decls(instrs):
+            for instr in instrs:
+                if instr.op == Op.EXTERN_DECL:
+                    self._extern_protos[instr.operands[0]] = instr.operands[1]
+        _collect_extern_decls(cg._instructions)
+        for fn_instrs in cg.compiled_functions.values():
+            _collect_extern_decls(fn_instrs)
 
         # Accumulate struct layouts so STRUCT_NEW / FIELD_GET work
         self.struct_layouts.update(cg._struct_layouts)
+
+        # Store imported source for runtime error location lookup
+        self._imported_sources.append((source_lines, line_map, filename))
 
     def _preprocess_import(self, path: str, kind: str):
         """
@@ -1539,7 +2220,7 @@ class FluxVM:
     # Type conversion ops
     # ------------------------------------------------------------------
 
-    def _op_cast(self, target: TTag):
+    def _op_cast(self, target: TTag, struct_type: str = None):
         val = self._pop()
         src = val.tag
         d   = val.data
@@ -1554,6 +2235,8 @@ class FluxVM:
             self._push(Val(target, float(d)))
         elif target == TTag.BOOL:
             self._push(Val(target, int(bool(d))))
+        elif target == TTag.PTR and struct_type:
+            self._push(Val(target, d, meta={'struct_type': struct_type}))
         else:
             self._push(Val(target, d))
 
@@ -1724,7 +2407,7 @@ class FluxVM:
             return int.from_bytes(raw[:byte_size], 'little', signed=False)
         return raw
 
-    def _val_to_bytes(self, val: Val, byte_size: int) -> bytes:
+    def _val_to_bytes(self, val: Val, byte_size: int, type_name: str = '') -> bytes:
         tag = val.tag
         d   = val.data
         if tag in (TTag.INT, TTag.LONG):
@@ -1735,6 +2418,21 @@ class FluxVM:
             return struct.pack('<f', d)
         if tag == TTag.DOUBLE:
             return struct.pack('<d', d)
+        if tag == TTag.STRUCT:
+            layout = self.struct_layouts.get(val.data)
+            fields = (val.meta or {}).get('fields', {})
+            buf = bytearray(byte_size)
+            if layout:
+                for fname, ftag, foff, fsz in layout.fields:
+                    fval = fields.get(fname)
+                    if fval is None:
+                        continue
+                    try:
+                        fbytes = self._val_to_bytes(fval, fsz)
+                        buf[foff:foff+fsz] = fbytes
+                    except Exception:
+                        pass
+            return bytes(buf)
         if isinstance(d, (bytes, bytearray)):
             return bytes(d)[:byte_size].ljust(byte_size, b'\x00')
         raise VMError(f'_val_to_bytes: unhandled tag {tag}')
@@ -1774,15 +2472,16 @@ class FluxVM:
 
     def _val_to_ctype(self, val: Val):
         tag = val.tag
-        if tag in (TTag.INT,):            return ctypes.c_int(int(val.data))
-        if tag in (TTag.UINT,):           return ctypes.c_uint(int(val.data))
-        if tag in (TTag.LONG,):           return ctypes.c_long(int(val.data))
-        if tag in (TTag.ULONG,):          return ctypes.c_ulong(int(val.data))
+        if tag in (TTag.INT,):            return ctypes.c_int32(int(val.data))
+        if tag in (TTag.UINT,):           return ctypes.c_uint32(int(val.data))
+        if tag in (TTag.LONG,):           return ctypes.c_int64(int(val.data))
+        if tag in (TTag.ULONG,):          return ctypes.c_uint64(int(val.data))
         if tag == TTag.FLOAT:             return ctypes.c_float(float(val.data))
         if tag == TTag.DOUBLE:            return ctypes.c_double(float(val.data))
         if tag == TTag.BOOL:              return ctypes.c_bool(bool(val.data))
         if tag == TTag.BYTE:              return ctypes.c_uint8(int(val.data))
-        if tag == TTag.PTR:               return ctypes.c_void_p(int(val.data))
+        if tag == TTag.PTR:               return ctypes.c_void_p(int(val.data) & 0xFFFFFFFFFFFFFFFF)
+        if tag in (TTag.BYTES,):          return ctypes.c_void_p(0)
         raise VMError(f'_val_to_ctype: unhandled tag {tag}')
 
 
@@ -1885,11 +2584,14 @@ def _serialise_instr(instr) -> str:
         Op.FFI_FREE,
         Op.COMPILER_PRINT, Op.COMPILER_INPUT,
         Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
+        Op.COMPILER_LOADLIB,
         Op.STR_LEN, Op.STR_CAT, Op.STR_SLICE, Op.STR_EQ, Op.STR_FIND,
         Op.INT_TO_STR, Op.STR_TO_INT,
         Op.ASSERT, Op.WARN, Op.PANIC,
         Op.EMIT_CONST, Op.EMIT_TYPE,
         Op.COMPILER_IMPORT_STDLIB, Op.COMPILER_IMPORT_LOCAL, Op.COMPILER_FPM_PACKAGE,
+        Op.COMPILER_FVM_TRACE_BEGIN, Op.COMPILER_FVM_TRACE_END,
+        Op.COMPILER_FVM_SETBP,
     }
     if op in _zero:
         return op.name
@@ -1940,6 +2642,8 @@ def _serialise_instr(instr) -> str:
         return f'{op.name} {o[0].value} {o[1]}'
 
     if op in (Op.CAST, Op.BITCAST):
+        if len(o) > 1 and o[1]:
+            return f'{op.name} {o[0].value} {o[1]}'
         return f'{op.name} {o[0].value}'
 
     if op == Op.EMIT_GLOBAL:
@@ -1953,6 +2657,14 @@ def _serialise_instr(instr) -> str:
 
     if op == Op.FFI_CALL:
         return f'FFI_CALL {o[0]} {o[1].value}'
+
+    if op == Op.INLINE_ASM:
+        body        = o[0].replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        constraints = o[1].replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+        n_inputs    = o[2]
+        n_outputs   = o[3]
+        out_names   = ' '.join(o[4]) if o[4] else ''
+        return f'INLINE_ASM "{body}" "{constraints}" {n_inputs} {n_outputs} {out_names}'.rstrip()
 
     if op == Op.EMITFLUX:
         src_text = o[0].replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
@@ -2364,7 +3076,10 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
         Op.COMPILER_PRINT, Op.COMPILER_INPUT,
         Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
         Op.COMPILER_FVM_DUMP,
+        Op.COMPILER_LOADLIB,
         Op.COMPILER_IMPORT_STDLIB, Op.COMPILER_IMPORT_LOCAL, Op.COMPILER_FPM_PACKAGE,
+        Op.COMPILER_FVM_TRACE_BEGIN, Op.COMPILER_FVM_TRACE_END,
+        Op.COMPILER_FVM_SETBP,
         Op.STR_LEN, Op.STR_CAT, Op.STR_SLICE, Op.STR_EQ, Op.STR_FIND,
         Op.INT_TO_STR, Op.STR_TO_INT,
         Op.ASSERT, Op.WARN, Op.PANIC,
@@ -2441,6 +3156,8 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
     if op in (Op.CAST, Op.BITCAST):
         if not raw_tokens:
             raise FVMParseError(f'{op.name} requires a type tag operand', lineno)
+        if len(raw_tokens) > 1:
+            return [_parse_ttag(raw_tokens[0]), raw_tokens[1]]
         return [_parse_ttag(raw_tokens[0])]
 
     if op == Op.CALL:
@@ -2483,6 +3200,18 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
 
     if op == Op.STR_SLICE:
         return []
+
+    if op == Op.INLINE_ASM:
+        if len(raw_tokens) < 4:
+            raise FVMParseError('INLINE_ASM requires body, constraints, n_inputs, n_outputs', lineno)
+        def _unescape(s: str) -> str:
+            return s.strip('"').replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+        body        = _unescape(raw_tokens[0])
+        constraints = _unescape(raw_tokens[1])
+        n_inputs    = int(raw_tokens[2], 0)
+        n_outputs   = int(raw_tokens[3], 0)
+        out_names   = list(raw_tokens[4:])
+        return [body, constraints, n_inputs, n_outputs, out_names]
 
     raise FVMParseError(f'unhandled operand encoding for {op.name}', lineno)
 

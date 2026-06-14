@@ -7877,6 +7877,12 @@ class CodegenVisitor:
         # Register all comptime functions: previously accumulated + newly compiled
         self._comptime_functions.update(cg.compiled_functions)
         self._comptime_struct_layouts.update(cg._struct_layouts)
+        # Merge overload table from codegen into VM
+        if hasattr(cg, 'compiled_overloads'):
+            for _ov_name, _ov_list in cg.compiled_overloads.items():
+                if _ov_name not in vm._function_overloads:
+                    vm._function_overloads[_ov_name] = []
+                vm._function_overloads[_ov_name].extend(_ov_list)
         for fn_name, fn_instrs in self._comptime_functions.items():
             vm.register_function(fn_name, fn_instrs)
         try:
@@ -7886,19 +7892,36 @@ class CodegenVisitor:
             last_line = getattr(vm, '_last_src_line', 0)
             snippet = ''
             if last_line:
-                _lm = getattr(module, '_flux_line_map', None)
-                if _lm and 1 <= last_line <= len(_lm):
-                    _fname, _local_ln = _lm[last_line - 1]
-                    if _fname:
+                _found = False
+                for _src_lines, _imp_lm, _imp_fname in getattr(vm, '_imported_sources', []):
+                    if _imp_lm and 1 <= last_line <= len(_imp_lm):
+                        _real_fname, _local_ln = _imp_lm[last_line - 1]
+                        _real_fname = _real_fname or _imp_fname
                         try:
-                            with open(_fname, 'r', encoding='utf-8', errors='replace') as _fh:
+                            with open(_real_fname, 'r', encoding='utf-8', errors='replace') as _fh:
                                 _lines = _fh.readlines()
                             if 1 <= _local_ln <= len(_lines):
                                 _raw = _lines[_local_ln - 1].rstrip('\n')
                                 _stripped = _raw.lstrip()
-                                snippet = f'\n[{_fname}:{_local_ln}]\n    {_stripped}\n    ^'
+                                snippet = f'\n[{_real_fname}:{_local_ln}]\n    {_stripped}\n    ^'
+                                _found = True
+                                break
                         except OSError:
                             pass
+                if not _found:
+                    _lm = getattr(module, '_flux_line_map', None)
+                    if _lm and 1 <= last_line <= len(_lm):
+                        _fname, _local_ln = _lm[last_line - 1]
+                        if _fname:
+                            try:
+                                with open(_fname, 'r', encoding='utf-8', errors='replace') as _fh:
+                                    _lines = _fh.readlines()
+                                if 1 <= _local_ln <= len(_lines):
+                                    _raw = _lines[_local_ln - 1].rstrip('\n')
+                                    _stripped = _raw.lstrip()
+                                    snippet = f'\n[{_fname}:{_local_ln}]\n    {_stripped}\n    ^'
+                            except OSError:
+                                pass
             import traceback as _tb; _tb.print_exc()
             raise FluxCodegenError(f'comptime execution failed: {e}{snippet}', node, module)
 
