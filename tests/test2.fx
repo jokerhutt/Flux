@@ -1,3 +1,4 @@
+///
 comptime
 {
 	compiler.fvm.loadlib("kernel32","dll");
@@ -7,15 +8,118 @@ comptime
 
 	using standard::io::console;
 
-	def main() -> int
+	contract TESTC
 	{
+		compiler.io.console.print("CONTRACT TIME!!\n");
+	};
+
+	def main() -> int : TESTC
+	{
+		defer compiler.io.console.print("DEFERRED!!!\n");
 		compiler.io.console.print("COMPTIME!\n");
 		print("Hello at comptime using regular print!\n");
 		return 0;
+	} : TESTC;
+
+	const int ci = 5;
+	//ci += 4; //works
+	compiler.io.console.print(f"{ci}\n");
+
+	//FRTStartup();
+};
+///
+
+comptime
+{
+	object MyObj1, MyObj2;
+	trait Trai1
+	{
+		def bar() -> void;
+	};
+	trait Trait2
+	{
+		def zed() -> void;
+	};
+	interface MyInter(A: Trait1, B: Trait2)
+	{
+		B : A
+		{
+			bar()->void
+		};
+	};
+	
+	object MyObj1
+	{
+		int x;
+		def __init() -> this
+		{
+			this.x = 25;
+			return this;
+		};
+		def __expr() -> MyObj1* { return this; };
+		def __exit() -> void { (void)this; };
+
+		def foo<T: int>(T y) -> void
+		{
+			MyObj2 mo2();
+			//mo2.zed(); // interfaces disallows call of zed
+			this.x = y;
+		};
+
+		private
+		{
+			def bar() -> void
+			{
+				this.x = 100;
+				noreturn;
+			};
+		};
+	} : MyInter(this, MyObj2);
+
+	object MyObj2
+	{
+		int x;
+		def __init() -> this
+		{
+			this.x = 25;
+			return this;
+		};
+		def __expr() -> MyObj2* { return this; };
+		def __exit() -> void { (void)this; };
+		def zed() -> void
+		{
+			compiler.io.console.print("ZED!!\n");
+		};
+	};
+	
+	MyObj1 newObj();
+
+	newObj.foo(20);
+	//newObj.bar(); // terminate execution here but not compilation
+
+	compiler.io.console.print(f"{newObj.x}\n");
+	
+
+	int x = noinit;
+
+	inline vectorcall foo() -> int
+	{
+		return 5;
 	};
 
-	FRTStartup();
+	register int y = 10;
+	volatile int z = 33;
 	compiler.fvm.dump("C:\\Users\\kvthw\\Flux\\test2.fvm");
+
+	//assert(0!=0, "TEST ASSERTION!\n");
+	namespace TNS
+	{
+		def tar() -> void { 1 + 1; };
+	};
+
+	deprecate TNS;
+
+	//TNS::tar(); // working
 };
 
 def !!FRTStartup() -> int { return 0; };

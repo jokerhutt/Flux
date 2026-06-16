@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fvm import Op, TTag, Val, Instr
 from fast import (
-    ASTNode,
+    ASTNode, Expression, NoInit,
     ComptimeBlock, EmitFlux,
     VariableDeclaration,
     TypeDeclaration,
@@ -35,6 +35,8 @@ from fast import (
     ForLoop,
     ReturnStatement,
     BreakStatement, ContinueStatement, EscapeStatement,
+    DeferStatement,
+    NoreturnStatement,
     LabelStatement, GotoStatement, JumpStatement,
     ExpressionStatement,
     Block,
@@ -48,6 +50,11 @@ from fast import (
     StructFieldAccess, StructFieldAssign, StructRecast,
     UnionDef, UnionDefStatement,
     ConstraDef,
+    ContractDef,
+    ObjectDef, ObjectDefStatement,
+    TraitDef, InterfaceDef,
+    DeprecateStatement,
+    AssertStatement,
     EnumDef, EnumDefStatement,
     macroDefStatement, macroCall,
     ExternBlock,
@@ -121,13 +128,8 @@ class ComptimeBytecode:
 class FVMCodegenError(Exception):
     """Carries both a message and the AST node that caused the failure."""
     def __init__(self, message: str, node=None):
-        loc = ''
         self.override_src_text = None
         if node is not None:
-            line = getattr(node, 'source_line', None)
-            col  = getattr(node, 'source_col',  None)
-            if line:
-                loc = f' [{line}:{col}]'
             # For InlineAsm, build a rich display from the node's own body/constraints
             from fast import InlineAsm as _IA
             if isinstance(node, _IA):
@@ -135,7 +137,13 @@ class FVMCodegenError(Exception):
                 body_indented = '\n'.join('    ' + l for l in node.body.splitlines())
                 constraints = f' : {node.constraints}' if node.constraints else ''
                 self.override_src_text = f'{prefix}\n{{\n{body_indented}\n}}{constraints};'
-        super().__init__(message + loc)
+        # Deliberately do not append a "[line:col]" suffix here: the raw
+        # source_col doesn't account for tab expansion, and the outer
+        # FluxCodegenError (fcodegen.py) already renders a correctly
+        # tab-aware "[file:line:col]" header plus caret via source_node.
+        # Embedding a second, raw-column location here produced confusing
+        # duplicate/mismatched locations like "... [18:2]\n[test2.fx:18:5]".
+        super().__init__(message)
         self.source_node = node
 
 
@@ -150,8 +158,14 @@ class FVMCodegen:
     """
 
     def __init__(self, known_functions: Dict[str, list] = None,
-                 known_struct_layouts: Dict[str, Any] = None):
+                 known_struct_layouts: Dict[str, Any] = None,
+                 program_statements: list = None):
         self._instructions: List[Instr] = []
+        # Full top-level program statement list (module._program_statements),
+        # used by _visit_deprecate to scan for lingering references to a
+        # namespace marked with `deprecate`, mirroring fcodegen.py's
+        # visit_DeprecateStatement.
+        self._program_statements: list = program_statements or []
         # Maps variable name -> local slot index
         self._locals: Dict[str, int] = {}
         self._local_count: int = 0
@@ -194,6 +208,22 @@ class FVMCodegen:
         self._local_typespecs: dict = {}
         # Heap-allocated variables: name -> (TTag, byte_size) for auto-deref on read
         self._heap_vars: dict = {}
+        # Interface registry: name -> InterfaceDef node (mirrors module.symbol_table._interface_registry)
+        self._interface_registry: dict = {}
+        # Interface whitelist: (caller_type, callee_type) -> set of allowed method names
+        # Built in _visit_object_def when processing interface annotations on objects.
+        # Enforced in _visit_method_call, mirroring fcodegen's pass 3.6 + visit_MethodCall check.
+        self._interface_whitelist: dict = {}
+        # Name of the object type whose method body is currently being compiled.
+        # Set/cleared in _visit_object_def per method, used by _visit_method_call to
+        # identify the caller type for whitelist checks (mirrors module._current_object_name).
+        self._current_object_name: str = None
+        # Stack of per-block defer lists. Each entry is a list of deferred
+        # statements (DeferStatement.body or [DeferStatement.expression]) for
+        # the body currently being compiled by _visit_body. Mirrors
+        # fcodegen.py's builder._flux_defer_stack but as an explicit stack
+        # since fvmcodegen has no enclosing builder object.
+        self._defer_stack: List[List] = []
         # Names declared at the top level of the comptime block (accessible to
         # nested function definitions via GLOBAL_GET / GLOBAL_SET).
         self._block_globals: set = set()
@@ -265,6 +295,68 @@ class FVMCodegen:
             self._local_count += 1
         return self._locals[name]
 
+    def _check_const_assign(self, name: str, node, op_label: str = 'assignment'):
+        """
+        Raise a compile error if `name` was declared `const` and is now
+        being reassigned. Mirrors the const-reassignment check performed
+        for the main LLVM codegen path in
+        AssignmentTypeHandler.handle_identifier_assignment /
+        handle_compound_assignment (ftypesys.py), which the comptime VM
+        codegen does not otherwise go through.
+        """
+        ts = self._local_typespecs.get(name)
+        if ts is not None and getattr(ts, 'is_const', False):
+            raise FVMCodegenError(
+                f"Cannot modify const variable '{name}' with {op_label}",
+                node
+            )
+
+    def _visit_deprecate(self, node: DeprecateStatement):
+        """
+        `deprecate NS;` is a compile-time-only static check: scan the whole
+        program for any remaining Identifier/FunctionCall references to the
+        deprecated (mangled) namespace and raise a ComptimeError if found.
+        Emits nothing to bytecode. Mirrors fcodegen.py's
+        visit_DeprecateStatement exactly, operating on
+        self._program_statements (module._program_statements) instead of
+        builder/module.
+        """
+        from fast import Identifier as _Identifier, FunctionCall as _FunctionCall, ASTNode as _ASTNode
+        mangled = node.namespace_path.replace("::", "__")
+        references = []
+
+        def walk(n, path="<top>"):
+            if n is None:
+                return
+            if isinstance(n, _Identifier):
+                if n.name == mangled or n.name.startswith(mangled + "__"):
+                    references.append(f"Identifier {n.name}")
+            elif isinstance(n, _FunctionCall):
+                if n.name == mangled or n.name.startswith(mangled + "__"):
+                    references.append(f"Function call {n.name}()")
+                for i, arg in enumerate(n.arguments):
+                    walk(arg, f"{path} -> call arg {i}")
+            if hasattr(n, '__dataclass_fields__'):
+                for field_name in n.__dataclass_fields__:
+                    child = getattr(n, field_name, None)
+                    child_path = f"{path}.{field_name}"
+                    if isinstance(child, list):
+                        for item in child:
+                            walk(item, child_path)
+                    elif isinstance(child, _ASTNode):
+                        walk(child, child_path)
+
+        for stmt in self._program_statements:
+            walk(stmt, type(stmt).__name__)
+
+        if references:
+            from fast import ComptimeError
+            ref_list = "\n".join(references)
+            raise ComptimeError(
+                f"Deprecated namespace '{node.namespace_path}' is still referenced:\n"
+                f"{ref_list}"
+            )
+
     def _fresh_tmp(self) -> str:
         """Return a unique temp-variable name that cannot collide with user identifiers."""
         n = self._local_count
@@ -274,11 +366,223 @@ class FVMCodegen:
         """Replace the instruction at idx with new_op targeting addr."""
         self._instructions[idx] = _instr(new_op, addr)
 
-    # ------------------------------------------------------------------
-    # Body / statement dispatch
-    # ------------------------------------------------------------------
+    def _visit_object_def(self, node: ObjectDef):
+        """
+        Compile each object method into self.compiled_functions under the key
+        'ObjectName.method_name', mirroring fcodegen.py's _emit_method_body.
+
+        Slot layout (matches _vardecl_call_constructor passing alloca as args[0]):
+          slot 0 : this  (the STRUCT value, by value in the VM)
+          slot 1+: explicit parameters (from method.parameters)
+
+        Special cases matching fcodegen._emit_method_body:
+          __init  -- implicit 'return this' (LOCAL_GET 0 / RET) if body doesn't terminate
+          __exit  -- returns void; implicit PUSH void / RET if not terminated
+          __expr  -- returns a pointer; body must explicitly return
+
+        The object name is recorded in self._object_type_names so that
+        _visit_var_decl can detect constructor calls (FunctionCall ending in .__init).
+        """
+        if not hasattr(self, '_object_type_names'):
+            self._object_type_names = set()
+        self._object_type_names.add(node.name)
+
+        # Register a StructLayout for this object so STRUCT_NEW can find it.
+        # Members map directly to layout fields; objects with no data members
+        # get an empty layout (total_size=0). This mirrors how visit_ComptimeBlock
+        # builds struct_layouts from module._struct_types for structs defined
+        # outside the comptime block -- but those paths use LLVM ABI sizes.
+        # Here we compute field sizes directly from the member TypeSpec.
+        from fvm import StructLayout as _SL
+        fields = []
+        offset = 0
+        for member in node.members:
+            ts = getattr(member, 'type_spec', None)
+            if ts is None:
+                continue
+            fsz = max(1, self._type_bit_width(ts) // 8)
+            ftag = self._type_ttag_from_ts(ts)
+            fields.append((member.name, ftag, offset, fsz))
+            offset += fsz
+        self._struct_layouts[node.name] = _SL(
+            name=node.name, fields=fields, total_size=offset)
+
+        # Build interface whitelist BEFORE compiling method bodies so that
+        # _visit_method_call can enforce it during codegen of those bodies.
+        # (If built after, the whitelist is empty when foo's fn_cg runs.)
+        for (iface_name, iface_args) in getattr(node, 'interfaces', None) or []:
+            iface_node = self._interface_registry.get(iface_name)
+            if iface_node is None:
+                continue
+            if len(iface_args) != len(iface_node.params):
+                continue
+            role_map = {}
+            for role_arg, (role_name, _trait) in zip(iface_args, iface_node.params):
+                role_map[role_name] = node.name if role_arg == 'this' else role_arg
+            concrete_types = list(role_map.values())
+            for _a in concrete_types:
+                for _b in concrete_types:
+                    if _a != _b:
+                        _pair = (_a, _b)
+                        if _pair not in self._interface_whitelist:
+                            self._interface_whitelist[_pair] = set()
+            for protocol in iface_node.protocols:
+                caller_concrete = role_map.get(protocol.caller)
+                callee_concrete = role_map.get(protocol.callee)
+                if caller_concrete is None or callee_concrete is None:
+                    continue
+                key = (caller_concrete, callee_concrete)
+                if key not in self._interface_whitelist:
+                    self._interface_whitelist[key] = set()
+                for proto in protocol.methods:
+                    self._interface_whitelist[key].add(proto.name)
+
+        for method in node.methods:
+            # Skip forward declarations (no body)
+            if method.body is None:
+                continue
+
+            fn_cg = FVMCodegen(known_functions=dict(self._known_functions),
+                               program_statements=self._program_statements)
+            fn_cg._outer_globals    = set(self._block_globals)
+            fn_cg._is_function_body = True
+            fn_cg._using_namespaces = list(self._using_namespaces)
+            fn_cg._struct_layouts   = dict(self._struct_layouts)
+            fn_cg._enum_names       = set(self._enum_names)
+            fn_cg._macro_table      = dict(self._macro_table)
+            fn_cg._local_types      = dict(self._local_types)
+            fn_cg._local_typespecs  = dict(self._local_typespecs)
+            fn_cg.compiled_functions = dict(self.compiled_functions)
+            # Propagate interface state so _visit_method_call can enforce
+            # whitelists for calls made from inside this method body.
+            fn_cg._interface_registry  = self._interface_registry
+            fn_cg._interface_whitelist = self._interface_whitelist
+            fn_cg._current_object_name = node.name  # mirrors module._current_object_name
+
+            # slot 0: 'this' -- the struct value, same as fcodegen's func.args[0]
+            fn_cg._alloc_local('this')
+            fn_cg._local_types['this'] = node.name
+
+            # slots 1+: explicit parameters
+            for param in method.parameters:
+                fn_cg._alloc_local(param.name)
+                if param.type_spec is not None:
+                    fn_cg._local_typespecs[param.name] = param.type_spec
+                    _ctn = getattr(param.type_spec, 'custom_typename', None)
+                    if _ctn:
+                        fn_cg._local_types[param.name] = _ctn
+                    elif param.type_spec.base_type is not None:
+                        _bt = param.type_spec.base_type
+                        fn_cg._local_types[param.name] = (
+                            str(_bt.value) if hasattr(_bt, 'value') else str(_bt))
+
+            body_stmts = (method.body.statements
+                          if isinstance(method.body, Block) else [method.body])
+            fn_cg._visit_body(body_stmts)
+
+            last_op = fn_cg._instructions[-1].op if fn_cg._instructions else None
+            if last_op not in (Op.RET, Op.TAIL_SELF):
+                # All methods implicitly return this (slot 0) so the call site
+                # can write the mutated struct back into the receiver variable.
+                # fcodegen achieves this transparently via pointer; the VM passes
+                # structs by value so every method must return the (possibly
+                # mutated) this so the caller can store it back. Matches
+                # fcodegen's implicit method_builder.ret(func.args[0]) for __init.
+                fn_cg._emit(_instr(Op.LOCAL_GET, 0))
+                fn_cg._emit(_instr(Op.RET))
+
+            func_key = f"{node.name}.{method.name}"
+            self.compiled_functions[func_key] = fn_cg._instructions
+            # propagate any nested definitions
+            for _k, _v in fn_cg.compiled_functions.items():
+                if _k not in self.compiled_functions:
+                    self.compiled_functions[_k] = _v
+
+
+    def _visit_assert(self, node: AssertStatement):
+        """
+        assert(cond, msg) at comptime: evaluate the condition; if false,
+        print the message via COMPILER_PRINT and PANIC to abort the
+        comptime block. Per Karac's direction, the message is printed
+        using the compiler's own console print path (Op.COMPILER_PRINT).
+
+        Bytecode emitted:
+            <condition>
+            JIF  -> skip_fail
+            <message | default string>
+            COMPILER_PRINT
+            PANIC
+          skip_fail:
+        """
+        # Evaluate condition; JIF skips the failure block if truthy
+        self._visit_expr(node.condition)
+        skip_idx = self._emit(_instr(Op.JIF, 0))
+
+        # Build the assertion failure message.
+        # The parser stores plain string literals as raw Python str
+        # (STRING_LITERAL -> .value); f-string/i-string nodes are AST
+        # Expression nodes. Handle both cases.
+        if node.message is not None:
+            if isinstance(node.message, str):
+                self._emit(_instr(Op.PUSH, Val(TTag.BYTES, node.message.encode())))
+            else:
+                self._visit_expr(node.message)
+        else:
+            line = getattr(node, 'source_line', '?')
+            col  = getattr(node, 'source_col',  '?')
+            self._emit(_instr(Op.PUSH, Val(TTag.BYTES,
+                f"Assertion failed at [{line}:{col}]\n".encode())))
+
+        self._emit(_instr(Op.PANIC))
+
+        # Patch the JIF to jump here (past the failure block)
+        self._patch_at(skip_idx, Op.JIF, self._current_ip())
 
     def _visit_body(self, stmts: list):
+        """
+        Each body (block) gets its own defer scope, mirroring fcodegen.py's
+        per-Block builder._flux_defer_stack. Statements registered via
+        `defer` within this body are run (in reverse order) when this body
+        falls through to its natural end; _visit_return/_visit_escape also
+        flush all active scopes (this one and any enclosing ones) before
+        emitting RET, since a return exits every enclosing block too.
+        """
+        self._defer_stack.append([])
+        try:
+            self._visit_body_stmts(stmts)
+            self._flush_defers(self._defer_stack[-1])
+        finally:
+            self._defer_stack.pop()
+
+    def _visit_defer(self, node: DeferStatement):
+        if node.body is not None:
+            self._defer_stack[-1].append(node.body)
+        else:
+            self._defer_stack[-1].append(node.expression)
+
+    def _flush_defers(self, deferred_list: list):
+        """Emit a list of deferred statements/expressions in reverse order."""
+        for deferred in reversed(deferred_list):
+            if isinstance(deferred, list):
+                for stmt in reversed(deferred):
+                    self._visit_stmt(stmt)
+            elif isinstance(deferred, Expression):
+                pushes = self._visit_expr(deferred)
+                if pushes:
+                    self._emit(_instr(Op.POP))
+            else:
+                self._visit_stmt(deferred)
+
+    def _flush_all_defers(self):
+        """
+        Emit all pending deferred statements across every active scope,
+        innermost scope first, used before RET/TAIL_SELF since a return
+        exits every enclosing block.
+        """
+        for deferred_list in reversed(self._defer_stack):
+            self._flush_defers(deferred_list)
+
+    def _visit_body_stmts(self, stmts: list):
         from fast import ArrayLiteral as _AL
         _unpack_targets = {DataType.SINT, DataType.UINT, DataType.SLONG, DataType.ULONG,
                            DataType.BYTE, DataType.CHAR}
@@ -344,6 +648,8 @@ class FVMCodegen:
         elif t is WhileLoop:             self._visit_while(node)
         elif t is DoLoop:                self._visit_do(node)
         elif t is DoWhileLoop:           self._visit_do_while(node)
+        elif t is DeferStatement:        self._visit_defer(node)
+        elif t is NoreturnStatement:     self._emit(_instr(Op.HALT))  # mirrors fcodegen's builder.unreachable()
         elif t is ReturnStatement:       self._visit_return(node)
         elif t is BreakStatement:        self._visit_break(node)
         elif t is EscapeStatement:       self._visit_escape(node)
@@ -362,6 +668,13 @@ class FVMCodegen:
         elif t is UnionDef:              self._visit_union_def(node)
         elif t is UnionDefStatement:     self._visit_union_def(node.union_def)
         elif t is ConstraDef:            pass  # compile-time only, no VM emission
+        elif t is ContractDef:           pass  # compile-time only; body already inlined into annotated functions by the parser, matches fcodegen.py's visit_ContractDef
+        elif t is ObjectDef:             self._visit_object_def(node)
+        elif t is ObjectDefStatement:    self._visit_object_def(node.object_def)
+        elif t is TraitDef:              pass  # symbol-table only, no VM bytecode; mirrors fcodegen's visit_TraitDef
+        elif t is InterfaceDef:          self._interface_registry[node.name] = node
+        elif t is DeprecateStatement:    self._visit_deprecate(node)
+        elif t is AssertStatement:       self._visit_assert(node)
         elif t is macroDefStatement:     self._macro_table[node.macro_def.name] = node.macro_def
         elif t.__name__ in ('macroDef', 'ExportBlock'): pass  # no VM emission
         elif t is ExternBlock:           self._visit_extern_block(node)
@@ -401,7 +714,7 @@ class FVMCodegen:
                 self._local_types[node.name] = f'__data_{node.type_spec.bit_width}'
             elif bt is not None:
                 self._local_types[node.name] = bt.value if hasattr(bt, 'value') else str(bt)
-        if node.initial_value is not None:
+        if node.initial_value is not None and not isinstance(node.initial_value, NoInit):
             slot = self._alloc_local(node.name)
             self._visit_expr(node.initial_value)
             self._emit(_instr(Op.LOCAL_SET, slot))
@@ -448,7 +761,7 @@ class FVMCodegen:
                 self._heap_vars[node.name] = (ttag, byte_size)
                 self._emit(_instr(Op.PUSH, Val(TTag.UINT, byte_size)))
                 self._emit(_instr(Op.ALLOC))
-                if node.initial_value is not None:
+                if node.initial_value is not None and not isinstance(node.initial_value, NoInit):
                     self._emit(_instr(Op.DUP))
                     self._visit_expr(node.initial_value)
                     self._emit(_instr(Op.STORE, ttag, byte_size))
@@ -467,7 +780,7 @@ class FVMCodegen:
             self._emit(_instr(Op.CMP_EQ))
             jnf_idx = self._emit(_instr(Op.JNF, 0))  # skip init if already done
             # Init block: evaluate initializer and store in globals
-            if node.initial_value is not None:
+            if node.initial_value is not None and not isinstance(node.initial_value, NoInit):
                 self._visit_expr(node.initial_value)
             else:
                 ttag2 = self._type_ttag_from_ts(node.type_spec)
@@ -507,7 +820,24 @@ class FVMCodegen:
                 self._local_types[node.name] = ts.custom_typename
             elif ts.base_type is not None:
                 self._local_types[node.name] = str(ts.base_type.value) if hasattr(ts.base_type, 'value') else str(ts.base_type)
-        if node.initial_value is not None:
+        if node.initial_value is not None and not isinstance(node.initial_value, NoInit):
+            # Constructor call: MyObj1 newObj()  ->  initial_value is FunctionCall('MyObj1.__init', args)
+            # fcodegen._vardecl_call_constructor prepends alloca (this) as args[0].
+            # Mirror that: emit STRUCT_NEW to create the struct, then call __init
+            # with this (the struct) as slot 0, followed by explicit args.
+            if (isinstance(node.initial_value, FunctionCall) and
+                    node.initial_value.name.endswith('.__init')):
+                type_name = node.initial_value.name[:-len('.__init')]
+                self._emit(_instr(Op.STRUCT_NEW, type_name))   # push this
+                for arg in node.initial_value.arguments:
+                    self._visit_expr(arg)
+                argc = 1 + len(node.initial_value.arguments)
+                self._emit(_instr(Op.CALL, node.initial_value.name, argc))
+                self._emit(_instr(Op.DUP))
+                self._emit(_instr(Op.LOCAL_SET, slot))
+                self._emit(_instr(Op.GLOBAL_SET, node.name))
+                self._block_globals.add(node.name)
+                return
             # Pack expression: scalar_type var = [a, b, ...] packs elements into an integer.
             # Detect this when the target type is a scalar integer and the initial value
             # is an ArrayLiteral that is not a string.
@@ -522,6 +852,21 @@ class FVMCodegen:
                 self._emit_pack(node.initial_value, node.type_spec)
             else:
                 self._visit_expr(node.initial_value)
+                # Coerce the initializer's value to the declared type, the
+                # same way the compiler implicitly converts an initializer
+                # expression to the target variable's type (e.g. `long x = 5;`
+                # must store 5 as a 64-bit value, not as the literal's
+                # default 32-bit int).  Only applies to plain numeric scalar
+                # declarations -- pointers, structs, enums and arrays are
+                # handled separately above/below.
+                if (node.type_spec is not None and
+                        not getattr(node.type_spec, 'is_array', False) and
+                        not getattr(node.type_spec, 'is_pointer', False)):
+                    _decl_ttag = self._type_ttag_from_ts(node.type_spec)
+                    if _decl_ttag in (TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG,
+                                       TTag.BYTE, TTag.CHAR, TTag.FLOAT, TTag.DOUBLE,
+                                       TTag.BOOL):
+                        self._emit(_instr(Op.CAST, _decl_ttag))
             # If the declared type is a pointer to a named struct (e.g. BlockEntry* entry = ...),
             # tag the result with CAST PTR typename so STRUCT_LOAD can read fields through it.
             if (node.type_spec is not None and
@@ -573,6 +918,7 @@ class FVMCodegen:
     def _visit_assignment(self, node: Assignment):
         if isinstance(node.target, Identifier):
             name = node.target.name
+            self._check_const_assign(name, node, 'assignment')
             if name in self._outer_globals:
                 self._visit_expr(node.value)
                 self._emit(_instr(Op.GLOBAL_SET, name))
@@ -735,6 +1081,7 @@ class FVMCodegen:
                 f'fvmcodegen: only simple identifier compound-assignment in comptime{loc}'
             )
         name = node.target.name
+        self._check_const_assign(name, node, 'compound assignment')
         slot = self._alloc_local(name)
         # Push LHS
         self._emit(_instr(Op.LOCAL_GET, slot))
@@ -1587,6 +1934,54 @@ class FVMCodegen:
             return opcode in _PUSHES
 
         if full_name is not None:
+            # Check if this is an object method call: receiver_var.method_name(args)
+            # where receiver_var is a local of a known object type registered via
+            # _visit_object_def. Mirrors fcodegen.py's visit_MethodCall which builds
+            # method_func_name = f"{obj_type_name}.{node.method_name}" and passes
+            # this_ptr as args[0].
+            if (isinstance(node.object, Identifier) and
+                    node.object.name in self._local_types):
+                type_name = self._local_types[node.object.name]
+                obj_method_key = f"{type_name}.{node.method_name}"
+                _is_object_type = (type_name in self._struct_layouts or
+                                   type_name in getattr(self, '_object_type_names', set()))
+                if (_is_object_type or
+                        obj_method_key in self.compiled_functions or
+                        obj_method_key in self._known_functions):
+                    recv_name = node.object.name
+                    # Interface whitelist enforcement: if the caller type and callee
+                    # type are governed by an interface, only whitelisted methods may
+                    # be called. Mirrors fcodegen.py's visit_MethodCall check.
+                    caller_type = getattr(self, '_current_object_name', None)
+                    if caller_type is not None:
+                        _key = (caller_type, type_name)
+                        _whitelist = getattr(self, '_interface_whitelist', {})
+                        if _key in _whitelist and node.method_name not in _whitelist[_key]:
+                            raise FVMCodegenError(
+                                f"Interface violation: '{caller_type}' is not permitted to "
+                                f"call '{node.method_name}' from '{type_name}'",
+                                node
+                            )
+                    # Push 'this' (the struct value) then explicit args
+                    self._visit_expr(node.object)
+                    for arg in node.arguments:
+                        self._visit_expr(arg)
+                    self._emit(_instr(Op.CALL, obj_method_key, 1 + len(node.arguments)))
+                    # All object methods return the (possibly mutated) this.
+                    # Write it back into the receiver variable so mutations
+                    # are visible to the caller -- structs are by value in
+                    # the VM; this mirrors fcodegen's pointer-based mutation.
+                    # Stack after CALL: [this_mutated]
+                    # DUP x2 so we have three copies: LOCAL_SET and GLOBAL_SET
+                    # consume two, one remains as the pushed return value for
+                    # _visit_expr_stmt to POP.
+                    recv_slot = self._alloc_local(recv_name)
+                    self._emit(_instr(Op.DUP))          # [this, this]
+                    self._emit(_instr(Op.DUP))          # [this, this, this]
+                    self._emit(_instr(Op.LOCAL_SET, recv_slot))  # [this, this]
+                    self._emit(_instr(Op.GLOBAL_SET, recv_name)) # [this]
+                    return True
+
             # Check if this is a type function call: receiver_var.method_name(args)
             # The receiver is a local variable; look up its declared type name and
             # try the __typefunc__<type_name>__<method_name> mangled key.
@@ -1868,7 +2263,7 @@ class FVMCodegen:
         can register it with the VM before execute().
         Parameters are pre-loaded into local slots 0..N-1 by the VM _call() mechanism.
         """
-        fn_cg = FVMCodegen(known_functions=dict(self._known_functions))
+        fn_cg = FVMCodegen(known_functions=dict(self._known_functions), program_statements=self._program_statements)
         fn_cg._outer_globals = set(self._block_globals)
         fn_cg._is_function_body = True
         fn_cg._using_namespaces = list(self._using_namespaces)
@@ -1940,7 +2335,7 @@ class FVMCodegen:
         TypeFuncCall sites can find it by the same mangled name.
         The implicit receiver parameter '_' occupies slot 0.
         """
-        fn_cg = FVMCodegen(known_functions=dict(self._known_functions))
+        fn_cg = FVMCodegen(known_functions=dict(self._known_functions), program_statements=self._program_statements)
         fn_cg._outer_globals = set(self._block_globals)
         fn_cg._is_function_body = True
         fn_cg._using_namespaces = list(self._using_namespaces)
@@ -2025,6 +2420,20 @@ class FVMCodegen:
                 return _prim
             return TTag.STRUCT
         if ts.base_type is not None:
+            if ts.base_type == _DT.DATA:
+                # data{N} types (and aliases such as u64/i32/wchar) are
+                # scalar integers of N bits -- map to the closest integer
+                # TTag based on bit width and signedness, the same way
+                # _visit_cast resolves explicit (u64)/(i32) casts. Without
+                # this, u64 etc fall through to the generic DATA->INT
+                # default below, which truncates 64-bit pointer values to
+                # 32 bits when the declared-type coercion CAST is emitted.
+                bits = getattr(ts, 'bit_width', None) or 32
+                is_signed = getattr(ts, 'is_signed', False)
+                if bits <= 32:
+                    return TTag.INT if is_signed else TTag.UINT
+                else:
+                    return TTag.LONG if is_signed else TTag.ULONG
             return _datatype_to_ttag(ts.base_type)
         return TTag.INT
 
@@ -2278,7 +2687,7 @@ class FVMCodegen:
         for func in node.functions:
             if func is None:
                 continue
-            fn_cg = FVMCodegen(known_functions=self._known_functions)
+            fn_cg = FVMCodegen(known_functions=self._known_functions, program_statements=self._program_statements)
             fn_cg._outer_globals = set(self._block_globals)
             fn_cg._is_function_body = True
             fn_cg._using_namespaces = list(self._using_namespaces)
@@ -2601,6 +3010,12 @@ class FVMCodegen:
             self._visit_expr(node.value)
         else:
             self._emit(_instr(Op.PUSH, Val(TTag.VOID, 0)))
+        # A return exits every enclosing block, so run all pending `defer`
+        # statements (innermost scope first) now, after the return value
+        # has been computed and pushed but before RET consumes it. Each
+        # deferred statement is stack-neutral (ExpressionStatement pops any
+        # value it leaves), so the return value underneath is undisturbed.
+        self._flush_all_defers()
         # Inside a <~ function every return is a re-entry, not an exit.
         # escape bypasses this by calling _visit_escape directly.
         if self._tail_call_self is not None:
@@ -2619,6 +3034,7 @@ class FVMCodegen:
         self._tail_call_self = None
         self._visit_expr(node.call)
         self._tail_call_self = saved
+        self._flush_all_defers()
         self._emit(_instr(Op.RET))
 
     def _visit_break(self, node: BreakStatement):

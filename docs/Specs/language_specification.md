@@ -5,7 +5,7 @@ Flux is a compiled, general purpose programming language.
 
 It provides power with ease of writing.
 
-If you like Flux, please consider contributing to the project or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
+If you like Flux, please consider contributing to the language or joining the [Flux Discord server](https://discord.gg/RAHjbYuNUc) where you can ask questions, provide feedback, and talk with other Flux enjoyers!
 
 **Creator note** Everything in Flux is **stack allocated** unless specified.  
 - This means you are likely to introduce stack overflows if you perform stack allocations inside loops such as declaring a new variable each time a loop passes.
@@ -3048,8 +3048,19 @@ volatile, while, xor
 ## The `compiler.` namespace:
 - `compiler.io.console.print(byte*)`  
 - `compiler.io.console.input()->byte*`  
+
 - `compiler.io.file.readall(path)->byte*`  
 - `compiler.io.file.write(path,content,flags)`  
+
+- `compiler.import.stdlib(filename)`
+- `compiler.import.local(filename)`
+- `compiler.fpm.package(package-name)`
+
+- `compiler.fvm.trace.begin()`
+- `compiler.fvm.trace.end()`
+
+- `compiler.fvm.loadlib(lib_name, type)` - `// "kernel32", "dll"`
+- `compiler.fvm.dump(path)`
 
 
 <a id="operator-list"></a>

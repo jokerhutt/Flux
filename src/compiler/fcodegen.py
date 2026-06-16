@@ -212,7 +212,7 @@ def get_struct_vtable(module: ir.Module, struct_name: str):
 # Source location helper
 # ---------------------------------------------------------------------------
 
-def _src_loc(node, module: ir.Module) -> str:
+def _src_loc(node, module: ir.Module, col_override=None) -> str:
     """
     Return a human-readable source location string for *node*.
 
@@ -223,9 +223,13 @@ def _src_loc(node, module: ir.Module) -> str:
 
     Format when map is available:  ``filename.fx:6:1``
     Fallback (no map / out of range):  ``6:1``
+
+    If *col_override* is given, it is used in place of node.source_col
+    (e.g. a tab-expanded visual column, so the reported column matches
+    the caret position shown beneath the source line).
     """
     line = getattr(node, 'source_line', '?')
-    col  = getattr(node, 'source_col',  '?')
+    col  = col_override if col_override is not None else getattr(node, 'source_col', '?')
 
     line_map = getattr(module, '_flux_line_map', None) if module is not None else None
     if line_map and isinstance(line, int) and 1 <= line <= len(line_map):
@@ -243,8 +247,6 @@ def _src_loc_with_source(node, module: ir.Module, source_lines=None) -> str:
     Like _src_loc but also appends the relevant source line text when available,
     to give the user the same context as a parser error.
     """
-    loc = _src_loc(node, module)
-
     # Try to pull the actual source line text
     line = getattr(node, 'source_line', None)
     col  = getattr(node, 'source_col', 1) or 1
@@ -265,9 +267,13 @@ def _src_loc_with_source(node, module: ir.Module, source_lines=None) -> str:
         src_text = source_lines[line - 1].rstrip('\n')
 
     if src_text is not None:
-        pointer = ' ' * (col - 1) + '^'
-        return f"{loc}\n    {src_text}\n    {pointer}"
-    return loc
+        from ferrors import _expand_tabs
+        expanded_text, visual_col = _expand_tabs(src_text, col)
+        loc = _src_loc(node, module, col_override=visual_col)
+        stripped = expanded_text.lstrip(' ')
+        pointer = ' ' * 4 + '^'
+        return f"{loc}\n    {stripped}\n{pointer}"
+    return _src_loc(node, module)
 
 
 # ---------------------------------------------------------------------------
@@ -7679,6 +7685,17 @@ class CodegenVisitor:
                     # For partner types we record the implicit requirement but cannot enforce
                     # here without access to their ObjectDef; enforcement is deferred to
                     # a future pass when partner ObjectDefs are available in the statement list.
+                # Pre-register ALL ordered pairs of concrete types as empty sets
+                # so any cross-call not explicitly whitelisted is blocked.
+                # Without this, an ungoverned direction has no key and bypasses
+                # the check in visit_MethodCall entirely.
+                _concrete_types = list(role_map.values())
+                for _a in _concrete_types:
+                    for _b in _concrete_types:
+                        if _a != _b:
+                            _pair = (_a, _b)
+                            if _pair not in module.symbol_table._interface_whitelist:
+                                module.symbol_table._interface_whitelist[_pair] = set()
                 # Build call whitelist for each protocol block
                 for protocol in iface_node.protocols:
                     caller_concrete = role_map.get(protocol.caller)
@@ -7815,12 +7832,14 @@ class CodegenVisitor:
 
         # Compile comptime block to VM bytecode
         cg = FVMCodegen(known_functions=self._comptime_functions,
-                        known_struct_layouts=self._comptime_struct_layouts)
+                        known_struct_layouts=self._comptime_struct_layouts,
+                        program_statements=getattr(module, '_program_statements', []))
         try:
             bc = cg.compile(node, captured_scope)
         except Exception as e:
             from fvmcodegen import FVMCodegenError as _FVMErr
-            err_node = e.source_node if isinstance(e, _FVMErr) and e.source_node is not None else node
+            from fast import ASTNode as _ASTNode
+            err_node = e.source_node if isinstance(e, _FVMErr) and isinstance(e.source_node, _ASTNode) else node
             import traceback as _tb; _tb.print_exc()
             raise FluxCodegenError(f'comptime codegen failed: {e}', err_node, module)
 
@@ -7893,33 +7912,37 @@ class CodegenVisitor:
             snippet = ''
             if last_line:
                 _found = False
-                for _src_lines, _imp_lm, _imp_fname in getattr(vm, '_imported_sources', []):
-                    if _imp_lm and 1 <= last_line <= len(_imp_lm):
-                        _real_fname, _local_ln = _imp_lm[last_line - 1]
-                        _real_fname = _real_fname or _imp_fname
+                # Check the user's own file (module._flux_line_map) FIRST so that
+                # errors in user code are not mis-attributed to a stdlib line that
+                # happened to execute just before the crash.
+                _lm = getattr(module, '_flux_line_map', None)
+                if _lm and 1 <= last_line <= len(_lm):
+                    _fname, _local_ln = _lm[last_line - 1]
+                    if _fname:
                         try:
-                            with open(_real_fname, 'r', encoding='utf-8', errors='replace') as _fh:
+                            with open(_fname, 'r', encoding='utf-8', errors='replace') as _fh:
                                 _lines = _fh.readlines()
                             if 1 <= _local_ln <= len(_lines):
                                 _raw = _lines[_local_ln - 1].rstrip('\n')
                                 _stripped = _raw.lstrip()
-                                snippet = f'\n[{_real_fname}:{_local_ln}]\n    {_stripped}\n    ^'
+                                snippet = f'\n[{_fname}:{_local_ln}]\n    {_stripped}\n    ^'
                                 _found = True
-                                break
                         except OSError:
                             pass
                 if not _found:
-                    _lm = getattr(module, '_flux_line_map', None)
-                    if _lm and 1 <= last_line <= len(_lm):
-                        _fname, _local_ln = _lm[last_line - 1]
-                        if _fname:
+                    for _src_lines, _imp_lm, _imp_fname in getattr(vm, '_imported_sources', []):
+                        if _imp_lm and 1 <= last_line <= len(_imp_lm):
+                            _real_fname, _local_ln = _imp_lm[last_line - 1]
+                            _real_fname = _real_fname or _imp_fname
                             try:
-                                with open(_fname, 'r', encoding='utf-8', errors='replace') as _fh:
+                                with open(_real_fname, 'r', encoding='utf-8', errors='replace') as _fh:
                                     _lines = _fh.readlines()
                                 if 1 <= _local_ln <= len(_lines):
                                     _raw = _lines[_local_ln - 1].rstrip('\n')
                                     _stripped = _raw.lstrip()
-                                    snippet = f'\n[{_fname}:{_local_ln}]\n    {_stripped}\n    ^'
+                                    snippet = f'\n[{_real_fname}:{_local_ln}]\n    {_stripped}\n    ^'
+                                    _found = True
+                                    break
                             except OSError:
                                 pass
             import traceback as _tb; _tb.print_exc()

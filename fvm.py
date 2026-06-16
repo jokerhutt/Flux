@@ -889,7 +889,7 @@ class FluxVM:
         frame  = CallFrame(
             func_name=name,
             instructions=instrs,
-            locals=list(args) + [None] * max(0, 32 - len(args)),
+            locals=list(args) + [None] * max(0, 256 - len(args)),
         )
         self.frames.append(frame)
 

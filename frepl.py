@@ -44,15 +44,47 @@ from fast import ComptimeBlock
 
 
 # ---------------------------------------------------------------------------
+# stdout column tracking
+# ---------------------------------------------------------------------------
+#
+# compiler.io.console.print(...) (and other VM output) writes directly to
+# sys.stdout and may not end with a newline.  Before the multi-line editor
+# redraws the prompt it clears from the cursor to the end of the screen
+# (\x1b[J), which would erase any such output that is still on the current
+# line.  This wrapper tracks whether the cursor is at column 0 so the editor
+# can emit a newline first when needed.
+
+class _ColumnTrackingStdout:
+    def __init__(self, real):
+        self._real = real
+        self.at_line_start = True
+
+    def write(self, s):
+        if s:
+            self.at_line_start = s.endswith('\n')
+        return self._real.write(s)
+
+    def flush(self):
+        return self._real.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+
+sys.stdout = _ColumnTrackingStdout(sys.stdout)
+
+
+# ---------------------------------------------------------------------------
 # Version / banner
 # ---------------------------------------------------------------------------
 
-_VERSION = '0.1.0'
+_VERSION = '0.1.1'
 
 _BANNER = f"""\
 Flux REPL {_VERSION}  (FVM-powered)
-Type Flux comptime code and press Enter.  Multi-line input is collected until
-braces balance.  Type :help for commands, :quit to exit.
+Type Flux comptime code.  ENTER inserts a new line (indentation is carried
+over from the previous line); press CTRL+ENTER to compile and run.
+Type :help for commands, :quit to exit.
 """
 
 _HELP = """\
@@ -64,6 +96,8 @@ Commands:
   :funcs           List comptime functions defined so far
   :help            Show this message
 
+ENTER inserts a new line; CTRL+ENTER submits the input for compilation.
+New lines are indented to match the previous line.
 Any other input is treated as the body of a comptime block and executed.
 Variables and functions defined in one input survive into the next.
 """
@@ -91,72 +125,508 @@ class ReplSession:
 # ---------------------------------------------------------------------------
 # Input collection
 # ---------------------------------------------------------------------------
+#
+# The REPL uses a raw-terminal multi-line editor instead of repeated calls
+# to input().  Submission is no longer triggered by a blank line; instead
+# the user presses CTRL+ENTER to compile, which lets multi-line input
+# contain blank lines freely (for spacing between statements, etc).
+#
+# Terminal behaviour notes:
+#   - Plain ENTER is delivered as CR (0x0D).
+#   - CTRL+ENTER is delivered as LF (0x0A) -- i.e. the same byte as CTRL+J.
+#     This holds on POSIX terminals (xterm, gnome-terminal, etc) and on the
+#     Windows console via msvcrt.  If a particular terminal does not forward
+#     CTRL+ENTER as CTRL+J, pressing CTRL+J directly submits as well, since
+#     it is the exact same byte.
+#
+# When ENTER is pressed, a newline is inserted and the new line is
+# pre-filled with the indentation of the line just left -- but only if
+# that line had non-whitespace content.  This way repeatedly pressing
+# ENTER on blank lines keeps the current indentation instead of resetting
+# it to nothing.
 
-def _brace_depth(text: str) -> int:
-    """Return net open-brace count, ignoring braces inside string literals."""
-    depth   = 0
-    in_str  = False
-    str_ch  = ''
-    i       = 0
-    while i < len(text):
-        ch = text[i]
-        if in_str:
-            if ch == '\\':
-                i += 2
-                continue
-            if ch == str_ch:
-                in_str = False
-        else:
-            if ch in ('"', "'"):
-                in_str = True
-                str_ch = ch
-            elif ch == '{':
-                depth += 1
-            elif ch == '}':
-                depth -= 1
+import platform
+
+_IS_WINDOWS = platform.system() == 'Windows'
+
+if _IS_WINDOWS:
+    import msvcrt
+    import ctypes
+    from ctypes import wintypes
+
+    # STD_OUTPUT_HANDLE is defined as -11, i.e. 0xFFFFFFF5 as an unsigned
+    # 32-bit DWORD (the type GetStdHandle's argtype expects).
+    _STD_OUTPUT_HANDLE = 0xFFFFFFF5
+
+    class _COORD(ctypes.Structure):
+        _fields_ = [('X', ctypes.c_short), ('Y', ctypes.c_short)]
+
+    class _SMALL_RECT(ctypes.Structure):
+        _fields_ = [('Left', ctypes.c_short), ('Top', ctypes.c_short),
+                     ('Right', ctypes.c_short), ('Bottom', ctypes.c_short)]
+
+    class _CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+        _fields_ = [('dwSize', _COORD),
+                     ('dwCursorPosition', _COORD),
+                     ('wAttributes', wintypes.WORD),
+                     ('srWindow', _SMALL_RECT),
+                     ('dwMaximumWindowSize', _COORD)]
+
+    class _WinConsole:
+        """
+        Direct Win32 console API access for in-place redraw.  Used instead
+        of ANSI/VT escape sequences, which are not reliably interpreted by
+        every Windows console (e.g. the legacy cmd.exe host).
+        """
+
+        def __init__(self):
+            kernel32 = ctypes.windll.kernel32
+
+            # ctypes defaults every function's restype/argtypes to c_int,
+            # which truncates 64-bit HANDLE values on 64-bit Windows.  Set
+            # explicit prototypes so the handle and coordinate structs are
+            # marshalled correctly.
+            kernel32.GetStdHandle.restype  = wintypes.HANDLE
+            kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+
+            kernel32.GetConsoleScreenBufferInfo.restype  = wintypes.BOOL
+            kernel32.GetConsoleScreenBufferInfo.argtypes = [
+                wintypes.HANDLE, ctypes.POINTER(_CONSOLE_SCREEN_BUFFER_INFO)
+            ]
+
+            kernel32.SetConsoleCursorPosition.restype  = wintypes.BOOL
+            kernel32.SetConsoleCursorPosition.argtypes = [wintypes.HANDLE, _COORD]
+
+            kernel32.FillConsoleOutputCharacterW.restype  = wintypes.BOOL
+            kernel32.FillConsoleOutputCharacterW.argtypes = [
+                wintypes.HANDLE, ctypes.c_wchar, wintypes.DWORD, _COORD,
+                ctypes.POINTER(wintypes.DWORD)
+            ]
+
+            self._kernel32 = kernel32
+            self._handle   = kernel32.GetStdHandle(_STD_OUTPUT_HANDLE)
+
+        def _info(self) -> _CONSOLE_SCREEN_BUFFER_INFO:
+            info = _CONSOLE_SCREEN_BUFFER_INFO()
+            self._kernel32.GetConsoleScreenBufferInfo(self._handle, ctypes.byref(info))
+            return info
+
+        def get_cursor_pos(self):
+            info = self._info()
+            return info.dwCursorPosition.X, info.dwCursorPosition.Y
+
+        def get_buffer_width(self) -> int:
+            return self._info().dwSize.X
+
+        def get_buffer_height(self) -> int:
+            return self._info().dwSize.Y
+
+        def get_window_rect(self):
+            info = self._info()
+            return info.srWindow.Top, info.srWindow.Bottom
+
+        def set_cursor_pos(self, x: int, y: int):
+            self._kernel32.SetConsoleCursorPosition(self._handle, _COORD(x, y))
+
+        def clear_lines(self, x: int, y: int, width: int, num_lines: int):
+            """Fill `num_lines` lines (full width) starting at (x, y) with spaces."""
+            written = wintypes.DWORD(0)
+            count = width * num_lines
+            self._kernel32.FillConsoleOutputCharacterW(
+                self._handle, ctypes.c_wchar(' '), count, _COORD(x, y), ctypes.byref(written)
+            )
+
+    _win_console = _WinConsole()
+
+    def _enable_windows_vt_mode():
+        # No-op: rendering on Windows uses direct console API calls instead
+        # of VT escape sequences.
+        pass
+else:
+    import termios
+    import tty
+
+    def _enable_windows_vt_mode():
+        pass
+
+
+_CTRL_C = '\x03'
+_CTRL_D = '\x04'
+_ENTER  = '\r'
+_SUBMIT = '\n'   # CTRL+ENTER / CTRL+J
+_BACKSPACE_CHARS = ('\x7f', '\x08')
+
+# When set, the multi-line editor's Windows render path logs cursor/window
+# coordinates for each render to this file, to help diagnose console
+# scrolling/redraw issues.
+_REPL_DEBUG_LOG = os.environ.get('FREPL_DEBUG_LOG')
+
+
+def _debug_log(msg: str):
+    if not _REPL_DEBUG_LOG:
+        return
+    try:
+        with open(_REPL_DEBUG_LOG, 'a', encoding='utf-8') as f:
+            f.write(msg + '\n')
+    except OSError:
+        pass
+
+# Arrow-key sentinels returned by _read_key(); normalized across platforms.
+_KEY_UP    = 'KEY_UP'
+_KEY_DOWN  = 'KEY_DOWN'
+_KEY_LEFT  = 'KEY_LEFT'
+_KEY_RIGHT = 'KEY_RIGHT'
+
+
+def _read_key() -> str:
+    """
+    Read one logical keypress and return it as a single character, or as
+    one of the _KEY_* sentinels for arrow keys.  Blocks until a key is
+    available.
+    """
+    if _IS_WINDOWS:
+        ch = msvcrt.getwch()
+        if ch in ('\x00', '\xe0'):
+            # Extended key: a second call gives the actual scan code.
+            code = msvcrt.getwch()
+            return {
+                'H': _KEY_UP,
+                'P': _KEY_DOWN,
+                'K': _KEY_LEFT,
+                'M': _KEY_RIGHT,
+            }.get(code, '')
+        return ch
+    else:
+        ch = sys.stdin.read(1)
+        if ch == '\x1b':
+            # Escape sequence -- arrow keys are ESC [ A/B/C/D
+            seq = sys.stdin.read(1)
+            if seq == '[':
+                code = sys.stdin.read(1)
+                return {
+                    'A': _KEY_UP,
+                    'B': _KEY_DOWN,
+                    'C': _KEY_RIGHT,
+                    'D': _KEY_LEFT,
+                }.get(code, '')
+            return ''
+        return ch
+
+
+def _leading_whitespace(line: str) -> str:
+    i = 0
+    while i < len(line) and line[i] in (' ', '\t'):
         i += 1
-    return depth
+    return line[:i]
 
 
-def _is_complete(lines: list, depth: int) -> bool:
+class _MultilineEditor:
     """
-    Return True when the accumulated input is ready to execute.
+    A minimal raw-mode multi-line text editor for the REPL prompt.
 
-    Rules:
-      - If braces are still open (depth > 0), always keep collecting.
-      - If braces are balanced (depth == 0) AND the last non-empty line ends
-        with ';', the statement is self-contained -- execute immediately.
-      - Otherwise (depth == 0 but no trailing ';', e.g. 'namespace Test')
-        keep collecting until the user submits a blank line.
+    Lines are stored as a list of strings.  The cursor is tracked as
+    (row, col).  Supports:
+      - printable character insertion
+      - ENTER: split line, auto-indent the new line
+      - CTRL+ENTER: submit the buffer
+      - BACKSPACE: delete char before cursor (joins lines at col 0)
+      - arrow keys: move cursor within the buffer
+      - CTRL+C: raise KeyboardInterrupt
+      - CTRL+D: raise EOFError (only when buffer is empty)
     """
-    if depth > 0:
+
+    def __init__(self, prompt: str, continuation: str):
+        self.prompt       = prompt
+        self.continuation = continuation
+        self.lines        = ['']
+        self.row          = 0
+        self.col          = 0
+        # Indentation carried forward across blank lines.
+        self.last_indent  = ''
+        self._first_render = True
+        # Windows-only state: console-buffer coordinates of the prompt's
+        # first character, and how many lines were drawn last time (for
+        # clearing before redraw).
+        self._win_origin         = None
+        self._win_prev_line_count = 0
+
+    # -- rendering -----------------------------------------------------
+
+    def _render(self):
+        if _IS_WINDOWS:
+            self._render_windows()
+        else:
+            self._render_ansi()
+
+    def _render_ansi(self):
+        out = []
+        if self._first_render:
+            self._first_render = False
+            # If the cursor is mid-line (e.g. the last command printed
+            # output without a trailing newline), move to a fresh line
+            # before drawing the prompt so that output is not erased by
+            # the clear-to-end-of-screen below.
+            if not getattr(sys.stdout, 'at_line_start', True):
+                out.append('\r\n')
+        out.append('\r')
+        out.append('\x1b[J')  # clear from cursor to end of screen
+        for i, line in enumerate(self.lines):
+            prefix = self.prompt if i == 0 else self.continuation
+            out.append(prefix + line)
+            if i != len(self.lines) - 1:
+                out.append('\r\n')
+        # Reposition cursor to (self.row, self.col)
+        lines_below = (len(self.lines) - 1) - self.row
+        if lines_below > 0:
+            out.append(f'\x1b[{lines_below}A')
+        prefix_len = len(self.prompt) if self.row == 0 else len(self.continuation)
+        out.append('\r')
+        target_col = prefix_len + self.col
+        if target_col > 0:
+            out.append(f'\x1b[{target_col}C')
+        sys.stdout.write(''.join(out))
+        sys.stdout.flush()
+
+    def _render_windows(self):
+        sys.stdout.flush()
+        width = max(1, _win_console.get_buffer_width())
+
+        def rows_for(text_len: int) -> int:
+            # A line of text_len characters occupies ceil(text_len / width)
+            # screen rows, with a minimum of 1 (an empty line still takes
+            # one row).
+            if text_len == 0:
+                return 1
+            return (text_len + width - 1) // width
+
+        if self._first_render:
+            self._first_render = False
+            if not getattr(sys.stdout, 'at_line_start', True):
+                sys.stdout.write('\r\n')
+                sys.stdout.flush()
+            x, y = _win_console.get_cursor_pos()
+            self._win_origin = (x, y)
+            win_top, win_bottom = _win_console.get_window_rect()
+            _debug_log(f'[first_render] origin=({x},{y}) window=({win_top},{win_bottom}) '
+                       f'buffer_height={_win_console.get_buffer_height()} width={width}')
+
+        origin_x, origin_y = self._win_origin
+
+        # Build the full text for each buffer line (prompt/continuation
+        # prefix included) and compute how many screen rows each occupies.
+        full_lines = []
+        for i, line in enumerate(self.lines):
+            prefix = self.prompt if i == 0 else self.continuation
+            full_lines.append(prefix + line)
+
+        line_row_counts = [rows_for(len(t)) for t in full_lines]
+        total_rows = sum(line_row_counts)
+
+        _debug_log(f'[before] origin=({origin_x},{origin_y}) total_rows={total_rows} '
+                   f'prev_lines={self._win_prev_line_count} num_buf_lines={len(self.lines)} '
+                   f'row={self.row} col={self.col}')
+
+        # Clear the region previously occupied by the editor, starting at
+        # the recorded origin.
+        if self._win_prev_line_count > 0:
+            _win_console.set_cursor_pos(origin_x, origin_y)
+            _win_console.clear_lines(0, origin_y, width, self._win_prev_line_count)
+
+        _win_console.set_cursor_pos(origin_x, origin_y)
+
+        for i, text in enumerate(full_lines):
+            sys.stdout.write(text)
+            if i != len(full_lines) - 1:
+                sys.stdout.write('\r\n')
+        sys.stdout.flush()
+
+        # Writing the lines above may have caused the console to scroll
+        # (if the content reached the bottom of the visible window), which
+        # shifts every absolute row coordinate -- including origin_y --
+        # without us being told.  Re-derive origin_y from the cursor
+        # position the console actually ended up at after the write,
+        # which reflects any such scroll.
+        end_x, end_y = _win_console.get_cursor_pos()
+        new_origin_y = end_y - (total_rows - 1)
+        if new_origin_y < 0:
+            new_origin_y = 0
+
+        win_top, win_bottom = _win_console.get_window_rect()
+        _debug_log(f'[after]  end=({end_x},{end_y}) new_origin_y={new_origin_y} '
+                   f'window=({win_top},{win_bottom})')
+
+        origin_y = new_origin_y
+        self._win_origin = (origin_x, origin_y)
+
+        self._win_prev_line_count = total_rows
+
+        # Compute target cursor position for (self.row, self.col).
+        target_row = origin_y
+        for i in range(self.row):
+            target_row += line_row_counts[i]
+
+        prefix_len = len(self.prompt) if self.row == 0 else len(self.continuation)
+        start_col  = (origin_x + prefix_len) if self.row == 0 else prefix_len
+        abs_pos    = start_col + self.col
+        target_row += abs_pos // width
+        target_col  = abs_pos % width
+
+        _debug_log(f'[target] target=({target_col},{target_row})')
+
+        _win_console.set_cursor_pos(target_col, target_row)
+
+    # -- editing ops -----------------------------------------------------
+
+    def insert_char(self, ch: str):
+        line = self.lines[self.row]
+        self.lines[self.row] = line[:self.col] + ch + line[self.col:]
+        self.col += 1
+
+    def enter(self):
+        cur    = self.lines[self.row]
+        before = cur[:self.col]
+        after  = cur[self.col:]
+
+        if before.strip():
+            self.last_indent = _leading_whitespace(before)
+        # else: line being left was blank/whitespace-only -> keep last_indent
+
+        if after == '':
+            new_line = self.last_indent
+        else:
+            new_line = self.last_indent + after
+
+        self.lines[self.row] = before
+        self.lines.insert(self.row + 1, new_line)
+        self.row += 1
+        self.col = len(self.last_indent)
+
+    def backspace(self):
+        if self.col > 0:
+            line = self.lines[self.row]
+            self.lines[self.row] = line[:self.col - 1] + line[self.col:]
+            self.col -= 1
+        elif self.row > 0:
+            prev = self.lines[self.row - 1]
+            cur  = self.lines[self.row]
+            self.col = len(prev)
+            self.lines[self.row - 1] = prev + cur
+            del self.lines[self.row]
+            self.row -= 1
+
+    def move_left(self):
+        if self.col > 0:
+            self.col -= 1
+        elif self.row > 0:
+            self.row -= 1
+            self.col = len(self.lines[self.row])
+
+    def move_right(self):
+        if self.col < len(self.lines[self.row]):
+            self.col += 1
+        elif self.row < len(self.lines) - 1:
+            self.row += 1
+            self.col = 0
+
+    def move_up(self):
+        if self.row > 0:
+            self.row -= 1
+            self.col = min(self.col, len(self.lines[self.row]))
+
+    def move_down(self):
+        if self.row < len(self.lines) - 1:
+            self.row += 1
+            self.col = min(self.col, len(self.lines[self.row]))
+
+    # -- main loop -----------------------------------------------------
+
+    def _process_key(self, key: str) -> bool:
+        """
+        Handle one key (or _KEY_* sentinel).  Returns True if the input
+        should be submitted (CTRL+ENTER pressed).
+        """
+        if key == _CTRL_C:
+            raise KeyboardInterrupt
+
+        if key == _CTRL_D:
+            if len(self.lines) == 1 and self.lines[0] == '':
+                raise EOFError
+            # ignore CTRL+D mid-input
+            return False
+
+        if key == _SUBMIT:
+            return True
+
+        if key == _ENTER:
+            self.enter()
+            self._render()
+            return False
+
+        if key in _BACKSPACE_CHARS:
+            self.backspace()
+            self._render()
+            return False
+
+        if key == _KEY_UP:
+            self.move_up()
+            self._render()
+            return False
+        if key == _KEY_DOWN:
+            self.move_down()
+            self._render()
+            return False
+        if key == _KEY_LEFT:
+            self.move_left()
+            self._render()
+            return False
+        if key == _KEY_RIGHT:
+            self.move_right()
+            self._render()
+            return False
+
+        if len(key) == 1 and key.isprintable():
+            self.insert_char(key)
+            self._render()
+            return False
+
+        # ignore other control characters / unrecognized sequences
         return False
-    last = next((l for l in reversed(lines) if l.strip()), '')
-    return last.rstrip().endswith(';')
+
+    def run(self) -> str:
+        if _IS_WINDOWS:
+            self._render()
+            while True:
+                key = _read_key()
+                if self._process_key(key):
+                    break
+            sys.stdout.write('\r\n')
+            sys.stdout.flush()
+        else:
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                self._render()
+                while True:
+                    key = _read_key()
+                    if self._process_key(key):
+                        break
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                sys.stdout.write('\r\n')
+                sys.stdout.flush()
+
+        return '\n'.join(self.lines)
 
 
-def collect_input(first_line: str) -> str:
+def read_multiline_input(prompt: str = 'fx> ', continuation: str = '... ') -> str:
     """
-    Given the first line already read, collect further lines until the input
-    is complete.  Completion is determined by _is_complete():
-      - Balanced braces + trailing semicolon  -> execute immediately.
-      - Balanced braces but no trailing ';'   -> wait for a blank line.
-      - Unbalanced braces                     -> keep collecting regardless.
-    Returns the complete input text (blank continuation line not included).
+    Read a (possibly multi-line) input from the user.  ENTER inserts a
+    newline (auto-indented to match the previous line); CTRL+ENTER submits
+    the whole buffer for compilation.
     """
-    lines = [first_line]
-    depth = _brace_depth(first_line)
-    while not _is_complete(lines, depth):
-        try:
-            line = input('... ')
-        except EOFError:
-            break
-        # A blank line while braces are balanced signals end-of-input
-        if line.strip() == '' and depth == 0:
-            break
-        lines.append(line)
-        depth += _brace_depth(line)
-    return '\n'.join(lines)
+    editor = _MultilineEditor(prompt, continuation)
+    return editor.run()
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +677,13 @@ def _run_block(session: ReplSession, block: ComptimeBlock):
     session.vm.struct_layouts.update(cg._struct_layouts)
 
     result = session.vm.execute(bc.instructions, bc.local_count)
+
+    # The VM stack is not cleared between top-level execute() calls, so any
+    # value left behind by this block (e.g. a trailing expression-statement
+    # result) would otherwise still be on top of the stack for the *next*
+    # submission, causing _print_result to keep reporting it.  Capture the
+    # result above, then clear the stack so each submission starts clean.
+    session.vm.stack.clear()
 
     # Capture live variables into the persistent scope using the codegen's locals map
     for name, slot in cg._locals.items():
@@ -308,47 +785,41 @@ def _cmd_funcs(session: ReplSession):
 # ---------------------------------------------------------------------------
 
 def repl():
+    _enable_windows_vt_mode()
     print(_BANNER)
     session = ReplSession()
 
     while True:
-        # --- prompt ---
+        # --- read input (multi-line editor, CTRL+ENTER to submit) ---
         try:
-            first = input('fx> ').strip()
+            source = read_multiline_input('fx> ', '... ')
         except (EOFError, KeyboardInterrupt):
             print()
             break
 
-        if not first:
+        stripped = source.strip()
+        if not stripped:
             continue
 
-        # --- built-in commands ---
-        if first in (':quit', ':q'):
+        # --- built-in commands (only when the whole input is one command) ---
+        if stripped in (':quit', ':q'):
             break
-        if first == ':reset':
+        if stripped == ':reset':
             session.reset()
             print('Session reset.')
             continue
-        if first == ':help':
+        if stripped == ':help':
             print(_HELP)
             continue
-        if first == ':stack':
+        if stripped == ':stack':
             _cmd_stack(session)
             continue
-        if first == ':locals':
+        if stripped == ':locals':
             _cmd_locals(session)
             continue
-        if first == ':funcs':
+        if stripped == ':funcs':
             _cmd_funcs(session)
             continue
-
-        # --- collect multi-line input ---
-        try:
-            source = collect_input(first)
-        except KeyboardInterrupt:
-            print()
-            continue
-
         # --- wrap and parse ---
         wrapped = _wrap_comptime(source)
         try:
