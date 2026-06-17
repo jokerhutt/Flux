@@ -3544,7 +3544,9 @@ class FluxParser:
                     f"Object '{name}': __expr() must take no parameters "
                     f"(got {len(explicit_params)})"
                 )
-            if expr_method.return_type is None or expr_method.return_type.base_type == DataType.VOID:
+            rt = expr_method.return_type
+            is_bare_void = (rt is None) or (rt.base_type == DataType.VOID and not getattr(rt, 'is_pointer', False))
+            if is_bare_void:
                 self.error(
                     f"Object '{name}': __expr() must have a non-void return type"
                 )
@@ -5401,12 +5403,18 @@ class FluxParser:
 
     def comptime_block(self) -> ComptimeBlock:
         """
-        comptime_block -> 'comptime' '{' statement* '}' ';'
+        comptime_block -> 'comptime' IDENTIFIER? '{' statement* '}' ';'
         Parses a compile-time execution block. The body may contain any valid
         Flux statements plus emitflux blocks.
+        An optional name allows the block to be targeted by goto inside other
+        comptime blocks: `comptime MyBlock { ... };`
         """
         tok = self.current_token
         self.consume(TokenType.COMPTIME)
+        block_name = None
+        if self.expect(TokenType.IDENTIFIER):
+            block_name = self.current_token.value
+            self.advance()
         self.consume(TokenType.LEFT_BRACE)
         self._in_comptime += 1
         body = []
@@ -5421,7 +5429,7 @@ class FluxParser:
         self._in_comptime -= 1
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
-        return ComptimeBlock(body=body).set_location(tok.line, tok.column)
+        return ComptimeBlock(body=body, name=block_name).set_location(tok.line, tok.column)
 
     def _token_to_source(self, t) -> str:
         """

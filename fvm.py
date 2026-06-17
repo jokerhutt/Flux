@@ -80,6 +80,11 @@ class Op(Enum):
     TAIL_SELF   = auto()   # TAIL_SELF <argc> - reset ip=0, reload args into slots 0..N-1, reuse frame
     HALT        = auto()
 
+    # Exceptions (comptime try/catch/throw)
+    THROW       = auto()   # THROW       - pop value, raise FluxThrowSignal(value)
+    TRY_BEGIN   = auto()   # TRY_BEGIN <catch_addr>  - push exception handler entry point
+    TRY_END     = auto()   # TRY_END     - pop exception handler (normal exit from try body)
+
     # Locals
     LOCAL_GET      = auto()   # LOCAL_GET <slot>
     LOCAL_SET      = auto()   # LOCAL_SET <slot>
@@ -249,6 +254,8 @@ class CallFrame:
     ip:      int = 0                              # instruction pointer
     locals:  List[Optional[Val]] = field(default_factory=list)
     ret_val: Optional[Val] = None
+    # Stack of (catch_addr, stack_depth) pushed by TRY_BEGIN, popped by TRY_END/throw
+    exception_handlers: List[tuple] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +337,12 @@ class VMHeap:
 
 class VMError(Exception):
     pass
+
+class FluxThrowSignal(Exception):
+    """Raised by the THROW opcode; carries the thrown Val for catch handlers."""
+    def __init__(self, value):
+        self.value = value
+        super().__init__(repr(value))
 
 
 # ---------------------------------------------------------------------------
@@ -434,7 +447,7 @@ class FluxVM:
     def _run(self) -> Optional[Val]:
         import time as _time
         _watchdog_start = _time.monotonic()
-        _watchdog_limit = 5.0  # seconds
+        _watchdog_limit = 300.0  # seconds (5 minutes)
         _instr_count = 0
         while self.frames:
             frame = self.frames[-1]
@@ -473,7 +486,27 @@ class FluxVM:
                         f'  stack (top 6): {_stack_dump}\n'
                         f'Last executed source line is shown below.'
                     )
-            self._dispatch(instr)
+            try:
+                self._dispatch(instr)
+            except FluxThrowSignal as _throw:
+                # Walk the frame stack (innermost first) looking for a
+                # TRY_BEGIN handler. If found, restore the stack to the
+                # depth at TRY_BEGIN time, push the thrown value, and
+                # jump to the catch address. If no handler found, re-raise.
+                _handled = False
+                while self.frames:
+                    _frame = self.frames[-1]
+                    if _frame.exception_handlers:
+                        _catch_addr, _stack_depth = _frame.exception_handlers.pop()
+                        # Restore stack to the depth recorded at TRY_BEGIN
+                        del self.stack[_stack_depth:]
+                        self._push(_throw.value)
+                        _frame.ip = _catch_addr
+                        _handled = True
+                        break
+                    self.frames.pop()
+                if not _handled:
+                    raise VMError(f'Unhandled comptime throw: {_throw.value!r}')
         return self.stack[-1] if self.stack else None
 
     def _dispatch(self, instr: Instr):
@@ -541,6 +574,12 @@ class FluxVM:
             if self.frames:
                 self.last_locals = list(self.frames[0].locals)
             self.frames.clear()
+
+        # Exception handling
+        elif op == Op.THROW:
+            raise FluxThrowSignal(self._pop())
+        elif op == Op.TRY_BEGIN:  self._op_try_begin(o[0])
+        elif op == Op.TRY_END:    self._op_try_end()
 
         # Locals
         elif op == Op.LOCAL_GET:      self._push(self.frames[-1].locals[o[0]])
@@ -728,10 +767,6 @@ class FluxVM:
 
     def _call(self, name: str, argc: int):
         self._call_depth = getattr(self, '_call_depth', 0) + 1
-        self._call_counts = getattr(self, '_call_counts', {})
-        self._call_counts[name] = self._call_counts.get(name, 0) + 1
-        if self._call_counts[name] > 500:
-            raise VMError(f'[VM TRACE] infinite loop detected: {name!r} called {self._call_counts[name]} times, stack size={len(self.stack)}')
         # TEMP DIAGNOSTIC: auto-enable tracing on entry to table_raw_insert
         # (matches bare or namespace-qualified names like
         # standard__memory__allocators__stdheap__table_raw_insert).
@@ -889,7 +924,7 @@ class FluxVM:
         frame  = CallFrame(
             func_name=name,
             instructions=instrs,
-            locals=list(args) + [None] * max(0, 256 - len(args)),
+            locals=list(args) + [None] * max(0, 32 - len(args)),
         )
         self.frames.append(frame)
 
@@ -2278,6 +2313,17 @@ class FluxVM:
         msg = self._read_vm_string(val) if val.tag in (TTag.BYTES, TTag.PTR) else str(val.data)
         raise VMError(f'comptime panic: {msg}')
 
+    def _op_try_begin(self, catch_addr: int):
+        """Push a catch handler onto the current frame's exception_handlers stack."""
+        frame = self.frames[-1]
+        frame.exception_handlers.append((catch_addr, len(self.stack)))
+
+    def _op_try_end(self):
+        """Pop the innermost catch handler (normal exit from try body)."""
+        frame = self.frames[-1]
+        if frame.exception_handlers:
+            frame.exception_handlers.pop()
+
     # ------------------------------------------------------------------
     # Boundary crossing ops
     # ------------------------------------------------------------------
@@ -3084,6 +3130,7 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
         Op.INT_TO_STR, Op.STR_TO_INT,
         Op.ASSERT, Op.WARN, Op.PANIC,
         Op.EMIT_CONST, Op.EMIT_TYPE,
+        Op.THROW, Op.TRY_END,
     }
     if op in _zero_op:
         return []
@@ -3111,6 +3158,7 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
         Op.LOCAL_GET, Op.LOCAL_SET,
         Op.TAIL_SELF,
         Op.EMIT_GLOBAL,
+        Op.TRY_BEGIN,
     }
     if op in _single_int_op:
         if not raw_tokens:

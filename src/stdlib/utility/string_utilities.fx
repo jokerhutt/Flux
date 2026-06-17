@@ -959,7 +959,7 @@ namespace standard
             def find_substring(byte* str, byte* substr, int start_pos) -> int
             {
                 int str_len, substr_len;
-                bool match = true;
+                bool match;
                 while (str[str_len] != 0) { str_len = str_len + 1; };
                 while (substr[substr_len] != 0) { substr_len = substr_len + 1; };
                 
@@ -970,6 +970,7 @@ namespace standard
                 
                 for (int i = start_pos; i <= str_len - substr_len; i = i + 1)
                 {
+                    match = true;
                     for (int j; j < substr_len; j = j + 1)
                     {
                         if (str[i + j] != substr[j])

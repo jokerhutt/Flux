@@ -30,7 +30,11 @@
 
 #ifndef FLUX_STANDARD_ALLOCATORS
 #import <runtime\allocators.fx>;
+#endif;
 using standard::memory::allocators::stdarena;
+
+#ifndef FLUX_STANDARD_FFI_FIO
+#import <runtime\ffifio.fx>;
 #endif;
 
 #ifndef FLUX_XML
@@ -1077,6 +1081,83 @@ namespace xml
         if (!_serialize_node(node, @sb, 0)) { return (byte*)0; };
         if (!_sb_wc(@sb, 0)) { return (byte*)0; };
         return sb.buf;
+    };
+
+    // =========================================================================
+    // File I/O entry points
+    // =========================================================================
+
+    // Parse an XML file from disk into an arena-backed node tree.
+    // errmsg receives a pointer to a static error string on parse failure, or
+    // null on success. Returns the root XmlNode* on success, null on failure.
+    // The caller owns the arena and must call arena_destroy when done.
+    def xml_parse_file(byte* path, Arena* a, byte* errmsg) -> XmlNode*
+    {
+        file f(path, "rb\0");
+        int      file_size;
+        byte*    buf;
+        XmlNode* root;
+
+        if (!f.is_open()) { f.__exit(); return (XmlNode*)0; };
+
+        file_size = f.get_size();
+        if (file_size <= 0) { f.__exit(); return (XmlNode*)0; };
+
+        buf = (byte*)fmalloc((u64)file_size + 1);
+        if ((u64)buf == 0) { f.__exit(); return (XmlNode*)0; };
+
+        if (f.read_bytes(buf, file_size) != file_size)
+        {
+            ffree((u64)buf);
+            f.__exit();
+            return (XmlNode*)0;
+        };
+        buf[file_size] = 0;
+        f.__exit();
+
+        root = xml_parse(buf, a, errmsg);
+        ffree((u64)buf);
+        return root;
+    };
+
+    // Serialize a node tree with XML declaration and write it to a file.
+    // init_cap is the initial arena buffer guess in bytes (512 is a safe default).
+    // Returns true on success, false on OOM or file write failure.
+    def xml_serialize_file(XmlNode* node, byte* path, Arena* a, int init_cap) -> bool
+    {
+        byte* xml_str;
+        int   xml_len;
+
+        xml_str = xml_serialize(node, a, init_cap);
+        if ((u64)xml_str == 0) { return false; };
+
+        while (xml_str[xml_len] != 0) { xml_len = xml_len + 1; };
+
+        file f(path, "wb\0");
+        if (!f.is_open()) { f.__exit(); return false; };
+
+        bool ok = f.write_bytes(xml_str, xml_len) == xml_len;
+        f.__exit();
+        return ok;
+    };
+
+    // Serialize a node tree without XML declaration and write it to a file.
+    def xml_serialize_fragment_file(XmlNode* node, byte* path, Arena* a, int init_cap) -> bool
+    {
+        byte* xml_str;
+        int   xml_len;
+
+        xml_str = xml_serialize_fragment(node, a, init_cap);
+        if ((u64)xml_str == 0) { return false; };
+
+        while (xml_str[xml_len] != 0) { xml_len = xml_len + 1; };
+
+        file f(path, "wb\0");
+        if (!f.is_open()) { f.__exit(); return false; };
+
+        bool ok = f.write_bytes(xml_str, xml_len) == xml_len;
+        f.__exit();
+        return ok;
     };
 
 };

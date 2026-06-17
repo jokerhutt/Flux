@@ -14,13 +14,15 @@
 // Zero-copy strings: use as_string_view() for parsed data; as_string() only
 // valid for strings set via set_string() or set_string_arena().
 
-#ifndef FLUX_STANDARD
-#import "standard.fx";
+#ifndef FLUX_STANDARD_ALLOCATORS
+#import <runtime\allocators.fx>;
 #endif;
 
-#ifndef FLUX_STANDARD_ALLOCATORS
-#import "allocators.fx";
+#ifndef FLUX_STANDARD_FFI_FIO
+#import <runtime\ffifio.fx>;
 #endif;
+
+using standard::io::file;
 
 #ifndef FLUX_JSON
 #def FLUX_JSON 1;
@@ -2181,6 +2183,64 @@ namespace json
 		};
 		sb.buf[sb.pos] = '\x00';
 		return sb.buf;
+	};
+
+	// =========================================================================
+	// File I/O entry points
+	// =========================================================================
+
+	// Parse a JSON file from disk into an arena-backed node tree.
+	// Returns true on success, false on failure. root is populated on success.
+	// The caller owns the arena and must call arena_destroy when done.
+	def parse_file(byte* path, JSONNode* root, standard::memory::allocators::stdarena::Arena* a) -> bool
+	{
+		file f(path, "rb\0");
+		int  file_size;
+		byte* buf;
+
+		if (!f.is_open()) { f.__exit(); return false; };
+
+		file_size = f.get_size();
+		if (file_size <= 0) { f.__exit(); return false; };
+
+		buf = (byte*)fmalloc((u64)file_size + 1);
+		if ((u64)buf == 0) { f.__exit(); return false; };
+
+		if (f.read_bytes(buf, file_size) != file_size)
+		{
+			ffree((u64)buf);
+			f.__exit();
+			return false;
+		};
+		buf[file_size] = 0;
+		f.__exit();
+
+		JSONParser p(buf, file_size, a);
+		bool ok = p.parse(root);
+		p.__exit();
+		ffree((u64)buf);
+		return ok;
+	};
+
+	// Serialize a node tree and write it to a file.
+	// init_cap is the initial arena buffer guess in bytes (256 is a good default).
+	// Returns true on success, false on OOM or file write failure.
+	def serialize_file(JSONNode* node, byte* path, standard::memory::allocators::stdarena::Arena* a, int init_cap) -> bool
+	{
+		byte* json_str;
+		int   json_len, j;
+
+		json_str = serialize_arena(node, a, init_cap);
+		if ((u64)json_str == 0) { return false; };
+
+		while (json_str[json_len] != 0) { json_len = json_len + 1; };
+
+		file f(path, "wb\0");
+		if (!f.is_open()) { f.__exit(); return false; };
+
+		bool ok = f.write_bytes(json_str, json_len) == json_len;
+		f.__exit();
+		return ok;
 	};
 
 };

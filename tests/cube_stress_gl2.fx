@@ -30,7 +30,7 @@
 //   fxc cube_stress.fx -o cube_stress.exe
 // ============================================================================
 
-#import "standard.fx", "math.fx", "vectors.fx", "matrices.fx", "windows.fx", "opengl.fx", "raycasting.fx", "string_utilities.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <raycasting.fx>;
 
 using standard::io::console,
       standard::system::windows,
@@ -258,12 +258,12 @@ def lcg_range(u64* seed, double lo, double hi) -> double
 // ============================================================================
 // FPS TITLE BUILDER
 //
-// Writes "Cube Stress | FPS: NNN | Avg/min: NNN.N" into buf (must be >= 64
-// bytes) and null-terminates it.  Returns nothing; caller passes buf to
-// win.set_title().
+// Writes "Cube Stress | FPS: NNN | Avg/min: NNN.N | VSync: ON" into buf
+// (must be >= 80 bytes) and null-terminates it.  Returns nothing; caller
+// passes buf to win.set_title().
 // ============================================================================
 
-def build_fps_title(byte* buf, int fps_now, double fps_avg) -> void
+def build_fps_title(byte* buf, int fps_now, double fps_avg, int vsync_on) -> void
 {
     // Prefix
     byte[64] tmp;
@@ -290,6 +290,23 @@ def build_fps_title(byte* buf, int fps_now, double fps_avg) -> void
     k = 0;
     while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
 
+    // " | VSync: ON" or " | VSync: OFF"
+    byte* vmid = " | VSync: ";
+    k = 0;
+    while (vmid[k] != (byte)0) { buf[pos] = vmid[k]; pos++; k++; };
+    if (vsync_on != 0)
+    {
+        byte* von = "ON";
+        k = 0;
+        while (von[k] != (byte)0) { buf[pos] = von[k]; pos++; k++; };
+    }
+    else
+    {
+        byte* voff = "OFF";
+        k = 0;
+        while (voff[k] != (byte)0) { buf[pos] = voff[k]; pos++; k++; };
+    };
+
     buf[pos] = (byte)0;
     return;
 };
@@ -306,15 +323,23 @@ const int VK_LEFT  = 0x25,
           VK_D     = 0x44,
           VK_Q     = 0x51,
           VK_E     = 0x45,
-          VK_R     = 0x52;
+          VK_R     = 0x52,
+          VK_V     = 0x56;
 
 def main() -> int
 {
     // -- Window + GL context ---------------------------------------------------
-    Window    win("Cube Stress - W/S: fly  A/D: strafe  Q/E: up/dn  Arrows: look  R: reset\0",
+    Window    win("Cube Stress - W/S: fly  A/D: strafe  Q/E: up/dn  Arrows: look  R: reset  V: vsync\0",
                   100, 100, WIN_W, WIN_H);
     GLContext gl(win.device_context);
     gl.load_extensions();
+
+    // -- VSync toggle (V key) ---------------------------------------------------
+    // wglSwapIntervalEXT is not a core WGL export; it must be fetched through
+    // wglGetProcAddress like any other GL extension function. interval=1 is
+    // vsync-on (the WGL default on most drivers), interval=0 is vsync-off.
+    def{}* wgl_swap_interval(int) -> int = wglGetProcAddress("wglSwapIntervalEXT\0");
+    i32 vsync_enabled = 1;
 
     // Fixed-function setup identical to cube_demo.fx
     glMatrixMode(GL_PROJECTION);
@@ -478,7 +503,8 @@ def main() -> int
     DWORD t_start, t_last, t_now;
     double dt, elapsed;
     double speed_y, speed_x;
-    WORD  left_st, right_st, up_st, dn_st, w_st, s_st, a_st, d_st, q_st, e_st, r_st;
+    WORD  left_st, right_st, up_st, dn_st, w_st, s_st, a_st, d_st, q_st, e_st, r_st,
+          v_st, v_prev_st;
     RECT  cr;
     i32 cur_w, cur_h;
 
@@ -490,10 +516,11 @@ def main() -> int
     // fps_ring_pos is the next write slot (wraps at 60).
     // fps_sec_accum accumulates sub-second time until a full second passes.
     // fps_avg is the running per-minute average recomputed each second.
-    int    fps_frames, fps_now, fps_ring_count, fps_ring_pos;
+    int    fps_frames, fps_now, fps_ring_count, fps_ring_pos,
+           ri, rsum;
     double fps_sec_accum, fps_avg;
     int[60] fps_ring;
-    byte[64] fps_title_buf;
+    byte[80] fps_title_buf;
 
     t_start = GetTickCount();
     t_last  = t_start;
@@ -522,7 +549,6 @@ def main() -> int
 
             // Recompute rolling average over filled slots
             {
-                int ri, rsum;
                 ri = 0;
                 rsum = 0;
                 while (ri < fps_ring_count) { rsum = rsum + fps_ring[ri]; ri++; };
@@ -530,7 +556,7 @@ def main() -> int
                 else { fps_avg = 0.0d; };
             };
 
-            build_fps_title(@fps_title_buf[0], fps_now, fps_avg);
+            build_fps_title(@fps_title_buf[0], fps_now, fps_avg, vsync_enabled);
             win.set_title(@fps_title_buf[0]);
         };
         if (dt > 0.1d) { dt = 0.1d; };
@@ -547,6 +573,7 @@ def main() -> int
         q_st     = GetAsyncKeyState(VK_Q);
         e_st     = GetAsyncKeyState(VK_E);
         r_st     = GetAsyncKeyState(VK_R);
+        v_st     = GetAsyncKeyState(VK_V);
 
         // Yaw
         if ((left_st  `& 0x8000) != 0) { r3d_player_turn(@player, -dt * 1.5d, 0.0d); };
@@ -577,6 +604,15 @@ def main() -> int
             player.yaw   = 0.0d;
             player.pitch = 0.0d;
         };
+
+        // Toggle vsync (edge-triggered on key-down so it flips once per
+        // press rather than every frame the key is held)
+        if (((v_st `& 0x8000) != 0) & ((v_prev_st `& 0x8000) == 0))
+        {
+            if (vsync_enabled == 1) { vsync_enabled = 0; } else { vsync_enabled = 1; };
+            wgl_swap_interval(vsync_enabled);
+        };
+        v_prev_st = v_st;
 
         // -- Rotate each cube on its own axes (slow drift) ---------------------
         elapsed = (double)(t_now - t_start) / 1000.0d;

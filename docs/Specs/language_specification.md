@@ -25,6 +25,7 @@ If you like Flux, please consider contributing to the language or joining the [F
     - [Very simple preprocessor](#very-simple-preprocessor)
   - [Namespaces](#namespaces)
   - [Structs](#structs)
+  - [Struct recast with `from`](#struct-recast-with-from)
   - [Objects](#objects)
     - [Required methods](#required-methods)
   - [Deferred object cleanup with `defer`](#deferred-object-cleanup-with-defer)
@@ -46,6 +47,7 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [`void` as a literal](#void-as-a-literal)
   - [Arrays](#arrays)
   - [Loops](#loops)
+  - [Membership testing with `in`](#membership-testing-with-in)
   - [Single-initialized variables with `singinit`](#singleinitialized-variables-with-singinit)
   - [Recursion](#recursion)
   - [Strict Recursion with `<~`](#strict-recursion-with)
@@ -94,6 +96,7 @@ If you like Flux, please consider contributing to the language or joining the [F
 - [Calling Conventions](#calling-conventions)
 - [Keyword list](#keyword-list)
 - [Operator list](#operator-list)
+- [Operator Precedence and Associativity](#operator-precedence-and-associativity)
   - [Primitive types](#primitive-types)
   - [All types](#all-types)
   - [Preprocesor directives](#preprocesor-directives)
@@ -140,6 +143,45 @@ def myAdd(float x, float y) -> float
     return x + y;
 };
 ```
+
+**How an overload is chosen at a call site:**
+1. **Filter by argument count.** Only overloads whose parameter count matches the call's
+   argument count are considered.
+2. **Prefer an exact type match.** Among the count-matching candidates, the compiler looks for
+   one whose parameter types are an exact match to the arguments' actual types, in declaration
+   order.
+3. **Otherwise, fall back to the first count-matching overload declared**, and adapt the
+   arguments to fit its parameter types rather than treating the mismatch as an error.
+
+This means overload selection is driven by argument count first and exact type match second; it
+does not attempt the kind of best-match ranking among multiple inexact candidates that C++ does.
+If none of the overloads for a given arity match exactly, you get whichever one was declared
+first, with its arguments coerced to fit - so when overloading on type for the same arity
+actually matters, declaration order matters too.
+
+**Argument coercion at call sites.** Once an overload is selected, arguments that don't already
+match the parameter types exactly are adapted automatically:
+- **`void*` is a universal pointer type at call boundaries.** Passing any pointer where a `void*`
+  parameter is expected bitcasts automatically (decaying through an array-to-pointer step first
+  if needed), and passing a `void*` argument where a concrete pointer type is expected does the
+  reverse. Neither direction requires an explicit cast at the call site.
+- **Arrays decay to pointers automatically** when passed to a parameter declared as a pointer to
+  the array's element type - you can pass an `int[8]` directly where an `int*` parameter is
+  expected.
+- **Integer width mismatches are adjusted, not rejected.** Passing a narrower or wider integer
+  than the parameter declares truncates or extends it to fit (sign- or zero-extending based on
+  the argument's known signedness). Unlike the array/integer packing casts described under
+  "Casting", there is no "sizes must match exactly or it's an error" rule for ordinary function
+  arguments - a call site adapts silently, because passing a value into a parameter is about
+  *conveying* a value, not *reinterpreting* a fixed memory layout the way an explicit pack/unpack
+  cast is.
+
+Built-in *operator* overloads (see "Custom infix operators and overloading") follow a stricter
+rule than ordinary functions: an operator overload is only used when its parameter types are an
+exact match for the operands. There is no fall-back-and-coerce step for operators - if nothing
+matches exactly, the native operation runs instead, since silently falling back to the wrong
+user-defined overload for a built-in symbol would be far more surprising than just doing the
+default thing.
 
 
 <a id="variadic-functions"></a>
@@ -419,6 +461,52 @@ struct BMP : Header, InfoHeader
 {
     // More bitmap fields
 } : ExtraData;
+```
+
+---
+
+<a id="struct-recast-with-from"></a>
+## **Struct recast with `from`**
+`from` reinterprets an existing value's bytes as a struct, without copying. It's the
+struct-typed counterpart to casting a byte array into an integer - useful for parsing a buffer
+into a structured view in place rather than building the struct field by field.
+
+```
+struct Header
+{
+    data{16} sig;
+    data{32} filesize;
+};
+
+byte[6] buf = [0x42, 0x4D, 0x00, 0x01, 0x02, 0x03];
+
+Header h from buf;
+// h.sig == 0x424D, h.filesize == 0x00010203
+// `buf` is no longer usable after this point.
+```
+
+The right-hand side of `from` may be a plain identifier (an array or other addressable variable)
+or an array slice (`buf[a:b]`). When the source is a slice, the compiler builds the struct view
+directly over the original buffer starting at the slice's offset - there is no intermediate copy
+of the sliced range.
+
+The total size of the source must match the struct's total byte size; a mismatch is a
+compile-time error, the same as casting one struct type to another of a different size.
+
+**By default, `from` consumes its source.** After the recast, the original identifier is removed
+from scope - referencing it again is a compile-time error. This mirrors the ownership-transfer
+behavior of the `~` tie operator: once the bytes are viewed as the new struct type, the old name
+for them is gone, so there's exactly one live name pointing at that memory.
+
+To keep the source usable after the recast, append `!` to the source expression:
+
+```
+Header h from buf!;   // buf is still valid and usable after this line
+```
+
+```
+// Recasting directly from a slice - no copy, h aliases buf[2:6]
+Header h from buf[2:6];
 ```
 
 ---
@@ -1120,6 +1208,42 @@ def example() -> void {
 
 In this case, `stackVar` is zeroed out and the reference invalidated.
 
+**The general casting rules.** Every cast falls into one of the following cases, determined by
+the source and target type pair:
+
+- **Same underlying representation, different Flux type.** If the source and target type happen
+  to share the same underlying machine representation (for example, `le32` and `uint` are both
+  a plain 32-bit integer), the cast performs no bit-level work. Instead, the compiler re-tags the
+  value with the target type's metadata. This is the mechanism behind clearing an endianness tag
+  explicitly:
+  ```
+  le32 netValue = ...;
+  uint plain = uint(netValue);   // same bits, but now untagged as native/no endianness
+  ```
+- **Integer to integer.** Narrowing truncates to the target width. Widening extends to the
+  target width, sign-extending for signed sources and zero-extending for unsigned sources.
+- **Integer and floating point.** `(float)`/`(double)` casts from an integer, and
+  `(int)`/`(long)`-style casts from a float or double, convert the numeric value (not the bit
+  pattern) using standard signed conversion. `(float)x` and `(double)x` between each other
+  extend or truncate the floating-point value as expected. To convert *bits* rather than *value*
+  between an integer and a float of the same width, route through a same-size array (see
+  "Arrays" below).
+- **Pointers.** Pointer to pointer is a plain reinterpretation - any pointer type converts to
+  any other pointer type directly. Pointer to integer normally takes the pointer's address and
+  stores it as an integer value. **The one exception is a pointer whose pointee is an array
+  type** - casting an array pointer to an integer does not produce the array's address as a
+  number; it packs the array's *contents* into the integer, following the array-packing rules
+  below. To get the numeric address of an array instead of its packed contents, take the
+  address of the array variable itself and cast through a non-array pointer type first (see
+  "Pointer to integer conversions"). Integer to pointer zero-extends the integer to a full
+  machine address width if it's narrower, then reinterprets it as the target pointer type.
+- **Structs.** Casting between two struct types reinterprets the same bits as the new layout,
+  provided both structs have the same total bit width. A size mismatch is a compile-time error -
+  there is no implicit padding or truncation when reinterpreting one struct as another. Casting
+  a struct value to a pointer type takes its address (allocating a temporary stack slot first if
+  the value doesn't already live in memory); casting a struct pointer to another pointer type is
+  a plain reinterpretation.
+
 ---
 
 <a id="stringification-with"></a>
@@ -1266,6 +1390,43 @@ using standard::collections; // For the dynamic array 'Array'
 Array[] myArr = [x.name for (Array x in oldArr) if (x.name.len() > 5)];
 ```
 
+**Casting between arrays, integers, and floating-point values**
+
+Casting a fixed-size array to an integer or floating-point type (and back) packs or unpacks the
+array element by element, following one fixed convention:
+
+> **Element 0 occupies the most significant bits of the integer; the last element occupies the
+> least significant bits.** This holds regardless of array length, element width, or any
+> endianness tag on the element type - array packing is always big-endian at the array level.
+
+```
+u64 packed = (u64)[0x12u, 0x34u, 0x56u, 0x78u, 0x9Au, 0xBCu, 0xDEu, 0xF0u];
+// packed == 0x123456789ABCDEF0 - element 0 is the highest byte.
+
+byte[8] bytes = (byte[8])packed;
+// bytes == [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0]
+```
+
+Floats and doubles participate in the same packing rule by having their raw bit pattern treated
+as the integer payload for that slot - packing four bytes into a `float` reinterprets those four
+bytes' bits as the float's bit pattern (not as a numeric conversion of the bytes' values).
+
+**The total bit width must match exactly.** Packing an array into an integer (or unpacking an
+integer into an array) requires `element_count * element_bit_width == target_bit_width`. There
+is no implicit zero-padding or truncation to make a mismatched size fit - a three-element
+`byte[3]` cannot be packed directly into a 32-bit integer; pack into a 24-bit `data{24}` instead,
+or pad the array to four elements first.
+
+**Unpacking into a byte or char array adds one extra, null element.** `(byte[8])someValue`
+allocates and returns nine bytes: the eight packed bytes followed by a `0` terminator, so the
+result can be used immediately as a C-style string. This applies specifically to 8-bit element
+arrays; arrays of wider elements (`u16[4]`, for example) are not null-padded.
+
+This packing convention is also what powers the rewrites shown under "Advanced data manipulation
+techniques" - `hash[0..3] = (byte[4])(be32)ctx.state[0];` relies on exactly this
+element-0-is-high-bits ordering to place the most significant byte of `ctx.state[0]` at
+`hash[0]`.
+
 ---
 
 <a id="loops"></a>
@@ -1320,6 +1481,40 @@ while (1)
 {
     // ...
 };
+```
+
+---
+
+<a id="membership-testing-with-in"></a>
+## **Membership testing with `in`**
+Beyond `for (x in y)`, `in` is also a general binary operator usable in any expression context -
+`if`, ternaries, `return`, assignments, anywhere a boolean is expected:
+
+```
+int x = 5;
+int[5] arr = [1, 2, 3, 4, 5];
+
+if (x in arr) { ... };          // true: 5 is an element of arr
+bool found = 3 in arr;
+```
+
+It resolves differently depending on what the needle and haystack look like:
+
+| Needle | Haystack | Behavior |
+|---|---|---|
+| single value | string (`byte*`/`char*`) | true if that single byte/char occurs anywhere in the string |
+| single value | fixed-size or decayed array | true if any element of the array equals the value |
+| array / sub-sequence | string | true if the sequence occurs as a substring |
+| array / sub-sequence | array | true if the sequence occurs as a contiguous sub-sequence anywhere in the array |
+
+```
+byte* greeting = "Hello, World!";
+if ('W' in greeting) { ... };          // true
+if ("World" in greeting) { ... };      // true - substring search
+
+int[6] nums = [1, 2, 3, 4, 5, 6];
+int[2] pair = [3, 4];
+if (pair in nums) { ... };             // true - contiguous sub-sequence
 ```
 
 ---
@@ -1755,6 +1950,56 @@ operator (int L, BigInt R) [+] -> bool
 };
 ```
 
+**How this actually works under the hood:**
+
+A symbol that isn't already one of Flux's built-in operators (anything not found in the
+"Operator list") is registered as a **new piece of grammar**. From that point on, the parser
+recognizes that exact token sequence anywhere an expression is expected and rewrites it directly
+into a call to the operator's generated function. This rewrite happens at one single, fixed
+precedence tier - between `+`/`-` and `*`/`/`/`%`/`^`, always left-associative - no matter what
+the symbol looks like or what a programmer might expect a symbol like `<=>` or `**` to bind like
+in another language. If you want a custom operator to behave as though it binds tighter or
+looser than that tier, parenthesize at the call site.
+
+A custom symbol can be either a single bare identifier (`NOPOR`, used like a word-operator) or a
+sequence of the language's existing punctuation tokens glued together (`+++`, `<=>`, `??=` are
+all legal, since `+`, `<`, `=`, `>`, `?` are each already meaningful punctuation on their own).
+
+When the bracketed symbol *is* one of the language's built-in operators, nothing changes about
+how that symbol parses - `+` still parses as ordinary addition, at its normal precedence,
+because the parser never rewrites built-in symbols into function calls the way it does for new
+ones. **This is the actual mechanism behind rule 2 above**: there is no separate code path for
+an overloaded `+` to take at parse time. Resolution happens later, during code generation: for
+every `+` expression, the compiler checks whether a registered overload exists whose two
+parameter types exactly match the operands' types, and calls that function instead of emitting
+the native add instruction if so. If no overload matches the operand types, the built-in
+behavior runs as normal.
+
+Rule 1 above ("one parameter must not be a built-in type") is enforced as a compile error, not
+just a convention: an attempt to overload `+` for two plain primitives (`int` and `int`, `float`
+and `double`, etc.) is rejected, specifically so that user overloads can never silently hijack
+ordinary primitive arithmetic everywhere it's used. A non-built-in parameter is a struct, an
+object, a custom `data` type alias, or a pointer.
+
+**Templated operators** declare their concrete instantiation lazily:
+```
+operator<T> (T L, T R) [+] -> T
+{
+    // ...
+};
+```
+Each time that operator symbol is used in an expression with operand types the compiler can
+determine, it automatically generates a concrete overload for that specific pair of types (if
+one hasn't already been generated). The same non-built-in-parameter restriction still applies
+once concrete types are known: a templated `+` is never instantiated for an expression where
+both operands turn out to be plain primitives.
+
+Custom operators accept the exact same pre- and post-contract syntax as ordinary functions (see
+"Functions and `contract`" and "Contracts on operators" below) - the contract's assertions are
+spliced into the operator's generated function body at compile time, so they run on every call
+that dispatches to that specific overload, whether the call arrived through the
+rewritten-call-site path (new symbols) or the type-matched-dispatch path (built-in overloads).
+
 ---
 
 <a id="functions-and-contract"></a>
@@ -2142,10 +2387,62 @@ Compiler will output:
 ----^ // 5 + x will lower to byte
 ```
 
+**The complete type-relationship operator set** and what each one enforces once a template is
+instantiated with concrete types:
+
+| Operator | Meaning | Scope |
+|---|---|---|
+| `~=` | The two types must be **compatible** | pairwise |
+| `!~=` | The two types must be **incompatible** | pairwise |
+| `!@` | A variable of this type must never have its address taken (`@`) anywhere in the template body | independent |
+| `` !`< `` | This type must never appear as either side of a narrowing (truncating) conversion in the body | independent |
+| `` !`<= `` | A narrowing conversion specifically **between these two named types** is forbidden | between |
+| `` !`> `` | This type must never appear as either side of a widening conversion in the body | independent |
+| `` !`>= `` | A widening conversion specifically **between these two named types** is forbidden | between |
+
+"Compatible" (for `~=`/`!~=`) means: both types are pointers or both are non-pointers; if both
+are pointers, their pointer depth matches; and if both have a known bit width, the widths are
+equal.
+
+The **independent** vs **between** distinction matters once more than two parameters are in
+play. `` T !`< T `` (independent, self-referential, as in the `MyCS` example above) forbids `T`
+from ever being narrowed by *anything* - any cast or implicit arithmetic narrowing involving
+`T`'s width is a violation, regardless of what the other side of that conversion is.
+`` T !`<= U `` (between) only forbids narrowing conversions where *both* the source and
+destination widths belong to `{T, U}` specifically - narrowing `T` to some unrelated third type
+is still allowed.
+
+These checks aren't purely static type comparisons - for the truncation/widening operators, the
+compiler walks the instantiated function body looking for the actual operations that would
+violate the constraint: explicit casts (`(Type)expr`), `return` statements whose expression is
+wider or narrower than the declared return type, and ordinary arithmetic where an implicit
+narrowing happens because one operand is wider than the other. This is exactly how the `MyCS`
+example above produces a violation from `return 5 + x;` with no explicit cast in sight - the `+`
+between an `int` literal and a `byte`-constrained `x` implicitly narrows the result, and that
+narrowing context is what gets flagged.
+
+**Joining multiple names with `&`** lets one relation apply to a whole group of parameters at
+once: `T & U ~= V` requires *both* `T` and `U` to individually satisfy `~= V`. This reuses the
+ordinary `&` (logical AND) token, but inside a constraint set it's a list-joiner for the
+relation's operands, not a boolean evaluation of two relation results.
+
 You can comma separate named constraints in your template definition like so:  
 `<T: int, :{MyCS1, MyCS2, MyCS3}>`
 
 Template constraints can be used in any template, including operator, struct, and object templates.
+
+**Named constraint sets can be merged**, combining the relations of two or more existing sets
+into a new one:
+```
+constraint MyCS3 = MyCS1 + MyCS2;
+```
+All sources must declare the same number of parameters. The merged set adopts the first
+source's parameter names unless you supply your own rename list before the `=`:
+```
+constraint MyCS3(M, N) = MyCS1 + MyCS2;
+```
+Relations from every source are carried over into the merged set, with each source's own
+parameter names remapped to the merged set's names.
 
 ```
 struct myStru<A,B>
@@ -2424,6 +2721,18 @@ hash[28..31] = (byte[4])(be32)ctx.state[7];
 
 <a id="bit-slices"></a>
 ### ***Bit slices***
+The bit-slice operator `` x[a``b] `` addresses individual bits of a value using one consistent
+numbering scheme: **bit 0 is the most significant bit of the entire value, and bit numbers
+increase moving toward the least significant bit.** This numbering runs across the whole
+source - for a struct, it continues across field boundaries in declaration order, exactly as if
+the struct's fields had been concatenated into one big-endian buffer. Because struct members
+are packed tightly with no padding between them (see "Structs"), bit numbering never has to skip
+over hidden padding bits when it crosses from one member into the next - member N's last bit is
+immediately followed by member N+1's first bit.
+
+A slice written with the start index greater than the end index (as in the example below) reads
+the same bit range but reverses the order of the bits in the result. Bit slices may span up to
+the full width of a native integer type (8 through 64 bits).
 ```
 #import <standard.fx>;
 
@@ -2485,6 +2794,18 @@ def main() -> int
     return 0;
 };
 ```
+Bit-slice results are ordinary integer values of the slice's width, so a bit slice can itself be
+the source of another bit slice - there's no special chaining logic, it falls out naturally.
+
+Assigning into a bit slice (`` x[a``b] = value; ``) replaces just that bit range in place,
+leaving every other bit of the target untouched:
+```
+u32 packed = 0x12345678;
+packed[24``31] = 0xFF;   // replace just the lowest byte
+// packed == 0x123456FF
+```
+The assignment target must be a plain variable, and the start/end indices must be compile-time
+constants.
 
 ---
 
@@ -3148,6 +3469,61 @@ RECURSE_ARROW = "<~"      // def foo() <~ void;  // Emits musttail, 0 stack grow
 NO_MANGLE = "!!"          // prevent the compiler from mangling the function name
 FUNCTION_POINTER = "{}*"
 ```
+
+---
+
+<a id="operator-precedence-and-associativity"></a>
+# Operator Precedence and Associativity
+
+Flux's operators bind in the following order, from **loosest** (evaluated last) to **tightest**
+(evaluated first):
+
+| Level | Operators | Associativity |
+|---|---|---|
+| 1 | `=` `+=` `-=` `*=` `/=` `%=` `^=` `&=` `\|=` `^^=` `` `&= `` `` `\|= `` `` `!&= `` `` `!\|= `` `` `^^!= `` `<<=` `>>=` `@=` `?=` | right |
+| 2 | `?:` (ternary) | right |
+| 3 | `??` (null-coalesce) | right |
+| 4 | `or` / `\|\|` | left |
+| 5 | `and` / `&&` | left |
+| 6 | `xor` / `^^` (logical xor) | left |
+| 7 | `` `\| `` `` `!\| `` (bitwise or / nor) | left |
+| 8 | `` `^^ `` `` `^^!\| `` (bitwise xor / xnor) | left |
+| 9 | `` `& `` `` `!& `` (bitwise and / nand) | left |
+| 10 | `==` `!=` `is` `in` | left |
+| 11 | `<-` (chain arrow) | right |
+| 12 | `<` `<=` `>` `>=` | left |
+| 13 | `<<` `>>` (shift) | left |
+| 14 | `..` (range) | n/a |
+| 15 | `+` `-` (additive) | left |
+| 16 | user-defined infix operators (`operator`) | left |
+| 17 | `*` `/` `%` `^` (multiplicative, **including power**) | left |
+| 18 | `(Type)expr` (cast) | right (prefix) |
+| 19 | unary `-` `+` `*` (deref) `@` (address-of) `++` `--` `` `! `` `not` `is not` `` `^^! `` `` `^^!& `` `` `^^!\| `` | right (prefix) |
+| 20 | postfix `[i]` `[a:b]` `` [a``b] `` `(...)` `.field` `->field` postfix `++`/`--` | left |
+
+A few rules worth calling out individually, since they differ from the C-family languages Flux
+otherwise resembles:
+
+- **`^` is the power operator, and it binds at the same precedence as `*`, `/`, and `%`,
+  evaluated left to right.** `2 * 3 ^ 2` is `(2 * 3) ^ 2`, not `2 * (3 ^ 2)`. If you want
+  exponentiation to bind tighter than multiplication, parenthesize explicitly.
+- **Bitwise `` `& ``, `` `\| ``, and `` `^^ `` bind tighter than the comparison operators**
+  (`==`, `!=`, `<`, `<=`, `>`, `>=`). `a == b `&` c` means `a == (b `&` c)`. This is the opposite
+  of C, where bitwise operators are notoriously looser than comparisons - in Flux you do not
+  need extra parentheses to get the intuitive reading.
+- `xor`/`^^` is a **logical** connective, sitting with `and`/`or` above the bitwise tier. It is
+  a different operator from the bitwise `` `^^ ``, which lives down with the other bitwise
+  operators.
+- The range operator `..` wraps an arithmetic expression on each side, so `1 + 2 .. 3 + 4` is
+  valid and means `(1+2)..(3+4)`. A range cannot directly be the left or right operand of a
+  shift or relational operator without parentheses, since those sit at a looser level than `..`.
+- User-defined infix operators (declared with `operator`) always bind tighter than `+`/`-` and
+  looser than `*`/`/`/`%`/`^`, and are always left-associative, regardless of what the operator
+  symbol "looks like" it should do mathematically. See "Custom infix operators and overloading"
+  for how this is enforced and how it differs for overloads of *built-in* operator symbols.
+- Casts (`(Type)expr`) bind tighter than every binary operator, including multiplication, and
+  chain right to left: `(byte[8])(u64)x` first casts `x` to `u64`, then casts that result to
+  `byte[8]`. Each cast in a chain applies to everything written after it.
 
 ---
 

@@ -421,6 +421,17 @@ class CodegenVisitor:
 
     def visit_GotoStatement(self, node, builder, module):
         if node.target not in builder._flux_label_blocks:
+            # Check if the target is a named comptime block -- goto to a
+            # comptime block is only valid from inside another comptime block
+            # (handled by fvmcodegen), not from runtime code.
+            from fast import ComptimeBlock as _ComptimeBlock
+            _stmts = getattr(module, '_program_statements', [])
+            for _s in _stmts:
+                if isinstance(_s, _ComptimeBlock) and _s.name == node.target:
+                    raise FluxCodegenError(
+                        f"'goto {node.target}' targets a comptime block and is "
+                        f"only valid inside another comptime block",
+                        node, module)
             raise FluxCodegenError(
                 f"'goto' to undefined label '{node.target}' ", node, module)
         if builder.block.is_terminated:
@@ -3061,16 +3072,19 @@ class CodegenVisitor:
         return self._funcall_generate(node, builder, module, func, arg_vals)
 
     def _funcall_is_fp_variable(self, node, builder, module):
+        def _is_function_type(t):
+            return type(t).__name__ == 'FunctionType'
+
         if module.symbol_table.get_llvm_value(node.name) is not None:
             var_ptr = module.symbol_table.get_llvm_value(node.name)
             if isinstance(var_ptr.type, ir.PointerType):
                 pointee = var_ptr.type.pointee
-                if isinstance(pointee, ir.FunctionType): return True
-                if isinstance(pointee, ir.PointerType) and isinstance(pointee.pointee, ir.FunctionType): return True
+                if _is_function_type(pointee): return True
+                if isinstance(pointee, ir.PointerType) and _is_function_type(pointee.pointee): return True
         elif node.name in module.globals:
             gvar = module.globals[node.name]
             if not isinstance(gvar, ir.Function) and isinstance(gvar.type, ir.PointerType):
-                if isinstance(gvar.type.pointee, (ir.FunctionType, ir.PointerType)):
+                if _is_function_type(gvar.type.pointee) or isinstance(gvar.type.pointee, ir.PointerType):
                     return True
         return False
 
@@ -4242,6 +4256,8 @@ class CodegenVisitor:
         try:
             cond_val = self.visit(node.condition, builder, module)
         except Exception as e:
+            import traceback as _tb, sys as _sys
+            _tb.print_exc(file=_sys.stdout)
             from fast import ComptimeError
             raise ComptimeError(f"if statement condition: {e}")
 
@@ -5691,6 +5707,50 @@ class CodegenVisitor:
                     init_val = builder.bitcast(init_val, ptr_type)
                 builder.store(init_val, alloca)
             return alloca
+
+    def visit_FunctionPointerCall(self, node, builder, module):
+        """Call through a function pointer variable."""
+        from fast import Identifier
+
+        # Evaluate the pointer expression to get the alloca holding the fp.
+        ptr_alloca = self.visit(node.pointer, builder, module)
+
+        # Load the function pointer value from the alloca.
+        if isinstance(ptr_alloca.type, ir.PointerType):
+            pointee = ptr_alloca.type.pointee
+            # If it's a pointer-to-pointer-to-function, load once to get fp.
+            if isinstance(pointee, ir.PointerType) and type(pointee.pointee).__name__ == 'FunctionType':
+                fp_val = builder.load(ptr_alloca, name="fp_load")
+            elif type(pointee).__name__ == 'FunctionType':
+                fp_val = ptr_alloca
+            else:
+                fp_val = builder.load(ptr_alloca, name="fp_load")
+        else:
+            fp_val = ptr_alloca
+
+        # Build argument values.
+        arg_vals = []
+        for arg in node.arguments:
+            av = self.visit(arg, builder, module)
+            arg_vals.append(av)
+
+        # Coerce arguments to the function pointer's parameter types.
+        if type(fp_val.type).__name__ == 'FunctionType':
+            fn_type = fp_val.type
+        elif isinstance(fp_val.type, ir.PointerType) and type(fp_val.type.pointee).__name__ == 'FunctionType':
+            fn_type = fp_val.type.pointee
+        else:
+            fn_type = None
+
+        if fn_type is not None:
+            coerced = []
+            for i, (av, param_type) in enumerate(zip(arg_vals, fn_type.args)):
+                av = FunctionTypeHandler.convert_argument_to_parameter_type(
+                    builder, module, av, param_type, i, node)
+                coerced.append(av)
+            arg_vals = coerced
+
+        return builder.call(fp_val, arg_vals, name="fp_call")
 
     def visit_FunctionPointerAssignment(self, node, builder, module):
         raise FluxCodegenError(
@@ -7308,6 +7368,25 @@ class CodegenVisitor:
 
         # Handle constructor calls
         if isinstance(node.initial_value, _FunctionCall) and node.initial_value.name.endswith('.__init'):
+            # Check if the single argument already produces the same struct type as the
+            # LHS (e.g. `string s = f.read_all()` where read_all returns a string).
+            # In that case the parser sugar-wrapped a direct object return in __init
+            # unnecessarily - just visit the argument and store the struct directly.
+            if (len(node.initial_value.arguments) == 1 and
+                    isinstance(llvm_type, (ir.LiteralStructType, ir.IdentifiedStructType))):
+                probe_val = self.visit(node.initial_value.arguments[0], builder, module)
+                if probe_val is not None:
+                    probe_type = probe_val.type
+                    # Unwrap pointer-to-struct if needed
+                    if isinstance(probe_type, ir.PointerType) and probe_type.pointee == llvm_type:
+                        probe_val = builder.load(probe_val, name="obj_copy_load")
+                        probe_type = probe_val.type
+                    if probe_type == llvm_type:
+                        builder.store(probe_val, alloca)
+                        return
+                    # Types don't match - argument does not return this object type.
+                    # Fall through to normal constructor handling below.
+
             # Zero-initialize the alloca before calling the constructor so that embedded
             # sub-object fields (e.g. arr.len, arr.cap inside JSONNode) start at zero per
             # Flux semantics. Constructors that are empty (just return this) rely on this.

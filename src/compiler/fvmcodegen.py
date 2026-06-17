@@ -37,6 +37,7 @@ from fast import (
     BreakStatement, ContinueStatement, EscapeStatement,
     DeferStatement,
     NoreturnStatement,
+    TryBlock, ThrowStatement,
     LabelStatement, GotoStatement, JumpStatement,
     ExpressionStatement,
     Block,
@@ -538,6 +539,82 @@ class FVMCodegen:
         # Patch the JIF to jump here (past the failure block)
         self._patch_at(skip_idx, Op.JIF, self._current_ip())
 
+    def _visit_throw(self, node: ThrowStatement):
+        """
+        throw expr; -- pushes the expression value and raises FluxThrowSignal.
+        Mirrors fcodegen's visit_ThrowStatement which stores into flux_exception_value
+        and branches to the catch handler. Here the VM catches FluxThrowSignal in _run.
+        """
+        self._visit_expr(node.expression)
+        self._emit(_instr(Op.THROW))
+
+    def _visit_try(self, node: TryBlock):
+        """
+        try { ... } catch (T e) { ... }
+
+        Bytecode layout (mirrors fcodegen's try_block/catch_block basic-block structure):
+            TRY_BEGIN <catch_addr>
+              <try body>
+            TRY_END
+            JMP <after_all_catches>
+          catch_0_addr:
+            [LOCAL_SET <slot>  if catch var named]
+            <catch_0 body>
+            JMP <after_all_catches>
+          catch_1_addr:
+            ...
+          after_all_catches:
+
+        THROW pops a value and raises FluxThrowSignal; _run catches it,
+        finds the nearest TRY_BEGIN handler on the frame stack, restores
+        the stack to the TRY_BEGIN depth, pushes the thrown value, and
+        jumps to catch_addr.
+        """
+        # Emit TRY_BEGIN with a placeholder catch address
+        try_begin_idx = self._emit(_instr(Op.TRY_BEGIN, 0))
+
+        # Emit try body
+        try_stmts = (node.try_body.statements
+                     if isinstance(node.try_body, Block) else [node.try_body])
+        self._visit_body(try_stmts)
+
+        # Normal exit from try: pop the handler and jump past all catches
+        self._emit(_instr(Op.TRY_END))
+        jmp_past_idx = self._emit(_instr(Op.JMP, 0))
+
+        # Patch TRY_BEGIN to point here (start of first catch)
+        first_catch_addr = self._current_ip()
+        self._patch_at(try_begin_idx, Op.TRY_BEGIN, first_catch_addr)
+
+        after_patches = []
+        for i, (exc_type, exc_name, catch_body) in enumerate(node.catch_blocks):
+            catch_start = self._current_ip()
+            if i > 0:
+                # Patch previous catch's JMP to here for chained catches
+                # (single-catch is the common case; multiple catches share the
+                # same thrown value dispatch since we have no type dispatch in VM)
+                pass
+
+            # The thrown value is on top of the stack (pushed by _run after THROW).
+            if exc_name:
+                slot = self._alloc_local(exc_name)
+                if exc_type is not None and hasattr(exc_type, 'custom_typename') and exc_type.custom_typename:
+                    self._local_types[exc_name] = exc_type.custom_typename
+                self._emit(_instr(Op.LOCAL_SET, slot))
+            else:
+                self._emit(_instr(Op.POP))
+
+            catch_stmts = (catch_body.statements
+                           if isinstance(catch_body, Block) else [catch_body])
+            self._visit_body(catch_stmts)
+
+            after_patches.append(self._emit(_instr(Op.JMP, 0)))
+
+        after_addr = self._current_ip()
+        self._patch_at(jmp_past_idx, Op.JMP, after_addr)
+        for idx in after_patches:
+            self._patch_at(idx, Op.JMP, after_addr)
+
     def _visit_body(self, stmts: list):
         """
         Each body (block) gets its own defer scope, mirroring fcodegen.py's
@@ -650,6 +727,8 @@ class FVMCodegen:
         elif t is DoWhileLoop:           self._visit_do_while(node)
         elif t is DeferStatement:        self._visit_defer(node)
         elif t is NoreturnStatement:     self._emit(_instr(Op.HALT))  # mirrors fcodegen's builder.unreachable()
+        elif t is TryBlock:              self._visit_try(node)
+        elif t is ThrowStatement:        self._visit_throw(node)
         elif t is ReturnStatement:       self._visit_return(node)
         elif t is BreakStatement:        self._visit_break(node)
         elif t is EscapeStatement:       self._visit_escape(node)
@@ -2926,7 +3005,48 @@ class FVMCodegen:
         self._goto_patches = remaining
 
     def _visit_goto(self, node: GotoStatement):
-        """Emit a JMP to the target label, patching later if forward reference."""
+        """
+        Emit a jump to a label or a named comptime block.
+
+        For named comptime blocks: compile the block's body as a standalone
+        function (registered under '__comptime_block__<name>') and emit a
+        CALL -- this lets the VM handle recursion naturally at runtime.
+        Inlining the body directly would cause Python-level infinite recursion
+        during codegen for mutually-recursive comptime blocks.
+
+        Goto to a comptime block from non-comptime code is caught by
+        fcodegen.py's visit_GotoStatement and raises a FluxCodegenError.
+        """
+        from fast import ComptimeBlock as _ComptimeBlock
+        for _s in self._program_statements:
+            if isinstance(_s, _ComptimeBlock) and _s.name == node.target:
+                func_key = f'__comptime_block__{node.target}'
+                # Compile the block body as a function the first time it's
+                # targeted; subsequent gotos reuse the compiled function.
+                if func_key not in self.compiled_functions:
+                    # Register a stub first to break mutual-recursion cycles
+                    self.compiled_functions[func_key] = []
+                    fn_cg = FVMCodegen(
+                        known_functions=dict(self._known_functions),
+                        program_statements=self._program_statements)
+                    fn_cg._outer_globals      = set(self._block_globals)
+                    fn_cg._is_function_body   = False
+                    fn_cg._using_namespaces   = list(self._using_namespaces)
+                    fn_cg._struct_layouts     = dict(self._struct_layouts)
+                    fn_cg._enum_names         = set(self._enum_names)
+                    fn_cg._macro_table        = dict(self._macro_table)
+                    fn_cg._local_types        = dict(self._local_types)
+                    fn_cg._local_typespecs    = dict(self._local_typespecs)
+                    fn_cg._interface_registry = self._interface_registry
+                    fn_cg._interface_whitelist= self._interface_whitelist
+                    fn_cg.compiled_functions  = self.compiled_functions
+                    fn_cg._visit_body(_s.body)
+                    fn_cg._emit(_instr(Op.PUSH, Val(TTag.VOID, 0)))
+                    fn_cg._emit(_instr(Op.RET))
+                    self.compiled_functions[func_key] = fn_cg._instructions
+                self._emit(_instr(Op.CALL, func_key, 0))
+                return
+        # Regular label goto
         if node.target in self._labels:
             self._emit(_instr(Op.JMP, self._labels[node.target]))
         else:

@@ -27,7 +27,6 @@ comptime
 
 	//FRTStartup();
 };
-///
 
 comptime
 {
@@ -120,6 +119,23 @@ comptime
 	deprecate TNS;
 
 	//TNS::tar(); // working
+};
+
+comptime ZaZa
+{
+	compiler.io.console.print("ZaZa\n");
+	goto BoZo;
+};
+
+comptime BoZo
+{
+	compiler.io.console.print("BoZo\n");
+	goto ZaZa;
+};
+///
+
+comptime
+{
 };
 
 def !!FRTStartup() -> int { return 0; };

@@ -1692,11 +1692,15 @@ class ComptimeBlock(ASTNode):
     """
     comptime { ... } -- a block of statements executed at compile time via fvm.py.
     The body may contain regular Flux statements and EmitFlux nodes.
+    An optional name allows the block to be targeted by goto inside other
+    comptime blocks: `comptime MyBlock { ... };` / `goto MyBlock;`
     """
     body: List[ASTNode] = field(default_factory=list)
+    name: str = None
 
     def __repr__(self) -> str:
-        return f'ComptimeBlock({len(self.body)} statements)'
+        tag = f' {self.name}' if self.name else ''
+        return f'ComptimeBlock{tag}({len(self.body)} statements)'
 
 
 @dataclass

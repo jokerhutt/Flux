@@ -64,7 +64,7 @@ namespace standard
                 this.elem_size = elem_size;
                 this.len       = 0;
                 this.capacity  = (size_t)ARRAY_INITIAL_CAPACITY;
-                this.buf       = malloc(this.capacity * elem_size);
+                this.buf       = (void*)fmalloc(this.capacity * elem_size);
                 return this;
             };
 
@@ -73,7 +73,7 @@ namespace standard
             {
                 if (this.buf != STDLIB_GVP)
                 {
-                    free(this.buf);
+                    ffree(this.buf);
                     this.buf = STDLIB_GVP;
                 };
                 return;
@@ -349,7 +349,7 @@ namespace standard
             {
                 len = len + 1;
             };
-            byte* dst = (byte*)stdheap::fmalloc(len + 1);
+            byte* dst = (byte*)fmalloc(len + 1);
             while (i < len)
             {
                 dst[i] = src[i];
@@ -389,7 +389,7 @@ namespace standard
                 this.cap     = c;
                 this.count   = 0;
                 u64 nbytes   = c * 32; // sizeof(HMBucket) = 32
-                this.buckets = (HMBucket*)stdheap::fmalloc(nbytes);
+                this.buckets = (HMBucket*)fmalloc(nbytes);
                 // Zero all buckets (key_hash == 0 means empty)
                 while (i < c)
                 {
@@ -410,11 +410,11 @@ namespace standard
                 {
                     if (this.buckets[i].key_hash != 0)
                     {
-                        stdheap::ffree((u64)this.buckets[i].key);
+                        ffree((u64)this.buckets[i].key);
                     };
                     i = i + 1;
                 };
-                stdheap::ffree((u64)this.buckets);
+                ffree((u64)this.buckets);
             };
 
             def __expr() -> HashMap*
@@ -496,7 +496,7 @@ namespace standard
                     i;
                 HMBucket* old_buckets = this.buckets;
 
-                this.buckets  = (HMBucket*)stdheap::fmalloc(nbytes);
+                this.buckets  = (HMBucket*)fmalloc(nbytes);
                 this.cap      = new_cap;
                 this.count    = 0;
 
@@ -523,7 +523,7 @@ namespace standard
                     i = i + 1;
                 };
 
-                stdheap::ffree((u64)old_buckets);
+                ffree((u64)old_buckets);
             };
 
             // Insert or update a key-value pair.
@@ -567,7 +567,7 @@ namespace standard
                     {
                         if (hm_str_eq(slot.key, insert_bkt.key))
                         {
-                            stdheap::ffree((u64)insert_bkt.key);
+                            ffree((u64)insert_bkt.key);
                             slot.value = insert_bkt.value;
                             return;
                         };
@@ -670,7 +670,7 @@ namespace standard
                         if (hm_str_eq(slot.key, key))
                         {
                             // Free the duplicated key
-                            stdheap::ffree((u64)slot.key);
+                            ffree((u64)slot.key);
                             slot.key_hash = 0;
                             slot.key      = (byte*)0;
                             slot.value    = (void*)0;
@@ -755,7 +755,7 @@ namespace standard
                 };
                 this.cap     = c;
                 this.count   = 0;
-                this.buckets = (HMIBucket*)stdheap::fmalloc(nbytes);
+                this.buckets = (HMIBucket*)fmalloc(nbytes);
                 while (i < c)
                 {
                     this.buckets[i].key_hash = 0;
@@ -769,7 +769,7 @@ namespace standard
 
             def __exit() -> void
             {
-                stdheap::ffree((u64)this.buckets);
+                ffree((u64)this.buckets);
             };
 
             def __expr() -> HashMapInt*
@@ -840,7 +840,7 @@ namespace standard
                     i;
                 HMIBucket* old_buckets = this.buckets;
 
-                this.buckets  = (HMIBucket*)stdheap::fmalloc(nbytes);
+                this.buckets  = (HMIBucket*)fmalloc(nbytes);
                 this.cap      = new_cap;
                 this.count    = 0;
 
@@ -867,7 +867,7 @@ namespace standard
                     i = i + 1;
                 };
 
-                stdheap::ffree((u64)old_buckets);
+                ffree((u64)old_buckets);
             };
 
             def hmi_set(u64 key, void* value) -> void
@@ -1054,7 +1054,7 @@ namespace standard
                 this.head     = (LLNode*)STDLIB_GVP;
                 this.tail     = (LLNode*)STDLIB_GVP;
                 // sizeof(LLNode) = 24 (prev:8, next:8, value:8)
-                this.pool     = (LLNode*)stdheap::fmalloc(pool_cap * 24);
+                this.pool     = (LLNode*)fmalloc(pool_cap * 24);
                 // Thread free-list through all nodes; next pointer serves as link.
                 // All locals must be declared at function top.
                 size_t i = 0;
@@ -1082,7 +1082,7 @@ namespace standard
             // Free the pool slab.  One ffree; no loop.
             def __exit() -> void
             {
-                stdheap::ffree((u64)this.pool);
+                ffree((u64)this.pool);
                 this.pool     = (LLNode*)STDLIB_GVP;
                 this.freelist = (LLNode*)STDLIB_GVP;
                 this.head     = (LLNode*)STDLIB_GVP;
@@ -1497,7 +1497,7 @@ namespace standard
                 this.head = 0;
                 this.tail = 0;
                 this.len  = 0;
-                this.buf  = (void**)stdheap::fmalloc(cap * 8);
+                this.buf  = (void**)fmalloc(cap * 8);
                 return this;
             };
 
@@ -1505,7 +1505,7 @@ namespace standard
             {
                 if (this.buf != (void**)STDLIB_GVP)
                 {
-                    stdheap::ffree((u64)this.buf);
+                    ffree((u64)this.buf);
                     this.buf = (void**)STDLIB_GVP;
                 };
                 return;
@@ -1654,7 +1654,7 @@ namespace standard
                 this.head = 0;
                 this.tail = 0;
                 this.used = 0;
-                this.buf  = (byte*)stdheap::fmalloc(cap);
+                this.buf  = (byte*)fmalloc(cap);
                 return this;
             };
 
@@ -1662,7 +1662,7 @@ namespace standard
             {
                 if (this.buf != (byte*)STDLIB_GVP)
                 {
-                    stdheap::ffree((u64)this.buf);
+                    ffree((u64)this.buf);
                     this.buf = (byte*)STDLIB_GVP;
                 };
                 return;
@@ -1826,8 +1826,8 @@ namespace standard
                 this.count         = 0;
                 this.key_pool_cap  = key_pool_bytes;
                 this.key_pool_used = 0;
-                this.buckets       = (HSBucket*)stdheap::fmalloc(c * 24);
-                this.key_pool      = (byte*)stdheap::fmalloc(key_pool_bytes);
+                this.buckets       = (HSBucket*)fmalloc(c * 24);
+                this.key_pool      = (byte*)fmalloc(key_pool_bytes);
                 while (i < c)
                 {
                     this.buckets[i].key_hash = 0;
@@ -1841,8 +1841,8 @@ namespace standard
             // exit: two frees, no loop.
             def __exit() -> void
             {
-                stdheap::ffree((u64)this.buckets);
-                stdheap::ffree((u64)this.key_pool);
+                ffree((u64)this.buckets);
+                ffree((u64)this.key_pool);
                 this.buckets  = (HSBucket*)STDLIB_GVP;
                 this.key_pool = (byte*)STDLIB_GVP;
                 return;
@@ -1935,7 +1935,7 @@ namespace standard
                 u64 new_cap      = old_cap * 2;
                 HSBucket* old_bk = this.buckets;
                 u64 i            = 0;
-                this.buckets     = (HSBucket*)stdheap::fmalloc(new_cap * 24);
+                this.buckets     = (HSBucket*)fmalloc(new_cap * 24);
                 this.cap         = new_cap;
                 this.count       = 0;
                 while (i < new_cap)
@@ -1954,7 +1954,7 @@ namespace standard
                     };
                     i = i + 1;
                 };
-                stdheap::ffree((u64)old_bk);
+                ffree((u64)old_bk);
                 return;
             };
 
@@ -2124,7 +2124,7 @@ namespace standard
                 };
                 this.cap     = c;
                 this.count   = 0;
-                this.buckets = (HSIBucket*)stdheap::fmalloc(c * 24);
+                this.buckets = (HSIBucket*)fmalloc(c * 24);
                 while (i < c)
                 {
                     this.buckets[i].key_hash = 0;
@@ -2137,7 +2137,7 @@ namespace standard
 
             def __exit() -> void
             {
-                stdheap::ffree((u64)this.buckets);
+                ffree((u64)this.buckets);
                 this.buckets = (HSIBucket*)STDLIB_GVP;
                 return;
             };
@@ -2197,7 +2197,7 @@ namespace standard
                 u64 new_cap       = old_cap * 2,
                     i;
                 HSIBucket* old_bk = this.buckets;
-                this.buckets      = (HSIBucket*)stdheap::fmalloc(new_cap * 24);
+                this.buckets      = (HSIBucket*)fmalloc(new_cap * 24);
                 this.cap          = new_cap;
                 this.count        = 0;
                 while (i < new_cap)
@@ -2216,7 +2216,7 @@ namespace standard
                     };
                     i = i + 1;
                 };
-                stdheap::ffree((u64)old_bk);
+                ffree((u64)old_bk);
                 return;
             };
 
@@ -2365,12 +2365,12 @@ namespace standard
         object MinHeap
         {
             Array  elems;   // stores void* pointers, elem_size = 8
-            void*  cmp_fn;  // comparator stored as void*
+            long   cmp_fn;  // comparator stored as raw address
 
             def __init(void* cmp) -> this
             {
                 this.elems.__init((size_t)8);
-                this.cmp_fn = cmp;
+                this.cmp_fn = long(cmp);
                 return this;
             };
 
@@ -2392,7 +2392,7 @@ namespace standard
             def heap_push(void* value) -> bool
             {
                 // All locals at function top.
-                def{}* cmp(void*, void*) -> int = this.cmp_fn;
+                def{}* fn_cmp(void*, void*) -> int = this.cmp_fn;
                 size_t i, parent;
                 void** pslot, islot;
                 void*  pval, ival, tmp;
@@ -2408,7 +2408,7 @@ namespace standard
                     islot  = (void**)this.elems.get(i);
                     pval   = *pslot;
                     ival   = *islot;
-                    if (cmp(pval, ival) <= 0)
+                    if (fn_cmp(pval, ival) <= 0)
                     {
                         break;
                     };
@@ -2426,7 +2426,7 @@ namespace standard
             def heap_pop() -> void*
             {
                 // All locals at function top.
-                def{}* cmp(void*, void*) -> int = this.cmp_fn;
+                def{}* fn_cmp(void*, void*) -> int = this.cmp_fn;
                 size_t n, i, lft, rgt, smallest;
                 void** root_slot,
                        last_slot,
@@ -2455,7 +2455,7 @@ namespace standard
                     {
                         lslot = (void**)this.elems.get(lft);
                         sslot = (void**)this.elems.get(smallest);
-                        if (cmp(*lslot, *sslot) < 0)
+                        if (fn_cmp(*lslot, *sslot) < 0)
                         {
                             smallest = lft;
                         };
@@ -2464,7 +2464,7 @@ namespace standard
                     {
                         rslot = (void**)this.elems.get(rgt);
                         sslot = (void**)this.elems.get(smallest);
-                        if (cmp(*rslot, *sslot) < 0)
+                        if (fn_cmp(*rslot, *sslot) < 0)
                         {
                             smallest = rgt;
                         };

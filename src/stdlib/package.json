@@ -16,7 +16,7 @@
       }
     },
     "flux-collections": {
-      "version": "1.0.2",
+      "version": "1.0.3",
       "entry": "collections.fx",
       "path": "",
       "description": "Generic collections: lists, maps, sets, queues, stacks",
@@ -135,7 +135,7 @@
       }
     },
     "flux-json": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "json.fx",
       "path": "",
       "description": "JSON parsing and serialization",
@@ -381,7 +381,7 @@
       }
     },
     "flux-allocators": {
-      "version": "1.0.7",
+      "version": "1.0.8",
       "entry": "allocators.fx",
       "path": "runtime",
       "description": "Standard memory allocators",
@@ -511,14 +511,14 @@
       "dependencies": {}
     },
     "flux-string-utilities": {
-      "version": "1.0.3",
+      "version": "1.0.4",
       "entry": "string_utilities.fx",
       "path": "utility",
       "description": "String manipulation utilities",
       "dependencies": {}
     },
     "flux-xml": {
-      "version": "1.0.0",
+      "version": "1.0.1",
       "entry": "xml.fx",
       "path": "",
       "description": "XML parsing and utilities",
