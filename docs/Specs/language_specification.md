@@ -2067,7 +2067,7 @@ contract NonZero(a,b)
     assert(b != 0, "b must be nonzero");
 };
 
-operator(int x, i32 y)[+] -> int : NonZero(a,b)
+operator(int x, i32 y)[+] -> int : NonZero(x,y)
 {
     return x+y;
 };
