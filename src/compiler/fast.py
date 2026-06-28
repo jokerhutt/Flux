@@ -538,12 +538,15 @@ class TypeOf(Expression):
     KIND_BYTE      = 7
     KIND_SLONG     = 8
     KIND_ULONG     = 9
-    KIND_POINTER   = 10
+    KIND_POINTER   = 10  # generic fallback (depth=1, unknown pointee)
     KIND_ARRAY     = 11
     KIND_STRUCT    = 12
     KIND_OBJECT    = 13
     KIND_VOID      = 14
     KIND_FUNCTION  = 15
+    # Pointer kinds are encoded as: depth * 100 + pointee_base_kind
+    # e.g. byte* = 107, int* = 101, int** = 201, byte*** = 307
+    KIND_POINTER_BASE = 100
 
 
 
@@ -1412,6 +1415,28 @@ class NamespaceDef(ASTNode):
         from fcodegen import visitor as _visitor
         if excluded is None:
             excluded = getattr(module, '_excluded_namespaces', set())
+
+        # Pre-register namespace global variables (constants) before resolving struct/object
+        # member types.  Object members may use namespace-scoped constants as array dimensions
+        # (e.g. ArgDef[ARGPARSE_MAX_DEFS] defs), and get_llvm_type resolves those by looking
+        # them up in module.globals.  Without this step the constant is not in module.globals
+        # yet when struct layout runs, and the array member degrades to a pointer.
+        def _preregister_ns_vars(sub_ns, parent_path=''):
+            full_name = f"{parent_path}__{sub_ns.name}" if parent_path else sub_ns.name
+            if full_name in excluded:
+                return
+            for excl in excluded:
+                if full_name.startswith(excl + "__"):
+                    return
+            for var in sub_ns.variables:
+                try:
+                    _visitor._ns_variable(full_name, var, module)
+                except Exception:
+                    pass  # silently skip; will be retried properly in visit_NamespaceDef
+            for nested in sub_ns.nested_namespaces:
+                _preregister_ns_vars(nested, full_name)
+        _preregister_ns_vars(ns)
+
         pending = NamespaceDef._collect_all_ns_objects(ns, excluded)
         max_passes = len(pending) + 1
         for _ in range(max_passes):

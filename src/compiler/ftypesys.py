@@ -1355,8 +1355,54 @@ class TypeSystem:
                     elif hasattr(dim, 'value'):
                         current_type = ir.ArrayType(current_type, int(dim.value))
                     else:
-                        # Runtime size - return pointer to element type
-                        return ir.PointerType(element_type)
+                        # May be an Identifier referencing a compile-time constant.
+                        # Try to resolve it via namespace-aware global lookup before
+                        # giving up and emitting a pointer.
+                        resolved_dim = None
+                        if hasattr(dim, 'name'):
+                            dim_name = dim.name
+                            def _try_dim_gvar(gvar_name):
+                                if not (hasattr(module, 'globals') and gvar_name in module.globals):
+                                    return None
+                                gv = module.globals[gvar_name]
+                                if not (hasattr(gv, 'initializer') and gv.initializer is not None):
+                                    return None
+                                init = gv.initializer
+                                if hasattr(init, 'constant') and isinstance(init.constant, int):
+                                    return init.constant
+                                if hasattr(init, 'value') and isinstance(init.value, int):
+                                    return init.value
+                                return None
+                            # 1. Bare name
+                            resolved_dim = _try_dim_gvar(dim_name)
+                            # 2. Current namespace mangled
+                            if resolved_dim is None:
+                                current_ns = getattr(module, '_current_namespace', '') or (
+                                    module.symbol_table.current_namespace
+                                    if hasattr(module, 'symbol_table') else '')
+                                if current_ns:
+                                    resolved_dim = _try_dim_gvar(f"{current_ns.replace('::', '__')}__{dim_name}")
+                            # 3. Using namespaces
+                            if resolved_dim is None and hasattr(module, '_using_namespaces'):
+                                for ns in module._using_namespaces:
+                                    resolved_dim = _try_dim_gvar(f"{ns.replace('::', '__')}__{dim_name}")
+                                    if resolved_dim is not None:
+                                        break
+                            # 4. Symbol table
+                            if resolved_dim is None and hasattr(module, 'symbol_table'):
+                                entry = module.symbol_table.lookup_any(dim_name)
+                                if entry and entry.llvm_value is not None:
+                                    lv = entry.llvm_value
+                                    if hasattr(lv, 'initializer') and lv.initializer is not None:
+                                        init = lv.initializer
+                                        if hasattr(init, 'constant') and isinstance(init.constant, int):
+                                            resolved_dim = init.constant
+                                        elif hasattr(init, 'value') and isinstance(init.value, int):
+                                            resolved_dim = init.value
+                        if resolved_dim is not None:
+                            current_type = ir.ArrayType(current_type, resolved_dim)
+                        else:
+                            return ir.PointerType(element_type)
                 else:
                     current_type = ir.PointerType(current_type)
             return current_type
@@ -1374,17 +1420,37 @@ class TypeSystem:
                     # giving up and emitting a pointer.
                     resolved_size = None
                     if hasattr(type_spec.array_size, 'name'):
-                        # Identifier node — look up in module globals
                         const_name = type_spec.array_size.name
-                        if hasattr(module, 'globals') and const_name in module.globals:
-                            gvar = module.globals[const_name]
-                            if hasattr(gvar, 'initializer') and gvar.initializer is not None:
-                                init = gvar.initializer
-                                if hasattr(init, 'constant') and isinstance(init.constant, int):
-                                    resolved_size = init.constant
-                                elif hasattr(init, 'value') and isinstance(init.value, int):
-                                    resolved_size = init.value
-                        # Also try via symbol table
+                        def _try_resolve_gvar(gvar_name):
+                            if not (hasattr(module, 'globals') and gvar_name in module.globals):
+                                return None
+                            gv = module.globals[gvar_name]
+                            if not (hasattr(gv, 'initializer') and gv.initializer is not None):
+                                return None
+                            init = gv.initializer
+                            if hasattr(init, 'constant') and isinstance(init.constant, int):
+                                return init.constant
+                            if hasattr(init, 'value') and isinstance(init.value, int):
+                                return init.value
+                            return None
+                        # 1. Bare name
+                        resolved_size = _try_resolve_gvar(const_name)
+                        # 2. Current namespace mangled (e.g. "argparse__ARGPARSE_MAX_DEFS")
+                        if resolved_size is None:
+                            current_ns = getattr(module, '_current_namespace', '') or (
+                                module.symbol_table.current_namespace
+                                if hasattr(module, 'symbol_table') else '')
+                            if current_ns:
+                                mangled = f"{current_ns.replace('::', '__')}__{const_name}"
+                                resolved_size = _try_resolve_gvar(mangled)
+                        # 3. Using namespaces
+                        if resolved_size is None and hasattr(module, '_using_namespaces'):
+                            for ns in module._using_namespaces:
+                                mangled = f"{ns.replace('::', '__')}__{const_name}"
+                                resolved_size = _try_resolve_gvar(mangled)
+                                if resolved_size is not None:
+                                    break
+                        # 4. Symbol table (covers cases where it is already registered)
                         if resolved_size is None and hasattr(module, 'symbol_table'):
                             entry = module.symbol_table.lookup_any(const_name)
                             if entry and entry.llvm_value is not None:

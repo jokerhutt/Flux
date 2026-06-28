@@ -136,6 +136,7 @@ _EXPRESSION_START_TOKENS = {
     TokenType.CHAR,
     TokenType.STRING_LITERAL,
     TokenType.F_STRING,
+    TokenType.G_STRING,
     TokenType.I_STRING,
     TokenType.TRUE,
     TokenType.FALSE,
@@ -1195,6 +1196,11 @@ class FluxParser:
             destructure = self.destructuring_assignment()
             self.consume(TokenType.SEMICOLON)
             return destructure
+        elif self.expect(TokenType.AUTO) and self.peek() and self.peek().type == TokenType.IDENTIFIER:
+            # Handle auto type inference: auto name = expr;
+            decl = self.auto_variable_declaration()
+            self.consume(TokenType.SEMICOLON)
+            return decl
         elif self.expect(TokenType.CODIFY):
             # ~$varname; - compile-time code injection.
             # The parser re-lexes the string literal stored in varname and parses
@@ -3544,8 +3550,11 @@ class FluxParser:
                     f"Object '{name}': __expr() must take no parameters "
                     f"(got {len(explicit_params)})"
                 )
-            rt = expr_method.return_type
-            is_bare_void = (rt is None) or (rt.base_type == DataType.VOID and not getattr(rt, 'is_pointer', False))
+            ret = expr_method.return_type
+            is_bare_void = (
+                ret is None
+                or (ret.base_type == DataType.VOID and not getattr(ret, 'is_pointer', False))
+            )
             if is_bare_void:
                 self.error(
                     f"Object '{name}': __expr() must have a non-void return type"
@@ -5447,6 +5456,9 @@ class FluxParser:
         if tt == TokenType.F_STRING:
             # F-string token value includes the f" prefix and closing "
             return t.value
+        if tt == TokenType.G_STRING:
+            escaped = t.value.replace('\\', '\\\\').replace('"', '\\"')
+            return f'g"{escaped}"'
         if tt == TokenType.I_STRING:
             return t.value
         # For all other tokens the value is already the source text
@@ -8100,6 +8112,11 @@ class FluxParser:
             value = tok.value
             self.advance()
             return StringLiteral(value).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.G_STRING):
+            tok = self.current_token
+            value = tok.value
+            self.advance()
+            return StringLiteral(value, storage_class=StorageClass.GLOBAL).set_location(tok.line, tok.column)
         elif self.expect(TokenType.F_STRING):
             tok = self.current_token
             f_string_content = self.current_token.value
@@ -8507,6 +8524,24 @@ class FluxParser:
                     self.parse_object_body_item(methods, members, nested_objects, nested_structs, is_private=True)
                 self.consume(TokenType.RIGHT_BRACE)
                 self.consume(TokenType.SEMICOLON)
+
+    def auto_variable_declaration(self) -> VariableDeclaration:
+        """
+        auto_variable_declaration -> 'auto' IDENTIFIER '=' expression
+        The type of the variable is inferred from the RHS expression by the codegen.
+        A sentinel TypeSystem with storage_class=StorageClass.AUTO is used so that
+        visit_VariableDeclaration in fcodegen.py can detect and handle type inference.
+        """
+        from ftypesys import StorageClass as _SC, DataType as _DT
+        tok = self.current_token
+        self.consume(TokenType.AUTO)
+        name = self.consume(TokenType.IDENTIFIER).value
+        self.consume(TokenType.ASSIGN)
+        initial_value = self.expression()
+        # Sentinel type spec: storage_class=AUTO signals deferred type inference
+        auto_ts = TypeSystem(base_type=_DT.VOID, storage_class=_SC.AUTO)
+        self.symbol_table.define(name, SymbolKind.VARIABLE, auto_ts)
+        return VariableDeclaration(name, auto_ts, initial_value).set_location(tok.line, tok.column)
 
     def destructuring_assignment(self) -> DestructuringAssignment:
         """

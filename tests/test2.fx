@@ -136,6 +136,9 @@ comptime BoZo
 
 comptime
 {
+	data{8::0} as lebyte;
+
+	compiler.io.console.print(endianof(lebyte));
 };
 
 def !!FRTStartup() -> int { return 0; };

@@ -263,34 +263,47 @@ def lcg_range(u64* seed, double lo, double hi) -> double
 // passes buf to win.set_title().
 // ============================================================================
 
-def build_fps_title(byte* buf, int fps_now, double fps_avg, int vsync_on) -> void
+def build_fps_title(byte* buf, int fps_now, double fps_avg, int vsync_on,
+                    double ms_clear, double ms_geo, double ms_light) -> void
 {
-    // Prefix
     byte[64] tmp;
     int pos, n, k;
     pos = 0;
 
-    // "Cube Stress | FPS: "
     byte* prefix = "Cube Stress | FPS: ";
     k = 0;
     while (prefix[k] != (byte)0) { buf[pos] = prefix[k]; pos++; k++; };
 
-    // current FPS integer
     n = i32str((i32)fps_now, @tmp[0]);
     k = 0;
     while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
 
-    // " | Avg/min: "
-    byte* mid = " | Avg/min: ";
+    byte* mid = " | Avg: ";
     k = 0;
     while (mid[k] != (byte)0) { buf[pos] = mid[k]; pos++; k++; };
 
-    // average FPS with 1 decimal place
     n = dbl2str(fps_avg, @tmp[0], (i32)1);
     k = 0;
     while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
 
-    // " | VSync: ON" or " | VSync: OFF"
+    // Pass timings
+    byte* pc = " | clr:";
+    k = 0; while (pc[k] != (byte)0) { buf[pos] = pc[k]; pos++; k++; };
+    n = dbl2str(ms_clear, @tmp[0], (i32)0);
+    k = 0; while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
+
+    byte* pg = "ms geo:";
+    k = 0; while (pg[k] != (byte)0) { buf[pos] = pg[k]; pos++; k++; };
+    n = dbl2str(ms_geo, @tmp[0], (i32)0);
+    k = 0; while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
+
+    byte* pl = "ms lit:";
+    k = 0; while (pl[k] != (byte)0) { buf[pos] = pl[k]; pos++; k++; };
+    n = dbl2str(ms_light, @tmp[0], (i32)0);
+    k = 0; while (k < n) { buf[pos] = tmp[k]; pos++; k++; };
+    buf[pos] = (byte)'m'; pos++;
+    buf[pos] = (byte)'s'; pos++;
+
     byte* vmid = " | VSync: ";
     k = 0;
     while (vmid[k] != (byte)0) { buf[pos] = vmid[k]; pos++; k++; };
@@ -324,12 +337,14 @@ const int VK_LEFT  = 0x25,
           VK_Q     = 0x51,
           VK_E     = 0x45,
           VK_R     = 0x52,
-          VK_V     = 0x56;
+          VK_V     = 0x56,
+          VK_F     = 0x46,
+          VK_L     = 0x4C;
 
 def main() -> int
 {
     // -- Window + GL context ---------------------------------------------------
-    Window    win("Cube Stress - W/S: fly  A/D: strafe  Q/E: up/dn  Arrows: look  R: reset  V: vsync\0",
+    Window    win("Cube Stress - W/S: fly  A/D: strafe  Q/E: up/dn  Arrows: look  R: reset  V: vsync  F: fog  L: lighting\0",
                   100, 100, WIN_W, WIN_H);
     GLContext gl(win.device_context);
     gl.load_extensions();
@@ -340,6 +355,7 @@ def main() -> int
     // vsync-on (the WGL default on most drivers), interval=0 is vsync-off.
     def{}* wgl_swap_interval(int) -> int = wglGetProcAddress("wglSwapIntervalEXT\0");
     i32 vsync_enabled = 1;
+    i32 lighting_enabled = 1;
 
     // Fixed-function setup identical to cube_demo.fx
     glMatrixMode(GL_PROJECTION);
@@ -469,7 +485,7 @@ def main() -> int
             lx, ly, lz,
             lr, lg, lb,
             0.9,
-            1.0, 0.5, 0.5);
+            1.0, 0.09, 0.032);
 
         i++;
     };
@@ -504,7 +520,9 @@ def main() -> int
     double dt, elapsed;
     double speed_y, speed_x;
     WORD  left_st, right_st, up_st, dn_st, w_st, s_st, a_st, d_st, q_st, e_st, r_st,
-          v_st, v_prev_st;
+          v_st, v_prev_st,
+          f_st, f_prev_st,
+          l_st, l_prev_st;
     RECT  cr;
     i32 cur_w, cur_h;
 
@@ -520,7 +538,7 @@ def main() -> int
            ri, rsum;
     double fps_sec_accum, fps_avg;
     int[60] fps_ring;
-    byte[80] fps_title_buf;
+    byte[160] fps_title_buf;
 
     t_start = GetTickCount();
     t_last  = t_start;
@@ -556,7 +574,8 @@ def main() -> int
                 else { fps_avg = 0.0d; };
             };
 
-            build_fps_title(@fps_title_buf[0], fps_now, fps_avg, vsync_enabled);
+            build_fps_title(@fps_title_buf[0], fps_now, fps_avg, vsync_enabled,
+                            scene.dbg_ms_zbuf_clear, scene.dbg_ms_geo, scene.dbg_ms_light);
             win.set_title(@fps_title_buf[0]);
         };
         if (dt > 0.1d) { dt = 0.1d; };
@@ -574,6 +593,8 @@ def main() -> int
         e_st     = GetAsyncKeyState(VK_E);
         r_st     = GetAsyncKeyState(VK_R);
         v_st     = GetAsyncKeyState(VK_V);
+        f_st     = GetAsyncKeyState(VK_F);
+        l_st     = GetAsyncKeyState(VK_L);
 
         // Yaw
         if ((left_st  `& 0x8000) != 0) { r3d_player_turn(@player, -dt * 1.5d, 0.0d); };
@@ -613,6 +634,38 @@ def main() -> int
             wgl_swap_interval(vsync_enabled);
         };
         v_prev_st = v_st;
+
+        // Toggle fog (edge-triggered)
+        if (((f_st `& 0x8000) != 0) & ((f_prev_st `& 0x8000) == 0))
+        {
+            if (scene.fog_end > 0.0d | scene.vol_density > 0.0d)
+            {
+                scene.fog_end    = 0.0d;
+                scene.vol_density = 0.0d;
+            }
+            else
+            {
+                r3d_scene_set_fog(@scene, 0.0d, 0.0d, 0.15d, 0.15d, 0.15d);
+                r3d_scene_set_vol_fog(@scene, 0.012d, 0.4d, -5.0d, 0.10d, 0.10d, 0.12d);
+            };
+        };
+        f_prev_st = f_st;
+
+        // Toggle lighting (edge-triggered)
+        if (((l_st `& 0x8000) != 0) & ((l_prev_st `& 0x8000) == 0))
+        {
+            if (lighting_enabled == 1)
+            {
+                lighting_enabled = 0;
+                scene.light_count = 0;
+            }
+            else
+            {
+                lighting_enabled = 1;
+                scene.light_count = NUM_LIGHTS;
+            };
+        };
+        l_prev_st = l_st;
 
         // -- Rotate each cube on its own axes (slow drift) ---------------------
         elapsed = (double)(t_now - t_start) / 1000.0d;

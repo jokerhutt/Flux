@@ -48,6 +48,7 @@ class TokenType(Enum):
     # String interpolation
     I_STRING = auto()
     F_STRING = auto()
+    G_STRING = auto()
     
     # Identifiers and keywords
     IDENTIFIER = auto()
@@ -482,6 +483,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.BOOL:           '<bool>',
     TokenType.I_STRING:       '<istring>',
     TokenType.F_STRING:       '<fstring>',
+    TokenType.G_STRING:       '<gstring>',
     TokenType.IDENTIFIER:     '<identifier>',
     TokenType.ASM_BLOCK:      '<asm>',
     TokenType.EOF:            '<EOF>',
@@ -930,7 +932,25 @@ class FluxLexer:
                 if '.' in expanded_str:
                     expanded_str = expanded_str.rstrip('0').rstrip('.')
 
-                # Choose float vs double based on the absolute magnitude of the exponent
+                # An explicit f/d suffix must be consumed here and take priority
+                # over the magnitude heuristic below. This branch returns directly
+                # and never reaches the generic suffix-handling code further down
+                # in this function (the one used for non-scientific-notation
+                # literals), so previously a suffix like the 'd' in 1.0e18d was
+                # left completely unconsumed: the cursor stayed sitting on it,
+                # and the next call to read a token would start mid-suffix,
+                # producing a stray identifier-like token with no operator
+                # before it. Affects any explicit f/d suffix after an exponent,
+                # not just 'd' on a large exponent specifically.
+                if self.current_char() == 'f':
+                    self.advance()
+                    return Token(TokenType.FLOAT, expanded_str, start_pos[0], start_pos[1])
+                if self.current_char() == 'd':
+                    self.advance()
+                    return Token(TokenType.DOUBLE, expanded_str, start_pos[0], start_pos[1])
+
+                # No explicit suffix: choose float vs double based on the absolute
+                # magnitude of the exponent (unchanged prior behavior).
                 abs_exp = abs(exponent)
                 if abs_exp <= 5:
                     return Token(TokenType.FLOAT, expanded_str, start_pos[0], start_pos[1])
@@ -1050,6 +1070,12 @@ class FluxLexer:
                 self.advance()  # Skip 'f'
                 f_string_content = self.read_f_string()
                 tokens.append(Token(TokenType.F_STRING, f'f"{f_string_content}"', start_pos[0], start_pos[1]))
+                continue
+
+            if char == 'g' and self.peek_char() == '"':
+                self.advance()  # Skip 'g'
+                content_g = self.read_string('"')
+                tokens.append(Token(TokenType.G_STRING, content_g, start_pos[0], start_pos[1]))
                 continue
             
             # String literals

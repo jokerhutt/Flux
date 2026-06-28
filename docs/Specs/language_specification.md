@@ -2797,7 +2797,7 @@ def main() -> int
 Bit-slice results are ordinary integer values of the slice's width, so a bit slice can itself be
 the source of another bit slice - there's no special chaining logic, it falls out naturally.
 
-Assigning into a bit slice (`` x[a``b] = value; ``) replaces just that bit range in place,
+Assigning into a bit slice (` x[a``b] = value;`) replaces just that bit range in place,
 leaving every other bit of the target untouched:
 ```
 u32 packed = 0x12345678;

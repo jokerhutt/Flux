@@ -534,12 +534,15 @@ class CodegenVisitor:
     _TYPEOF_KIND_BYTE     = 7
     _TYPEOF_KIND_SLONG    = 8
     _TYPEOF_KIND_ULONG    = 9
-    _TYPEOF_KIND_POINTER  = 10
+    _TYPEOF_KIND_POINTER  = 10  # generic fallback
     _TYPEOF_KIND_ARRAY    = 11
     _TYPEOF_KIND_STRUCT   = 12
     _TYPEOF_KIND_OBJECT   = 13
     _TYPEOF_KIND_VOID     = 14
     _TYPEOF_KIND_FUNCTION = 15
+    # Pointer kinds: depth * 100 + pointee_base_kind
+    # e.g. byte* = 107, int* = 101, int** = 201, byte*** = 307
+    _TYPEOF_KIND_POINTER_BASE = 100
 
     def visit_Literal(self, node, builder, module):
         from fast import Literal
@@ -702,12 +705,25 @@ class CodegenVisitor:
             from fast import string_heap_allocation
             return string_heap_allocation(builder, module, str_val)
         if use_global or not use_stack:
+            # G-strings are compile-time constants with fixed content, so identical
+            # g-string values can share a single global rather than emitting duplicates.
+            # Plain string literals that happen to be at global scope are not deduplicated
+            # because they originate from distinct source locations and may be mutated.
+            is_gstring = node.storage_class == StorageClass.GLOBAL
+            if is_gstring:
+                if not hasattr(module, '_gstr_cache'):
+                    module._gstr_cache = {}
+                cached = module._gstr_cache.get(string_bytes)
+                if cached is not None:
+                    return cached
             str_name = f".str.{id(node)}"
             gv = ir.GlobalVariable(module, str_val.type, name=str_name)
             gv.linkage = 'internal'
             gv.global_constant = True
             gv.initializer = str_val
             gv.type._is_array_pointer = True
+            if is_gstring:
+                module._gstr_cache[string_bytes] = gv
             return gv
         stack_alloca = builder.alloca(str_array_ty, name="str_stack")
         for i, byte_val in enumerate(string_bytes):
@@ -1003,7 +1019,15 @@ class CodegenVisitor:
 
     def visit_TypeOf(self, node, builder, module):
         from fast import Identifier, Literal
+        from ftypesys import TypeSystem as _TS
         expr = node.expression
+        if isinstance(expr, _TS):
+            if expr.is_pointer:
+                depth = getattr(expr, 'pointer_depth', 1) or 1
+                base_kind = self._typeof_kind_from_datatype(expr.base_type)
+                return ir.Constant(ir.IntType(32), self._typeof_kind_for_pointer(base_kind, depth))
+            kind = self._typeof_kind_from_datatype(expr.base_type)
+            return ir.Constant(ir.IntType(32), kind)
         if isinstance(expr, Identifier):
             kind = self._typeof_resolve_identifier_kind(expr.name, module)
             if kind is not None:
@@ -1034,7 +1058,12 @@ class CodegenVisitor:
             return self._TYPEOF_KIND_STRUCT
         var_entry = module.symbol_table.lookup_variable(name, current_ns)
         if var_entry is not None and var_entry.type_spec is not None:
-            return self._typeof_kind_from_datatype(var_entry.type_spec.base_type)
+            ts = var_entry.type_spec
+            if getattr(ts, 'is_pointer', False):
+                depth = getattr(ts, 'pointer_depth', 1) or 1
+                base_kind = self._typeof_kind_from_datatype(ts.base_type)
+                return self._typeof_kind_for_pointer(base_kind, depth)
+            return self._typeof_kind_from_datatype(ts.base_type)
         try:
             if module.context.get_identified_type(name) is not None:
                 return self._TYPEOF_KIND_STRUCT
@@ -1045,6 +1074,10 @@ class CodegenVisitor:
                 if key == name or key.endswith('__' + name) or key.endswith('.' + name):
                     return self._TYPEOF_KIND_STRUCT
         return None
+
+    def _typeof_kind_for_pointer(self, base_kind: int, depth: int) -> int:
+        """Encode a pointer kind as depth * 100 + pointee_base_kind."""
+        return depth * self._TYPEOF_KIND_POINTER_BASE + base_kind
 
     def _typeof_kind_from_datatype(self, dt) -> int:
         mapping = {
@@ -1069,13 +1102,24 @@ class CodegenVisitor:
                 return self._TYPEOF_KIND_BOOL
             if llvm_type.width == 8:
                 return self._TYPEOF_KIND_BYTE
+            if llvm_type.width == 32:
+                return self._TYPEOF_KIND_SINT
+            if llvm_type.width == 64:
+                return self._TYPEOF_KIND_SLONG
             return self._TYPEOF_KIND_SINT
         if isinstance(llvm_type, ir.FloatType):
             return self._TYPEOF_KIND_FLOAT
         if isinstance(llvm_type, ir.DoubleType):
             return self._TYPEOF_KIND_DOUBLE
         if isinstance(llvm_type, ir.PointerType):
-            return self._TYPEOF_KIND_POINTER
+            # Walk pointer chain to get depth and innermost base type kind
+            depth = 0
+            inner = llvm_type
+            while isinstance(inner, ir.PointerType):
+                depth += 1
+                inner = inner.pointee
+            base_kind = self._typeof_kind_from_llvm_type(inner)
+            return self._typeof_kind_for_pointer(base_kind, depth)
         if isinstance(llvm_type, ir.ArrayType):
             return self._TYPEOF_KIND_ARRAY
         if isinstance(llvm_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
@@ -3343,9 +3387,13 @@ class CodegenVisitor:
                     f"[{node.source_line}:{node.source_col}]", node, module)
         method_func_name = f"{obj_type_name}.{node.method_name}"
         func = module.globals.get(method_func_name)
+        # arg_vals built during overload resolution are reused in the emission loop
+        # below to avoid visiting each argument node twice (which would cause duplicate
+        # GlobalVariable names for g-string literals, among other side-effects).
+        _prebuilt_arg_vals = None
         if func is None and hasattr(module, '_function_overloads') and method_func_name in module._function_overloads:
-            arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
-            func = TypeResolver.resolve_function(module, method_func_name, "", arg_vals)
+            _prebuilt_arg_vals = [self.visit(arg, builder, module) for arg in node.arguments]
+            func = TypeResolver.resolve_function(module, method_func_name, "", _prebuilt_arg_vals)
         if func is None:
             # If the receiver is a known object type, give a clear "method not found" error
             # rather than falling through to type function dispatch (which produces a misleading message).
@@ -3379,7 +3427,12 @@ class CodegenVisitor:
                 entry = module.symbol_table.lookup_variable(arg_expr.name)
                 if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
                     raise FluxCodegenError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call", node, module)
-            arg_val = self.visit(arg_expr, builder, module)
+            # Reuse arg values already emitted during overload resolution when available
+            # so that each argument expression is only visited once.
+            if _prebuilt_arg_vals is not None:
+                arg_val = _prebuilt_arg_vals[i]
+            else:
+                arg_val = self.visit(arg_expr, builder, module)
             expected_type = func.args[i + 1].type
             if (isinstance(arg_val.type, ir.PointerType) and isinstance(arg_val.type.pointee, ir.ArrayType) and
                     isinstance(expected_type, ir.PointerType) and arg_val.type.pointee.element == expected_type.pointee):
@@ -6855,6 +6908,13 @@ class CodegenVisitor:
         raise FluxCodegenError(f"Unknown identifier: {node.name}", node, module)
 
     def visit_VariableDeclaration(self, node, builder, module):
+        # Handle auto type inference (storage_class=AUTO sentinel from parser)
+        from ftypesys import StorageClass as _SC
+        #print(f"[AUTO DEBUG] name={node.name} type_spec={node.type_spec!r} storage_class={getattr(node.type_spec, 'storage_class', 'NO_ATTR')!r} SC.AUTO={_SC.AUTO!r}", file=__import__('sys').stderr)
+        if (node.type_spec is not None and
+                node.type_spec.storage_class == _SC.AUTO):
+            return self._vardecl_auto(node, builder, module)
+
         # Resolve type (with automatic array size inference if needed)
         resolved_type_spec = VariableTypeHandler.infer_array_size(node.type_spec, node.initial_value, module)
         llvm_type = TypeSystem.get_llvm_type(resolved_type_spec, module, include_array=True, node=node)
@@ -6873,6 +6933,90 @@ class CodegenVisitor:
 
         # Handle local variables
         return self._vardecl_local(node, builder, module, llvm_type, resolved_type_spec)
+
+    def _vardecl_auto(self, node, builder, module):
+        """
+        Handle auto type inference: auto name = expr;
+        Visits the RHS expression to determine its LLVM type, allocates storage
+        of that type, stores the value, and registers the variable in scope with
+        a TypeSystem derived from the inferred LLVM type.
+        auto is local-only (global auto is not supported).
+        """
+        from ftypesys import StorageClass as _SC, DataType as _DT
+
+        if node.initial_value is None:
+            raise FluxCodegenError(
+                f"'auto' variable '{node.name}' must have an initializer", node, module)
+
+        # Visit RHS to get the value and its LLVM type
+        rhs_val = self.visit(node.initial_value, builder, module)
+        inferred_llvm_type = rhs_val.type
+
+        rhs_flux_spec = getattr(rhs_val, '_flux_type_spec', None)
+
+        # Build a TypeSystem reflecting the inferred type for symbol table use.
+        # If the RHS carried _flux_type_spec use it directly; otherwise map the
+        # LLVM type to the closest Flux primitive.
+        if rhs_flux_spec is not None and isinstance(rhs_flux_spec, TypeSystem):
+            inferred_ts = rhs_flux_spec
+        else:
+            inferred_ts = self._auto_llvm_type_to_type_spec(inferred_llvm_type, module)
+
+        # Hoist alloca to function entry block (standard Flux pattern)
+        current_block = builder.block
+        entry_block = builder.block.function.entry_basic_block
+        entry_term = entry_block.terminator
+        if entry_term is not None:
+            builder.position_before(entry_term)
+        else:
+            builder.position_at_end(entry_block)
+        alloca = builder.alloca(inferred_llvm_type, name=node.name)
+        builder.position_at_end(current_block)
+
+        if inferred_ts is not None:
+            alloca._flux_type_spec = inferred_ts
+
+        # Store the inferred value
+        builder.store(rhs_val, alloca)
+
+        # Register variable in scope with the inferred TypeSystem
+        module.symbol_table.define(
+            node.name, SymbolKind.VARIABLE,
+            type_spec=inferred_ts,
+            llvm_value=alloca,
+        )
+        return alloca
+
+    def _auto_llvm_type_to_type_spec(self, llvm_type, module):
+        """
+        Map a common LLVM type back to the closest Flux TypeSystem for symbol table
+        registration. Used exclusively by _vardecl_auto for type inference.
+        """
+        from ftypesys import DataType as _DT
+        if isinstance(llvm_type, ir.IntType):
+            w = llvm_type.width
+            if w == 1:
+                return TypeSystem(base_type=_DT.BOOL)
+            elif w == 8:
+                return TypeSystem(base_type=_DT.BYTE)
+            elif w == 32:
+                return TypeSystem(base_type=_DT.SINT)
+            elif w == 64:
+                return TypeSystem(base_type=_DT.SLONG)
+            else:
+                return TypeSystem(base_type=_DT.DATA, bit_width=w)
+        elif isinstance(llvm_type, ir.FloatType):
+            return TypeSystem(base_type=_DT.FLOAT)
+        elif isinstance(llvm_type, ir.DoubleType):
+            return TypeSystem(base_type=_DT.DOUBLE)
+        elif isinstance(llvm_type, ir.PointerType):
+            inner = self._auto_llvm_type_to_type_spec(llvm_type.pointee, module)
+            base = inner.base_type if inner is not None else _DT.VOID
+            return TypeSystem(base_type=base, is_pointer=True, pointer_depth=1)
+        # Struct / aggregate: build a custom_typename TypeSystem using the LLVM type name
+        if hasattr(llvm_type, 'name') and llvm_type.name:
+            return TypeSystem(base_type=_DT.STRUCT, custom_typename=llvm_type.name)
+        return TypeSystem(base_type=_DT.VOID)
 
     def _vardecl_global(self, node, module, llvm_type, resolved_type_spec):
         """Generate code for global variable."""

@@ -29,7 +29,9 @@ from fast import (
     PointerDeref,
     InExpression,
     SizeOf,
+    AlignOf,
     TypeOf,
+    EndianOf,
     IfStatement,
     WhileLoop, DoLoop, DoWhileLoop,
     ForLoop,
@@ -1241,7 +1243,9 @@ class FVMCodegen:
         elif t is AddressOf:           return self._visit_address_of(node)
         elif t is PointerDeref:        return self._visit_pointer_deref(node)
         elif t is SizeOf:              return self._visit_sizeof(node)
+        elif t is AlignOf:             return self._visit_alignof(node)
         elif t is TypeOf:              return self._visit_typeof(node)
+        elif t is EndianOf:            return self._visit_endianof(node)
         elif t is InExpression:        return self._visit_in_expression(node)
         elif t is CastExpression:      return self._visit_cast(node)
         elif t is TypeConvertExpression: return self._visit_cast(node)
@@ -1600,13 +1604,123 @@ class FVMCodegen:
         self._emit(_instr(Op.PUSH, Val(TTag.ULONG, bits)))
         return True
 
+    def _visit_alignof(self, node: AlignOf) -> bool:
+        """
+        alignof(T) returns the alignment of T in bytes as a uint.
+        Mirrors AlignOfTypeHandler.alignof_bytes_for_target from fcodegen.py.
+        For data{N} types: alignment = (N + 7) // 8 bytes.
+        For primitives: alignment = byte size.
+        For pointers: 8 bytes.
+        For structs: max field byte size (matching _op_alignof in fvm.py).
+        """
+        from ftypesys import TypeSystem as _TS, DataType as _DT
+        _prim_align = {
+            _DT.SINT:  4, _DT.UINT:  4,
+            _DT.SLONG: 8, _DT.ULONG: 8,
+            _DT.FLOAT: 4, _DT.DOUBLE: 8,
+            _DT.BOOL:  1, _DT.BYTE:  1,
+            _DT.CHAR:  1,
+        }
+        align = None
+        target = node.target
+
+        if isinstance(target, _TS):
+            if target.alignment is not None:
+                align = target.alignment
+            elif target.base_type == _DT.DATA and target.bit_width is not None:
+                align = (target.bit_width + 7) // 8
+            elif target.is_pointer:
+                align = 8
+            elif target.base_type in _prim_align:
+                align = _prim_align[target.base_type]
+
+        elif isinstance(target, Identifier):
+            # Check heap vars: use byte size as alignment proxy (mirrors _op_alignof)
+            if target.name in self._heap_vars:
+                heap_info = self._heap_vars[target.name]
+                if len(heap_info) == 3:  # array: (elem_ttag, elem_bytes, count)
+                    _, elem_bytes, _ = heap_info
+                    align = elem_bytes
+                else:  # scalar: (ttag, byte_size)
+                    align = heap_info[1]
+            # Check full typespec
+            if align is None and target.name in self._local_typespecs:
+                ts = self._local_typespecs[target.name]
+                if ts.alignment is not None:
+                    align = ts.alignment
+                elif ts.base_type == _DT.DATA and ts.bit_width is not None:
+                    align = (ts.bit_width + 7) // 8
+                elif ts.is_pointer:
+                    align = 8
+                elif ts.base_type in _prim_align:
+                    align = _prim_align[ts.base_type]
+            # Check primitive type name string
+            if align is None:
+                type_name = self._local_types.get(target.name)
+                if type_name is not None:
+                    if type_name.startswith('__data_'):
+                        bits = int(type_name[7:])
+                        align = (bits + 7) // 8
+                    else:
+                        _name_align = {
+                            'int': 4, 'uint': 4, 'long': 8, 'ulong': 8,
+                            'float': 4, 'double': 8, 'bool': 1,
+                            'byte': 1, 'char': 1,
+                        }
+                        align = _name_align.get(type_name)
+            # Check struct layouts: max field byte size (mirrors _op_alignof)
+            if align is None:
+                layout = self._struct_layouts.get(target.name)
+                if layout is not None:
+                    align = max((f[3] for f in layout.fields), default=1)
+
+        if align is None:
+            align = 1  # unknown -- emit 1 rather than crash
+
+        self._emit(_instr(Op.PUSH, Val(TTag.UINT, align)))
+        return True
+
+    def _visit_endianof(self, node: EndianOf) -> bool:
+        """
+        endianof(T) returns the endianness of T as an int: 0 = little, 1 = big.
+        Mirrors visit_EndianOf in fcodegen.py (ir.Constant IntType(32)).
+        TypeSystem.endianness: 0 = little, 1 = big (default 1).
+        Identifier targets: checks local typespecs, then le/be name prefix (mirrors _op_endianof).
+        """
+        from ftypesys import TypeSystem as _TS, DataType as _DT
+        endian = None
+        target = node.target
+
+        if isinstance(target, _TS):
+            # Explicit endianness on TypeSystem (0=little, 1=big, default 1)
+            endian = getattr(target, 'endianness', 1)
+
+        elif isinstance(target, Identifier):
+            # Check full typespec for declared endianness
+            ts = self._local_typespecs.get(target.name)
+            if ts is not None:
+                endian = getattr(ts, 'endianness', 1)
+            # Fall back to le/be name prefix convention (mirrors _op_endianof)
+            if endian is None:
+                type_name = self._local_types.get(target.name, '')
+                if type_name.startswith('be'):
+                    endian = 1
+                elif type_name.startswith('le'):
+                    endian = 0
+
+        if endian is None:
+            endian = 0  # Flux default: little-endian
+
+        self._emit(_instr(Op.PUSH, Val(TTag.INT, endian)))
+        return True
+
     def _visit_typeof(self, node: TypeOf) -> bool:
         """
         typeof(expr) returns an integer kind constant matching the TypeOf.KIND_* values.
-        typeof(bool), typeof(int), etc. resolve the bare type name.
-        typeof(var) resolves from the variable's recorded local type.
+        Pointer kinds are encoded as depth * 100 + pointee_base_kind.
+        e.g. byte* = 107, int* = 101, int** = 201.
         """
-        from ftypesys import DataType as _DT
+        from ftypesys import DataType as _DT, TypeSystem as _TS
         # KIND constants mirror fast.TypeOf
         _KIND = {
             'int':    1,  'uint':   2,  'float':  3,  'double': 4,
@@ -1622,7 +1736,14 @@ class FVMCodegen:
         kind = 0  # KIND_UNKNOWN
         expr = node.expression
 
-        if isinstance(expr, Identifier):
+        if isinstance(expr, _TS):
+            if expr.is_pointer:
+                depth = getattr(expr, 'pointer_depth', 1) or 1
+                base_kind = _DT_KIND.get(expr.base_type, 0)
+                kind = depth * 100 + base_kind
+            else:
+                kind = _DT_KIND.get(expr.base_type, 0)
+        elif isinstance(expr, Identifier):
             name = expr.name
             # Bare type keyword used as typeof argument (e.g. typeof(bool))
             if name in _KIND:
@@ -1632,16 +1753,20 @@ class FVMCodegen:
                 kind = 12  # KIND_STRUCT
             # Variable whose type was recorded
             else:
-                type_name = self._local_types.get(name)
-                if type_name is not None:
-                    kind = _KIND.get(type_name, 0)
-                    if kind == 0 and type_name in self._struct_layouts:
-                        kind = 12  # KIND_STRUCT
-        else:
-            # For a TypeSystem target (e.g. typeof(bool) parsed as TS)
-            from ftypesys import TypeSystem as _TS
-            if isinstance(expr, _TS):
-                kind = _DT_KIND.get(expr.base_type, 0)
+                ts = self._local_typespecs.get(name)
+                if ts is not None and isinstance(ts, _TS):
+                    if ts.is_pointer:
+                        depth = getattr(ts, 'pointer_depth', 1) or 1
+                        base_kind = _DT_KIND.get(ts.base_type, 0)
+                        kind = depth * 100 + base_kind
+                    else:
+                        kind = _DT_KIND.get(ts.base_type, 0)
+                else:
+                    type_name = self._local_types.get(name)
+                    if type_name is not None:
+                        kind = _KIND.get(type_name, 0)
+                        if kind == 0 and type_name in self._struct_layouts:
+                            kind = 12  # KIND_STRUCT
 
         self._emit(_instr(Op.PUSH, Val(TTag.INT, kind)))
         return True

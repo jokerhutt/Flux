@@ -109,12 +109,23 @@
 #import <runtime\threading.fx>;
 #endif;
 
+#ifndef FLUX_STANDARD_ATOMICS
+#import <runtime\atomics.fx>;
+#endif;
+
 #ifndef FLUX_STANDARD_SYSTEM
 #import <sys.fx>;
 #endif;
 
 #ifndef FLUX_RAYCASTING
 #def FLUX_RAYCASTING 1;
+
+#ifdef __WINDOWS__
+extern
+{
+    def !! GetTickCount() -> u32;
+};
+#endif;
 
 using standard::vectors;
 using standard::math;
@@ -182,7 +193,11 @@ using standard::threading;
 #def R3D_TASK_VOLSCATTER 1;
 #def R3D_TASK_FOGBLEND   2;
 #def R3D_TASK_VOLUPSAMPLE 3;
+#def R3D_TASK_FOGBLEND_VOLSCATTER 4;
+#def R3D_TASK_LIGHTING   5;
+#def R3D_TASK_MESH_AND_LIGHTING 6;
 #def R3D_MAX_VOL_LIGHTS  64;  // Max point lights considered by the scatter pass
+#def R3D_MAX_INST        4096; // Maximum visible instances in vis_insts heap array
 
 // Full-screen fog blend mode, selected once on the main thread (not per
 // pixel) so the worker's inner loop stays branch-free, mirroring the
@@ -362,7 +377,9 @@ struct R3DLight
            intensity,
            atten_const,            // Point light attenuation: 1/(c + l*d + q*d^2)
            atten_linear,
-           atten_quad;
+           atten_quad,
+           max_dist_sq;            // Squared world-space range beyond which contrib < threshold
+                                   // 0 = unlimited (directional lights always use 0)
 };
 
 // 3D player / camera state
@@ -429,6 +446,15 @@ struct R3DVolScatterFrame
     i32     pt_count;
     double[64] ld_xs, ld_ys, ld_zs;
     double[64] lc_r, lc_g, lc_b, lc_int;
+    // Per-light eye_term: 1/(1+eye_dist_sq), depends only on light pos
+    // relative to eye, not on pixel or ray direction. Precomputed once
+    // per light per frame instead of recomputed sw2*sh2 times per light
+    // inside r3d_vol_scatter_rows.
+    double[64] lc_eyeterm;
+    // Per-light |ld|^2 (eye_dist_sq), reused by the unclamped fast-path
+    // perp_sq shortcut in r3d_vol_scatter_rows: since rd is unit length,
+    // perp_sq = |ld|^2 - along^2 exactly when along is not clamped.
+    double[64] lc_lensq;
     double* zbuf;
     u64*    buf;
     double* sbuf_r;
@@ -447,8 +473,12 @@ struct R3DFogBlendFrame
 {
     i32     mode;       // R3D_FOGBLEND_COMBINED / _ATMO / _VOL
     i32     total_px;
+    i32     sw, sh;     // Screen dimensions for row-based thread striding
     double  atmo_range_inv, fog_start, vol_density, far_z;
     u64     fog_target;
+    // Preconverted fog color channels in [0, 65535] integer range.
+    // Avoids a double multiply per pixel inside color64_lerp.
+    u64     fog_r16, fog_g16, fog_b16;
     double* zbuf;
     u64*    buf;
 };
@@ -480,6 +510,48 @@ struct R3DScene
     Arena         frame_arena;  // Per-frame scratch; reset at top of r3d_render
     R3DVolScatterFrame vol_scatter;  // Shared data for the parallel scatter pass
     R3DFogBlendFrame   fog_blend;    // Shared data for the parallel fog blend pass
+    // Half-res volumetric scatter scratch buffers (Pass 1 output, Pass 2 input).
+    // Persisted across frames and only reallocated when the half-res
+    // dimensions change (window resize), instead of fmalloc/ffree every
+    // single frame the combined fog+lighting pass runs. Null / 0 until the
+    // first frame that actually needs them (lazy allocation).
+    double*       vol_sbuf_r;
+    double*       vol_sbuf_g;
+    double*       vol_sbuf_b;
+    double*       vol_sbuf_d;
+    i32           vol_sbuf_w;  // Half-res width these buffers were sized for
+    i32           vol_sbuf_h;  // Half-res height these buffers were sized for
+    // G-buffer for deferred lighting pass. One R3DGBufPixel per screen pixel,
+    // packed so all data for one pixel is contiguous (cache-friendly writes).
+    // Lazily allocated and resized like vol_sbuf_*. Null / 0 until first frame.
+    R3DGBufPixel* gbuf;
+    i32           gbuf_w;   // screen_w these buffers were sized for
+    i32           gbuf_h;   // screen_h these buffers were sized for
+    // Pre-culled active light list built by main thread before lighting dispatch.
+    // Workers iterate only these indices instead of all lights.
+    i32[64] active_lights;   // Max 64 lights (R3D_MAX_VOL_LIGHTS is the larger bound)
+    i32                  active_light_count;
+    // Single barrier semaphore
+    // main thread does one semaphore_wait instead of N-1 sequential waits.
+    Semaphore     frame_done;
+    i32           workers_done;  // Atomic countdown; last worker posts frame_done
+    // Per-frame pass timing (milliseconds). Written by r3d_render each frame.
+    // Read by the application for debug display. Uses GetTickCount internally
+    // so resolution is ~1ms; good enough to identify which pass dominates.
+    double dbg_ms_zbuf_clear;   // zbuf + buf mem_fill
+    double dbg_ms_sky;          // sky draw
+    double dbg_ms_cull;         // main-thread frustum cull
+    double dbg_ms_geo;          // parallel geometry pass
+    double dbg_ms_light;        // parallel lighting pass
+    double dbg_ms_fog;          // fog + scatter + upsample
+    double dbg_ms_fxaa;         // FXAA pass
+    // Main-thread cull results: visible instance list built once before dispatch.
+    // Workers iterate this instead of re-culling every instance independently.
+    // Heap-allocated in r3d_scene_init to avoid embedding a large array in the
+    // struct (which causes llc to emit a massive constant aggregate initializer).
+    R3DCullEntry* vis_insts;  // Heap-allocated visible instance list
+    i32           vis_count;  // Number of entries filled this frame
+    i32           vis_cap;    // Capacity of vis_insts array
     // Threading
     i32                  num_threads;
     Thread[64]           threads;
@@ -487,20 +559,40 @@ struct R3DScene
     Arena[64]            thread_arenas; // Per-thread scratch arenas; reset each frame
 };
 
+// Internal: pre-culled instance entry produced by the main-thread cull pass.
+// Holds the instance pointer and the already-built model matrix so workers
+// never recompute dmat4_trs or r3d_inst_cull.
+struct R3DCullEntry
+{
+    R3DMeshInst* inst;
+    DMat4        model;  // World matrix built once during main-thread cull
+};
+
 // Internal: per-thread work descriptor for parallel mesh rasterization.
 // Each thread owns one of these; filled by r3d_render before dispatch.
 struct R3DMeshWorkSlice
 {
-    R3DScene*  scene;
-    double*    zbuf;
-    u64*       buf;
-    Arena*     arena;      // Per-thread scratch arena (thread owns this slot)
-    i32        thread_id;  // Row ownership: render rows where y % num_threads == thread_id
-    i32        num_threads;
-    i32        task;       // R3D_TASK_MESH or R3D_TASK_VOLSCATTER for this wake round
-    Semaphore  wake;       // Main thread posts to wake the worker
-    Semaphore  done;       // Worker posts when frame work is complete
-    i32        running;    // Set to 0 to signal the worker to exit
+    R3DScene*     scene;
+    double*        zbuf;
+    u64*           buf;
+    R3DGBufPixel*  gbuf;
+    Arena*         arena;
+    i32            thread_id;
+    i32            num_threads;
+    i32            task;
+    i32            wake_flag;  // Atomic spin-wake: main stores 1, worker spins until 1 then stores 0
+    Semaphore      wake;       // Used only for exit signal (running=0)
+    Semaphore      done;       // Unused for frame sync (kept for destroy compat)
+    i32            running;
+};
+
+// G-buffer pixel: packed struct so all data for one pixel is contiguous (56 bytes,
+// fits in one cache line). Replaces the 7 separate per-channel arrays.
+struct R3DGBufPixel
+{
+    u64    albedo;          // Unlit color (texture * tint), 0 = empty/sky
+    double nx, ny, nz;     // World-space normal
+    double wx, wy, wz;     // World-space position
 };
 
 // Internal: a clipped vertex with perspective-correct interpolation data
@@ -509,7 +601,8 @@ struct R3DClipVert
     double x, y, z, w,   // Clip space
            nx, ny, nz,   // Interpolated normal
            u, v,         // Texture coords
-           inv_w;        // 1/w, carried for p-correct interp
+           inv_w,        // 1/w, carried for p-correct interp
+           wx, wy, wz;   // World-space position (interpolated through clip)
 };
 
 // Internal: pre-transformed vertex cache entry (world pos, world normal, clip pos)
@@ -2256,6 +2349,12 @@ namespace raycaster
     // 3D LIGHTING
     // =========================================================================
 
+    // Contribution significance threshold for point lights.
+    // A light whose contrib (intensity * ndotl * atten) is below this value
+    // is too dim to be visible at 16-bit color precision and is skipped.
+    // 1/65535 ~ 0.0000153; use 2x that to also skip nearly-invisible lights.
+    #def R3D_LIGHT_CONTRIB_MIN 0.004;
+
     def r3d_light_directional(R3DLight* l,
                                double dx, double dy, double dz,
                                double r, double g, double b,
@@ -2275,6 +2374,7 @@ namespace raycaster
         l.atten_const  = 1.0;
         l.atten_linear = 0.0;
         l.atten_quad   = 0.0;
+        l.max_dist_sq  = 0.0;  // Directional: unlimited range
     };
 
     def r3d_light_point(R3DLight* l,
@@ -2283,6 +2383,10 @@ namespace raycaster
                         double intensity,
                         double kc, double kl, double kq) -> void
     {
+        // Derive max useful range: solve intensity/atten(d) = R3D_LIGHT_CONTRIB_MIN.
+        // Quadratic-dominant: d ~ sqrt(intensity / (kq * min_contrib)).
+        // Zero max_dist_sq = unlimited range (no early-out).
+        double max_d, thresh;
         l.kind         = R3D_LIGHT_POINT;
         l.pos_x        = px;
         l.pos_y        = py;
@@ -2294,6 +2398,24 @@ namespace raycaster
         l.atten_const  = kc;
         l.atten_linear = kl;
         l.atten_quad   = kq;
+
+        thresh = R3D_LIGHT_CONTRIB_MIN;
+        max_d  = 0.0;
+        if (kq > RC_EPSILON)
+        {
+            max_d = sqrt(intensity / (kq * thresh));
+        }
+        elif (kl > RC_EPSILON)
+        {
+            max_d = intensity / (kl * thresh);
+        }
+        elif (kc > RC_EPSILON)
+        {
+            if ((intensity / kc) > thresh) { max_d = 1.0e9; } else { max_d = 0.0; };
+        };
+        // Add 20% margin so falloff at the boundary is smooth, not abrupt
+        max_d = max_d * 1.2;
+        l.max_dist_sq  = max_d * max_d;
     };
 
     // Compute combined RGB light contribution for a surface point + normal.
@@ -2302,6 +2424,14 @@ namespace raycaster
     // ndotl*0.5+0.5, then squared. This prevents hard terminator lines and
     // blown-out bright faces while keeping the dark side visible — the
     // standard solution for matte/diffuse surfaces.
+    // Compute combined RGB light contribution for a surface point + normal.
+    // Optimizations vs original:
+    //   1. Point light: dist_sq early-out against precomputed max_dist_sq avoids fisr.
+    //   2. Attenuation expressed via inv_d (= fisr result) -- eliminates the
+    //      llen = 1/flen division and rewrites 1/(kc + kl*d + kq*d^2) as
+    //      inv_d^2 / (kc*inv_d^2 + kl*inv_d + kq). Two muls replace one division.
+    //   3. Contrib threshold early-out skips color accumulation when a light
+    //      contributes less than 1 unit at 16-bit precision.
     def r3d_eval_lighting(R3DLight*  lights,
                           i32        light_count,
                           double     amb_r, double amb_g, double amb_b,
@@ -2310,9 +2440,9 @@ namespace raycaster
                           double*    out_r, double*  out_g, double* out_b) -> void
     {
         i32    i;
-        double lr, lg, lb, ndotl, d, atten, ldx, ldy, ldz, llen;
-        double contrib, lum, sr, sg, sb;
-        float  flen;
+        double ndotl, atten, ldx, ldy, ldz, dist_sq;
+        double contrib, inv_d, inv_d2;
+        float  finv_d;
 
         *out_r = amb_r;
         *out_g = amb_g;
@@ -2332,34 +2462,52 @@ namespace raycaster
                     {
                         contrib = lights[i].intensity * ndotl;
                         if (contrib > 1.0) { contrib = 1.0; };
-                        *out_r += lights[i].color_r * contrib;
-                        *out_g += lights[i].color_g * contrib;
-                        *out_b += lights[i].color_b * contrib;
+                        if (contrib >= R3D_LIGHT_CONTRIB_MIN)
+                        {
+                            *out_r += lights[i].color_r * contrib;
+                            *out_g += lights[i].color_g * contrib;
+                            *out_b += lights[i].color_b * contrib;
+                        };
                     };
                 }
                 case (R3D_LIGHT_POINT)
                 {
-                    ldx  = lights[i].pos_x - wx;
-                    ldy  = lights[i].pos_y - wy;
-                    ldz  = lights[i].pos_z - wz;
-                    {
-                    flen = fisr((float)(ldx*ldx + ldy*ldy + ldz*ldz));
-                    llen = 1.0d / (double)flen;
-                    ndotl = (ldx*nx + ldy*ny + ldz*nz) * (double)flen;
-                    };
+                    ldx     = lights[i].pos_x - wx;
+                    ldy     = lights[i].pos_y - wy;
+                    ldz     = lights[i].pos_z - wz;
+                    dist_sq = ldx*ldx + ldy*ldy + ldz*ldz;
 
-                    if (llen < RC_EPSILON) { i++; continue; };
+                    // Range cull: skip entirely if beyond precomputed max influence radius
+                    if (lights[i].max_dist_sq > RC_EPSILON &
+                        dist_sq > lights[i].max_dist_sq) { i++; continue; };
+
+                    // Fast inverse sqrt; degenerate guard in inv_d space
+                    finv_d = fisr((float)dist_sq);
+                    inv_d  = (double)finv_d;
+                    if (inv_d < RC_EPSILON) { i++; continue; };
+
+                    // ndotl via normalized light direction (ldx*inv_d, ...)
+                    ndotl = (ldx*nx + ldy*ny + ldz*nz) * inv_d;
                     if (ndotl < 0.0) { ndotl = 0.0; };
 
-                    atten = 1.0 / (lights[i].atten_const +
-                                   lights[i].atten_linear * llen +
-                                   lights[i].atten_quad   * llen * llen);
+                    // Attenuation rewritten in inv_d space to eliminate the
+                    // d = 1/inv_d division:
+                    //   original: 1 / (kc + kl*d + kq*d^2)
+                    //   rewritten: inv_d^2 / (kc*inv_d^2 + kl*inv_d + kq)
+                    inv_d2 = inv_d * inv_d;
+                    atten  = inv_d2 / (lights[i].atten_const  * inv_d2 +
+                                       lights[i].atten_linear * inv_d  +
+                                       lights[i].atten_quad);
 
                     contrib = lights[i].intensity * ndotl * atten;
                     if (contrib > 1.0) { contrib = 1.0; };
-                    *out_r += lights[i].color_r * contrib;
-                    *out_g += lights[i].color_g * contrib;
-                    *out_b += lights[i].color_b * contrib;
+                    // Skip accumulation if contribution is below 16-bit visibility threshold
+                    if (contrib >= R3D_LIGHT_CONTRIB_MIN)
+                    {
+                        *out_r += lights[i].color_r * contrib;
+                        *out_g += lights[i].color_g * contrib;
+                        *out_b += lights[i].color_b * contrib;
+                    };
                 }
                 default {};
             };
@@ -2400,6 +2548,9 @@ namespace raycaster
         out.nz   = a.nz  + (b.nz  - a.nz)  * t;
         out.u    = a.u   + (b.u   - a.u)   * t;
         out.v    = a.v   + (b.v   - a.v)   * t;
+        out.wx   = a.wx  + (b.wx  - a.wx)  * t;
+        out.wy   = a.wy  + (b.wy  - a.wy)  * t;
+        out.wz   = a.wz  + (b.wz  - a.wz)  * t;
         out.inv_w = (out.w > RC_EPSILON) ? (1.0d / out.w) : 0.0d;
     };
 
@@ -2556,17 +2707,14 @@ namespace raycaster
                           RCTexture*  tex,
                           u64         tint,
                           i32         shade_model,
-                          R3DLight*   lights,
-                          i32         light_count,
-                          double      amb_r, double amb_g, double amb_b,
+                          double      face_nx, double face_ny, double face_nz,
                           double      wx_a, double wy_a, double wz_a,
                           double      wx_b, double wy_b, double wz_b,
                           double      wx_c, double wy_c, double wz_c,
                           double*     zbuf,
-                          u64*        buf,
+                          R3DGBufPixel* gbuf,
                           i32         thread_id,
-                          i32         num_threads,
-                          double      pre_flat_r, double pre_flat_g, double pre_flat_b) -> void
+                          i32         num_threads) -> void
     {
         // ---- Sort vertices by Y (insertion sort, 3 elements) ----
         double tmp_d;
@@ -2638,19 +2786,8 @@ namespace raycaster
         if (y_top > y_bot) { return; };
 
         // ---- Pre-compute lighting ----
-        // Flat: bake once per triangle. Gouraud: per-vertex values for interpolation.
-        double flat_lr, flat_lg, flat_lb;
-        flat_lr = 0.0d; flat_lg = 0.0d; flat_lb = 0.0d;
-
-        if (shade_model == R3D_SHADE_FLAT)
-        {
-            // Use pre-baked values computed once per mesh triangle at the call site.
-            // This ensures both triangles of a quad face use identical lighting.
-            flat_lr = pre_flat_r;
-            flat_lg = pre_flat_g;
-            flat_lb = pre_flat_b;
-        };
-
+        // Deferred: no per-triangle lighting. G-buffer written per pixel.
+        // Gouraud normal interpolation weights still needed for per-pixel normal interp.
         double va_lr, va_lg, va_lb;
         double vb_lr, vb_lg, vb_lb;
         double vc_lr, vc_lg, vc_lb;
@@ -2658,24 +2795,37 @@ namespace raycaster
         vb_lr = 0.0d; vb_lg = 0.0d; vb_lb = 0.0d;
         vc_lr = 0.0d; vc_lg = 0.0d; vc_lb = 0.0d;
 
-        if (shade_model == R3D_SHADE_GOURAUD)
+        // For flat shading, all three vertex normals are replaced with the
+        // face normal so the per-pixel normal in the gbuf is constant across
+        // the triangle. This prevents the curved highlight artifact that occurs
+        // when smooth (averaged) vertex normals are interpolated across a flat face.
+        if (shade_model == R3D_SHADE_FLAT)
         {
-            r3d_eval_lighting(lights, light_count, amb_r, amb_g, amb_b,
-                              wx_a, wy_a, wz_a, anx, any, anz,
-                              @va_lr, @va_lg, @va_lb);
-            r3d_eval_lighting(lights, light_count, amb_r, amb_g, amb_b,
-                              wx_b, wy_b, wz_b, bnx, bny, bnz,
-                              @vb_lr, @vb_lg, @vb_lb);
-            r3d_eval_lighting(lights, light_count, amb_r, amb_g, amb_b,
-                              wx_c, wy_c, wz_c, cnx, cny, cnz,
-                              @vc_lr, @vc_lg, @vc_lb);
+            anx = face_nx; any = face_ny; anz = face_nz;
+            bnx = face_nx; bny = face_ny; bnz = face_nz;
+            cnx = face_nx; cny = face_ny; cnz = face_nz;
         };
+
+        // Repurpose va/vb/vc lr/lg/lb slots to carry world normals for gbuf interp.
+        // wx/wy/wz world positions are interpolated in their own slots below.
+        // All stored as value/w for perspective-correct interpolation.
+        va_lr = anx * a_inv_w; va_lg = any * a_inv_w; va_lb = anz * a_inv_w;
+        vb_lr = bnx * b_inv_w; vb_lg = bny * b_inv_w; vb_lb = bnz * b_inv_w;
+        vc_lr = cnx * c_inv_w; vc_lg = cny * c_inv_w; vc_lb = cnz * c_inv_w;
 
         // ---- Precompute UV in perspective space (u/w, v/w at each vertex) ----
         double au_w, av_w, bu_w, bv_w, cu_w, cv_w;
         au_w = au * a_inv_w; av_w = av * a_inv_w;
         bu_w = bu * b_inv_w; bv_w = bv * b_inv_w;
         cu_w = cu * c_inv_w; cv_w = cv * c_inv_w;
+
+        // World positions stored as value/w for perspective-correct interpolation
+        double awx_w, awy_w, awz_w;
+        double bwx_w, bwy_w, bwz_w;
+        double cwx_w, cwy_w, cwz_w;
+        awx_w = wx_a * a_inv_w; awy_w = wy_a * a_inv_w; awz_w = wz_a * a_inv_w;
+        bwx_w = wx_b * b_inv_w; bwy_w = wy_b * b_inv_w; bwz_w = wz_b * b_inv_w;
+        cwx_w = wx_c * c_inv_w; cwy_w = wy_c * c_inv_w; cwz_w = wz_c * c_inv_w;
 
         // ---- Edge deltas ----
         double dy_ac, dy_ab, dy_bc;
@@ -2694,6 +2844,7 @@ namespace raycaster
         // Per-scanline step rates along long edge (a->c)
         double dxac, dinv_wac, du_wac, dv_wac;
         double dlrac, dlgac, dlbac;
+        double dwxac, dwyac, dwzac;
         dxac    = (cx   - ax)     * inv_dy_ac;
         dinv_wac= (c_inv_w - a_inv_w) * inv_dy_ac;
         du_wac  = (cu_w  - au_w)  * inv_dy_ac;
@@ -2701,10 +2852,14 @@ namespace raycaster
         dlrac   = (vc_lr - va_lr) * inv_dy_ac;
         dlgac   = (vc_lg - va_lg) * inv_dy_ac;
         dlbac   = (vc_lb - va_lb) * inv_dy_ac;
+        dwxac   = (cwx_w - awx_w) * inv_dy_ac;
+        dwyac   = (cwy_w - awy_w) * inv_dy_ac;
+        dwzac   = (cwz_w - awz_w) * inv_dy_ac;
 
         // Per-scanline step rates along upper short edge (a->b)
         double dxab, dinv_wab, du_wab, dv_wab;
         double dlrab, dlgab, dlbab;
+        double dwxab, dwyab, dwzab;
         dxab    = (bx   - ax)     * inv_dy_ab;
         dinv_wab= (b_inv_w - a_inv_w) * inv_dy_ab;
         du_wab  = (bu_w  - au_w)  * inv_dy_ab;
@@ -2712,10 +2867,14 @@ namespace raycaster
         dlrab   = (vb_lr - va_lr) * inv_dy_ab;
         dlgab   = (vb_lg - va_lg) * inv_dy_ab;
         dlbab   = (vb_lb - va_lb) * inv_dy_ab;
+        dwxab   = (bwx_w - awx_w) * inv_dy_ab;
+        dwyab   = (bwy_w - awy_w) * inv_dy_ab;
+        dwzab   = (bwz_w - awz_w) * inv_dy_ab;
 
         // Per-scanline step rates along lower short edge (b->c)
         double dxbc, dinv_wbc, du_wbc, dv_wbc;
         double dlrbc, dlgbc, dlbbc;
+        double dwxbc, dwybc, dwzbc;
         dxbc    = (cx   - bx)     * inv_dy_bc;
         dinv_wbc= (c_inv_w - b_inv_w) * inv_dy_bc;
         du_wbc  = (cu_w  - bu_w)  * inv_dy_bc;
@@ -2723,6 +2882,9 @@ namespace raycaster
         dlrbc   = (vc_lr - vb_lr) * inv_dy_bc;
         dlgbc   = (vc_lg - vb_lg) * inv_dy_bc;
         dlbbc   = (vc_lb - vb_lb) * inv_dy_bc;
+        dwxbc   = (cwx_w - bwx_w) * inv_dy_bc;
+        dwybc   = (cwy_w - bwy_w) * inv_dy_bc;
+        dwzbc   = (cwz_w - bwz_w) * inv_dy_bc;
 
         // Determine if long edge is on right or left
         bool long_edge_right;
@@ -2736,8 +2898,8 @@ namespace raycaster
         };
 
         // ---- Edge walker storage (computed exactly each scanline, no incremental drift) ----
-        double lx, linv_w, lu_w, lv_w, llr, llg, llb;
-        double sx, sinv_w, su_w, sv_w, slr, slg, slb;
+        double lx, linv_w, lu_w, lv_w, llr, llg, llb, llwx, llwy, llwz;
+        double sx, sinv_w, su_w, sv_w, slr, slg, slb, slwx, slwy, slwz;
 
         i32 y, x, px_start, px_end, row_base;
         double span, inv_span;
@@ -2745,7 +2907,6 @@ namespace raycaster
         double u_w_left, u_w_right, v_w_left, v_w_right;
         double lr_left, lr_right, lg_left, lg_right, lb_left, lb_right;
         double px_inv_w, px_z, px_u, px_v;
-        double px_lr, px_lg, px_lb;
         bool   px_transparent;
         i32    scan_lod0, scan_lod1;
         double scan_lod_frac;
@@ -2759,6 +2920,12 @@ namespace raycaster
         double cur_inv_w, cur_u_w, cur_v_w;
         double cur_lr, cur_lg, cur_lb;
         u64    px_col;
+        // Interpolated world normal and world position for gbuf write
+        // (reusing lr/lg/lb slots for normal; adding wwx/y/z for world pos)
+        double wnx_left, wnx_right, wny_left, wny_right, wnz_left, wnz_right;
+        double wwx_left, wwx_right, wwy_left, wwy_right, wwz_left, wwz_right;
+        double d_wnx, d_wny, d_wnz, d_wwx, d_wwy, d_wwz;
+        double cur_wnx, cur_wny, cur_wnz, cur_wwx, cur_wwy, cur_wwz;
 
         // Stride loop: jump directly to first owned row, then step by num_threads.
         // Eliminates the per-row modulo and branch of the old skip pattern.
@@ -2789,6 +2956,9 @@ namespace raycaster
             llr   = va_lr  + dlrac   * tb;
             llg   = va_lg  + dlgac   * tb;
             llb   = va_lb  + dlbac   * tb;
+            llwx  = awx_w  + dwxac   * tb;
+            llwy  = awy_w  + dwyac   * tb;
+            llwz  = awz_w  + dwzac   * tb;
 
             // Evaluate short edge exactly at this scanline center
             if (y < y_mid)
@@ -2801,6 +2971,9 @@ namespace raycaster
                 slr   = va_lr  + dlrab   * tb;
                 slg   = va_lg  + dlgab   * tb;
                 slb   = va_lb  + dlbab   * tb;
+                slwx  = awx_w  + dwxab   * tb;
+                slwy  = awy_w  + dwyab   * tb;
+                slwz  = awz_w  + dwzab   * tb;
             }
             else
             {
@@ -2812,6 +2985,9 @@ namespace raycaster
                 slr   = vb_lr  + dlrbc   * tb;
                 slg   = vb_lg  + dlgbc   * tb;
                 slb   = vb_lb  + dlbbc   * tb;
+                slwx  = bwx_w  + dwxbc   * tb;
+                slwy  = bwy_w  + dwybc   * tb;
+                slwz  = bwz_w  + dwzbc   * tb;
             };
 
             // Assign left/right from long and short edge walkers
@@ -2824,6 +3000,12 @@ namespace raycaster
                 lr_left   = slr;    lr_right   = llr;
                 lg_left   = slg;    lg_right   = llg;
                 lb_left   = slb;    lb_right   = llb;
+                wnx_left  = slr;    wnx_right  = llr;
+                wny_left  = slg;    wny_right  = llg;
+                wnz_left  = slb;    wnz_right  = llb;
+                wwx_left  = slwx;   wwx_right  = llwx;
+                wwy_left  = slwy;   wwy_right  = llwy;
+                wwz_left  = slwz;   wwz_right  = llwz;
             }
             else
             {
@@ -2834,10 +3016,16 @@ namespace raycaster
                 lr_left   = llr;    lr_right   = slr;
                 lg_left   = llg;    lg_right   = slg;
                 lb_left   = llb;    lb_right   = slb;
+                wnx_left  = llr;    wnx_right  = slr;
+                wny_left  = llg;    wny_right  = slg;
+                wnz_left  = llb;    wnz_right  = slb;
+                wwx_left  = llwx;   wwx_right  = slwx;
+                wwy_left  = llwy;   wwy_right  = slwy;
+                wwz_left  = llwz;   wwz_right  = slwz;
             };
 
             px_start = (i32)(x_left  + 0.5d);
-            px_end   = (i32)(x_right + 0.5d);
+            px_end   = (i32)(x_right - 0.5d);  // Exclusive right edge (top-left fill rule)
             if (px_start < 0)   { px_start = 0; };
             if (px_end   >= sw) { px_end   = sw - 1; };
 
@@ -2853,6 +3041,12 @@ namespace raycaster
             d_lr    = (lr_right    - lr_left)     * inv_span;
             d_lg    = (lg_right    - lg_left)     * inv_span;
             d_lb    = (lb_right    - lb_left)     * inv_span;
+            d_wnx   = (wnx_right   - wnx_left)   * inv_span;
+            d_wny   = (wny_right   - wny_left)   * inv_span;
+            d_wnz   = (wnz_right   - wnz_left)   * inv_span;
+            d_wwx   = (wwx_right   - wwx_left)   * inv_span;
+            d_wwy   = (wwy_right   - wwy_left)   * inv_span;
+            d_wwz   = (wwz_right   - wwz_left)   * inv_span;
 
             // Compute duv: texels per screen pixel for mip level selection.
             // d_u_w and d_v_w are (u/w) and (v/w) increments per pixel.
@@ -2894,8 +3088,14 @@ namespace raycaster
             cur_lr    = lr_left    + d_lr    * ((double)px_start + 0.5d - x_left);
             cur_lg    = lg_left    + d_lg    * ((double)px_start + 0.5d - x_left);
             cur_lb    = lb_left    + d_lb    * ((double)px_start + 0.5d - x_left);
+            cur_wnx   = wnx_left   + d_wnx  * ((double)px_start + 0.5d - x_left);
+            cur_wny   = wny_left   + d_wny  * ((double)px_start + 0.5d - x_left);
+            cur_wnz   = wnz_left   + d_wnz  * ((double)px_start + 0.5d - x_left);
+            cur_wwx   = wwx_left   + d_wwx  * ((double)px_start + 0.5d - x_left);
+            cur_wwy   = wwy_left   + d_wwy  * ((double)px_start + 0.5d - x_left);
+            cur_wwz   = wwz_left   + d_wwz  * ((double)px_start + 0.5d - x_left);
 
-            // #3: Cache row base index to avoid per-pixel multiply
+            // Cache row base index to avoid per-pixel multiply
             row_base = y * sw;
 
             x = px_start;
@@ -2903,27 +3103,24 @@ namespace raycaster
             {
                 px_inv_w = cur_inv_w;
 
-                // Depth test in inv_w space: compute px_z only if we pass.
-                // inv_w < epsilon means behind camera; zbuf stores px_z so convert once.
+                // Depth test in inv_w space: larger inv_w = closer.
                 if (px_inv_w >= RC_EPSILON)
                 {
-                    px_z = 1.0d / px_inv_w;
-                    if (px_z < zbuf[row_base + x])
+                    if (px_inv_w > zbuf[row_base + x])
                     {
 
-                // Recover perspective-correct UVs
+                px_z = 1.0d / px_inv_w;
                 px_u = cur_u_w * px_z;
                 px_v = cur_v_w * px_z;
                 px_u = px_u - (double)(i32)px_u; if (px_u < 0.0d) { px_u += 1.0d; };
                 px_v = px_v - (double)(i32)px_v; if (px_v < 0.0d) { px_v += 1.0d; };
 
-                // Sample texture: LOD already selected per-scanline
+                // Sample texture
                 px_transparent = false;
                 if (tex != (RCTexture*)0)
                 {
                     if (scan_duv < 1.0d)
                     {
-                        // Magnification: nearest-neighbor
                         nn_tx = (i32)(px_u * (double)tex.mip_w[0]);
                         nn_ty = (i32)(px_v * (double)tex.mip_h[0]);
                         if (nn_tx >= tex.mip_w[0]) { nn_tx = tex.mip_w[0] - 1; };
@@ -2948,30 +3145,24 @@ namespace raycaster
                 {
                 if (tint != 0) { px_col = color64_tint(px_col, tint); };
 
-                // #4: Apply lighting
-                if (shade_model == R3D_SHADE_FLAT)
-                {
-                    // Flat: pre-baked color, no per-pixel unpack/pack
-                    px_col = color64_light_bake(px_col, flat_lr, flat_lg, flat_lb);
-                }
-                elif (shade_model == R3D_SHADE_GOURAUD)
-                {
-                    // Gouraud: interpolated light RGB, incremental
-                    px_lr = cur_lr;
-                    px_lg = cur_lg;
-                    px_lb = cur_lb;
-                    px_col = color64_light(px_col, px_lr, px_lg, px_lb);
-                };
-
-                buf[row_base + x]  = px_col;
-                zbuf[row_base + x] = px_z;
+                // Write to G-buffer packed struct — all fields contiguous in memory
+                gbuf[row_base + x].albedo = px_col;
+                gbuf[row_base + x].nx     = cur_wnx * px_z;
+                gbuf[row_base + x].ny     = cur_wny * px_z;
+                gbuf[row_base + x].nz     = cur_wnz * px_z;
+                gbuf[row_base + x].wx     = cur_wwx * px_z;
+                gbuf[row_base + x].wy     = cur_wwy * px_z;
+                gbuf[row_base + x].wz     = cur_wwz * px_z;
+                zbuf[row_base + x]        = px_inv_w;
                 };  // !px_transparent
                     };  // depth test
                 };  // inv_w >= epsilon
 
                 x++;
-                cur_inv_w+=d_inv_w; cur_u_w+=d_u_w; cur_v_w+=d_v_w;
-                cur_lr+=d_lr; cur_lg+=d_lg; cur_lb+=d_lb;
+                cur_inv_w += d_inv_w; cur_u_w += d_u_w; cur_v_w += d_v_w;
+                cur_lr    += d_lr;    cur_lg  += d_lg;   cur_lb  += d_lb;
+                cur_wnx   += d_wnx;   cur_wny += d_wny;  cur_wnz += d_wnz;
+                cur_wwx   += d_wwx;   cur_wwy += d_wwy;  cur_wwz += d_wwz;
             };
 
             y += num_threads;
@@ -3059,29 +3250,26 @@ namespace raycaster
     // =========================================================================
 
     def r3d_draw_mesh_inst(R3DMeshInst*       inst,
+                           DMat4*             pre_model,
                            R3DCamera*         cam,
-                           R3DLight*          lights,
-                           i32                light_count,
-                           double             amb_r, double amb_g, double amb_b,
                            RCTexturePalette*  palette,
                            Arena*             frame_arena,
                            double*            zbuf,
-                           u64*               buf,
+                           R3DGBufPixel*      gbuf,
                            i32                thread_id,
                            i32                num_threads) -> void
     {
         i32       t, v;
         R3DMesh*  mesh;
-        DMat4     model, normal_mat, mvp;
+        DMat4     model, normal_mat;
         RCTexture* tex;
 
         mesh = inst.mesh;
         if (mesh == (R3DMesh*)0) { return; };
 
-        // Build model matrix
-        model = dmat4_trs(inst.pos_x, inst.pos_y, inst.pos_z,
-                          inst.rot_x, inst.rot_y, inst.rot_z,
-                          inst.scale_x, inst.scale_y, inst.scale_z);
+        // Use the pre-built model matrix from the main-thread cull pass.
+        // dmat4_trs (3 sincos + ~30 multiplies) is not repeated per worker.
+        model = *pre_model;
 
         // Detect uniform scale before normal matrix — skips the cofactor inverse
         // for the common case (all stress-test cubes are uniform scale).
@@ -3118,11 +3306,6 @@ namespace raycaster
         {
             dmat4_normal_mat(model, @normal_mat);
         };
-
-        // Precompute MVP = VP * model once per instance.
-        // Each vertex then needs only one mat-vec multiply for clip space
-        // instead of two (model*p then vp*w).
-        mvp = dmat4_mul(cam.vp, model);
 
         // Resolve texture
         tex = (RCTexture*)0;
@@ -3161,8 +3344,9 @@ namespace raycaster
             };
             xv.nx = wn.x; xv.ny = wn.y; xv.nz = wn.z;
 
-            // Clip space via precomputed MVP — one mat-vec multiply instead of two.
-            c = dmat4_mul_vec4(mvp, p);
+            // Clip space: VP * world_pos, reusing w already computed above.
+            // This saves one full model*p mat-vec per vertex vs MVP*p.
+            c = dmat4_mul_vec4(cam.vp, w);
             xv.cx = c.x; xv.cy = c.y; xv.cz = c.z; xv.cw = c.w;
 
             v++;
@@ -3183,7 +3367,6 @@ namespace raycaster
         DVec4 wa, wb, wc, ca, cb, cc;
         DVec4 wna, wnb, wnc;
         double fnx, fny, fnz, vdx, vdy, vdz, ndotv;
-        double pre_lr, pre_lg, pre_lb;
         R3DClipVert[3] clip_in;
         R3DClipVert[R3D_MAX_CLIP_VERTS] clip_out;
         i32 clip_count;
@@ -3222,10 +3405,16 @@ namespace raycaster
             wnc.x = xvc.nx; wnc.y = xvc.ny; wnc.z = xvc.nz; wnc.w = 0.0d;
 
             // ---- Backface cull in world space ----
+            // Compute true geometric face normal from edge cross product.
+            // This is identical for both triangles of a quad face, unlike
+            // the sum of vertex normals which differs per triangle.
             {
-                fnx = wna.x + wnb.x + wnc.x;
-                fny = wna.y + wnb.y + wnc.y;
-                fnz = wna.z + wnb.z + wnc.z;
+                double ex0, ey0, ez0, ex1, ey1, ez1;
+                ex0 = wb.x - wa.x; ey0 = wb.y - wa.y; ez0 = wb.z - wa.z;
+                ex1 = wc.x - wa.x; ey1 = wc.y - wa.y; ez1 = wc.z - wa.z;
+                fnx = ey0*ez1 - ez0*ey1;
+                fny = ez0*ex1 - ex0*ez1;
+                fnz = ex0*ey1 - ey0*ex1;
                 vdx = wa.x - cam.eye_x;
                 vdy = wa.y - cam.eye_y;
                 vdz = wa.z - cam.eye_z;
@@ -3233,16 +3422,11 @@ namespace raycaster
                 if (ndotv >= 0.0d) { t++; continue; };
             };
 
-            // Flat shading: evaluate lighting after backface cull so invisible
-            // triangles don't pay the lighting cost.
-            pre_lr = 0.0d; pre_lg = 0.0d; pre_lb = 0.0d;
-            if (inst.shade_model == R3D_SHADE_FLAT)
+            // Normalize face normal for flat shading gbuf write
             {
-                r3d_eval_lighting(lights, light_count,
-                                  amb_r, amb_g, amb_b,
-                                  xva.wx, xva.wy, xva.wz,
-                                  xva.nx, xva.ny, xva.nz,
-                                  @pre_lr, @pre_lg, @pre_lb);
+                double fnlen;
+                fnlen = sqrt(fnx*fnx + fny*fny + fnz*fnz);
+                if (fnlen > RC_EPSILON) { fnx /= fnlen; fny /= fnlen; fnz /= fnlen; };
             };
 
             // ---- Full frustum clip (all 6 planes) ----
@@ -3250,18 +3434,21 @@ namespace raycaster
             clip_in[0].z = ca.z; clip_in[0].w = ca.w;
             clip_in[0].nx = wna.x; clip_in[0].ny = wna.y; clip_in[0].nz = wna.z;
             clip_in[0].u = va.u; clip_in[0].v = va.v;
+            clip_in[0].wx = xva.wx; clip_in[0].wy = xva.wy; clip_in[0].wz = xva.wz;
             clip_in[0].inv_w = (ca.w > cam.near_z) ? (1.0d / ca.w) : (1.0d / cam.near_z);
 
             clip_in[1].x = cb.x; clip_in[1].y = cb.y;
             clip_in[1].z = cb.z; clip_in[1].w = cb.w;
             clip_in[1].nx = wnb.x; clip_in[1].ny = wnb.y; clip_in[1].nz = wnb.z;
             clip_in[1].u = vb.u; clip_in[1].v = vb.v;
+            clip_in[1].wx = xvb.wx; clip_in[1].wy = xvb.wy; clip_in[1].wz = xvb.wz;
             clip_in[1].inv_w = (cb.w > cam.near_z) ? (1.0d / cb.w) : (1.0d / cam.near_z);
 
             clip_in[2].x = cc.x; clip_in[2].y = cc.y;
             clip_in[2].z = cc.z; clip_in[2].w = cc.w;
             clip_in[2].nx = wnc.x; clip_in[2].ny = wnc.y; clip_in[2].nz = wnc.z;
             clip_in[2].u = vc2.u; clip_in[2].v = vc2.v;
+            clip_in[2].wx = xvc.wx; clip_in[2].wy = xvc.wy; clip_in[2].wz = xvc.wz;
             clip_in[2].inv_w = (cc.w > cam.near_z) ? (1.0d / cc.w) : (1.0d / cam.near_z);
 
             clip_count = r3d_clip_frustum(@clip_in[0], 3, cam.near_z, @clip_out[0]);
@@ -3301,17 +3488,14 @@ namespace raycaster
                     tex,
                     inst.tint,
                     inst.shade_model,
-                    lights,
-                    light_count,
-                    amb_r, amb_g, amb_b,
-                    wa.x, wa.y, wa.z,
-                    wb.x, wb.y, wb.z,
-                    wc.x, wc.y, wc.z,
+                    fnx, fny, fnz,
+                    v0.wx, v0.wy, v0.wz,
+                    v1.wx, v1.wy, v1.wz,
+                    v2.wx, v2.wy, v2.wz,
                     zbuf,
-                    buf,
+                    gbuf,
                     thread_id,
-                    num_threads,
-                    pre_lr, pre_lg, pre_lb
+                    num_threads
                 );
 
                 fan++;
@@ -3444,6 +3628,7 @@ namespace raycaster
             if (scy_top   < 0)             { scy_top   = 0; };
             if (scy_bot   >= cam.screen_h) { scy_bot   = cam.screen_h - 1; };
 
+            // zbuf stores inv_w; compute view_z (used for bs_duv) after the test.
             view_z = 1.0 / inv_w_c;
 
             tex = (RCTexture*)0;
@@ -3459,7 +3644,7 @@ namespace raycaster
                 px = scx_left;
                 while (px <= scx_right)
                 {
-                    if (view_z >= zbuf[py * cam.screen_w + px]) { px++; continue; };
+                    if (inv_w_c <= zbuf[py * cam.screen_w + px]) { px++; continue; };  // zbuf is inv_w; larger = closer
 
                     tex_u = (double)(px - scx_left) / (double)(scx_right - scx_left + 1);
                     tex_v = (double)(py - scy_top)  / (double)(scy_bot   - scy_top  + 1);
@@ -3485,7 +3670,7 @@ namespace raycaster
                     };
 
                     buf[py * cam.screen_w + px]  = px_col;
-                    zbuf[py * cam.screen_w + px] = view_z;
+                    zbuf[py * cam.screen_w + px] = inv_w_c;  // Store inv_w
 
                     px++;
                 };
@@ -3543,11 +3728,9 @@ namespace raycaster
     def r3d_fxaa(u64*, i32, i32) -> void;
 
     // Forward prototype — worker calls r3d_draw_mesh_inst which is defined above.
-    def r3d_draw_mesh_inst(R3DMeshInst*, R3DCamera*, R3DLight*, i32,
-                           double, double, double,
-                           RCTexturePalette*, Arena*, double*, u64*,
-                           i32, i32) -> void;
-
+    def r3d_draw_mesh_inst(R3DMeshInst*, DMat4*, R3DCamera*,
+                           RCTexturePalette*, Arena*, double*,
+                           R3DGBufPixel*, i32, i32) -> void;
     // Forward prototype - worker calls r3d_vol_scatter_rows, defined below.
     def r3d_vol_scatter_rows(R3DScene*, i32, i32) -> void;
 
@@ -3556,6 +3739,9 @@ namespace raycaster
 
     // Forward prototype - worker calls r3d_vol_upsample_rows, defined below.
     def r3d_vol_upsample_rows(R3DScene*, i32, i32) -> void;
+
+    // Forward prototype - worker calls r3d_lighting_rows, defined below.
+    def r3d_lighting_rows(R3DScene*, i32, i32) -> void;
 
     // =========================================================================
     // PARALLEL MESH WORKER
@@ -3579,12 +3765,10 @@ namespace raycaster
 
         sl = (R3DMeshWorkSlice*)arg;
 
-        // Persistent loop: sleep until woken, do one frame of work, signal done.
         while (true)
         {
             semaphore_wait(@sl.wake);
 
-            // Exit signal: running set to 0 by r3d_scene_destroy.
             if (sl.running == 0) { return (void*)0; };
 
             scene = sl.scene;
@@ -3597,41 +3781,71 @@ namespace raycaster
             {
                 r3d_fog_blend_rows(scene, sl.thread_id, sl.num_threads);
             }
+            elif (sl.task == R3D_TASK_FOGBLEND_VOLSCATTER)
+            {
+                r3d_fog_blend_rows(scene, sl.thread_id, sl.num_threads);
+                r3d_vol_scatter_rows(scene, sl.thread_id, sl.num_threads);
+            }
             elif (sl.task == R3D_TASK_VOLUPSAMPLE)
             {
                 r3d_vol_upsample_rows(scene, sl.thread_id, sl.num_threads);
+            }
+            elif (sl.task == R3D_TASK_LIGHTING)
+            {
+                r3d_lighting_rows(scene, sl.thread_id, sl.num_threads);
+            }
+            elif (sl.task == R3D_TASK_MESH_AND_LIGHTING)
+            {
+                // Geo + lighting in one wake/done round — eliminates a full
+                // semaphore round-trip versus dispatching them separately.
+                arena_reset(sl.arena);
+                i = 0;
+                while (i < scene.vis_count)
+                {
+                    r3d_draw_mesh_inst(
+                        scene.vis_insts[i].inst,
+                        @scene.vis_insts[i].model,
+                        scene.cam,
+                        scene.palette,
+                        sl.arena,
+                        sl.zbuf,
+                        sl.gbuf,
+                        sl.thread_id,
+                        sl.num_threads
+                    );
+                    i++;
+                };
+                r3d_lighting_rows(scene, sl.thread_id, sl.num_threads);
             }
             else
             {
                 arena_reset(sl.arena);
 
+                // Iterate the pre-culled visible instance list built by the main
+                // thread. No cull call here; no dmat4_trs here.
                 i = 0;
-                while (i < scene.inst_count)
+                while (i < scene.vis_count)
                 {
-                    if (scene.insts[i] != (R3DMeshInst*)0 &
-                        !r3d_inst_cull(scene.insts[i], scene.cam))
-                    {
-                        r3d_draw_mesh_inst(
-                            scene.insts[i],
-                            scene.cam,
-                            scene.lights,
-                            scene.light_count,
-                            scene.ambient_r,
-                            scene.ambient_g,
-                            scene.ambient_b,
-                            scene.palette,
-                            sl.arena,
-                            sl.zbuf,
-                            sl.buf,
-                            sl.thread_id,
-                            sl.num_threads
-                        );
-                    };
+                    r3d_draw_mesh_inst(
+                        scene.vis_insts[i].inst,
+                        @scene.vis_insts[i].model,
+                        scene.cam,
+                        scene.palette,
+                        sl.arena,
+                        sl.zbuf,
+                        sl.gbuf,
+                        sl.thread_id,
+                        sl.num_threads
+                    );
                     i++;
                 };
             };
 
-            semaphore_post(@sl.done);
+            if (fetch_sub32(@sl.scene.workers_done, 1) == 1)
+            {
+                semaphore_post(@sl.scene.frame_done);
+            };
+            // semaphore_post(@sl.done); // replaced by single barrier
         };
 
         return (void*)0;
@@ -3655,9 +3869,11 @@ namespace raycaster
         i32    sy, sx, zy, zx, li3, sy_row2;
         double ray_dx, ray_dy, ray_dz, rdx, rdy, rdz;
         float  inv_len;
-        double sr3, sg3, sb4, depth3, cos_a;
-        double ld_x, ld_y, ld_z, along, along_x, along_y, along_z, perp_sq, scatter;
+        double sr3, sg3, sb4, depth3, cos_a, rd_lensq;
+        double ld_x, ld_y, ld_z, along, along_raw, along_x, along_y, along_z, perp_sq, scatter;
         double row_rx, row_ry, row_rz;
+        double zinv;
+        double eye_term, medium_term, scatter_bound;
 
         vf = @scene.vol_scatter;
         sw2 = vf.sw2; sh2 = vf.sh2; sw3 = vf.sw3;
@@ -3681,11 +3897,18 @@ namespace raycaster
                 rdx = ray_dx * (double)inv_len;
                 rdy = ray_dy * (double)inv_len;
                 rdz = ray_dz * (double)inv_len;
+                // fisr only runs a single Newton-Raphson refinement, so rd is only
+                // approximately unit length, not exactly. Compute its actual squared
+                // length once per pixel so the perp_sq shortcut below can be exact
+                // for whatever rd actually is, instead of assuming |rd|^2 == 1.
+                rd_lensq = rdx*rdx + rdy*rdy + rdz*rdz;
 
                 sr3 = 0.0d; sg3 = 0.0d; sb4 = 0.0d;
                 zy = sy * 2; zx = sx * 2;
-                depth3 = vf.zbuf[zy * sw3 + zx];
-                if (depth3 >= 1.0e200) { depth3 = vf.far_z; };
+                // zbuf stores inv_w; convert to view-space depth.
+                // inv_w == 0 means sky (no geometry); use far_z as depth cap.
+                zinv = vf.zbuf[zy * sw3 + zx];
+                depth3 = (zinv > 0.0d) ? (1.0d / zinv) : vf.far_z;
                 cos_a = rdx*vf.fwd_x + rdy*vf.fwd_y + rdz*vf.fwd_z;
                 if (cos_a > 0.0001d) { depth3 = depth3 / cos_a; };
 
@@ -3695,16 +3918,53 @@ namespace raycaster
                     ld_x  = vf.ld_xs[li3];
                     ld_y  = vf.ld_ys[li3];
                     ld_z  = vf.ld_zs[li3];
-                    along = ld_x*rdx + ld_y*rdy + ld_z*rdz;
-                    if (along < 0.0d) { li3++; continue; };
+                    along_raw = ld_x*rdx + ld_y*rdy + ld_z*rdz;
+                    along = along_raw;
+                    // Do not skip rays with negative along: the eye-proximity term
+                    // must apply for all ray directions when the camera is near a
+                    // light, otherwise the glow cuts off at steep camera angles.
+                    if (along < 0.0d) { along = 0.0d; };
                     if (along > depth3) { along = depth3; };
-                    along_x = along*rdx; along_y = along*rdy; along_z = along*rdz;
-                    perp_sq = (ld_x-along_x)*(ld_x-along_x) +
-                              (ld_y-along_y)*(ld_y-along_y) +
-                              (ld_z-along_z)*(ld_z-along_z);
+                    if (along == along_raw)
+                    {
+                        // Fast path: exact for any rd magnitude (not just unit length).
+                        // |ld - along*rd|^2 expands to |ld|^2 - along^2*(2 - |rd|^2)
+                        // when along = ld.rd, which holds regardless of |rd|. Using
+                        // the real rd_lensq here (rather than assuming 1) keeps this
+                        // bit-for-bit equivalent to the explicit subtraction below,
+                        // since fisr's single-iteration refinement leaves rd only
+                        // approximately unit length.
+                        perp_sq = vf.lc_lensq[li3] - along*along*(2.0d - rd_lensq);
+                        if (perp_sq < 0.0d) { perp_sq = 0.0d; };
+                    }
+                    else
+                    {
+                        // Clamped: the closest point on the visible segment is the
+                        // endpoint, not the true perpendicular foot, so the shortcut
+                        // above does not apply; compute the distance directly.
+                        along_x = along*rdx; along_y = along*rdy; along_z = along*rdz;
+                        perp_sq = (ld_x-along_x)*(ld_x-along_x) +
+                                  (ld_y-along_y)*(ld_y-along_y) +
+                                  (ld_z-along_z)*(ld_z-along_z);
+                    };
+                    // Intensity falls off with perpendicular distance from ray to light.
+                    // scatter_bound is the maximum possible scatter for this light at
+                    // this pixel, since medium_term (computed below) is always <= 1.0.
+                    // Test against it before paying for medium_term's division.
                     scatter = vf.lc_int[li3] / (1.0d + perp_sq * 0.8d);
-                    scatter *= (vf.vol_density * along) / (1.0d + vf.vol_density * along);
-                    scatter *= 2.0d;
+                    scatter_bound = scatter * 2.0d;
+                    if (scatter_bound < 0.0005d) { li3++; continue; };
+                    // medium_term: along-ray fog integration
+                    medium_term = (vf.vol_density * along) / (1.0d + vf.vol_density * along);
+                    // eye_term: peaks at 1 when eye is at the light, falls off with distance.
+                    // factor=1.0 -> 0.8 brightness at 0.5 units, hands off to medium at ~6 units.
+                    // Depends only on light position relative to eye (fixed for the whole
+                    // frame), so it is precomputed once per light in r3d_render rather than
+                    // recomputed here on every pixel.
+                    eye_term = vf.lc_eyeterm[li3];
+                    // Take the max so close-range proximity wins over the ray integral
+                    if (eye_term > medium_term) { medium_term = eye_term; };
+                    scatter = scatter_bound * medium_term;
                     // Early-out: skip negligible contribution before color accumulation
                     if (scatter < 0.0005d) { li3++; continue; };
                     if (scatter > 1.0d) { scatter = 1.0d; };
@@ -3739,89 +3999,148 @@ namespace raycaster
     // the single-threaded version did inline.
     // =========================================================================
 
+    // Blends fog into all pixels based on zbuf depth.
+    // Optimizations vs original:
+    //   1. Row-based thread striding: each thread owns contiguous rows
+    //      (was flat pixel stride, which scattered reads across the full buffer
+    //      and thrashed cache across all threads simultaneously).
+    //   2. Fog color channels preconverted to u64 integer [0,65535];
+    //      blend loop uses pure integer arithmetic instead of calling
+    //      color64_lerp (which did a double multiply + clamp per pixel).
+    //   3. Combined mode: vol and atmo blend factors both computed, max taken,
+    //      then one single blend -- same result, fewer memory writes.
     def r3d_fog_blend_rows(R3DScene* scene, i32 thread_id, i32 num_threads) -> void
     {
         R3DFogBlendFrame* ff;
-        i32    pi, total_px;
+        i32    row, col, pi, sw2, sh2;
         double depth, atmo_t, vol_t2, combined_t, vd;
         double atmo_range_inv, fog_start2, vol_density2, far_z2;
-        u64    fog_target;
+        double zinv2;
+        u64    fr16, fg16, fb16;
+        u64    t16, it16, src, r2, g2, b2;
         double* zbuf;
         u64*    buf;
 
         ff = @scene.fog_blend;
-        total_px       = ff.total_px;
+        sw2            = ff.sw;
+        sh2            = ff.sh;
         atmo_range_inv = ff.atmo_range_inv;
         fog_start2     = ff.fog_start;
         vol_density2   = ff.vol_density;
         far_z2         = ff.far_z;
-        fog_target     = ff.fog_target;
+        fr16           = ff.fog_r16;
+        fg16           = ff.fog_g16;
+        fb16           = ff.fog_b16;
         zbuf           = ff.zbuf;
         buf            = ff.buf;
 
+        // Row-based striding: thread owns rows where (row % num_threads == thread_id).
+        // Each thread reads and writes a contiguous span of pixels per row,
+        // keeping its working set in cache instead of scattering across the buffer.
         if (ff.mode == R3D_FOGBLEND_COMBINED)
         {
-            pi = thread_id;
-            while (pi < total_px)
+            row = thread_id;
+            while (row < sh2)
             {
-                depth = zbuf[pi];
-                if (depth >= 1.0e300) { depth = far_z2; };
-
-                atmo_t = (depth - fog_start2) * atmo_range_inv;
-                combined_t = 0.0d;
-                if (atmo_t > 0.0d)
+                pi = row * sw2;
+                col = 0;
+                while (col < sw2)
                 {
-                    if (atmo_t > 1.0d) { atmo_t = 1.0d; };
-                    combined_t = atmo_t;
-                };
-                // Fast approx: x/(1+x) ≈ 1-exp(-x)
-                vd = vol_density2 * depth;
-                vol_t2 = vd / (1.0d + vd);
-                if (vol_t2 > combined_t) { combined_t = vol_t2; };
+                    // zbuf stores inv_w; 0 = sky sentinel (infinitely far).
+                    zinv2 = zbuf[pi];
+                    depth = (zinv2 > 0.0d) ? (1.0d / zinv2) : far_z2;
 
-                if (combined_t > 0.001d)
-                {
-                    if (combined_t > 1.0d) { combined_t = 1.0d; };
-                    buf[pi] = color64_lerp(buf[pi], fog_target, combined_t);
+                    atmo_t = (depth - fog_start2) * atmo_range_inv;
+                    combined_t = 0.0d;
+                    if (atmo_t > 0.0d)
+                    {
+                        if (atmo_t > 1.0d) { atmo_t = 1.0d; };
+                        combined_t = atmo_t;
+                    };
+                    vd = vol_density2 * depth;
+                    vol_t2 = vd / (1.0d + vd);
+                    if (vol_t2 > combined_t) { combined_t = vol_t2; };
+
+                    if (combined_t > 0.001d)
+                    {
+                        if (combined_t > 1.0d) { combined_t = 1.0d; };
+                        // Integer blend: avoids color64_lerp's double multiply + pack
+                        t16  = (u64)(combined_t * 65536.0d);
+                        it16 = (u64)65536 - t16;
+                        src  = buf[pi];
+                        r2 = (((src >> 32) & (u64)0xFFFF) * it16 + fr16 * t16) >> 16;
+                        g2 = (((src >> 16) & (u64)0xFFFF) * it16 + fg16 * t16) >> 16;
+                        b2 = (( src        & (u64)0xFFFF) * it16 + fb16 * t16) >> 16;
+                        buf[pi] = (u64)0xFFFF000000000000 | (r2 << 32) | (g2 << 16) | b2;
+                    };
+                    pi++;
+                    col++;
                 };
-                pi += num_threads;
+                row += num_threads;
             };
         }
         elif (ff.mode == R3D_FOGBLEND_ATMO)
         {
-            pi = thread_id;
-            while (pi < total_px)
+            row = thread_id;
+            while (row < sh2)
             {
-                depth = zbuf[pi];
-                if (depth >= 1.0e300) { depth = far_z2; };
-
-                atmo_t = (depth - fog_start2) * atmo_range_inv;
-                if (atmo_t > 0.001d)
+                pi = row * sw2;
+                col = 0;
+                while (col < sw2)
                 {
-                    if (atmo_t > 1.0d) { atmo_t = 1.0d; };
-                    buf[pi] = color64_lerp(buf[pi], fog_target, atmo_t);
+                    // zbuf stores inv_w; 0 = sky sentinel (infinitely far).
+                    zinv2 = zbuf[pi];
+                    depth = (zinv2 > 0.0d) ? (1.0d / zinv2) : far_z2;
+
+                    atmo_t = (depth - fog_start2) * atmo_range_inv;
+                    if (atmo_t > 0.001d)
+                    {
+                        if (atmo_t > 1.0d) { atmo_t = 1.0d; };
+                        t16  = (u64)(atmo_t * 65536.0d);
+                        it16 = (u64)65536 - t16;
+                        src  = buf[pi];
+                        r2 = (((src >> 32) & (u64)0xFFFF) * it16 + fr16 * t16) >> 16;
+                        g2 = (((src >> 16) & (u64)0xFFFF) * it16 + fg16 * t16) >> 16;
+                        b2 = (( src        & (u64)0xFFFF) * it16 + fb16 * t16) >> 16;
+                        buf[pi] = (u64)0xFFFF000000000000 | (r2 << 32) | (g2 << 16) | b2;
+                    };
+                    pi++;
+                    col++;
                 };
-                pi += num_threads;
+                row += num_threads;
             };
         }
         else
         {
             // R3D_FOGBLEND_VOL
-            pi = thread_id;
-            while (pi < total_px)
+            row = thread_id;
+            while (row < sh2)
             {
-                depth = zbuf[pi];
-                if (depth >= 1.0e300) { depth = far_z2; };
-
-                // Fast approx: x/(1+x) ≈ 1-exp(-x)
-                vd = vol_density2 * depth;
-                vol_t2 = vd / (1.0d + vd);
-                if (vol_t2 > 0.001d)
+                pi = row * sw2;
+                col = 0;
+                while (col < sw2)
                 {
-                    if (vol_t2 > 1.0d) { vol_t2 = 1.0d; };
-                    buf[pi] = color64_lerp(buf[pi], fog_target, vol_t2);
+                    // zbuf stores inv_w; 0 = sky sentinel (infinitely far).
+                    zinv2 = zbuf[pi];
+                    depth = (zinv2 > 0.0d) ? (1.0d / zinv2) : far_z2;
+
+                    vd = vol_density2 * depth;
+                    vol_t2 = vd / (1.0d + vd);
+                    if (vol_t2 > 0.001d)
+                    {
+                        if (vol_t2 > 1.0d) { vol_t2 = 1.0d; };
+                        t16  = (u64)(vol_t2 * 65536.0d);
+                        it16 = (u64)65536 - t16;
+                        src  = buf[pi];
+                        r2 = (((src >> 32) & (u64)0xFFFF) * it16 + fr16 * t16) >> 16;
+                        g2 = (((src >> 16) & (u64)0xFFFF) * it16 + fg16 * t16) >> 16;
+                        b2 = (( src        & (u64)0xFFFF) * it16 + fb16 * t16) >> 16;
+                        buf[pi] = (u64)0xFFFF000000000000 | (r2 << 32) | (g2 << 16) | b2;
+                    };
+                    pi++;
+                    col++;
                 };
-                pi += num_threads;
+                row += num_threads;
             };
         };
     };
@@ -3842,9 +4161,11 @@ namespace raycaster
         R3DVolScatterFrame* vf;
         i32    sw2, sh2, sw3, sh3;
         i32    py3, px3, pi3, sy0, sy1, sx0, sx1, srow0, srow1, frow;
+        i32    i00, i10, i01, i11;
         double far_z2;
         double ty, tx, w00, w10, w01, w11;
         double full_d, dd, inv_sigma2, dw00, dw10, dw01, dw11, dw_sum, inv_sum;
+        double zinv3;
         double sr3, sg3, sb4;
         u64    src3, pr3, pg3, pb4;
         double* zbuf;
@@ -3869,7 +4190,7 @@ namespace raycaster
 
         while (py3 < sh3)
         {
-            sy0 = py3 / 2;
+            sy0 = py3 >> 1;  // py3 is always >= 0, so this is exact, same as py3/2
             sy1 = sy0 + 1; if (sy1 >= sh2) { sy1 = sh2 - 1; };
             ty  = (double)(py3 & 1) * 0.5d;
             srow0 = sy0 * sw2;
@@ -3878,38 +4199,58 @@ namespace raycaster
             px3 = 0;
             while (px3 < sw3)
             {
-                sx0 = px3 / 2;
+                sx0 = px3 >> 1;  // px3 is always >= 0, so this is exact, same as px3/2
                 sx1 = sx0 + 1; if (sx1 >= sw2) { sx1 = sw2 - 1; };
                 tx  = (double)(px3 & 1) * 0.5d;
+
+                i00 = srow0 + sx0; i10 = srow0 + sx1;
+                i01 = srow1 + sx0; i11 = srow1 + sx1;
+
+                // Cheap pre-check before paying for the bilateral weight divisions
+                // below: the weighted blend is a convex combination of these 4
+                // corner samples per channel (weights are non-negative and sum to
+                // 1), and every scatter sample is itself non-negative, so if all
+                // 4 corners are already below the contribution threshold on every
+                // channel, the weighted result is guaranteed to be too. Skipping
+                // here always reaches the exact same outcome as computing the
+                // full weighted blend and then failing the threshold check below.
+                if (sbuf_r[i00] <= 0.001d & sbuf_r[i10] <= 0.001d & sbuf_r[i01] <= 0.001d & sbuf_r[i11] <= 0.001d &
+                    sbuf_g[i00] <= 0.001d & sbuf_g[i10] <= 0.001d & sbuf_g[i01] <= 0.001d & sbuf_g[i11] <= 0.001d &
+                    sbuf_b[i00] <= 0.001d & sbuf_b[i10] <= 0.001d & sbuf_b[i01] <= 0.001d & sbuf_b[i11] <= 0.001d)
+                {
+                    px3++;
+                    continue;
+                };
 
                 // Bilinear spatial weights
                 w00 = (1.0d-tx)*(1.0d-ty); w10 = tx*(1.0d-ty);
                 w01 = (1.0d-tx)*ty;         w11 = tx*ty;
 
-                // Full-res pixel depth for bilateral comparison
-                full_d = zbuf[frow + px3];
-                if (full_d >= 1.0e200) { full_d = far_z2; };
+                // Full-res pixel depth for bilateral comparison.
+                // zbuf stores inv_w; convert to depth. 0 = sky, use far_z.
+                zinv3 = zbuf[frow + px3];
+                full_d = (zinv3 > 0.0d) ? (1.0d / zinv3) : far_z2;
 
                 // Depth weights: suppress samples whose depth differs
                 // significantly (across a geometry edge). Sigma ~ 2 units.
                 {
                     inv_sigma2 = 0.25d;
-                    dd = sbuf_d[srow0+sx0] - full_d; dw00 = w00 / (1.0d + dd*dd*inv_sigma2);
-                    dd = sbuf_d[srow0+sx1] - full_d; dw10 = w10 / (1.0d + dd*dd*inv_sigma2);
-                    dd = sbuf_d[srow1+sx0] - full_d; dw01 = w01 / (1.0d + dd*dd*inv_sigma2);
-                    dd = sbuf_d[srow1+sx1] - full_d; dw11 = w11 / (1.0d + dd*dd*inv_sigma2);
+                    dd = sbuf_d[i00] - full_d; dw00 = w00 / (1.0d + dd*dd*inv_sigma2);
+                    dd = sbuf_d[i10] - full_d; dw10 = w10 / (1.0d + dd*dd*inv_sigma2);
+                    dd = sbuf_d[i01] - full_d; dw01 = w01 / (1.0d + dd*dd*inv_sigma2);
+                    dd = sbuf_d[i11] - full_d; dw11 = w11 / (1.0d + dd*dd*inv_sigma2);
                     dw_sum = dw00 + dw10 + dw01 + dw11;
                 };
 
                 if (dw_sum > 0.0001d)
                 {
                     inv_sum = 1.0d / dw_sum;
-                    sr3 = (sbuf_r[srow0+sx0]*dw00 + sbuf_r[srow0+sx1]*dw10 +
-                           sbuf_r[srow1+sx0]*dw01 + sbuf_r[srow1+sx1]*dw11) * inv_sum;
-                    sg3 = (sbuf_g[srow0+sx0]*dw00 + sbuf_g[srow0+sx1]*dw10 +
-                           sbuf_g[srow1+sx0]*dw01 + sbuf_g[srow1+sx1]*dw11) * inv_sum;
-                    sb4 = (sbuf_b[srow0+sx0]*dw00 + sbuf_b[srow0+sx1]*dw10 +
-                           sbuf_b[srow1+sx0]*dw01 + sbuf_b[srow1+sx1]*dw11) * inv_sum;
+                    sr3 = (sbuf_r[i00]*dw00 + sbuf_r[i10]*dw10 +
+                           sbuf_r[i01]*dw01 + sbuf_r[i11]*dw11) * inv_sum;
+                    sg3 = (sbuf_g[i00]*dw00 + sbuf_g[i10]*dw10 +
+                           sbuf_g[i01]*dw01 + sbuf_g[i11]*dw11) * inv_sum;
+                    sb4 = (sbuf_b[i00]*dw00 + sbuf_b[i10]*dw10 +
+                           sbuf_b[i01]*dw01 + sbuf_b[i11]*dw11) * inv_sum;
 
                     if (sr3 > 0.001d | sg3 > 0.001d | sb4 > 0.001d)
                     {
@@ -3935,45 +4276,204 @@ namespace raycaster
                    double*   zbuf) -> void
     {
         i32 i, total_px;
+        u32 tc0, tc1, tc2, tc3, tc4, tc5;
 
         // Reset the per-frame scratch arena — O(chunks) walk, no OS calls.
         arena_reset(@scene.frame_arena);
 
+        tc0 = GetTickCount();
+
         // Clear both buffers at the start of every frame.
-        // buf is zeroed via mem_fill (byte 0 = u64 0 = black).
-        // zbuf is filled with 0x7F: every byte 0x7F gives the double
-        // 1.38e306, a valid positive finite value far beyond any far_z.
         total_px = scene.cam.screen_w * scene.cam.screen_h;
         mem_fill((void*)buf,  (byte)0x00, (size_t)((u64)total_px * 8));
-        mem_fill((void*)zbuf, (byte)0x7F, (size_t)((u64)total_px * 8));
+        mem_fill((void*)zbuf, (byte)0x00, (size_t)((u64)total_px * 8));
+
+        tc1 = GetTickCount();
+        scene.dbg_ms_zbuf_clear = (double)(tc1 - tc0);
 
         if (scene.sky != (RCSky*)0)
         {
             r3d_draw_sky(scene.sky, scene.cam, scene.player, buf);
         };
 
+        tc2 = GetTickCount();
+        scene.dbg_ms_sky = (double)(tc2 - tc1);
+
         if (scene.passes & R3D_PASS_MESHES)
         {
-            // Update per-frame pointers in each slice then wake all workers.
-            // Workers are persistent threads; no OS thread creation this frame.
+            // Lazy-allocate or resize G-buffer when screen dimensions change.
+            {
+                i32 gw, gh;
+                gw = scene.cam.screen_w;
+                gh = scene.cam.screen_h;
+                if (scene.gbuf == (R3DGBufPixel*)0 | scene.gbuf_w != gw | scene.gbuf_h != gh)
+                {
+                    if (scene.gbuf != (R3DGBufPixel*)0) { ffree((u64)scene.gbuf); };
+                    scene.gbuf   = (R3DGBufPixel*)fmalloc((size_t)((u64)gw * (u64)gh * (u64)(sizeof(R3DGBufPixel) / 8)));
+                    scene.gbuf_w = gw;
+                    scene.gbuf_h = gh;
+                };
+            };
+
+            scene.vis_count = 0;
+            {
+                i32 ci;
+                R3DMeshInst* cinst;
+                ci = 0;
+                while (ci < scene.inst_count)
+                {
+                    cinst = scene.insts[ci];
+                    if (cinst != (R3DMeshInst*)0 &
+                        !r3d_inst_cull(cinst, scene.cam))
+                    {
+                        scene.vis_insts[scene.vis_count].inst  = cinst;
+                        scene.vis_insts[scene.vis_count].model =
+                            dmat4_trs(cinst.pos_x, cinst.pos_y, cinst.pos_z,
+                                      cinst.rot_x, cinst.rot_y, cinst.rot_z,
+                                      cinst.scale_x, cinst.scale_y, cinst.scale_z);
+                        scene.vis_count++;
+                        if (scene.vis_count >= scene.vis_cap) { ci = scene.inst_count; continue; };
+                    };
+                    ci++;
+                };
+            };
+
+            // Set counter to num_threads-1 (main thread does last stripe itself).
+            store32(@scene.workers_done, scene.num_threads - 1);
+
+            // Wake workers 0..num_threads-2, then main thread does the last stripe
+            // itself so it never sleeps waiting for work to finish.
             i = 0;
-            while (i < scene.num_threads)
+            while (i < scene.num_threads - 1)
             {
                 scene.work_slices[i].scene = scene;
                 scene.work_slices[i].zbuf  = zbuf;
                 scene.work_slices[i].buf   = buf;
-                scene.work_slices[i].task  = R3D_TASK_MESH;
+                scene.work_slices[i].gbuf  = scene.gbuf;
+                scene.work_slices[i].task  = R3D_TASK_MESH_AND_LIGHTING;
                 semaphore_post(@scene.work_slices[i].wake);
                 i++;
             };
 
-            // Wait for all workers to finish.
-            i = 0;
-            while (i < scene.num_threads)
+            // Main thread does the last thread's stripe inline.
             {
-                semaphore_wait(@scene.work_slices[i].done);
-                i++;
+                u32 tc_geo_split, tc_light_split;
+                i32 main_tid;
+                main_tid = scene.num_threads - 1;
+                scene.work_slices[main_tid].scene = scene;
+                scene.work_slices[main_tid].zbuf  = zbuf;
+                scene.work_slices[main_tid].buf   = buf;
+                scene.work_slices[main_tid].gbuf  = scene.gbuf;
+                arena_reset(scene.work_slices[main_tid].arena);
+                {
+                    i32 vi;
+                    vi = 0;
+                    while (vi < scene.vis_count)
+                    {
+                        r3d_draw_mesh_inst(
+                            scene.vis_insts[vi].inst,
+                            @scene.vis_insts[vi].model,
+                            scene.cam,
+                            scene.palette,
+                            scene.work_slices[main_tid].arena,
+                            zbuf,
+                            scene.gbuf,
+                            main_tid,
+                            scene.num_threads
+                        );
+                        vi++;
+                    };
+                };
+                tc_geo_split = GetTickCount();
+                r3d_lighting_rows(scene, main_tid, scene.num_threads);
+                tc_light_split = GetTickCount();
+                scene.dbg_ms_geo   = (double)(tc_geo_split - tc2);
+                scene.dbg_ms_light = (double)(tc_light_split - tc_geo_split);
             };
+
+            // Single wait: last worker to finish posts frame_done.
+            semaphore_wait(@scene.frame_done);
+
+            // Pre-cull lights against the AABB of visible pixels in world space.
+            // Workers then iterate only active_lights[] instead of all lights.
+            {
+                double wx_min, wx_max, wy_min, wy_max, wz_min, wz_max;
+                double px, py, pz;
+                double lx, ly, lz, max_r, cx, cy, cz, closest_sq;
+                i32 gw, gh, gpi, gtotal, lci;
+                bool first_px;
+                gw      = scene.cam.screen_w;
+                gh      = scene.cam.screen_h;
+                gtotal  = gw * gh;
+                first_px = true;
+                wx_min = 0.0d; wx_max = 0.0d;
+                wy_min = 0.0d; wy_max = 0.0d;
+                wz_min = 0.0d; wz_max = 0.0d;
+
+                // Stride through zbuf to find covered pixels and build world AABB.
+                // Sample every 8th pixel — close enough for light culling.
+                gpi = 0;
+                while (gpi < gtotal)
+                {
+                    if (zbuf[gpi] > RC_EPSILON)
+                    {
+                        px = scene.gbuf[gpi].wx;
+                        py = scene.gbuf[gpi].wy;
+                        pz = scene.gbuf[gpi].wz;
+                        if (first_px)
+                        {
+                            wx_min = px; wx_max = px;
+                            wy_min = py; wy_max = py;
+                            wz_min = pz; wz_max = pz;
+                            first_px = false;
+                        }
+                        else
+                        {
+                            if (px < wx_min) { wx_min = px; } elif (px > wx_max) { wx_max = px; };
+                            if (py < wy_min) { wy_min = py; } elif (py > wy_max) { wy_max = py; };
+                            if (pz < wz_min) { wz_min = pz; } elif (pz > wz_max) { wz_max = pz; };
+                        };
+                    };
+                    gpi += 8;
+                };
+
+                // Build active light list: keep lights whose influence sphere
+                // overlaps the visible AABB.
+                scene.active_light_count = 0;
+                {
+                    lci = 0;
+                    while (lci < scene.light_count)
+                    {
+                        if (scene.lights[lci].kind == R3D_LIGHT_DIR)
+                        {
+                            scene.active_lights[scene.active_light_count] = lci;
+                            scene.active_light_count++;
+                        }
+                        elif (scene.lights[lci].kind == R3D_LIGHT_POINT & !first_px)
+                        {
+                            lx    = scene.lights[lci].pos_x;
+                            ly    = scene.lights[lci].pos_y;
+                            lz    = scene.lights[lci].pos_z;
+                            max_r = scene.lights[lci].max_dist_sq;
+                            // Clamp light pos to AABB, compute squared distance
+                            cx = lx < wx_min ? wx_min : (lx > wx_max ? wx_max : lx);
+                            cy = ly < wy_min ? wy_min : (ly > wy_max ? wy_max : ly);
+                            cz = lz < wz_min ? wz_min : (lz > wz_max ? wz_max : lz);
+                            closest_sq = (lx-cx)*(lx-cx) + (ly-cy)*(ly-cy) + (lz-cz)*(lz-cz);
+                            if (max_r < RC_EPSILON | closest_sq <= max_r)
+                            {
+                                scene.active_lights[scene.active_light_count] = lci;
+                                scene.active_light_count++;
+                            };
+                        };
+                        lci++;
+                    };
+                };
+            };
+
+            tc3 = GetTickCount();
+            scene.dbg_ms_cull = (double)scene.active_light_count;
+            tc4 = tc3;
         };
 
         if ((scene.passes & R3D_PASS_SPRITES) &
@@ -3995,10 +4495,15 @@ namespace raycaster
         // mesh and scatter passes; this pass has no row/column structure, so
         // r3d_fog_blend_rows strides the flat pixel index instead.
         u64 fog_packed2, vol_packed, fog_target;
-        bool has_atmo, has_vol;
+        bool has_atmo, has_vol, run_scatter;
         double atmo_range_inv, fog_start2, vol_density2, far_z2;
-        has_atmo = (scene.fog_end > scene.fog_start);
-        has_vol  = (scene.vol_density > 0.0d);
+        has_atmo    = (scene.fog_end > scene.fog_start);
+        has_vol     = (scene.vol_density > 0.0d);
+        // run_scatter requires vol_density > 0, which already satisfies has_vol,
+        // so run_scatter always implies (has_atmo | has_vol): scatter never needs
+        // to run without fog blend also running this frame. That is what makes
+        // merging their dispatch into a single round below safe.
+        run_scatter = has_vol & (scene.light_count > 0);
 
         if (has_atmo | has_vol)
         {
@@ -4012,11 +4517,18 @@ namespace raycaster
             fog_target     = has_vol ? vol_packed : fog_packed2;
 
             scene.fog_blend.total_px       = total_px;
+            scene.fog_blend.sw             = scene.cam.screen_w;
+            scene.fog_blend.sh             = scene.cam.screen_h;
             scene.fog_blend.atmo_range_inv = atmo_range_inv;
             scene.fog_blend.fog_start      = fog_start2;
             scene.fog_blend.vol_density    = vol_density2;
             scene.fog_blend.far_z          = far_z2;
             scene.fog_blend.fog_target     = fog_target;
+            // Preconvert fog color to integer channels once; avoids
+            // a double multiply per pixel inside the blend loop.
+            scene.fog_blend.fog_r16        = (fog_target >> 32) & (u64)0xFFFF;
+            scene.fog_blend.fog_g16        = (fog_target >> 16) & (u64)0xFFFF;
+            scene.fog_blend.fog_b16        =  fog_target        & (u64)0xFFFF;
             scene.fog_blend.zbuf           = zbuf;
             scene.fog_blend.buf            = buf;
 
@@ -4026,164 +4538,163 @@ namespace raycaster
             elif (has_atmo)         { scene.fog_blend.mode = R3D_FOGBLEND_ATMO; }
             else                    { scene.fog_blend.mode = R3D_FOGBLEND_VOL; };
 
+            // Volumetric in-scattering Pass 1 setup. run_scatter implies we are
+            // already inside the has_atmo|has_vol branch above, so this setup
+            // always has a chance to run before the merged dispatch below.
+            if (run_scatter)
+            {
+                i32 sw3, sh3,
+                    sw2, sh2,
+                    lj,
+                    pt_count;
+                i32[64] pt_idx;
+                double hw3, hh3,
+                       eye_x, eye_y3, eye_z,
+                       tan_hfov3, tan_hfov_h3,
+                       row_rx, row_ry, row_rz,
+                       dcol_x, dcol_y, dcol_z,
+                       drow_x, drow_y, drow_z;
+
+                sw3 = scene.cam.screen_w;
+                sh3 = scene.cam.screen_h;
+                hw3 = (double)sw3 * 0.5d;
+                hh3 = (double)sh3 * 0.5d;
+                eye_x       = scene.cam.eye_x;
+                eye_y3      = scene.cam.eye_y;
+                eye_z       = scene.cam.eye_z;
+                tan_hfov3   = tan(scene.cam.fov_v * 0.5d);
+                tan_hfov_h3 = tan(scene.cam.fov_h * 0.5d);
+
+                sw2 = (sw3 + 1) / 2;
+                sh2 = (sh3 + 1) / 2;
+
+                // Reuse the scatter buffers across frames; only reallocate when the
+                // half-res dimensions actually change (window resize), instead of
+                // fmalloc/ffree of ~4 full half-res double buffers every frame.
+                if (scene.vol_sbuf_w != sw2 | scene.vol_sbuf_h != sh2)
+                {
+                    if (scene.vol_sbuf_r != (double*)0)
+                    {
+                        ffree((u64)scene.vol_sbuf_r);
+                        ffree((u64)scene.vol_sbuf_g);
+                        ffree((u64)scene.vol_sbuf_b);
+                        ffree((u64)scene.vol_sbuf_d);
+                    };
+                    scene.vol_sbuf_r = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+                    scene.vol_sbuf_g = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+                    scene.vol_sbuf_b = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+                    scene.vol_sbuf_d = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
+                    scene.vol_sbuf_w = sw2;
+                    scene.vol_sbuf_h = sh2;
+                };
+
+                pt_count = 0;
+                {
+                    i32 lii;
+                    lii = 0;
+                    while (lii < scene.light_count & pt_count < 64)
+                    {
+                        if (scene.lights[lii].kind == R3D_LIGHT_POINT)
+                        {
+                            scene.vol_scatter.ld_xs[pt_count] = scene.lights[lii].pos_x - eye_x;
+                            scene.vol_scatter.ld_ys[pt_count] = scene.lights[lii].pos_y - eye_y3;
+                            scene.vol_scatter.ld_zs[pt_count] = scene.lights[lii].pos_z - eye_z;
+                            pt_idx[pt_count] = lii;
+                            pt_count++;
+                        };
+                        lii++;
+                    };
+                };
+
+                // Half-res increments
+                dcol_x = scene.cam.right_x * tan_hfov_h3 / hw3 * 2.0d;
+                dcol_y = scene.cam.right_y * tan_hfov_h3 / hw3 * 2.0d;
+                dcol_z = scene.cam.right_z * tan_hfov_h3 / hw3 * 2.0d;
+                drow_x = -scene.cam.up_x * tan_hfov3 / hh3 * 2.0d;
+                drow_y = -scene.cam.up_y * tan_hfov3 / hh3 * 2.0d;
+                drow_z = -scene.cam.up_z * tan_hfov3 / hh3 * 2.0d;
+                row_rx = scene.cam.fwd_x + scene.cam.right_x * (-1.0d) * tan_hfov_h3 + scene.cam.up_x * ( 1.0d) * tan_hfov3;
+                row_ry = scene.cam.fwd_y + scene.cam.right_y * (-1.0d) * tan_hfov_h3 + scene.cam.up_y * ( 1.0d) * tan_hfov3;
+                row_rz = scene.cam.fwd_z + scene.cam.right_z * (-1.0d) * tan_hfov_h3 + scene.cam.up_z * ( 1.0d) * tan_hfov3;
+
+                // Cache per-light color and intensity into shared arrays to avoid
+                // repeated indirect struct-field loads inside each worker's inner loop.
+                {
+                    i32 lci;
+                    double ed_x, ed_y, ed_z, eye_dist_sq2;
+                    lci = 0;
+                    while (lci < pt_count)
+                    {
+                        lj = pt_idx[lci];
+                        scene.vol_scatter.lc_r[lci]   = scene.lights[lj].color_r;
+                        scene.vol_scatter.lc_g[lci]   = scene.lights[lj].color_g;
+                        scene.vol_scatter.lc_b[lci]   = scene.lights[lj].color_b;
+                        scene.vol_scatter.lc_int[lci] = scene.lights[lj].intensity;
+                        // eye_term depends only on light position relative to the
+                        // eye (fixed for the whole frame), never on pixel/ray
+                        // direction, so it belongs here, not in the per-pixel loop.
+                        ed_x = scene.vol_scatter.ld_xs[lci];
+                        ed_y = scene.vol_scatter.ld_ys[lci];
+                        ed_z = scene.vol_scatter.ld_zs[lci];
+                        eye_dist_sq2 = ed_x*ed_x + ed_y*ed_y + ed_z*ed_z;
+                        scene.vol_scatter.lc_eyeterm[lci] = 1.0d / (1.0d + eye_dist_sq2 * 1.0d);
+                        scene.vol_scatter.lc_lensq[lci]   = eye_dist_sq2;
+                        lci++;
+                    };
+                };
+
+                // Publish shared per-frame data for the scatter workers.
+                scene.vol_scatter.sw2         = sw2;
+                scene.vol_scatter.sh2         = sh2;
+                scene.vol_scatter.sw3         = sw3;
+                scene.vol_scatter.sh3         = sh3;
+                scene.vol_scatter.fwd_x       = scene.cam.fwd_x;
+                scene.vol_scatter.fwd_y       = scene.cam.fwd_y;
+                scene.vol_scatter.fwd_z       = scene.cam.fwd_z;
+                scene.vol_scatter.far_z       = scene.cam.far_z;
+                scene.vol_scatter.vol_density = scene.vol_density;
+                scene.vol_scatter.row_rx0     = row_rx;
+                scene.vol_scatter.row_ry0     = row_ry;
+                scene.vol_scatter.row_rz0     = row_rz;
+                scene.vol_scatter.dcol_x      = dcol_x;
+                scene.vol_scatter.dcol_y      = dcol_y;
+                scene.vol_scatter.dcol_z      = dcol_z;
+                scene.vol_scatter.drow_x      = drow_x;
+                scene.vol_scatter.drow_y      = drow_y;
+                scene.vol_scatter.drow_z      = drow_z;
+                scene.vol_scatter.pt_count    = pt_count;
+                scene.vol_scatter.zbuf        = zbuf;
+                scene.vol_scatter.buf         = buf;
+                scene.vol_scatter.sbuf_r      = scene.vol_sbuf_r;
+                scene.vol_scatter.sbuf_g      = scene.vol_sbuf_g;
+                scene.vol_scatter.sbuf_b      = scene.vol_sbuf_b;
+                scene.vol_scatter.sbuf_d      = scene.vol_sbuf_d;
+            };
+
+            // Fog blend and scatter (when run_scatter) write disjoint memory and
+            // share no ordering requirement between each other, so dispatch them
+            // in a single wake/done round instead of two separate round trips
+            // through the worker pool's semaphores.
+            store32(@scene.workers_done, scene.num_threads);
             i = 0;
             while (i < scene.num_threads)
             {
                 scene.work_slices[i].scene = scene;
-                scene.work_slices[i].task  = R3D_TASK_FOGBLEND;
+                scene.work_slices[i].task  = run_scatter ? R3D_TASK_FOGBLEND_VOLSCATTER : R3D_TASK_FOGBLEND;
                 semaphore_post(@scene.work_slices[i].wake);
                 i++;
             };
-
-            i = 0;
-            while (i < scene.num_threads)
-            {
-                semaphore_wait(@scene.work_slices[i].done);
-                i++;
-            };
+            semaphore_wait(@scene.frame_done);
         };
 
-        // Volumetric in-scattering pass: for each pixel, integrate how much
-        // light from each point source scatters into the view ray.
-        // A uniform fog medium scatters light proportional to density and
-        // inversely to distance from the ray to the light.
-        // Key quantity: perpendicular distance from light to view ray.
-        // Rays passing near a light accumulate much more scattered light.
-        //
-        // Pass 1 (the per-pixel x per-light loop, in r3d_vol_scatter_rows) and
-        // Pass 2 (the bilateral upsample, in r3d_vol_upsample_rows) are both
-        // dispatched across the same persistent worker pool used for mesh
-        // rasterization: Pass 1 striped by half-res row, Pass 2 by full-res
-        // row.
-        if (scene.vol_density > 0.0d & scene.light_count > 0)
+        // Pass 2: bilateral upsample of the scatter buffer into the framebuffer.
+        // Must run strictly after fog blend (the glow is meant to add on top of
+        // the fog-tinted image, not be blended underneath it) and after scatter
+        // (sbuf_r/g/b/d must be populated), so unlike fog blend + scatter above,
+        // this one stays its own round.
+        if (run_scatter)
         {
-            i32 sw3, sh3,
-                sw2, sh2,
-                lj,
-                pt_count;
-            i32[64] pt_idx;
-            double hw3, hh3,
-                   eye_x, eye_y3, eye_z,
-                   tan_hfov3, tan_hfov_h3,
-                   row_rx, row_ry, row_rz,
-                   dcol_x, dcol_y, dcol_z,
-                   drow_x, drow_y, drow_z;
-            double* sbuf_r;
-            double* sbuf_g;
-            double* sbuf_b;
-            double* sbuf_d;
-
-            sw3 = scene.cam.screen_w;
-            sh3 = scene.cam.screen_h;
-            hw3 = (double)sw3 * 0.5d;
-            hh3 = (double)sh3 * 0.5d;
-            eye_x       = scene.cam.eye_x;
-            eye_y3      = scene.cam.eye_y;
-            eye_z       = scene.cam.eye_z;
-            tan_hfov3   = tan(scene.cam.fov_v * 0.5d);
-            tan_hfov_h3 = tan(scene.cam.fov_h * 0.5d);
-
-            sw2 = (sw3 + 1) / 2;
-            sh2 = (sh3 + 1) / 2;
-            sbuf_r = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
-            sbuf_g = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
-            sbuf_b = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
-            sbuf_d = (double*)fmalloc((size_t)((u64)(sw2 * sh2) * 8));
-
-            pt_count = 0;
-            {
-                i32 lii;
-                lii = 0;
-                while (lii < scene.light_count & pt_count < 64)
-                {
-                    if (scene.lights[lii].kind == R3D_LIGHT_POINT)
-                    {
-                        scene.vol_scatter.ld_xs[pt_count] = scene.lights[lii].pos_x - eye_x;
-                        scene.vol_scatter.ld_ys[pt_count] = scene.lights[lii].pos_y - eye_y3;
-                        scene.vol_scatter.ld_zs[pt_count] = scene.lights[lii].pos_z - eye_z;
-                        pt_idx[pt_count] = lii;
-                        pt_count++;
-                    };
-                    lii++;
-                };
-            };
-
-            // Half-res increments
-            dcol_x = scene.cam.right_x * tan_hfov_h3 / hw3 * 2.0d;
-            dcol_y = scene.cam.right_y * tan_hfov_h3 / hw3 * 2.0d;
-            dcol_z = scene.cam.right_z * tan_hfov_h3 / hw3 * 2.0d;
-            drow_x = -scene.cam.up_x * tan_hfov3 / hh3 * 2.0d;
-            drow_y = -scene.cam.up_y * tan_hfov3 / hh3 * 2.0d;
-            drow_z = -scene.cam.up_z * tan_hfov3 / hh3 * 2.0d;
-            row_rx = scene.cam.fwd_x + scene.cam.right_x * (-1.0d) * tan_hfov_h3 + scene.cam.up_x * ( 1.0d) * tan_hfov3;
-            row_ry = scene.cam.fwd_y + scene.cam.right_y * (-1.0d) * tan_hfov_h3 + scene.cam.up_y * ( 1.0d) * tan_hfov3;
-            row_rz = scene.cam.fwd_z + scene.cam.right_z * (-1.0d) * tan_hfov_h3 + scene.cam.up_z * ( 1.0d) * tan_hfov3;
-
-            // Cache per-light color and intensity into shared arrays to avoid
-            // repeated indirect struct-field loads inside each worker's inner loop.
-            {
-                i32 lci;
-                lci = 0;
-                while (lci < pt_count)
-                {
-                    lj = pt_idx[lci];
-                    scene.vol_scatter.lc_r[lci]   = scene.lights[lj].color_r;
-                    scene.vol_scatter.lc_g[lci]   = scene.lights[lj].color_g;
-                    scene.vol_scatter.lc_b[lci]   = scene.lights[lj].color_b;
-                    scene.vol_scatter.lc_int[lci] = scene.lights[lj].intensity;
-                    lci++;
-                };
-            };
-
-            // Publish shared per-frame data for the scatter workers.
-            scene.vol_scatter.sw2         = sw2;
-            scene.vol_scatter.sh2         = sh2;
-            scene.vol_scatter.sw3         = sw3;
-            scene.vol_scatter.sh3         = sh3;
-            scene.vol_scatter.fwd_x       = scene.cam.fwd_x;
-            scene.vol_scatter.fwd_y       = scene.cam.fwd_y;
-            scene.vol_scatter.fwd_z       = scene.cam.fwd_z;
-            scene.vol_scatter.far_z       = scene.cam.far_z;
-            scene.vol_scatter.vol_density = scene.vol_density;
-            scene.vol_scatter.row_rx0     = row_rx;
-            scene.vol_scatter.row_ry0     = row_ry;
-            scene.vol_scatter.row_rz0     = row_rz;
-            scene.vol_scatter.dcol_x      = dcol_x;
-            scene.vol_scatter.dcol_y      = dcol_y;
-            scene.vol_scatter.dcol_z      = dcol_z;
-            scene.vol_scatter.drow_x      = drow_x;
-            scene.vol_scatter.drow_y      = drow_y;
-            scene.vol_scatter.drow_z      = drow_z;
-            scene.vol_scatter.pt_count    = pt_count;
-            scene.vol_scatter.zbuf        = zbuf;
-            scene.vol_scatter.buf         = buf;
-            scene.vol_scatter.sbuf_r      = sbuf_r;
-            scene.vol_scatter.sbuf_g      = sbuf_g;
-            scene.vol_scatter.sbuf_b      = sbuf_b;
-            scene.vol_scatter.sbuf_d      = sbuf_d;
-
-            // Run Pass 1 across the persistent worker pool, striped by
-            // half-res row. Reuses the same wake/done round mechanism as
-            // mesh rasterization; the mesh round has already completed by
-            // this point, so zbuf is fully written and safe to read here.
-            i = 0;
-            while (i < scene.num_threads)
-            {
-                scene.work_slices[i].scene = scene;
-                scene.work_slices[i].task  = R3D_TASK_VOLSCATTER;
-                semaphore_post(@scene.work_slices[i].wake);
-                i++;
-            };
-
-            i = 0;
-            while (i < scene.num_threads)
-            {
-                semaphore_wait(@scene.work_slices[i].done);
-                i++;
-            };
-
-            // Pass 2: bilateral upsample, dispatched across the worker pool
-            // the same way as Pass 1. Striped by full-res row.
+            store32(@scene.workers_done, scene.num_threads);
             i = 0;
             while (i < scene.num_threads)
             {
@@ -4192,76 +4703,228 @@ namespace raycaster
                 semaphore_post(@scene.work_slices[i].wake);
                 i++;
             };
+            semaphore_wait(@scene.frame_done);
 
-            i = 0;
-            while (i < scene.num_threads)
-            {
-                semaphore_wait(@scene.work_slices[i].done);
-                i++;
-            };
-
-            ffree((u64)sbuf_r);
-            ffree((u64)sbuf_g);
-            ffree((u64)sbuf_b);
-            ffree((u64)sbuf_d);
+            // sbuf_r/g/b/d are not freed here: they are cached on the scene
+            // (scene.vol_sbuf_*) and reused next frame instead of being
+            // reallocated every frame. They are freed once in r3d_scene_destroy.
         };
 
         if (scene.passes & R3D_PASS_FXAA)
         {
             r3d_fxaa(buf, scene.cam.screen_w, scene.cam.screen_h);
         };
+
+        {
+            u32 tc_end;
+            tc_end = GetTickCount();
+            scene.dbg_ms_fog  = (double)(tc_end - tc4);
+            scene.dbg_ms_fxaa = 0.0d;
+        };
+    };
+
+    // =========================================================================
+    // DEFERRED LIGHTING PASS
+    //
+    // Reads the G-buffer written by the geometry pass and evaluates all
+    // lights per covered pixel. Pixels with zbuf == 0 (sky / no geometry)
+    // are skipped. Each thread owns rows where y % num_threads == thread_id.
+    // =========================================================================
+
+    def r3d_lighting_rows(R3DScene* scene, i32 thread_id, i32 num_threads) -> void
+    {
+        i32     sw, sh, y, x, pi, li, ali;
+        double* zbuf;
+        u64*    buf;
+        R3DGBufPixel* gbuf;
+        u64     albedo;
+        u64     pr, pg, pb;
+        u64     lr16, lg16, lb16;
+        double  lr, lg, lb;
+        double  px_nx, px_ny, px_nz;
+        double  px_wx, px_wy, px_wz;
+        double  ndotl, atten, ldx, ldy, ldz, dist_sq;
+        double  contrib, inv_d, inv_d2;
+        float   finv_d;
+        R3DLight* lights;
+        i32       light_count;
+
+        // Hoist ambient and active light list out of the per-pixel loop.
+        double amb_r, amb_g, amb_b;
+        amb_r       = scene.ambient_r;
+        amb_g       = scene.ambient_g;
+        amb_b       = scene.ambient_b;
+        lights      = scene.lights;
+        light_count = scene.active_light_count;
+
+        sw   = scene.cam.screen_w;
+        sh   = scene.cam.screen_h;
+        gbuf = scene.gbuf;
+        zbuf = scene.work_slices[0].zbuf;
+        buf  = scene.work_slices[0].buf;
+
+        y = thread_id;
+        while (y < sh)
+        {
+            x = 0;
+            while (x < sw)
+            {
+                pi = y * sw + x;
+                if (zbuf[pi] > RC_EPSILON)
+                {
+                    albedo = gbuf[pi].albedo;
+                    px_nx  = gbuf[pi].nx; px_ny = gbuf[pi].ny; px_nz = gbuf[pi].nz;
+                    px_wx  = gbuf[pi].wx; px_wy = gbuf[pi].wy; px_wz = gbuf[pi].wz;
+
+                    // Start with ambient
+                    lr = amb_r; lg = amb_g; lb = amb_b;
+
+                    // Inline light loop — only active (pre-culled) lights
+                    li = 0;
+                    while (li < light_count)
+                    {
+                        ali = scene.active_lights[li];
+                        if (lights[ali].kind == R3D_LIGHT_DIR)
+                        {
+                            ndotl = -(lights[ali].dir_x * px_nx +
+                                       lights[ali].dir_y * px_ny +
+                                       lights[ali].dir_z * px_nz);
+                            if (ndotl > 0.0d)
+                            {
+                                contrib = lights[ali].intensity * ndotl;
+                                if (contrib > 1.0d) { contrib = 1.0d; };
+                                lr += lights[ali].color_r * contrib;
+                                lg += lights[ali].color_g * contrib;
+                                lb += lights[ali].color_b * contrib;
+                            };
+                        }
+                        elif (lights[ali].kind == R3D_LIGHT_POINT)
+                        {
+                            ldx     = lights[ali].pos_x - px_wx;
+                            ldy     = lights[ali].pos_y - px_wy;
+                            ldz     = lights[ali].pos_z - px_wz;
+                            dist_sq = ldx*ldx + ldy*ldy + ldz*ldz;
+
+                            if (lights[ali].max_dist_sq > RC_EPSILON &
+                                dist_sq > lights[ali].max_dist_sq) { li++; continue; };
+
+                            finv_d = fisr((float)dist_sq);
+                            inv_d  = (double)finv_d;
+                            if (inv_d < RC_EPSILON) { li++; continue; };
+
+                            ndotl = (ldx*px_nx + ldy*px_ny + ldz*px_nz) * inv_d;
+                            if (ndotl > 0.0d)
+                            {
+                                inv_d2 = inv_d * inv_d;
+                                atten  = inv_d2 / (lights[ali].atten_const  * inv_d2 +
+                                                   lights[ali].atten_linear * inv_d  +
+                                                   lights[ali].atten_quad);
+                                contrib = lights[ali].intensity * ndotl * atten;
+                                if (contrib > 1.0d) { contrib = 1.0d; };
+                                if (contrib > R3D_LIGHT_CONTRIB_MIN)
+                                {
+                                    lr += lights[ali].color_r * contrib;
+                                    lg += lights[ali].color_g * contrib;
+                                    lb += lights[ali].color_b * contrib;
+                                };
+                            };
+                        };
+                        li++;
+                    };
+
+                    if (lr > 1.0d) { lr = 1.0d; };
+                    if (lg > 1.0d) { lg = 1.0d; };
+                    if (lb > 1.0d) { lb = 1.0d; };
+
+                    lr16 = (u64)(lr * 65536.0d); if (lr16 > (u64)65536) { lr16 = (u64)65536; };
+                    lg16 = (u64)(lg * 65536.0d); if (lg16 > (u64)65536) { lg16 = (u64)65536; };
+                    lb16 = (u64)(lb * 65536.0d); if (lb16 > (u64)65536) { lb16 = (u64)65536; };
+                    pr = (((albedo >> 32) & (u64)0xFFFF) * lr16) >> 16;
+                    pg = (((albedo >> 16) & (u64)0xFFFF) * lg16) >> 16;
+                    pb = (( albedo        & (u64)0xFFFF) * lb16) >> 16;
+                    if (pr > (u64)0xFFFF) { pr = (u64)0xFFFF; };
+                    if (pg > (u64)0xFFFF) { pg = (u64)0xFFFF; };
+                    if (pb > (u64)0xFFFF) { pb = (u64)0xFFFF; };
+                    buf[pi] = (u64)0xFFFF000000000000 | (pr << 32) | (pg << 16) | pb;
+                };
+                x++;
+            };
+            y += num_threads;
+        };
     };
 
     // =========================================================================
     // FXAA  (Fast Approximate Anti-Aliasing)
     //
-    // Single-pass screen-space edge filter.  For each pixel:
-    //   1. Sample a 3x3 luma neighbourhood.
-    //   2. Compute local contrast (max luma - min luma in cross).
-    //   3. Skip pixels below the contrast threshold (interior / sky).
-    //   4. Determine edge orientation (horizontal vs vertical) from the
-    //      Sobel-style luma gradient.
-    //   5. Blend the pixel toward its two neighbours across the edge by
-    //      a factor proportional to the contrast.
+    // Geometric-edge filter using a sustained high-contrast test.
     //
-    // Operates in-place on buf, reading from a scratch copy of the row
-    // above and current row to avoid allocating a full-frame temp buffer.
+    // A geometric silhouette has a LARGE, SUSTAINED cross-edge luma delta
+    // across multiple consecutive pixels along the edge. A checker texture
+    // has large contrast but it alternates direction every pixel AND the
+    // cross-edge delta at adjacent along-edge samples is small (they're
+    // interior to a face, not on the silhouette).
+    //
+    // Algorithm per pixel:
+    //   1. Full-frame luma cache.
+    //   2. 4-tap cross contrast threshold.
+    //   3. Weighted Sobel for edge orientation (H or V).
+    //   4. Compute cross-edge delta at centre.
+    //   5. Sustain check: at ±1 and ±2 along the edge, the cross-edge
+    //      delta must also exceed half the centre delta. This rejects
+    //      isolated checker transitions while passing silhouettes.
+    //   6. Blend toward the cross-edge neighbour. Blend weight is
+    //      proportional to contrast so bright silhouettes blend more.
     // =========================================================================
+
+    #def FXAA_EDGE_THRESHOLD          3277;   // ~5% of 65535 absolute floor
+    #def FXAA_EDGE_THRESHOLD_MIN_DENOM   6;   // relative floor: contrast > luma_max/6
+    #def FXAA_SUSTAIN_DENOM              2;   // along-edge delta must be > centre_delta/2
+    #def FXAA_MAX_BLEND               32768;  // 50% max blend (out of 65536)
 
     def r3d_fxaa(u64* buf, i32 sw, i32 sh) -> void
     {
-        size_t row_bytes;
-        u64*   row_prev;
-        u64*   row_cur;
-        u64*   row_tmp;
+        size_t luma_bytes;
+        u64*   luma;
+        i32    pi, total_px;
 
-        row_bytes = (size_t)((u64)sw * 8);
-        row_prev  = (u64*)fmalloc(row_bytes);
-        row_cur   = (u64*)fmalloc(row_bytes);
+        total_px   = sw * sh;
+        luma_bytes = (size_t)((u64)total_px * 8);
+        luma       = (u64*)fmalloc(luma_bytes);
 
-        i32 x, y;
-        u64 lN, lW, lC, lE, lS;
+        pi = 0;
+        while (pi < total_px) { luma[pi] = color64_luma(buf[pi]); pi++; };
+
+        i32 x, y, row;
+        u64 lNW, lN, lNE;
+        u64 lW,  lC, lE;
+        u64 lSW, lS, lSE;
         u64 luma_min, luma_max, contrast;
-        u64 edge_h, edge_v, blend16, ib16;
-        u64 neighbour_a, neighbour_b, avg_n;
+        u64 edge_h, edge_v;
         u64 fr, fg, fb;
-        x = 0;
-        while (x < sw) { row_prev[x] = buf[x]; x++; };
+        u64 cC, cN;
+        bool is_horiz;
+        i32 nx, ny;
+        u64 centre_delta, half_delta;
+        u64 dA1, dA2, dB1, dB2;
+        bool sustained;
+        u64 blend16, ib16;
 
         y = 1;
         while (y < sh - 1)
         {
-            x = 0;
-            while (x < sw) { row_cur[x] = buf[y * sw + x]; x++; };
-
+            row = y * sw;
             x = 1;
             while (x < sw - 1)
             {
-                lN = color64_luma(row_prev[x]);
-                lW = color64_luma(row_cur[x - 1]);
-                lC = color64_luma(row_cur[x]);
-                lE = color64_luma(row_cur[x + 1]);
-                lS = color64_luma(buf[(y+1)*sw + x]);
+                lC  = luma[row + x];
+                lN  = luma[row - sw + x];
+                lS  = luma[row + sw + x];
+                lW  = luma[row + x - 1];
+                lE  = luma[row + x + 1];
+                lNW = luma[row - sw + x - 1];
+                lNE = luma[row - sw + x + 1];
+                lSW = luma[row + sw + x - 1];
+                lSE = luma[row + sw + x + 1];
 
                 luma_min = lN;
                 if (lW < luma_min) { luma_min = lW; };
@@ -4277,60 +4940,129 @@ namespace raycaster
 
                 contrast = luma_max - luma_min;
 
-                // Skip: contrast too low or below 10% of local max
-                if (contrast < (u64)1310 | contrast * (u64)10 < luma_max)
-                {
-                    x++;
-                    continue;
-                };
+                if (contrast < (u64)FXAA_EDGE_THRESHOLD)                          { x++; continue; };
+                if (contrast * (u64)FXAA_EDGE_THRESHOLD_MIN_DENOM < luma_max)     { x++; continue; };
 
-                edge_h = lN > lS ? lN - lS : lS - lN;
-                edge_v = lW > lE ? lW - lE : lE - lW;
+                // Weighted Sobel orientation
+                edge_h = (lNW > lSW ? lNW - lSW : lSW - lNW)
+                       + (lN  > lS  ? lN  - lS  : lS  - lN ) * (u64)2
+                       + (lNE > lSE ? lNE - lSE : lSE - lNE);
+                edge_v = (lNW > lNE ? lNW - lNE : lNE - lNW)
+                       + (lW  > lE  ? lW  - lE  : lE  - lW ) * (u64)2
+                       + (lSW > lSE ? lSW - lSE : lSE - lSW);
 
-                // blend16 in [0, 49152] (0..75% of 65536)
-                if (luma_max > (u64)0)
+                is_horiz = (edge_h >= edge_v);
+
+                if (is_horiz)
                 {
-                    blend16 = (contrast << 16) / luma_max / 2;
+                    // Cross-edge delta at centre: |N - S|
+                    centre_delta = lN > lS ? lN - lS : lS - lN;
+                    half_delta   = centre_delta / (u64)FXAA_SUSTAIN_DENOM;
+
+                    // Along-edge: cross-edge delta at x+1, x+2, x-1, x-2
+                    if (x + 1 < sw - 1)
+                    {
+                        dA1 = luma[row - sw + x + 1] > luma[row + sw + x + 1]
+                            ? luma[row - sw + x + 1] - luma[row + sw + x + 1]
+                            : luma[row + sw + x + 1] - luma[row - sw + x + 1];
+                    }
+                    else { dA1 = centre_delta; };
+                    if (x + 2 < sw - 1)
+                    {
+                        dA2 = luma[row - sw + x + 2] > luma[row + sw + x + 2]
+                            ? luma[row - sw + x + 2] - luma[row + sw + x + 2]
+                            : luma[row + sw + x + 2] - luma[row - sw + x + 2];
+                    }
+                    else { dA2 = centre_delta; };
+                    if (x - 1 >= 1)
+                    {
+                        dB1 = luma[row - sw + x - 1] > luma[row + sw + x - 1]
+                            ? luma[row - sw + x - 1] - luma[row + sw + x - 1]
+                            : luma[row + sw + x - 1] - luma[row - sw + x - 1];
+                    }
+                    else { dB1 = centre_delta; };
+                    if (x - 2 >= 1)
+                    {
+                        dB2 = luma[row - sw + x - 2] > luma[row + sw + x - 2]
+                            ? luma[row - sw + x - 2] - luma[row + sw + x - 2]
+                            : luma[row + sw + x - 2] - luma[row - sw + x - 2];
+                    }
+                    else { dB2 = centre_delta; };
+
+                    sustained = (dA1 >= half_delta) & (dA2 >= half_delta)
+                              & (dB1 >= half_delta) & (dB2 >= half_delta);
+
+                    if (lN > lS) { ny = y - 1; } else { ny = y + 1; };
+                    nx = x;
                 }
                 else
                 {
-                    blend16 = (u64)0;
+                    // Cross-edge delta at centre: |W - E|
+                    centre_delta = lW > lE ? lW - lE : lE - lW;
+                    half_delta   = centre_delta / (u64)FXAA_SUSTAIN_DENOM;
+
+                    if (y - 1 >= 1)
+                    {
+                        dA1 = luma[(y - 1) * sw + x - 1] > luma[(y - 1) * sw + x + 1]
+                            ? luma[(y - 1) * sw + x - 1] - luma[(y - 1) * sw + x + 1]
+                            : luma[(y - 1) * sw + x + 1] - luma[(y - 1) * sw + x - 1];
+                    }
+                    else { dA1 = centre_delta; };
+                    if (y - 2 >= 1)
+                    {
+                        dA2 = luma[(y - 2) * sw + x - 1] > luma[(y - 2) * sw + x + 1]
+                            ? luma[(y - 2) * sw + x - 1] - luma[(y - 2) * sw + x + 1]
+                            : luma[(y - 2) * sw + x + 1] - luma[(y - 2) * sw + x - 1];
+                    }
+                    else { dA2 = centre_delta; };
+                    if (y + 1 < sh - 1)
+                    {
+                        dB1 = luma[(y + 1) * sw + x - 1] > luma[(y + 1) * sw + x + 1]
+                            ? luma[(y + 1) * sw + x - 1] - luma[(y + 1) * sw + x + 1]
+                            : luma[(y + 1) * sw + x + 1] - luma[(y + 1) * sw + x - 1];
+                    }
+                    else { dB1 = centre_delta; };
+                    if (y + 2 < sh - 1)
+                    {
+                        dB2 = luma[(y + 2) * sw + x - 1] > luma[(y + 2) * sw + x + 1]
+                            ? luma[(y + 2) * sw + x - 1] - luma[(y + 2) * sw + x + 1]
+                            : luma[(y + 2) * sw + x + 1] - luma[(y + 2) * sw + x - 1];
+                    }
+                    else { dB2 = centre_delta; };
+
+                    sustained = (dA1 >= half_delta) & (dA2 >= half_delta)
+                              & (dB1 >= half_delta) & (dB2 >= half_delta);
+
+                    if (lW > lE) { nx = x - 1; } else { nx = x + 1; };
+                    ny = y;
                 };
-                if (blend16 > (u64)49152) { blend16 = (u64)49152; };
 
-                if (edge_h >= edge_v)
+                if (!sustained) { x++; continue; };
+
+                // Blend weight: ramp from 0 at threshold to max over 4x threshold,
+                // so moderate edges blend well and extreme-contrast (backlit) edges
+                // don't over-smear. Clamp to FXAA_MAX_BLEND.
                 {
-                    neighbour_a = row_prev[x];
-                    neighbour_b = buf[(y+1)*sw + x];
-                }
-                else
-                {
-                    neighbour_a = row_cur[x - 1];
-                    neighbour_b = row_cur[x + 1];
+                    u64 excess;
+                    excess   = contrast - (u64)FXAA_EDGE_THRESHOLD;
+                    blend16  = (excess << 16) / ((u64)FXAA_EDGE_THRESHOLD * (u64)4);
+                    if (blend16 > (u64)FXAA_MAX_BLEND) { blend16 = (u64)FXAA_MAX_BLEND; };
                 };
 
-                avg_n = color64_lerp(neighbour_a, neighbour_b, 0.5d);
-
+                cC   = buf[row + x];
+                cN   = buf[ny * sw + nx];
                 ib16 = (u64)65536 - blend16;
-                fr = (((row_cur[x] >> 32) & (u64)0xFFFF) * ib16 + ((avg_n >> 32) & (u64)0xFFFF) * blend16) >> 16;
-                fg = (((row_cur[x] >> 16) & (u64)0xFFFF) * ib16 + ((avg_n >> 16) & (u64)0xFFFF) * blend16) >> 16;
-                fb = (((row_cur[x]      ) & (u64)0xFFFF) * ib16 + ((avg_n      ) & (u64)0xFFFF) * blend16) >> 16;
-                buf[y * sw + x] = (u64)0xFFFF000000000000 | (fr << 32) | (fg << 16) | fb;
+                fr = (((cC >> 32) & (u64)0xFFFF) * ib16 + ((cN >> 32) & (u64)0xFFFF) * blend16) >> 16;
+                fg = (((cC >> 16) & (u64)0xFFFF) * ib16 + ((cN >> 16) & (u64)0xFFFF) * blend16) >> 16;
+                fb = (( cC        & (u64)0xFFFF) * ib16 + ( cN        & (u64)0xFFFF) * blend16) >> 16;
+                buf[row + x] = (u64)0xFFFF000000000000 | (fr << 32) | (fg << 16) | fb;
 
                 x++;
             };
-
-            // Slide row_prev down: swap pointers
-            row_tmp  = row_prev;
-            row_prev = row_cur;
-            row_cur  = row_tmp;
-
             y++;
         };
 
-        ffree((u64)row_prev);
-        ffree((u64)row_cur);
-
+        ffree((u64)luma);
         return;
     };
 
@@ -4371,6 +5103,36 @@ namespace raycaster
         scene.vol_b         = 0.15;
         arena_init(@scene.frame_arena);
 
+        // Half-res scatter buffers are not allocated here; r3d_render
+        // lazily allocates them on the first frame that actually runs the
+        // combined fog+lighting scatter pass, and reuses them thereafter.
+        scene.vol_sbuf_r = (double*)0;
+        scene.vol_sbuf_g = (double*)0;
+        scene.vol_sbuf_b = (double*)0;
+        scene.vol_sbuf_d = (double*)0;
+        scene.vol_sbuf_w = 0;
+        scene.vol_sbuf_h = 0;
+
+        scene.workers_done      = 0;
+        semaphore_init(@scene.frame_done, 0);
+        scene.dbg_ms_zbuf_clear = 0.0d;
+        scene.dbg_ms_sky        = 0.0d;
+        scene.dbg_ms_cull       = 0.0d;
+        scene.dbg_ms_geo        = 0.0d;
+        scene.dbg_ms_light      = 0.0d;
+        scene.dbg_ms_fog        = 0.0d;
+        scene.dbg_ms_fxaa       = 0.0d;
+
+        scene.gbuf   = (R3DGBufPixel*)0;
+        scene.gbuf_w = 0;
+        scene.gbuf_h = 0;
+
+        // Allocate the visible instance list on the heap to avoid a massive
+        // constant aggregate initializer in the emitted IR.
+        scene.vis_insts = (R3DCullEntry*)fmalloc((size_t)((u64)R3D_MAX_INST * (u64)(sizeof(R3DCullEntry) / 8)));
+        scene.vis_count = 0;
+        scene.vis_cap   = R3D_MAX_INST;
+
         // Detect logical core count and initialise per-thread arenas and semaphores,
         // then spawn persistent worker threads that sleep until woken each frame.
         {
@@ -4390,6 +5152,7 @@ namespace raycaster
                 scene.work_slices[ti].num_threads = scene.num_threads;
                 scene.work_slices[ti].arena       = @scene.thread_arenas[ti];
                 scene.work_slices[ti].running     = 1;
+                scene.work_slices[ti].wake_flag   = 0;
                 semaphore_init(@scene.work_slices[ti].wake, 0);
                 semaphore_init(@scene.work_slices[ti].done, 0);
                 thread_create((void*)@r3d_mesh_worker,
@@ -4478,6 +5241,16 @@ namespace raycaster
             ti++;
         };
         arena_destroy(@scene.frame_arena);
+        semaphore_destroy(@scene.frame_done);
+        ffree((u64)scene.vis_insts);
+        // Free G-buffer (null-safe)
+        ffree((u64)scene.gbuf);
+        // Safe even if these were never allocated (scene never ran the
+        // combined fog+lighting pass): ffree no-ops on a null pointer.
+        ffree((u64)scene.vol_sbuf_r);
+        ffree((u64)scene.vol_sbuf_g);
+        ffree((u64)scene.vol_sbuf_b);
+        ffree((u64)scene.vol_sbuf_d);
     };
 
     // =========================================================================
@@ -4525,8 +5298,8 @@ namespace raycaster
         zbytes   = (size_t)(total_px * (i32)(sizeof(double) / 8));
         zbuf     = (double*)fmalloc(zbytes);
 
-        // Fill zbuf with 0x7F sentinel (double 1.38e306, beyond any far_z)
-        mem_fill((void*)zbuf, (byte)0x7F, zbytes);
+        // zbuf stores inv_w per pixel; 0x00 = zero = infinitely far (sky sentinel).
+        mem_fill((void*)zbuf, (byte)0x00, zbytes);
 
         if (rc_scene != (RCScene*)0)
         {
