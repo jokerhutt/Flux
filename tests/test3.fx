@@ -2,6 +2,28 @@
 
 using standard::io::console;
 
+comptime
+{
+    trait Fooable
+    {
+        def foo() -> void;
+    };
+
+    Fooable object Bar
+    {
+        def __init() -> this { return this; };
+        def __expr() -> Bar* { return this; };
+        def __exit() -> void { return void; };
+
+        def foo() -> void { return void; };
+    };
+
+    if (Bar has Fooable)
+    {
+        compiler.io.console.print("Fooable!\n");
+    };
+};
+
 def foo() -> byte*
 {
     return "Hello!";
@@ -21,6 +43,7 @@ def main() -> int
     {
         println("Success 2!");
     };
+
 
     return 0;
 };

@@ -3161,78 +3161,127 @@ class FluxParser:
         """
         interface_def -> 'interface' IDENTIFIER '(' param_list ')' '{' protocol_list '}' ';'
 
-        param_list    -> IDENTIFIER (':' IDENTIFIER)? (',' IDENTIFIER (':' IDENTIFIER)?)*
-        protocol_list -> (IDENTIFIER ':' IDENTIFIER '{' prototype_list '}' ';')*
-        prototype_list -> (function_prototype ';')*
+        param_list    -> IDENTIFIER ':' IDENTIFIER (',' IDENTIFIER ':' IDENTIFIER)*
+        protocol_list -> (protocol_block ';')*
+
+        protocol_block ->
+            IDENTIFIER ':' IDENTIFIER '{' prototype_list '}'         # A : B  CALL_ON
+          | IDENTIFIER '(' IDENTIFIER ')' '{' prototype_list '}'     # B(A)   PASS_INTO
+          | IDENTIFIER '->' IDENTIFIER '{' prototype_list '}'        # A -> B RETURN_TO
+
+        prototype_list -> function_prototype (',' function_prototype)*
         """
-        from fast import InterfaceDef, InterfaceProtocol
+        from fast import InterfaceDef, InterfaceProtocol, ProtocolKind
         tok = self.current_token
         self.consume(TokenType.INTERFACE)
         name = self.consume(TokenType.IDENTIFIER).value
 
-        # Parse parameter list: (A: Readable, B: Writable, C)
+        # Parse parameter list: (A: Readable, B: Writable)
+        # Every parameter MUST have a trait constraint -- bare (A, B) is illegal.
         self.consume(TokenType.LEFT_PAREN)
         params = []
         if not self.expect(TokenType.RIGHT_PAREN):
             param_name = self.consume(TokenType.IDENTIFIER).value
-            trait_name = None
-            if self.expect(TokenType.COLON):
-                self.advance()
-                trait_name = self.consume(TokenType.IDENTIFIER).value
+            if not self.expect(TokenType.COLON):
+                err_tok = self.current_token
+                raise SyntaxError(
+                    f"Interface parameter '{param_name}' must have a trait constraint "
+                    f"(e.g. {param_name}: SomeTrait) [{err_tok.line}:{err_tok.column}]")
+            self.advance()
+            trait_name = self.consume(TokenType.IDENTIFIER).value
             params.append((param_name, trait_name))
             while self.expect(TokenType.COMMA):
                 self.advance()
                 param_name = self.consume(TokenType.IDENTIFIER).value
-                trait_name = None
-                if self.expect(TokenType.COLON):
-                    self.advance()
-                    trait_name = self.consume(TokenType.IDENTIFIER).value
+                if not self.expect(TokenType.COLON):
+                    err_tok = self.current_token
+                    raise SyntaxError(
+                        f"Interface parameter '{param_name}' must have a trait constraint "
+                        f"(e.g. {param_name}: SomeTrait) [{err_tok.line}:{err_tok.column}]")
+                self.advance()
+                trait_name = self.consume(TokenType.IDENTIFIER).value
                 params.append((param_name, trait_name))
         self.consume(TokenType.RIGHT_PAREN)
 
-        # Parse body: { A : B { ... }; ... }
+        # Parse body: { <protocol_block>; ... }
         self.consume(TokenType.LEFT_BRACE)
         protocols = []
         while not self.expect(TokenType.RIGHT_BRACE):
-            caller = self.consume(TokenType.IDENTIFIER).value
-            self.consume(TokenType.COLON)
-            callee = self.consume(TokenType.IDENTIFIER).value
-            self.consume(TokenType.LEFT_BRACE)
-            # Parse bare prototype list: name(params) -> type, name2(...) -> type;  (comma-separated)
-            proto_methods = []
-            while not self.expect(TokenType.RIGHT_BRACE):
-                proto_tok = self.current_token
-                func_name = self.consume(TokenType.IDENTIFIER).value
-                self.consume(TokenType.LEFT_PAREN)
-                sig_params = []
-                if not self.expect(TokenType.RIGHT_PAREN):
-                    p_type = self.type_spec()
-                    p_name = self.consume(TokenType.IDENTIFIER).value
-                    sig_params.append(Parameter(p_name, p_type).set_location(proto_tok.line, proto_tok.column))
-                    while self.expect(TokenType.COMMA):
-                        self.advance()
-                        p_type = self.type_spec()
-                        p_name = self.consume(TokenType.IDENTIFIER).value
-                        sig_params.append(Parameter(p_name, p_type).set_location(proto_tok.line, proto_tok.column))
+            first = self.consume(TokenType.IDENTIFIER).value
+
+            if self.expect(TokenType.COLON):
+                # A : B { ... }  -- CALL_ON (existing)
+                self.advance()
+                callee = self.consume(TokenType.IDENTIFIER).value
+                proto_methods = self._parse_interface_proto_list()
+                protocol = InterfaceProtocol(first, callee, proto_methods, ProtocolKind.CALL_ON)
+
+            elif self.expect(TokenType.LEFT_PAREN):
+                # B(A) { ... }  -- PASS_INTO
+                # first = B (receiver), inside parens = A (provider)
+                self.advance()
+                provider = self.consume(TokenType.IDENTIFIER).value
                 self.consume(TokenType.RIGHT_PAREN)
-                self.consume(TokenType.RETURN_ARROW)
-                ret_type = self.type_spec()
-                proto = FunctionDef(func_name, sig_params, ret_type, Block([]), is_prototype=True)
-                proto.set_location(proto_tok.line, proto_tok.column)
-                proto_methods.append(proto)
-                # Signatures are comma-separated; a trailing comma or closing brace ends the list
-                if self.expect(TokenType.COMMA):
-                    self.advance()
-                else:
-                    break
-            self.consume(TokenType.RIGHT_BRACE)
-            self.consume(TokenType.SEMICOLON)
-            protocol = InterfaceProtocol(caller, callee, proto_methods)
+                proto_methods = self._parse_interface_proto_list()
+                # Store as caller=provider(A), callee=receiver(B): "A provides into B"
+                protocol = InterfaceProtocol(provider, first, proto_methods, ProtocolKind.PASS_INTO)
+
+            elif self.expect(TokenType.RETURN_ARROW):
+                # A -> B { ... }  -- RETURN_TO
+                self.advance()
+                callee = self.consume(TokenType.IDENTIFIER).value
+                proto_methods = self._parse_interface_proto_list()
+                protocol = InterfaceProtocol(first, callee, proto_methods, ProtocolKind.RETURN_TO)
+
+            else:
+                err_tok = self.current_token
+                raise SyntaxError(
+                    f"Expected ':', '(' or '->' in interface protocol block "
+                    f"[{err_tok.line}:{err_tok.column}]")
+
             protocol.set_location(tok.line, tok.column)
             protocols.append(protocol)
+            self.consume(TokenType.SEMICOLON)
+
         self.consume(TokenType.RIGHT_BRACE)
         self.consume(TokenType.SEMICOLON)
         return InterfaceDef(name, params, protocols).set_location(tok.line, tok.column)
+
+    def _parse_interface_proto_list(self) -> list:
+        """
+        Parse the { prototype_list } body shared by all three interface protocol forms.
+        Prototypes are comma-separated bare signatures: name(params) -> type
+        Returns a list of FunctionDef nodes with is_prototype=True.
+        """
+        self.consume(TokenType.LEFT_BRACE)
+        proto_methods = []
+        while not self.expect(TokenType.RIGHT_BRACE):
+            proto_tok = self.current_token
+            func_name = self.consume(TokenType.IDENTIFIER).value
+            self.consume(TokenType.LEFT_PAREN)
+            sig_params = []
+            if not self.expect(TokenType.RIGHT_PAREN):
+                p_type = self.type_spec()
+                p_name = self.consume(TokenType.IDENTIFIER).value
+                sig_params.append(Parameter(p_name, p_type).set_location(proto_tok.line, proto_tok.column))
+                while self.expect(TokenType.COMMA):
+                    self.advance()
+                    p_type = self.type_spec()
+                    p_name = self.consume(TokenType.IDENTIFIER).value
+                    sig_params.append(Parameter(p_name, p_type).set_location(proto_tok.line, proto_tok.column))
+            self.consume(TokenType.RIGHT_PAREN)
+            self.consume(TokenType.RETURN_ARROW)
+            ret_type = self.type_spec()
+            proto = FunctionDef(func_name, sig_params, ret_type, Block([]), is_prototype=True)
+            proto.set_location(proto_tok.line, proto_tok.column)
+            proto_methods.append(proto)
+            # Signatures are comma-separated; a trailing comma or closing brace ends the list
+            if self.expect(TokenType.COMMA):
+                self.advance()
+            else:
+                break
+        self.consume(TokenType.RIGHT_BRACE)
+        return proto_methods
 
     def object_def(self, trait_names: Optional[List[str]] = None) -> Union[ObjectDef, List[ObjectDef]]:
         """
@@ -6098,12 +6147,21 @@ class FluxParser:
         """
         expr = self.chain_expression()
 
-        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN):
+        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN, TokenType.HAS):
             op_tok = self.current_token
             if self.current_token.type == TokenType.IN:
                 self.advance()
                 haystack = self.chain_expression()
                 expr = InExpression(needle=expr, haystack=haystack).set_location(op_tok.line, op_tok.column)
+            elif self.current_token.type == TokenType.HAS:
+                self.advance()
+                # Right-hand side of 'has' must be a plain identifier (trait name)
+                if self.current_token.type != TokenType.IDENTIFIER:
+                    raise SyntaxError(
+                        f"Expected trait name after 'has' [{op_tok.line}:{op_tok.column}]")
+                trait_name = self.current_token.value
+                self.advance()
+                expr = HasExpression(subject=expr, trait_name=trait_name).set_location(op_tok.line, op_tok.column)
             else:
                 if self.current_token.type == TokenType.EQUAL:
                     operator = Operator.EQUAL

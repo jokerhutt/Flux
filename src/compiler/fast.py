@@ -240,6 +240,21 @@ class InExpression(Expression):
 
 
 @dataclass
+class HasExpression(Expression):
+    """
+    Represents the 'expr has TraitName' trait-membership expression.
+    Produces a boolean i1: true if the static type of 'subject' has the
+    named trait in its traits list, false otherwise.
+    The trait_name is always a plain identifier string resolved at compile time.
+    """
+    subject: Expression
+    trait_name: str  # bare trait name, e.g. "Serializable"
+
+    def __repr__(self) -> str:
+        return f"({self.subject} has {self.trait_name})"
+
+
+@dataclass
 class UnaryOp(Expression):
     operator: Operator
     operand: Expression
@@ -1253,12 +1268,23 @@ class TraitDef(ASTNode):
     prototypes: List['FunctionDef'] = field(default_factory=list)
 
 
+# Protocol relationship kinds for interface bodies.
+# CALL_ON  : A : B   -- A may call these methods on B (existing behaviour)
+# PASS_INTO: B(A)    -- return values of these A methods may be passed as args into B
+# RETURN_TO: A -> B  -- these A methods may be called from inside a B method body
+class ProtocolKind(Enum):
+    CALL_ON   = "call_on"
+    PASS_INTO = "pass_into"
+    RETURN_TO = "return_to"
+
+
 # Interface protocol: one directional block inside an interface body (A : B { ... })
 @dataclass
 class InterfaceProtocol(ASTNode):
-    caller: str                    # role name, e.g. "A"
-    callee: str                    # role name, e.g. "B"
+    caller: str                    # role name that initiates / provides, e.g. "A"
+    callee: str                    # role name that receives, e.g. "B"
     methods: List['FunctionDef'] = field(default_factory=list)  # prototypes only
+    kind: ProtocolKind = ProtocolKind.CALL_ON  # relationship kind; defaults to existing behaviour
 
 
 # Interface definition (compile-time only, no IR output)

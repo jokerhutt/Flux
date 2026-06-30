@@ -31,6 +31,8 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [Deferred object cleanup with `defer`](#deferred-object-cleanup-with-defer)
   - [Traits](#traits)
   - [Interfaces](#interfaces)
+    - [Protocol relationship operators](#protocol-relationship-operators)
+    - [Attachment rules](#attachment-rules)
   - [Public/Private with Objects/Structs](#publicprivate-with-objects)
   - [i-Strings and f-Strings](#istrings-and-fstrings)
   - [Pointers](#pointers)
@@ -716,59 +718,122 @@ Drawable object myObj
 
 <a id="interfaces"></a>
 ## **Interfaces**
-Interfaces are a generic way to define how two objects interact.  
-Attaching an interface to an object implicitly attaches traits because you need traits to define an interface.
+Interfaces define how two or more objects interact. Every interface parameter must declare a trait constraint — bare role names without a trait are a compile error.
 
-Here's how an interface is defined and used:
+Attaching an interface to an object implicitly requires both the attached object and any named partner objects to satisfy their respective trait constraints. This is checked at compile time.
+
+### Protocol relationship operators
+
+Three operators may appear inside an interface body, each expressing a different kind of relationship between the two roles:
+
+| Syntax | Meaning |
+|---|---|
+| `A : B { methods }` | A may call these methods on a B instance |
+| `B(A) { methods }` | Return values of these A methods may be passed as arguments into B |
+| `A -> B { methods }` | These A methods may be called from inside a B method body |
+
+All three can coexist in a single interface for the same pair of roles. Each is enforced independently at compile time.
+
+### `A : B` — call permission
+
+The original and most common form. Restricts which methods A may call on B. Once a governed pair exists, calling any unlisted method — even a public one — is a compile-time error.
+
+### `B(A)` — pass-into permission
+
+Controls data flow at call sites. When a return value of an A method is passed directly as an argument to a B method, the compiler checks that the A method is listed in the `B(A)` block. This enforces that only sanctioned values flow across the boundary.
+
 ```
-trait Readable
-{
-    def read(byte*,int)->int,
-        write(byte*,int)->int,
-        flush()->int;
-};
+// OK -- query is listed in the B(A) block
+b.some_func(a.query());
 
-trait Writable
-{
-    def ack()->int;
-};
-
-interface Stream(A: Readable, B: Writable)
-{
-    A : B  // reads as "A can call from B { these functions }"
-    {
-        read(byte*,int)->int,
-        write(byte*,int)->int,
-        flush()->int
-    };
-
-    B : A
-    {
-        ack()->int
-    };
-};
-
-// Does not implicitly have Writable
-object Socket
-{
-    ///...///
-};
-
-// Implicitly has Readable via Stream
-object Pipe
-{
-    ///...///
-} : Stream(this, Socket); // A Socket used by Pipe is expected to have traits Writable
+// Error -- secret is not listed
+b.some_func(a.secret());
 ```
 
-The interface is only attached to the Pipe object.  
-At compile time if Pipe uses a Socket *not* satisfying the trait Writable, this is an error.  
+### `A -> B` — return-to permission
 
-This does not mean you must add Stream to Socket.
-What this does mean is Socket is protected in the event a function was not implemented, and a Pipe object is attempting to use a Socket which *should* have trait Writable, and Socket itself did not satisfy that trait.
+Controls call context. An A method listed in `A -> B` may be called from inside a B method body. Methods not listed cannot be called from inside B, even if they are otherwise public.
 
-Once an interface is attached to an object, method calls between the two parties are restricted to the listed functions only.  
-Calling any unlisted method - even a public one - is a compile-time error.
+```
+// Inside a B method body:
+int val = a.result();   // OK -- result is listed in A -> B
+int val = a.secret();   // Error -- secret is not listed
+```
+
+### Full example
+
+```
+trait Queryable  { def query(byte* sql) -> byte*; };
+trait Connectable { def connect() -> bool, disconnect() -> bool; };
+
+interface Database(A: Connectable, B: Queryable)
+{
+    A : B
+    {
+        connect()    -> bool,
+        disconnect() -> void
+    };
+
+    B(A)
+    {
+        query(byte* sql) -> byte*
+    };
+
+    A -> B
+    {
+        result() -> byte*
+    };
+};
+
+object Client, Store;
+
+object Store
+{
+    def __init() -> this { return this; };
+    def __exit() -> void {};
+    def __expr() -> int { return 0; };
+    def query(byte* sql) -> byte* { return sql; };
+    def disconnect() -> void {};
+
+    def fetch(Client* c) -> byte*
+    {
+        // Allowed: result() is listed in A -> B
+        byte* r = c.result();
+        return r;
+    };
+} : Database(Client, this);
+
+object Client
+{
+    def __init() -> this { return this; };
+    def __exit() -> void {};
+    def __expr() -> int { return 0; };
+    def connect() -> bool { return true; };
+    def disconnect() -> bool { return true; };
+    def result() -> byte* { return "data\0"; };
+} : Database(this, Store);
+
+def main() -> int
+{
+    Client c();
+    Store  s();
+
+    // Allowed: query() is listed in B(A), result() is the A method being passed
+    byte* out = s.query(c.result());
+
+    // Allowed: connect() is listed in A : B
+    c.connect();
+
+    return 0;
+};
+```
+
+### Attachment rules
+
+- An interface may be attached to either or both participants. A single attachment is sufficient to register all protocol rules for the pair.
+- Argument order must match the interface parameter declaration: `Database(Client, this)` binds the first param role to `Client` and the second to `this`.
+- Attaching with the wrong argument order is a compile error if the resulting role bindings violate trait constraints.
+- A partner type named in an attachment (e.g. `Store` in `Database(this, Store)`) is checked against its role's required trait even if it never attaches the interface itself.
 
 ---
 
@@ -3350,7 +3415,7 @@ Yes, you may write an infinite loop at compile time.
 and, as, asm, assert, auto, bool, break, byte, case, catch,
 cdecl, char, comptime, const, constraint, continue, contract, data, def, default, defer,
 deprecate, do, double, elif, else, emitflux, enum, escape, export, extern,
-false, fastcall, float, for, from, global, goto, heap, if, in, inline, int, interface, is,  
+false, fastcall, float, for, from, global, goto, has, heap, if, in, inline, int, interface, is,  
 jump, label, local, long, macro, namespace, noinit, noreturn, not, object,
 operator, or, private, public, register, return, signed, singinit,
 stack, stdcall, struct, switch, this, thiscall, throw, trait, true,

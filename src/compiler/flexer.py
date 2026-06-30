@@ -94,6 +94,7 @@ class TokenType(Enum):
     FROM = auto()         # "        from
     GLOBAL = auto()       # "        global
     GOTO = auto()         # "        goto
+    HAS = auto()          # "        has
     HEAP = auto()         # "        heap
     IF = auto()           # "        if
     IN = auto()           # "        in
@@ -420,6 +421,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.FROM:       'from',
     TokenType.GLOBAL:     'global',
     TokenType.GOTO:       'goto',
+    TokenType.HAS:        'has',
     TokenType.HEAP:       'heap',
     TokenType.IF:         'if',
     TokenType.IN:         'in',
@@ -564,6 +566,7 @@ class FluxLexer:
             'for': TokenType.FOR,
             'global': TokenType.GLOBAL,
             'goto': TokenType.GOTO,
+            'has': TokenType.HAS,
             'heap': TokenType.HEAP,
             'if': TokenType.IF,
             'in': TokenType.IN,

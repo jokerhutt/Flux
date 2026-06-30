@@ -3374,17 +3374,36 @@ class CodegenVisitor:
         if obj_type_name is None:
             raise FluxCodegenError(f"Cannot determine object type for method call: {struct_ty}", node, module)
 
-        # Interface whitelist enforcement: if (caller_type, callee_type) is governed by an
-        # interface, only whitelisted methods may be called.
+        # Interface whitelist enforcement.
+        # Checks are applied in a specific order so that RETURN_TO allowances are
+        # evaluated before CALL_ON restrictions. A method call on an A instance from
+        # inside a B method body may be explicitly permitted by a RETURN_TO block
+        # (A -> B { method }) even though that direction is also governed by a CALL_ON
+        # block (B : A { other_methods }) that does not list it. RETURN_TO takes
+        # precedence: if the method is whitelisted there, the CALL_ON check is skipped.
         _caller_type = getattr(module, '_current_object_name', None)
         if _caller_type is not None and hasattr(module, 'symbol_table'):
-            _whitelist = getattr(module.symbol_table, '_interface_whitelist', {})
-            _key = (_caller_type, obj_type_name)
-            if _key in _whitelist and node.method_name not in _whitelist[_key]:
+            # RETURN_TO check: A -> B { method } -- A methods permitted inside B bodies.
+            # Key is (provider=obj_type_name, consumer=_caller_type).
+            _returnto = getattr(module.symbol_table, '_returnto_whitelist', {})
+            _rkey = (obj_type_name, _caller_type)
+            _returnto_governed = _rkey in _returnto
+            _returnto_allowed  = _returnto_governed and node.method_name in _returnto[_rkey]
+            if _returnto_governed and not _returnto_allowed:
                 raise FluxCodegenError(
-                    f"Interface violation: {_caller_type} is not permitted to call "
-                    f"{node.method_name} from {obj_type_name} "
+                    f"Interface violation: '{obj_type_name}.{node.method_name}' is not permitted "
+                    f"to be called from inside '{_caller_type}' "
                     f"[{node.source_line}:{node.source_col}]", node, module)
+            # CALL_ON check: B : A { method } -- B may call listed methods on A.
+            # Skip when RETURN_TO already explicitly allowed this call.
+            if not _returnto_allowed:
+                _whitelist = getattr(module.symbol_table, '_interface_whitelist', {})
+                _key = (_caller_type, obj_type_name)
+                if _key in _whitelist and node.method_name not in _whitelist[_key]:
+                    raise FluxCodegenError(
+                        f"Interface violation: {_caller_type} is not permitted to call "
+                        f"{node.method_name} from {obj_type_name} "
+                        f"[{node.source_line}:{node.source_col}]", node, module)
         method_func_name = f"{obj_type_name}.{node.method_name}"
         func = module.globals.get(method_func_name)
         # arg_vals built during overload resolution are reused in the emission loop
@@ -3427,6 +3446,34 @@ class CodegenVisitor:
                 entry = module.symbol_table.lookup_variable(arg_expr.name)
                 if entry is not None and entry.type_spec is not None and entry.type_spec.is_local:
                     raise FluxCodegenError(f"Compile error: local variable '{arg_expr.name}' cannot leave its scope via method call", node, module)
+            # PASS_INTO enforcement: B(A) means A method return values may only be passed into B.
+            # When an argument is a method call on an A instance, check _passinto_whitelist[(A, B)].
+            from fast import MethodCall as _MethodCall
+            if isinstance(arg_expr, _MethodCall) and isinstance(arg_expr.object, Identifier):
+                _inner_var = arg_expr.object.name
+                _inner_entry = module.symbol_table.get_llvm_value(_inner_var)
+                if _inner_entry is not None:
+                    _inner_ptr = _inner_entry
+                    _inner_ptr_t = _inner_ptr.type
+                    _inner_type_name = None
+                    if isinstance(_inner_ptr_t, ir.PointerType):
+                        _inner_s = _inner_ptr_t.pointee
+                        if isinstance(_inner_s, ir.PointerType) and isinstance(_inner_s.pointee, ir.IdentifiedStructType):
+                            _inner_s = _inner_s.pointee
+                        if isinstance(_inner_s, ir.IdentifiedStructType):
+                            if hasattr(module, '_struct_types'):
+                                for _tn, _st in module._struct_types.items():
+                                    if _st == _inner_s:
+                                        _inner_type_name = _tn
+                                        break
+                    if _inner_type_name is not None:
+                        _passinto = getattr(module.symbol_table, '_passinto_whitelist', {})
+                        _pkey = (_inner_type_name, obj_type_name)
+                        if _pkey in _passinto and arg_expr.method_name not in _passinto[_pkey]:
+                            raise FluxCodegenError(
+                                f"Interface violation: return value of '{_inner_type_name}.{arg_expr.method_name}' "
+                                f"is not permitted to be passed as an argument into '{obj_type_name}' "
+                                f"[{arg_expr.source_line}:{arg_expr.source_col}]", node, module)
             # Reuse arg values already emitted during overload resolution when available
             # so that each argument expression is only visited once.
             if _prebuilt_arg_vals is not None:
@@ -4897,12 +4944,12 @@ class CodegenVisitor:
             # check (haystack >> pos) & mask == needle  (mask = (1<<N)-1).
             if needle_scalar is None:
                 raise FluxCodegenError(
-                    f"'in' operator: sequence needle not supported for integer haystack ", node, module)
+                    f"in operator: sequence needle not supported for integer haystack ", node, module)
             hay_w = haystack_type.width
             ndl_w = needle_scalar.type.width
             if ndl_w > hay_w:
                 raise FluxCodegenError(
-                    f"'in' operator: needle width {ndl_w} exceeds haystack width {hay_w} ", node, module)
+                    f"in operator: needle width {ndl_w} exceeds haystack width {hay_w} ", node, module)
             # Widen both to the haystack width for uniform arithmetic.
             iHW   = haystack_type
             hay_v = haystack_raw
@@ -5155,6 +5202,61 @@ class CodegenVisitor:
         phi.add_incoming(ir.Constant(i1, 1), found_block)
         phi.add_incoming(ir.Constant(i1, 0), notfound_blk)
         return phi
+
+    def visit_HasExpression(self, node, builder, module):
+        """
+        Codegen for 'expr has TraitName'.
+
+        Resolves entirely at compile time: the static type of 'subject' is
+        looked up in the symbol table, its traits list is checked against
+        'trait_name', and an i1 constant (1 or 0) is returned.
+
+        Errors reported:
+          - subject type cannot be determined -> codegen error
+          - trait_name is not a known trait   -> codegen error
+          - subject type is not an object     -> codegen error
+        """
+        from fast import Identifier as _Ident, MemberAccess as _MemberAccess
+
+        i1 = ir.IntType(1)
+
+        # -- Resolve the static type name of the subject expression -----------
+        obj_type_name = None
+        object_traits = getattr(module, '_object_traits', {})
+
+        if isinstance(node.subject, _Ident):
+            entry = module.symbol_table.lookup_any(node.subject.name)
+            if entry is not None and entry.type_spec is not None:
+                obj_type_name = entry.type_spec.custom_typename
+            # If not found as a variable, check if the identifier is itself an
+            # object type name (e.g. 'Bar has Fooable' where Bar is the type).
+            if obj_type_name is None:
+                if node.subject.name in object_traits:
+                    obj_type_name = node.subject.name
+
+        if obj_type_name is None:
+            raise FluxCodegenError(
+                f"'has': cannot determine static type of subject "
+                f"'{node.subject}' -- only object instances are supported "
+                f"[{node.source_line}:{node.source_col}]", node, module)
+
+        # -- Verify the trait name is known -----------------------------------
+        trait_registry = getattr(module.symbol_table, '_trait_registry', {})
+        if node.trait_name not in trait_registry:
+            raise FluxCodegenError(
+                f"'has': '{node.trait_name}' is not a defined trait "
+                f"[{node.source_line}:{node.source_col}]", node, module)
+
+        # -- Verify the subject type is an object type ------------------------
+        if obj_type_name not in object_traits:
+            raise FluxCodegenError(
+                f"'has': type '{obj_type_name}' is not an object type -- "
+                f"'has' requires an object instance or object type name "
+                f"[{node.source_line}:{node.source_col}]", node, module)
+
+        # -- Evaluate membership and return a constant i1 ---------------------
+        result = node.trait_name in object_traits[obj_type_name]
+        return ir.Constant(i1, int(result))
 
     def visit_ReturnStatement(self, node, builder, module):
         from fast import Identifier, IfExpression
@@ -6159,6 +6261,12 @@ class CodegenVisitor:
         if not hasattr(module, '_object_type_names'):
             module._object_type_names = set()
         module._object_type_names.add(node.name)
+
+        # Record the traits list for this object so that visit_HasExpression
+        # can resolve 'expr has TraitName' at compile time.
+        if not hasattr(module, '_object_traits'):
+            module._object_traits = {}
+        module._object_traits[node.name] = list(node.traits)
 
         # Record private method names for access enforcement.
         # We store the fully-qualified "ObjName.method_name" key (plain, not mangled)
@@ -7860,14 +7968,18 @@ class CodegenVisitor:
                         continue
                     if proto.name not in implemented_names:
                         raise FluxCodegenError(
-                            f"Object '{obj_def.name}' does not implement required function "
-                            f"'{proto.name}' from '{trait_name}' trait "
+                            f"Object {obj_def.name} does not implement required function "
+                            f"{proto.name} from {trait_name} trait "
                             f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
 
         # Pass 3.6: Verify interface compliance and build method whitelists.
-        from fast import InterfaceDef as _InterfaceDef
+        from fast import InterfaceDef as _InterfaceDef, ProtocolKind as _ProtocolKind
         if not hasattr(module.symbol_table, '_interface_whitelist'):
             module.symbol_table._interface_whitelist = {}
+        if not hasattr(module.symbol_table, '_passinto_whitelist'):
+            module.symbol_table._passinto_whitelist = {}
+        if not hasattr(module.symbol_table, '_returnto_whitelist'):
+            module.symbol_table._returnto_whitelist = {}
         for stmt in node.statements:
             obj_def = None
             if isinstance(stmt, _ObjectDef):
@@ -7894,42 +8006,171 @@ class CodegenVisitor:
                 for role_arg, (role_name, _trait) in zip(iface_args, iface_node.params):
                     concrete = obj_def.name if role_arg == 'this' else role_arg
                     role_map[role_name] = concrete
-                # Apply implicit trait constraints derived from interface params
+                # Enforce trait constraint for this object's own role only.
+                # Partner type checking is deferred to pass 3.7 below, after all
+                # objects have been processed and _object_traits is fully populated.
                 for role_name, trait_name in iface_node.params:
                     if trait_name is None:
                         continue
                     concrete = role_map.get(role_name)
-                    if concrete is None:
+                    if concrete is None or concrete != obj_def.name:
                         continue
-                    if concrete == obj_def.name:
-                        # Apply to this object if not already listed
-                        if trait_name not in obj_def.traits:
-                            obj_def.traits.append(trait_name)
-                    # For partner types we record the implicit requirement but cannot enforce
-                    # here without access to their ObjectDef; enforcement is deferred to
-                    # a future pass when partner ObjectDefs are available in the statement list.
-                # Pre-register ALL ordered pairs of concrete types as empty sets
-                # so any cross-call not explicitly whitelisted is blocked.
-                # Without this, an ungoverned direction has no key and bypasses
-                # the check in visit_MethodCall entirely.
-                _concrete_types = list(role_map.values())
-                for _a in _concrete_types:
-                    for _b in _concrete_types:
-                        if _a != _b:
-                            _pair = (_a, _b)
-                            if _pair not in module.symbol_table._interface_whitelist:
-                                module.symbol_table._interface_whitelist[_pair] = set()
-                # Build call whitelist for each protocol block
+                    # Apply to this object if not already listed
+                    if trait_name not in obj_def.traits:
+                        obj_def.traits.append(trait_name)
+                        # Keep _object_traits in sync so that visit_HasExpression
+                        # sees interface-implied traits when evaluating method bodies
+                        # in Pass 4.
+                        if hasattr(module, '_object_traits'):
+                            module._object_traits.setdefault(obj_def.name, [])
+                            if trait_name not in module._object_traits[obj_def.name]:
+                                module._object_traits[obj_def.name].append(trait_name)
+                        # This trait was not present on the object before the interface
+                        # attachment, so pass 3.5 (which already ran) never checked it.
+                        # Run the same function-implementation compliance check here.
+                        required = module.symbol_table._trait_registry.get(trait_name)
+                        if required is None:
+                            raise FluxCodegenError(
+                                f"Trait {trait_name} required by interface {iface_name} "
+                                f"for parameter {role_name} is not defined "
+                                f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                        implemented_names = {m.name for m in obj_def.methods}
+                        for proto in required:
+                            if getattr(proto, '_is_trait_template_proto', False):
+                                continue
+                            if proto.name not in implemented_names:
+                                raise FluxCodegenError(
+                                    f"Object {obj_def.name} does not implement required function "
+                                    f"{proto.name} from {trait_name} trait "
+                                    f"(required by interface {iface_name} for parameter {role_name}) "
+                                    f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                # Pre-register governed pairs as empty sets so that any call in a
+                # governed direction that is not explicitly whitelisted is blocked.
+                # Critically: only register a pair in a given whitelist if that
+                # interface actually has a protocol block of that kind for that pair.
+                # Pre-registering ALL pairs in ALL whitelists would cause directions
+                # governed only by RETURN_TO to be incorrectly blocked by the CALL_ON
+                # check (and vice versa) because the empty set would match first.
+                for protocol in iface_node.protocols:
+                    _pc = role_map.get(protocol.caller)
+                    _pe = role_map.get(protocol.callee)
+                    if _pc is None or _pe is None:
+                        continue
+                    _ppair = (_pc, _pe)
+                    _kind = getattr(protocol, 'kind', _ProtocolKind.CALL_ON)
+                    if _kind == _ProtocolKind.CALL_ON:
+                        if _ppair not in module.symbol_table._interface_whitelist:
+                            module.symbol_table._interface_whitelist[_ppair] = set()
+                    elif _kind == _ProtocolKind.PASS_INTO:
+                        if _ppair not in module.symbol_table._passinto_whitelist:
+                            module.symbol_table._passinto_whitelist[_ppair] = set()
+                    elif _kind == _ProtocolKind.RETURN_TO:
+                        if _ppair not in module.symbol_table._returnto_whitelist:
+                            module.symbol_table._returnto_whitelist[_ppair] = set()
+                # Build whitelists for each protocol block, dispatching on kind
                 for protocol in iface_node.protocols:
                     caller_concrete = role_map.get(protocol.caller)
                     callee_concrete = role_map.get(protocol.callee)
                     if caller_concrete is None or callee_concrete is None:
                         continue
                     key = (caller_concrete, callee_concrete)
-                    if key not in module.symbol_table._interface_whitelist:
-                        module.symbol_table._interface_whitelist[key] = set()
-                    for proto in protocol.methods:
-                        module.symbol_table._interface_whitelist[key].add(proto.name)
+                    _kind = getattr(protocol, 'kind', _ProtocolKind.CALL_ON)
+                    if _kind == _ProtocolKind.CALL_ON:
+                        if key not in module.symbol_table._interface_whitelist:
+                            module.symbol_table._interface_whitelist[key] = set()
+                        for proto in protocol.methods:
+                            module.symbol_table._interface_whitelist[key].add(proto.name)
+                    elif _kind == _ProtocolKind.PASS_INTO:
+                        if key not in module.symbol_table._passinto_whitelist:
+                            module.symbol_table._passinto_whitelist[key] = set()
+                        for proto in protocol.methods:
+                            module.symbol_table._passinto_whitelist[key].add(proto.name)
+                    elif _kind == _ProtocolKind.RETURN_TO:
+                        if key not in module.symbol_table._returnto_whitelist:
+                            module.symbol_table._returnto_whitelist[key] = set()
+                        for proto in protocol.methods:
+                            module.symbol_table._returnto_whitelist[key].add(proto.name)
+
+        # Pass 3.7: Verify partner trait constraints now that _object_traits is fully
+        # populated for all objects. This is separate from pass 3.6 because a partner
+        # type named in an interface attachment may be defined after the attaching object
+        # in the source, so its traits would not yet be in _object_traits during 3.6.
+
+        # Build a name -> ObjectDef lookup so partner checks can inspect the partner's
+        # actual method list, not just whatever traits happen to already be recorded.
+        _all_obj_defs = {}
+        for stmt in node.statements:
+            _od = None
+            if isinstance(stmt, _ObjectDef):
+                _od = stmt
+            elif isinstance(stmt, _ObjectDefStatement):
+                _od = stmt.object_def
+            if _od is not None:
+                _all_obj_defs[_od.name] = _od
+
+        for stmt in node.statements:
+            obj_def = None
+            if isinstance(stmt, _ObjectDef):
+                obj_def = stmt
+            elif isinstance(stmt, _ObjectDefStatement):
+                obj_def = stmt.object_def
+            if obj_def is None or not getattr(obj_def, 'interfaces', None):
+                continue
+            if getattr(obj_def, 'template_params', None):
+                continue
+            for (iface_name, iface_args) in obj_def.interfaces:
+                iface_node = module.symbol_table._interface_registry.get(iface_name)
+                if iface_node is None:
+                    continue
+                if len(iface_args) != len(iface_node.params):
+                    continue
+                role_map = {}
+                for role_arg, (role_name, _trait) in zip(iface_args, iface_node.params):
+                    role_map[role_name] = obj_def.name if role_arg == 'this' else role_arg
+                for role_name, trait_name in iface_node.params:
+                    if trait_name is None:
+                        raise FluxCodegenError(
+                            f"Interface {iface_name}: parameter {role_name} has no trait "
+                            f"constraint -- all interface parameters must declare a trait "
+                            f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                    concrete = role_map.get(role_name)
+                    if concrete is None or concrete == obj_def.name:
+                        continue
+                    # Partner type: verify it satisfies the required trait, both that
+                    # the trait is recorded and that the required functions are actually
+                    # implemented, regardless of whether the partner's own pass 3.6 walk
+                    # already recorded this trait (it may not have, if the partner never
+                    # attaches the interface itself and is only ever named as a partner).
+                    required = module.symbol_table._trait_registry.get(trait_name)
+                    if required is None:
+                        raise FluxCodegenError(
+                            f"Trait {trait_name} required by interface {iface_name} "
+                            f"for convert_argument_to_parameter_type {role_name} is not defined "
+                            f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                    _partner_def = _all_obj_defs.get(concrete)
+                    if _partner_def is None:
+                        raise FluxCodegenError(
+                            f"Interface {iface_name}: parameter {role_name} is bound to "
+                            f"{concrete}, which is not a known object "
+                            f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                    _implemented_names = {m.name for m in _partner_def.methods}
+                    for proto in required:
+                        if getattr(proto, '_is_trait_template_proto', False):
+                            continue
+                        if proto.name not in _implemented_names:
+                            raise FluxCodegenError(
+                                f"Object {concrete} does not implement required function "
+                                f"{proto.name} from {trait_name} trait "
+                                f"(required by interface {iface_name} for parameter {role_name}) "
+                                f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
+                    # Also keep _object_traits in sync for the partner so that other
+                    # consumers of that map (e.g. visit_HasExpression) see this trait.
+                    if hasattr(module, '_object_traits'):
+                        module._object_traits.setdefault(concrete, [])
+                        if trait_name not in module._object_traits[concrete]:
+                            module._object_traits[concrete].append(trait_name)
+                        if trait_name not in _partner_def.traits:
+                            _partner_def.traits.append(trait_name)
 
         # Pass 4: Re-emit object method bodies that were skipped or partially emitted
         # during the pre-pass (e.g. because using-namespace functions such as println()
@@ -8223,7 +8464,7 @@ class CodegenVisitor:
         parser-level error; this visitor should never be reached directly.
         """
         raise FluxCodegenError(
-            "'emitflux' encountered outside a 'comptime' block during codegen",
+            "emitflux encountered outside a comptime block during code generation",
             node, module
         )
 

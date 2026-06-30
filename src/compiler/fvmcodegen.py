@@ -28,6 +28,7 @@ from fast import (
     AddressOf, CastExpression, TypeConvertExpression,
     PointerDeref,
     InExpression,
+    HasExpression,
     SizeOf,
     AlignOf,
     TypeOf,
@@ -217,6 +218,20 @@ class FVMCodegen:
         # Built in _visit_object_def when processing interface annotations on objects.
         # Enforced in _visit_method_call, mirroring fcodegen's pass 3.6 + visit_MethodCall check.
         self._interface_whitelist: dict = {}
+        # PASS_INTO whitelist: (provider_type, receiver_type) -> set of method names
+        # whose return values may be passed as arguments into receiver_type methods.
+        # Mirrors fcodegen._passinto_whitelist built in pass 3.6.
+        self._passinto_whitelist: dict = {}
+        # RETURN_TO whitelist: (provider_type, consumer_type) -> set of method names
+        # that may be called from inside consumer_type method bodies.
+        # Mirrors fcodegen._returnto_whitelist built in pass 3.6.
+        self._returnto_whitelist: dict = {}
+        # Trait registry: trait name -> list of prototype FunctionDef nodes.
+        # Mirrors module.symbol_table._trait_registry populated by visit_TraitDef.
+        self._trait_registry: dict = {}
+        # Object traits map: object type name -> list of trait name strings.
+        # Mirrors module._object_traits populated by visit_ObjectDef.
+        self._object_traits: dict = {}
         # Name of the object type whose method body is currently being compiled.
         # Set/cleared in _visit_object_def per method, used by _visit_method_call to
         # identify the caller type for whitelist checks (mirrors module._current_object_name).
@@ -390,6 +405,11 @@ class FVMCodegen:
             self._object_type_names = set()
         self._object_type_names.add(node.name)
 
+        # Record the traits list for this object so that _visit_has_expression
+        # can resolve 'expr has TraitName' at compile time.
+        # Mirrors fcodegen.py's visit_ObjectDef storing into module._object_traits.
+        self._object_traits[node.name] = list(node.traits)
+
         # Register a StructLayout for this object so STRUCT_NEW can find it.
         # Members map directly to layout fields; objects with no data members
         # get an empty layout (total_size=0). This mirrors how visit_ComptimeBlock
@@ -410,9 +430,9 @@ class FVMCodegen:
         self._struct_layouts[node.name] = _SL(
             name=node.name, fields=fields, total_size=offset)
 
-        # Build interface whitelist BEFORE compiling method bodies so that
-        # _visit_method_call can enforce it during codegen of those bodies.
-        # (If built after, the whitelist is empty when foo's fn_cg runs.)
+        # Build interface whitelists BEFORE compiling method bodies so that
+        # _visit_method_call can enforce them during codegen of those bodies.
+        # (If built after, the whitelists are empty when fn_cg runs.)
         for (iface_name, iface_args) in getattr(node, 'interfaces', None) or []:
             iface_node = self._interface_registry.get(iface_name)
             if iface_node is None:
@@ -422,23 +442,104 @@ class FVMCodegen:
             role_map = {}
             for role_arg, (role_name, _trait) in zip(iface_args, iface_node.params):
                 role_map[role_name] = node.name if role_arg == 'this' else role_arg
-            concrete_types = list(role_map.values())
-            for _a in concrete_types:
-                for _b in concrete_types:
-                    if _a != _b:
-                        _pair = (_a, _b)
-                        if _pair not in self._interface_whitelist:
-                            self._interface_whitelist[_pair] = set()
+            # Enforce trait constraints for both this object's own role and any
+            # partner roles, mirroring fcodegen.py's pass 3.6 / pass 3.7 split but
+            # collapsed into one step since the VM compiles objects as encountered
+            # rather than in discrete whole-program passes. Look up partner ObjectDef
+            # nodes from self._program_statements so their actual method lists can
+            # be checked regardless of source order.
+            from fast import ObjectDef as _ObjectDef, ObjectDefStatement as _ObjectDefStatement
+            _all_obj_defs = {}
+            for _stmt in self._program_statements:
+                _od = None
+                if isinstance(_stmt, _ObjectDef):
+                    _od = _stmt
+                elif isinstance(_stmt, _ObjectDefStatement):
+                    _od = _stmt.object_def
+                if _od is not None:
+                    _all_obj_defs[_od.name] = _od
+            for role_name, trait_name in iface_node.params:
+                if trait_name is None:
+                    raise FVMCodegenError(
+                        f"Interface {iface_name}: parameter {role_name} has no trait "
+                        f"constraint -- all interface parameters must declare a trait",
+                        node)
+                concrete = role_map.get(role_name)
+                if concrete is None:
+                    continue
+                required = self._trait_registry.get(trait_name)
+                if required is None:
+                    raise FVMCodegenError(
+                        f"Trait {trait_name} required by interface {iface_name} "
+                        f"for role {role_name} is not defined",
+                        node)
+                if concrete == node.name:
+                    _implemented_names = {m.name for m in node.methods}
+                    _target_def = node
+                else:
+                    _target_def = _all_obj_defs.get(concrete)
+                    if _target_def is None:
+                        raise FVMCodegenError(
+                            f"Interface {iface_name}: role {role_name} is bound to "
+                            f"{concrete}, which is not a known object",
+                            node)
+                    _implemented_names = {m.name for m in _target_def.methods}
+                for proto in required:
+                    if getattr(proto, '_is_trait_template_proto', False):
+                        continue
+                    if proto.name not in _implemented_names:
+                        raise FVMCodegenError(
+                            f"Object {concrete} does not implement required function "
+                            f"{proto.name} from {trait_name} trait "
+                            f"(required by interface {iface_name} for role {role_name})",
+                            node)
+                # Keep _object_traits in sync for whichever concrete type this is.
+                self._object_traits.setdefault(concrete, [])
+                if trait_name not in self._object_traits[concrete]:
+                    self._object_traits[concrete].append(trait_name)
+            # Pre-register governed pairs as empty sets per kind. Only register a
+            # pair in a given whitelist if the interface has a protocol of that kind
+            # for that pair -- pre-registering all pairs in all whitelists would cause
+            # directions governed only by RETURN_TO to be blocked by the CALL_ON check.
+            from fast import ProtocolKind as _ProtocolKind
+            for protocol in iface_node.protocols:
+                _pc = role_map.get(protocol.caller)
+                _pe = role_map.get(protocol.callee)
+                if _pc is None or _pe is None:
+                    continue
+                _ppair = (_pc, _pe)
+                _kind = getattr(protocol, 'kind', _ProtocolKind.CALL_ON)
+                if _kind == _ProtocolKind.CALL_ON:
+                    if _ppair not in self._interface_whitelist:
+                        self._interface_whitelist[_ppair] = set()
+                elif _kind == _ProtocolKind.PASS_INTO:
+                    if _ppair not in self._passinto_whitelist:
+                        self._passinto_whitelist[_ppair] = set()
+                elif _kind == _ProtocolKind.RETURN_TO:
+                    if _ppair not in self._returnto_whitelist:
+                        self._returnto_whitelist[_ppair] = set()
             for protocol in iface_node.protocols:
                 caller_concrete = role_map.get(protocol.caller)
                 callee_concrete = role_map.get(protocol.callee)
                 if caller_concrete is None or callee_concrete is None:
                     continue
                 key = (caller_concrete, callee_concrete)
-                if key not in self._interface_whitelist:
-                    self._interface_whitelist[key] = set()
-                for proto in protocol.methods:
-                    self._interface_whitelist[key].add(proto.name)
+                _kind = getattr(protocol, 'kind', _ProtocolKind.CALL_ON)
+                if _kind == _ProtocolKind.CALL_ON:
+                    if key not in self._interface_whitelist:
+                        self._interface_whitelist[key] = set()
+                    for proto in protocol.methods:
+                        self._interface_whitelist[key].add(proto.name)
+                elif _kind == _ProtocolKind.PASS_INTO:
+                    if key not in self._passinto_whitelist:
+                        self._passinto_whitelist[key] = set()
+                    for proto in protocol.methods:
+                        self._passinto_whitelist[key].add(proto.name)
+                elif _kind == _ProtocolKind.RETURN_TO:
+                    if key not in self._returnto_whitelist:
+                        self._returnto_whitelist[key] = set()
+                    for proto in protocol.methods:
+                        self._returnto_whitelist[key].add(proto.name)
 
         for method in node.methods:
             # Skip forward declarations (no body)
@@ -460,7 +561,13 @@ class FVMCodegen:
             # whitelists for calls made from inside this method body.
             fn_cg._interface_registry  = self._interface_registry
             fn_cg._interface_whitelist = self._interface_whitelist
+            fn_cg._passinto_whitelist  = self._passinto_whitelist
+            fn_cg._returnto_whitelist  = self._returnto_whitelist
             fn_cg._current_object_name = node.name  # mirrors module._current_object_name
+            # Propagate trait/object-trait data so _visit_has_expression works
+            # inside method bodies. Mirrors fcodegen's module._object_traits.
+            fn_cg._trait_registry  = self._trait_registry
+            fn_cg._object_traits   = dict(self._object_traits)
 
             # slot 0: 'this' -- the struct value, same as fcodegen's func.args[0]
             fn_cg._alloc_local('this')
@@ -752,7 +859,11 @@ class FVMCodegen:
         elif t is ContractDef:           pass  # compile-time only; body already inlined into annotated functions by the parser, matches fcodegen.py's visit_ContractDef
         elif t is ObjectDef:             self._visit_object_def(node)
         elif t is ObjectDefStatement:    self._visit_object_def(node.object_def)
-        elif t is TraitDef:              pass  # symbol-table only, no VM bytecode; mirrors fcodegen's visit_TraitDef
+        elif t is TraitDef:
+            # Register the trait so _visit_has_expression can verify trait names.
+            # Mirrors fcodegen.py's visit_TraitDef storing into
+            # module.symbol_table._trait_registry.
+            self._trait_registry[node.name] = node.prototypes
         elif t is InterfaceDef:          self._interface_registry[node.name] = node
         elif t is DeprecateStatement:    self._visit_deprecate(node)
         elif t is AssertStatement:       self._visit_assert(node)
@@ -1247,6 +1358,7 @@ class FVMCodegen:
         elif t is TypeOf:              return self._visit_typeof(node)
         elif t is EndianOf:            return self._visit_endianof(node)
         elif t is InExpression:        return self._visit_in_expression(node)
+        elif t is HasExpression:       return self._visit_has_expression(node)
         elif t is CastExpression:      return self._visit_cast(node)
         elif t is TypeConvertExpression: return self._visit_cast(node)
         elif t is InlineAsm:           return self._visit_inline_asm(node)
@@ -1849,6 +1961,55 @@ class FVMCodegen:
         self._emit(_instr(Op.LOCAL_GET, result_slot))
         return True
 
+    def _visit_has_expression(self, node: HasExpression) -> bool:
+        """
+        'expr has TraitName' -- trait membership check.
+
+        Resolves entirely at compile time: the static type of 'subject' is
+        looked up in _object_traits, its traits list is checked against
+        'trait_name', and a BOOL constant (1 or 0) is pushed onto the stack.
+
+        Mirrors fcodegen.py's visit_HasExpression exactly.
+        """
+        # -- Resolve the static type name of the subject ----------------------
+        obj_type_name = None
+
+        if isinstance(node.subject, Identifier):
+            # Check if the identifier is a local variable with a known type
+            obj_type_name = self._local_types.get(node.subject.name)
+            # If not a variable, check if the identifier is itself an object
+            # type name (e.g. 'Bar has Fooable' where Bar is the type directly).
+            if obj_type_name is None:
+                if node.subject.name in self._object_traits:
+                    obj_type_name = node.subject.name
+
+        if obj_type_name is None:
+            raise FVMCodegenError(
+                f"'has': cannot determine static type of subject "
+                f"'{node.subject}' -- only object instances or object type "
+                f"names are supported [{node.source_line}:{node.source_col}]",
+                node)
+
+        # -- Verify the trait name is known -----------------------------------
+        if node.trait_name not in self._trait_registry:
+            raise FVMCodegenError(
+                f"'has': '{node.trait_name}' is not a defined trait "
+                f"[{node.source_line}:{node.source_col}]",
+                node)
+
+        # -- Verify the subject type is an object type ------------------------
+        if obj_type_name not in self._object_traits:
+            raise FVMCodegenError(
+                f"'has': type '{obj_type_name}' is not an object type -- "
+                f"'has' requires an object instance or object type name "
+                f"[{node.source_line}:{node.source_col}]",
+                node)
+
+        # -- Push constant BOOL result ----------------------------------------
+        result = int(node.trait_name in self._object_traits[obj_type_name])
+        self._emit(_instr(Op.PUSH, Val(TTag.BOOL, result)))
+        return True
+
     def _visit_pointer_deref(self, node: PointerDeref) -> bool:
         """
         *ptr -- dereference a VM stack pointer.
@@ -2153,19 +2314,49 @@ class FVMCodegen:
                         obj_method_key in self.compiled_functions or
                         obj_method_key in self._known_functions):
                     recv_name = node.object.name
-                    # Interface whitelist enforcement: if the caller type and callee
-                    # type are governed by an interface, only whitelisted methods may
-                    # be called. Mirrors fcodegen.py's visit_MethodCall check.
+                    # Interface enforcement. RETURN_TO is checked first because a method
+                    # permitted by a RETURN_TO block (A -> B { method }) must not be
+                    # blocked by a CALL_ON block (B : A { other }) that does not list it.
                     caller_type = getattr(self, '_current_object_name', None)
                     if caller_type is not None:
-                        _key = (caller_type, type_name)
-                        _whitelist = getattr(self, '_interface_whitelist', {})
-                        if _key in _whitelist and node.method_name not in _whitelist[_key]:
+                        # RETURN_TO check: (provider=type_name, consumer=caller_type)
+                        _returnto = getattr(self, '_returnto_whitelist', {})
+                        _rkey = (type_name, caller_type)
+                        _returnto_governed = _rkey in _returnto
+                        _returnto_allowed  = _returnto_governed and node.method_name in _returnto[_rkey]
+                        if _returnto_governed and not _returnto_allowed:
                             raise FVMCodegenError(
-                                f"Interface violation: '{caller_type}' is not permitted to "
-                                f"call '{node.method_name}' from '{type_name}'",
+                                f"Interface violation: {type_name}.{node.method_name} is not "
+                                f"permitted to be called from inside {caller_type}",
                                 node
                             )
+                        # CALL_ON check: skip when RETURN_TO already allowed this call.
+                        if not _returnto_allowed:
+                            _key = (caller_type, type_name)
+                            _whitelist = getattr(self, '_interface_whitelist', {})
+                            if _key in _whitelist and node.method_name not in _whitelist[_key]:
+                                raise FVMCodegenError(
+                                    f"Interface violation: {caller_type} is not permitted to "
+                                    f"call {node.method_name} from {type_name}",
+                                    node
+                                )
+                    # PASS_INTO enforcement: B(A) means A method return values may only be
+                    # passed as arguments into B. Check each argument that is itself a method
+                    # call on a known object type against _passinto_whitelist[(A, B)].
+                    _passinto = getattr(self, '_passinto_whitelist', {})
+                    for _arg in node.arguments:
+                        if (isinstance(_arg, MethodCall) and
+                                isinstance(_arg.object, Identifier) and
+                                _arg.object.name in self._local_types):
+                            _inner_type = self._local_types[_arg.object.name]
+                            _pkey = (_inner_type, type_name)
+                            if _pkey in _passinto and _arg.method_name not in _passinto[_pkey]:
+                                raise FVMCodegenError(
+                                    f"Interface violation: return value of "
+                                    f"{_inner_type}.{_arg.method_name} is not permitted "
+                                    f"to be passed as an argument into {type_name}",
+                                    node
+                                )
                     # Push 'this' (the struct value) then explicit args
                     self._visit_expr(node.object)
                     for arg in node.arguments:
