@@ -5201,6 +5201,8 @@ class CodegenVisitor:
         phi = builder.phi(i1, name='in.result')
         phi.add_incoming(ir.Constant(i1, 1), found_block)
         phi.add_incoming(ir.Constant(i1, 0), notfound_blk)
+        if getattr(node, 'negated', False):
+            return builder.not_(phi, name='notin.result')
         return phi
 
     def visit_HasExpression(self, node, builder, module):
@@ -8011,7 +8013,10 @@ class CodegenVisitor:
                 # objects have been processed and _object_traits is fully populated.
                 for role_name, trait_name in iface_node.params:
                     if trait_name is None:
-                        continue
+                        raise FluxCodegenError(
+                            f"Interface {iface_name}: parameter {role_name} has no trait "
+                            f"constraint -- all interface parameters must declare a trait "
+                            f"[{obj_def.source_line}:{obj_def.source_col}]", node, module)
                     concrete = role_map.get(role_name)
                     if concrete is None or concrete != obj_def.name:
                         continue

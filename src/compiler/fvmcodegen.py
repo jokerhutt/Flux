@@ -1959,6 +1959,9 @@ class FVMCodegen:
         self._patch_at(exit_patch, Op.JIF, self._current_ip())
 
         self._emit(_instr(Op.LOCAL_GET, result_slot))
+        # For '!in' / 'not in', negate the result
+        if getattr(node, 'negated', False):
+            self._emit(_instr(Op.NOT))
         return True
 
     def _visit_has_expression(self, node: HasExpression) -> bool:

@@ -228,15 +228,17 @@ class BinaryOp(Expression):
 @dataclass
 class InExpression(Expression):
     """
-    Represents the 'x in y' membership-test expression.
-    Produces a boolean: true if 'needle' is found inside 'haystack'.
-    Used in if/while/ternary conditions and any other expression context.
+    Represents the 'x in y', 'x !in y', and 'x not in y' membership-test expressions.
+    Produces a boolean: true if needle is found inside haystack (negated=False),
+    or false if found (negated=True).
     """
     needle: Expression
     haystack: Expression
+    negated: bool = False
 
     def __repr__(self) -> str:
-        return f"({self.needle} in {self.haystack})"
+        op = "!in" if self.negated else "in"
+        return f"({self.needle} {op} {self.haystack})"
 
 
 @dataclass

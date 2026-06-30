@@ -6138,21 +6138,33 @@ class FluxParser:
     
     def equality_expression(self) -> Expression:
         """
-        equality_expression -> chain_expression (('==' | '!=' | 'in') chain_expression)*
+        equality_expression -> chain_expression (('==' | '!=' | 'in' | '!in' | 'not in') chain_expression)*
 
         'in' produces an InExpression (membership test): needle in haystack.
-        This allows 'x in y' in any expression context - if conditions, while
-        conditions, ternaries, assignments, etc. - mirroring the for-in syntax
-        but as a boolean operator rather than a loop head.
+        '!in' and 'not in' produce a negated InExpression: needle not in haystack.
+        Both negated forms are two-token sequences (NOT + IN) since ! and not share
+        the same NOT token type.
         """
         expr = self.chain_expression()
 
-        while self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN, TokenType.HAS):
+        while True:
+            # Check for '!in' or 'not in' -- both lex as NOT followed by IN
+            if self.expect(TokenType.NOT) and self.peek() and self.peek().type == TokenType.IN:
+                op_tok = self.current_token
+                self.advance()  # consume NOT
+                self.advance()  # consume IN
+                haystack = self.chain_expression()
+                expr = InExpression(needle=expr, haystack=haystack, negated=True).set_location(op_tok.line, op_tok.column)
+                continue
+
+            if not self.expect(TokenType.IS, TokenType.EQUAL, TokenType.NOT_EQUAL, TokenType.IN, TokenType.HAS):
+                break
+
             op_tok = self.current_token
             if self.current_token.type == TokenType.IN:
                 self.advance()
                 haystack = self.chain_expression()
-                expr = InExpression(needle=expr, haystack=haystack).set_location(op_tok.line, op_tok.column)
+                expr = InExpression(needle=expr, haystack=haystack, negated=False).set_location(op_tok.line, op_tok.column)
             elif self.current_token.type == TokenType.HAS:
                 self.advance()
                 # Right-hand side of 'has' must be a plain identifier (trait name)
