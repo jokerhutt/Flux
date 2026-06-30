@@ -5500,8 +5500,15 @@ class FluxParser:
             escaped = t.value.replace('\\', '\\\\').replace('"', '\\"')
             return f'"{escaped}"'
         if tt == TokenType.CHAR:
+            # Numeric char literals (97c) must round-trip as digits + suffix, not as a
+            # quoted character -- otherwise codified source would reconstruct '97' (a
+            # two-character string literal) instead of the original 97c.
+            if t.value.isdigit():
+                return f"{t.value}c"
             escaped = t.value.replace('\\', '\\\\').replace("'", "\\'")
             return f"'{escaped}'"
+        if tt == TokenType.BYTE_LITERAL:
+            return f"{t.value}b"
         if tt == TokenType.F_STRING:
             # F-string token value includes the f" prefix and closing "
             return t.value
@@ -8174,9 +8181,21 @@ class FluxParser:
             return Literal(value, DataType.DOUBLE).set_location(tok.line, tok.column)
         elif self.expect(TokenType.CHAR):
             tok = self.current_token
-            value = tok.value
+            # A quoted char literal ('a') has tok.value as the literal character itself.
+            # A numeric char literal (97c) has tok.value as a digit string from the lexer's
+            # suffix handling -- convert it to an int so normalize_char_value doesn't take
+            # ord() of the first digit by mistake.
+            if tok.value.isdigit():
+                value = int(tok.value)
+            else:
+                value = tok.value
             self.advance()
             return Literal(value, DataType.CHAR).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.BYTE_LITERAL):
+            tok = self.current_token
+            value = int(tok.value)
+            self.advance()
+            return Literal(value, DataType.BYTE).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRING_LITERAL):
             tok = self.current_token
             value = tok.value

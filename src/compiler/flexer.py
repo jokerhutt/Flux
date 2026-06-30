@@ -41,6 +41,7 @@ class TokenType(Enum):
     ULONG_LITERAL = auto() # ul
     FLOAT = auto()  # Support for 1f == float type == 1.0
     DOUBLE = auto() # Support for 64 bit floating point types
+    BYTE_LITERAL = auto() # Unsigned byte literal `97b`
     CHAR = auto()
     STRING_LITERAL = auto()
     BOOL = auto()
@@ -480,6 +481,7 @@ _TOKEN_TYPE_TO_STR: dict = {
     TokenType.ULONG_LITERAL:  '<ulong>',
     TokenType.FLOAT:          '<float>',
     TokenType.DOUBLE:         '<double>',
+    TokenType.BYTE_LITERAL:   '<byte>',
     TokenType.CHAR:           '<char>',
     TokenType.STRING_LITERAL: '<string>',
     TokenType.BOOL:           '<bool>',
@@ -986,6 +988,14 @@ class FluxLexer:
         elif not is_float and self.current_char() and self.current_char() == 'l':
             token_type = TokenType.SLONG_LITERAL
             self.advance()  # consume 'l'
+        # Check for byte suffix (lowercase 'b' only) -- e.g. 97b -> unsigned byte literal
+        elif not is_float and self.current_char() and self.current_char() == 'b':
+            token_type = TokenType.BYTE_LITERAL
+            self.advance()  # consume 'b'
+        # Check for char suffix (lowercase 'c' only) -- e.g. 97c -> unsigned char literal
+        elif not is_float and self.current_char() and self.current_char() == 'c':
+            token_type = TokenType.CHAR
+            self.advance()  # consume 'c'
         # If we have a decimal point but no 'f' suffix, it's still a float
         if is_float and dc <= 5:
             token_type = TokenType.FLOAT

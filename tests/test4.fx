@@ -2,6 +2,8 @@
 
 using standard::io::console;
 
+byte b = 97b;
+
 trait Queryable { def query(byte* sql) -> byte*; };
 trait Connectable { def connect() -> bool; };
 
