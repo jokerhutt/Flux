@@ -6242,7 +6242,6 @@ class CodegenVisitor:
                 for fname in ordered_names:
                     prepended.append(_StructMember(name=fname, type_spec=base_specs[fname]))
             node.members = prepended + node.members
-            node.base_structs = []  # clear to prevent double-prepend if visited again
 
         # Post-composition: append members from post_structs after inline members.
         # struct BMP : Header, InfoHeader { int extra; } : PostData;
@@ -8529,6 +8528,9 @@ class CodegenVisitor:
                 vm._function_overloads[_ov_name].extend(_ov_list)
         for fn_name, fn_instrs in self._comptime_functions.items():
             vm.register_function(fn_name, fn_instrs)
+        # Snapshot emit_results length before execution so we only process
+        # emissions from THIS block, not re-process emissions from prior blocks.
+        _emit_start = len(vm.emit_results)
         try:
             vm.execute(bc.instructions, bc.local_count)
         except Exception as e:
@@ -8590,10 +8592,12 @@ class CodegenVisitor:
                     self._comptime_locals[name] = val
 
         # Process emissions
-        for entry in vm.emit_results:
+        #print(f"DEBUG comptime_locals keys={list(self._comptime_locals.keys())}", flush=True)
+        for entry in vm.emit_results[_emit_start:]:
             if not (isinstance(entry, tuple) and len(entry) >= 2 and entry[0] == 'flux'):
                 continue
             flux_text = entry[1]
+            #print(f"DEBUG flux_text: {flux_text[:300]!r}", flush=True)
             # Re-lex and re-parse the emitted text
             try:
                 sub_lexer = FluxLexer(flux_text)
@@ -8616,6 +8620,7 @@ class CodegenVisitor:
                 )
             # Visit each emitted statement
             for stmt in sub_stmts:
+                #print(f"DEBUG visiting emitted stmt: {type(stmt).__name__}", flush=True)
                 self.visit(stmt, builder, module)
 
     def visit_EmitFlux(self, node, builder: ir.IRBuilder, module: ir.Module):

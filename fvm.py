@@ -2395,6 +2395,7 @@ class FluxVM:
         for name, value_str in subst.items():
             text = re.sub(r'\b' + re.escape(name) + r'\b', value_str, text)
 
+        #print(f"DEBUG _op_emitflux subst={subst}", flush=True)
         self.emit_results.append(('flux', text))
 
     # ------------------------------------------------------------------

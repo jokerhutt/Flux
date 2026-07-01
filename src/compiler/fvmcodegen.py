@@ -65,6 +65,7 @@ from fast import (
     FluxVMBlock,
     UsingStatement, NotUsingStatement,
     InlineAsm,
+    TernaryOp,
 )
 from ftypesys import DataType, Operator
 
@@ -1362,6 +1363,7 @@ class FVMCodegen:
         elif t is CastExpression:      return self._visit_cast(node)
         elif t is TypeConvertExpression: return self._visit_cast(node)
         elif t is InlineAsm:           return self._visit_inline_asm(node)
+        elif t is TernaryOp:           return self._visit_ternary_op(node)
         else:
             raise FVMCodegenError(
                 f'fvmcodegen: unsupported expression in comptime: {type(node).__name__}',
@@ -2081,6 +2083,21 @@ class FVMCodegen:
         self._emit(_instr(Op.LOCAL_SET, slot))
         # Push PTR to that slot
         self._emit(_instr(Op.PUSH, Val(TTag.PTR, slot)))
+        return True
+
+    def _visit_ternary_op(self, node) -> bool:
+        """
+        Compile a ternary expression: cond ? true_expr : false_expr
+        Emits: eval cond, JNF to false branch, eval true_expr, JMP to merge,
+               false branch: eval false_expr, merge.
+        """
+        self._visit_expr(node.condition)
+        jnf_patch = self._emit(_instr(Op.JNF, 0))
+        self._visit_expr(node.true_expr)
+        jmp_patch = self._emit(_instr(Op.JMP, 0))
+        self._patch_at(jnf_patch, Op.JNF, self._current_ip())
+        self._visit_expr(node.false_expr)
+        self._patch_at(jmp_patch, Op.JMP, self._current_ip())
         return True
 
     def _visit_inline_asm(self, node: InlineAsm) -> bool:
