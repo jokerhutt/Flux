@@ -3043,7 +3043,8 @@ class FluxParser:
             self.error("Comma-separated names are only allowed for prototypes (forward declarations)")
 
         self.consume(TokenType.LEFT_BRACE)
-        
+        comptime_blocks = []
+
         while not self.expect(TokenType.RIGHT_BRACE):
             if self.expect(TokenType.PUBLIC):
                 self.advance()
@@ -3101,13 +3102,17 @@ class FluxParser:
                     nested_structs.append(nested_struct_result)
                 # Allow both with and without semicolon for nested structs
                 self.expect(TokenType.SEMICOLON)
+            elif self.expect(TokenType.COMPTIME):
+                # comptime block inside struct body -- emitflux results become members
+                cb = self.comptime_block()
+                comptime_blocks.append((len(members), cb))
             else:
                 member = self.struct_member()
                 if isinstance(member, list):
                     members.extend(member)
                 else:
                     members.append(member)
-        
+
         self.consume(TokenType.RIGHT_BRACE)
 
         # Post-composition: struct BMP : Header, InfoHeader { ... } : PostData;
@@ -3127,7 +3132,8 @@ class FluxParser:
 
         self.consume(TokenType.SEMICOLON)
         sd = StructDef(name, members, base_structs, post_structs=post_structs,
-                       nested_structs=nested_structs, template_params=template_params)
+                       nested_structs=nested_structs, template_params=template_params,
+                       comptime_blocks=comptime_blocks)
         sd.set_location(tok.line, tok.column)
         if template_params:
             self._templates.register(name, 'struct', template_params, sd)

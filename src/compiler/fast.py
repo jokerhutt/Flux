@@ -1180,6 +1180,7 @@ class StructDef(ASTNode):
     storage_class: Optional[StorageClass] = None
     vtable: Optional[StructVTable] = None
     template_params: List[str] = field(default_factory=list)
+    comptime_blocks: List = field(default_factory=list)  # (insert_index, ComptimeBlock) pairs
     
     def calculate_vtable(self, module: ir.Module) -> StructVTable:
             """Calculate struct layout and generate TLD."""
