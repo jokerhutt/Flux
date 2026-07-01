@@ -4320,7 +4320,6 @@ class FluxParser:
             }
             if custom_typename in _CODIFY_BUILTIN_MAP:
                 return [_CODIFY_BUILTIN_MAP[custom_typename], None]
-            custom_typename = self._consume_codify()
             return [DataType.DATA, custom_typename]
         else:
             self.error("Expected type specifier", TokenType.IDENTIFIER)
@@ -5623,18 +5622,22 @@ class FluxParser:
                     # Matching close brace — advance past it and stop
                     self.advance()
                     break
-            elif self.expect(TokenType.CODIFY):
-                self.advance()  # consume ~$
-                if self.expect(TokenType.F_STRING, TokenType.I_STRING, TokenType.STRING_LITERAL, TokenType.IDENTIFIER):
-                    parts.append('~$' + self._token_to_source(self.current_token))
-                else:
-                    parts.append('~$')
-                    continue
             else:
                 parts.append(self._token_to_source(self.current_token))
             self.advance()
         self.consume(TokenType.SEMICOLON)
-        source_text = ' '.join(parts)
+        # Merge ~$ with the immediately following token (f-string, i-string, or identifier)
+        # to avoid reconstructing "~$ f"..."" with a spurious space.
+        merged = []
+        idx = 0
+        while idx < len(parts):
+            if parts[idx] == '~$' and idx + 1 < len(parts):
+                merged.append('~$' + parts[idx + 1])
+                idx += 2
+            else:
+                merged.append(parts[idx])
+                idx += 1
+        source_text = ' '.join(merged)
         return EmitFlux(source_text=source_text).set_location(tok.line, tok.column)
 
     def parse_operand_list(self) -> str:
@@ -8430,6 +8433,22 @@ class FluxParser:
                 else:
                     self.error("Expected member name after '.' in stringify expression", TokenType.IDENTIFIER)
             return Stringify(name, member).set_location(tok.line, tok.column)
+        elif self.expect(TokenType.CODIFY):
+            # ~$f"..." on the RHS of an assignment in comptime context.
+            # Treat as an f-string expression that evaluates to a string at VM runtime.
+            tok = self.current_token
+            self.advance()  # consume CODIFY
+            if self.expect(TokenType.F_STRING):
+                fstr_node = self.parse_f_string(self.consume(TokenType.F_STRING).value)
+                return fstr_node.set_location(tok.line, tok.column)
+            elif self.expect(TokenType.I_STRING):
+                istr_node = self.parse_i_string(self.consume(TokenType.I_STRING).value)
+                return istr_node.set_location(tok.line, tok.column)
+            else:
+                # ~$varname -- resolve from comptime strings or treat as identifier
+                var_name = self.consume(TokenType.IDENTIFIER).value
+                resolved = self._comptime_strings.get(var_name, var_name)
+                return StringLiteral(resolved).set_location(tok.line, tok.column)
         elif self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                          TokenType.CHAR, TokenType.BYTE, TokenType.BOOL_KW, TokenType.SLONG, TokenType.ULONG):
             # Built-in type convert expression: float(x), int(y), char(z), etc.

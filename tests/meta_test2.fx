@@ -6,8 +6,8 @@ comptime
 {
     compiler.io.console.print("Stage 1: deciding types\n");
 
-    byte*[] types = ["int", "float"];
-    byte*[] tags  = ["INT", "FLOAT"];
+    byte*[] types = ["int", "float"],
+            tags  = ["INT", "FLOAT"];
     int     count = 2;
     byte*   T, TAG;
 
