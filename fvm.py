@@ -2368,18 +2368,78 @@ class FluxVM:
                 return v.data.decode('utf-8', errors='replace')
             return str(v.data)
 
-        # Build name -> value-string mapping from the provided snapshot
-        subst: Dict[str, str] = {}
+        # Build name -> Val mapping from the provided snapshot (for expression evaluation)
+        local_vals: Dict[str, Val] = {}
         for name, slot in var_names:
             if frame is not None and slot < len(frame.locals):
-                v = frame.locals[slot]
-                subst[name] = val_to_str(v)
+                local_vals[name] = frame.locals[slot]
             else:
-                subst[name] = '0'
+                local_vals[name] = Val(TTag.INT, 0)
+
+        # Build name -> value-string mapping from the provided snapshot
+        subst: Dict[str, str] = {}
+        for name, v in local_vals.items():
+            subst[name] = val_to_str(v)
 
         import re
 
-        # Expand ~$f"..." expressions first
+        def _eval_istr_expr(expr_text: str) -> str:
+            """
+            Evaluate a single i-string positional expression against current locals.
+            Supports: bare identifier, identifier[identifier], identifier[integer].
+            Array subscripts are resolved directly against local_vals.
+            """
+            expr_text = expr_text.strip()
+            # Try identifier[index]
+            m = re.fullmatch(r'(\w+)\[(\w+)\]', expr_text)
+            if m:
+                arr_name = m.group(1)
+                idx_name = m.group(2)
+                arr_val  = local_vals.get(arr_name)
+                # Resolve index: may be a local name or a bare integer literal
+                if idx_name.lstrip('-').isdigit():
+                    idx = int(idx_name)
+                else:
+                    idx_val = local_vals.get(idx_name)
+                    idx = int(idx_val.data) if idx_val is not None else 0
+                if arr_val is not None and arr_val.tag == TTag.ARRAY:
+                    elements = (arr_val.meta or {}).get('elements', [])
+                    if 0 <= idx < len(elements):
+                        return val_to_str(elements[idx])
+                return '0'
+            # Bare identifier
+            if re.fullmatch(r'\w+', expr_text):
+                return subst.get(expr_text, expr_text)
+            # Fallback: plain text substitute and return
+            result = expr_text
+            for nm, vs in subst.items():
+                result = re.sub(r'\b' + re.escape(nm) + r'\b', vs, result)
+            return result
+
+        def expand_codify_istr(m):
+            """Expand ~$i"template":{expr1;expr2;} into the resulting identifier."""
+            template   = m.group(1)
+            exprs_text = m.group(2)
+            exprs = [e.strip() for e in exprs_text.split(';') if e.strip()]
+            result = ''
+            slot   = 0
+            i      = 0
+            while i < len(template):
+                if template[i] == '{' and i + 1 < len(template) and template[i + 1] == '}':
+                    if slot < len(exprs):
+                        result += _eval_istr_expr(exprs[slot])
+                        slot += 1
+                    i += 2
+                else:
+                    result += template[i]
+                    i += 1
+            return result
+
+        # Expand ~$i"...":{...} expressions first -- i-string codification.
+        # These must be evaluated (array subscripts, locals) before any text substitution.
+        text = re.sub(r'~\$i"([^"]*)":\{([^}]*)\}', expand_codify_istr, source_text)
+
+        # Expand ~$f"..." expressions
         def expand_codify_fstr(m):
             fstr_body = m.group(1)
             # Replace {name} placeholders inside the f-string body
@@ -2389,13 +2449,12 @@ class FluxVM:
             expanded = re.sub(r'\{(\w+)\}', replace_placeholder, fstr_body)
             return expanded  # result is the bare identifier text
 
-        text = re.sub(r'~\$f"([^"]*)"', expand_codify_fstr, source_text)
+        text = re.sub(r'~\$f"([^"]*)"', expand_codify_fstr, text)
 
         # Replace whole-word variable names with their values
         for name, value_str in subst.items():
             text = re.sub(r'\b' + re.escape(name) + r'\b', value_str, text)
 
-        #print(f"DEBUG _op_emitflux subst={subst}", flush=True)
         self.emit_results.append(('flux', text))
 
     # ------------------------------------------------------------------
