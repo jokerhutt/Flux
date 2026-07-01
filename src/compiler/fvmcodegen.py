@@ -1136,7 +1136,7 @@ class FVMCodegen:
             return
         elif isinstance(node.target, MemberAccess):
             # struct.field = value -> LOCAL_GET + val + STRUCT_STORE field + LOCAL_SET
-            if node.target.member == '_':
+            if node.target.member == '#':
                 # me1._ = MyUnionType -> ENUM_STORE
                 if isinstance(node.target.object, Identifier):
                     var_name  = node.target.object.name

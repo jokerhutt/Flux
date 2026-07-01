@@ -906,7 +906,7 @@ class CodegenVisitor:
                 raise ComptimeError(
                     f"Cannot stringify undefined identifier '{node.name}' ")
             return self._stringify_emit(builder, module, node.name, node)
-        if node.member == '_':
+        if node.member == '#':
             var_entry = module.symbol_table.lookup_variable(node.name, current_ns)
             if var_entry is None:
                 raise ComptimeError(
@@ -915,20 +915,20 @@ class CodegenVisitor:
             if (union_name is None or not hasattr(module, '_union_member_info') or
                     union_name not in module._union_member_info):
                 raise ComptimeError(
-                    f"Cannot stringify '._': '{node.name}' is not a tagged union variable ")
+                    f"Cannot stringify '.#': '{node.name}' is not a tagged union variable ")
             union_info = module._union_member_info[union_name]
             if not union_info.get('is_tagged'):
                 raise ComptimeError(
-                    f"Cannot stringify '._': union '{union_name}' has no tag ")
+                    f"Cannot stringify '.#': union '{union_name}' has no tag ")
             tag_enum_name = union_info['tag_name']
             if not hasattr(module, '_enum_types') or tag_enum_name not in module._enum_types:
                 raise ComptimeError(
-                    f"Cannot stringify '._': enum '{tag_enum_name}' not found ")
+                    f"Cannot stringify '.#': enum '{tag_enum_name}' not found ")
             enum_values = module._enum_types[tag_enum_name]
             var_llvm = module.symbol_table.get_llvm_value(node.name)
             if var_llvm is None:
                 raise ComptimeError(
-                    f"Cannot stringify '._': no LLVM value for '{node.name}' ")
+                    f"Cannot stringify '.#': no LLVM value for '{node.name}' ")
             tag_ptr = builder.gep(
                 var_llvm,
                 [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
@@ -943,11 +943,11 @@ class CodegenVisitor:
                 cmp = builder.icmp_signed('==', tag_val, ir.Constant(ir.IntType(32), enum_int))
                 builder.cbranch(cmp, match_bb, next_bb)
                 builder.position_at_end(match_bb)
-                str_ptr = self._stringify_emit(builder, module, f"{node.name}.{enum_member}", node)
+                str_ptr = self._stringify_emit(builder, module, f"{tag_enum_name}.{enum_member}", node)
                 builder.store(str_ptr, result_slot)
                 builder.branch(after_bb)
                 builder.position_at_end(next_bb)
-            unknown_ptr = self._stringify_emit(builder, module, f"{node.name}.<unknown>", node)
+            unknown_ptr = self._stringify_emit(builder, module, f"{tag_enum_name}.<unknown>", node)
             builder.store(unknown_ptr, result_slot)
             builder.branch(after_bb)
             builder.position_at_end(after_bb)
@@ -3467,9 +3467,9 @@ class CodegenVisitor:
         member_names = union_info['member_names']
         member_types = union_info['member_types']
         is_tagged    = union_info['is_tagged']
-        if node.member == '_':
+        if node.member == '#':
             if not is_tagged:
-                raise FluxCodegenError(f"Cannot access tag '._' on non-tagged union '{union_name}'", node, module)
+                raise FluxCodegenError(f"Cannot access tag '.#' on non-tagged union '{union_name}'", node, module)
             tag_ptr = builder.gep(union_ptr, [ir.Constant(ir.IntType(32), 0), ir.Constant(ir.IntType(32), 0)],
                                   inbounds=True, name="union_tag_ptr")
             return builder.load(tag_ptr, name="union_tag_value")
@@ -6242,6 +6242,7 @@ class CodegenVisitor:
                 for fname in ordered_names:
                     prepended.append(_StructMember(name=fname, type_spec=base_specs[fname]))
             node.members = prepended + node.members
+            node.base_structs = []  # clear to prevent double-prepend if visited again
 
         # Post-composition: append members from post_structs after inline members.
         # struct BMP : Header, InfoHeader { int extra; } : PostData;

@@ -5078,9 +5078,9 @@ class AssignmentTypeHandler:
         is_tagged = union_info['is_tagged']
         
         # Handle special ._ tag assignment for tagged unions
-        if member_name == '_':
+        if member_name == '#':
             if not is_tagged:
-                raise ValueError(f"AssignmentTypeHandler.handle_union_member_assignment: Cannot assign to tag '._' on non-tagged union '{union_name}'")
+                raise ValueError(f"AssignmentTypeHandler.handle_union_member_assignment: Cannot assign to tag '.#' on non-tagged union '{union_name}'")
             
             # For tagged unions, the tag is at index 0
             tag_ptr = builder.gep(

@@ -1995,6 +1995,9 @@ class FluxParser:
                 if self.expect(TokenType.IDENTIFIER):
                     str_member = self.current_token.value
                     self.advance()
+                elif self.expect(TokenType.TAG):
+                    self.advance()
+                    str_member = "#"
                 else:
                     self.error("Expected member name after '.' in stringify function name", TokenType.IDENTIFIER)
             name = Stringify(str_name, str_member).set_location(tok.line, tok.column)
@@ -2032,6 +2035,8 @@ class FluxParser:
                         self.advance()
                 if self.expect(TokenType.CODIFY):
                     self.advance()
+                    if self.expect(TokenType.IDENTIFIER, TokenType.F_STRING, TokenType.I_STRING):
+                        self.advance()
                 # Helper used in lookahead to skip ':{' ... '}'
                 def _la_skip_constraint_set_fd():
                     self.advance()  # consume ':'
@@ -2140,7 +2145,8 @@ class FluxParser:
                                 break
                         elif self.expect(TokenType.CODIFY):
                             self.advance()
-                            self.advance()  # consume IDENTIFIER after CODIFY
+                            if self.expect(TokenType.IDENTIFIER, TokenType.F_STRING, TokenType.I_STRING):
+                                self.advance()  # consume token after CODIFY
                             if self.expect(TokenType.COLON):
                                 self.advance()
                                 _la_skip_type_constraint_fd()
@@ -2309,9 +2315,7 @@ class FluxParser:
                         self.consume(TokenType.PLUS)
                         _no_default_first = True
                     if self.expect(TokenType.CODIFY):
-                        self.advance()
-                        _codify_var = self.consume(TokenType.IDENTIFIER).value
-                        _first_id = self._comptime_strings.get(_codify_var, _codify_var)
+                        _first_id = self._consume_codify()
                     else:
                         _first_id = self.consume(TokenType.IDENTIFIER).value
                     if _no_default_first:
@@ -2333,9 +2337,7 @@ class FluxParser:
                             self.consume(TokenType.PLUS)
                             _no_default_next = True
                         if self.expect(TokenType.CODIFY):
-                            self.advance()
-                            _codify_var = self.consume(TokenType.IDENTIFIER).value
-                            _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                            _next_id = self._consume_codify()
                         else:
                             _next_id = self.consume(TokenType.IDENTIFIER).value
                         if _no_default_next:
@@ -2409,6 +2411,9 @@ class FluxParser:
                         if self.expect(TokenType.IDENTIFIER):
                             _sm = self.current_token.value
                             self.advance()
+                        elif self.expect(TokenType.TAG):
+                            self.advance()
+                            _sm = "#"
                         else:
                             self.error("Expected member name after '.' in stringify function name", TokenType.IDENTIFIER)
                     proto_name = Stringify(_sn, _sm).set_location(tok.line, tok.column)
@@ -2893,9 +2898,10 @@ class FluxParser:
         
         self.consume(TokenType.RIGHT_BRACE)
         
-        # Check for optional tag name (tagged union)
+        # Check for optional tag name (tagged union): } # EnumName;
         tag_name = None
-        if self.expect(TokenType.IDENTIFIER):
+        if self.expect(TokenType.TAG):
+            self.advance()
             tag_name = self.consume(TokenType.IDENTIFIER).value
         
         self.consume(TokenType.SEMICOLON)
@@ -4304,10 +4310,17 @@ class FluxParser:
                     break
             return [DataType.DATA, custom_typename]
         elif self.expect(TokenType.CODIFY):
-            # ~$varname used as a type - resolve to the string value in _comptime_strings
-            self.advance()  # consume CODIFY
-            _codify_var = self.consume(TokenType.IDENTIFIER).value
-            custom_typename = self._comptime_strings.get(_codify_var, _codify_var)
+            # ~$varname or ~$f"..." used as a type - resolve string then map to correct DataType
+            custom_typename = self._consume_codify()
+            _CODIFY_BUILTIN_MAP = {
+                'byte': DataType.BYTE, 'int': DataType.SINT, 'uint': DataType.UINT,
+                'long': DataType.SLONG, 'ulong': DataType.ULONG, 'float': DataType.FLOAT,
+                'double': DataType.DOUBLE, 'bool': DataType.BOOL, 'char': DataType.CHAR,
+                'void': DataType.VOID,
+            }
+            if custom_typename in _CODIFY_BUILTIN_MAP:
+                return [_CODIFY_BUILTIN_MAP[custom_typename], None]
+            custom_typename = self._consume_codify()
             return [DataType.DATA, custom_typename]
         else:
             self.error("Expected type specifier", TokenType.IDENTIFIER)
@@ -4458,6 +4471,24 @@ class FluxParser:
         TokenType.I_STRING,
         # Named struct: IDENTIFIER handled separately in _is_type_func_def
     })
+
+    def _consume_codify(self) -> str:
+        """
+        After CODIFY (~$) has been detected, consume it plus the following
+        IDENTIFIER or F_STRING/I_STRING and return the resolved string value.
+        Handles: ~$varname  ~$f"{x}"  ~$i"{x}"
+        """
+        self.advance()  # consume CODIFY
+        if self.expect(TokenType.F_STRING):
+            raw = self.consume(TokenType.F_STRING).value
+            fstr = self.parse_f_string(raw[2:-1])
+            return "".join(p if isinstance(p, str) else self._comptime_strings.get(p.name, p.name) for p in fstr.parts)
+        elif self.expect(TokenType.I_STRING):
+            istr = self.parse_i_string(self.consume(TokenType.I_STRING).value)
+            return "".join(p if isinstance(p, str) else self._comptime_strings.get(p.name, p.name) for p in istr.parts)
+        else:
+            var_name = self.consume(TokenType.IDENTIFIER).value
+            return self._comptime_strings.get(var_name, var_name)
 
     def _resolve_fstring_name(self, node) -> str:
         """
@@ -4772,7 +4803,7 @@ class FluxParser:
                             self._skip_relconstraint_op()
                             if self.expect(TokenType.CODIFY):
                                 self.advance()
-                                if self.expect(TokenType.IDENTIFIER):
+                                if self.expect(TokenType.IDENTIFIER, TokenType.F_STRING, TokenType.I_STRING):
                                     self.advance()
                             elif self.expect(TokenType.IDENTIFIER):
                                 self.advance()
@@ -4780,7 +4811,7 @@ class FluxParser:
                                 self.advance()
                                 if self.expect(TokenType.CODIFY):
                                     self.advance()
-                                    if self.expect(TokenType.IDENTIFIER):
+                                    if self.expect(TokenType.IDENTIFIER, TokenType.F_STRING, TokenType.I_STRING):
                                         self.advance()
                                 elif self.expect(TokenType.IDENTIFIER):
                                     self.advance()
@@ -4805,7 +4836,8 @@ class FluxParser:
                                 break
                         elif self.expect(TokenType.CODIFY):
                             self.advance()
-                            self.advance()  # consume IDENTIFIER after CODIFY
+                            if self.expect(TokenType.IDENTIFIER, TokenType.F_STRING, TokenType.I_STRING):
+                                self.advance()  # consume token after CODIFY
                             if self.expect(TokenType.COLON):
                                 self.advance()
                                 _la_skip_type_con_tf()
@@ -4844,17 +4876,13 @@ class FluxParser:
                 self.advance()  # consume '<'
                 def _parse_id_list_tf():
                     if self.expect(TokenType.CODIFY):
-                        self.advance()
-                        _codify_var = self.consume(TokenType.IDENTIFIER).value
-                        names = [self._comptime_strings.get(_codify_var, _codify_var)]
+                        names = [self._consume_codify()]
                     else:
                         names = [self.consume(TokenType.IDENTIFIER).value]
                     while self.expect(TokenType.LOGICAL_AND):
                         self.advance()
                         if self.expect(TokenType.CODIFY):
-                            self.advance()
-                            _codify_var = self.consume(TokenType.IDENTIFIER).value
-                            names.append(self._comptime_strings.get(_codify_var, _codify_var))
+                            names.append(self._consume_codify())
                         else:
                             names.append(self.consume(TokenType.IDENTIFIER).value)
                     return names
@@ -4865,9 +4893,7 @@ class FluxParser:
                     def _parse_one_cs_entry_tf():
                         _entry_tok = self.current_token
                         if self.expect(TokenType.CODIFY):
-                            self.advance()
-                            _cv = self.consume(TokenType.IDENTIFIER).value
-                            _entry_name = self._comptime_strings.get(_cv, _cv)
+                            _entry_name = self._consume_codify()
                             _entry_is_codify = True
                         else:
                             _entry_name = self.consume(TokenType.IDENTIFIER).value
@@ -4929,9 +4955,7 @@ class FluxParser:
                             while self.expect(TokenType.LOGICAL_AND):
                                 self.advance()
                                 if self.expect(TokenType.CODIFY):
-                                    self.advance()
-                                    _cv = self.consume(TokenType.IDENTIFIER).value
-                                    lhs.append(self._comptime_strings.get(_cv, _cv))
+                                    lhs.append(self._consume_codify())
                                 else:
                                     lhs.append(self.consume(TokenType.IDENTIFIER).value)
                             op = self._consume_relconstraint_op()
@@ -4997,9 +5021,7 @@ class FluxParser:
                         self.consume(TokenType.PLUS)
                         _no_default_first = True
                     if self.expect(TokenType.CODIFY):
-                        self.advance()
-                        _codify_var = self.consume(TokenType.IDENTIFIER).value
-                        _first_id = self._comptime_strings.get(_codify_var, _codify_var)
+                        _first_id = self._consume_codify()
                     else:
                         _first_id = self.consume(TokenType.IDENTIFIER).value
                     if _no_default_first:
@@ -5021,9 +5043,7 @@ class FluxParser:
                             self.consume(TokenType.PLUS)
                             _no_default_next = True
                         if self.expect(TokenType.CODIFY):
-                            self.advance()
-                            _codify_var = self.consume(TokenType.IDENTIFIER).value
-                            _next_id = self._comptime_strings.get(_codify_var, _codify_var)
+                            _next_id = self._consume_codify()
                         else:
                             _next_id = self.consume(TokenType.IDENTIFIER).value
                         if _no_default_next:
@@ -5603,6 +5623,13 @@ class FluxParser:
                     # Matching close brace — advance past it and stop
                     self.advance()
                     break
+            elif self.expect(TokenType.CODIFY):
+                self.advance()  # consume ~$
+                if self.expect(TokenType.F_STRING, TokenType.I_STRING, TokenType.STRING_LITERAL, TokenType.IDENTIFIER):
+                    parts.append('~$' + self._token_to_source(self.current_token))
+                else:
+                    parts.append('~$')
+                    continue
             else:
                 parts.append(self._token_to_source(self.current_token))
             self.advance()
@@ -7916,6 +7943,10 @@ class FluxParser:
                 elif self.expect(TokenType.STRING_LITERAL):
                     member = self.current_token.value
                     self.advance()
+                elif self.expect(TokenType.TAG):
+                    # .# is the tagged union tag accessor
+                    self.advance()
+                    member = "#"
                 else:
                     member = self.consume(TokenType.IDENTIFIER).value
 
@@ -8392,6 +8423,10 @@ class FluxParser:
                 if self.expect(TokenType.IDENTIFIER):
                     member = self.current_token.value
                     self.advance()
+                elif self.expect(TokenType.TAG):
+                    # $.# - stringify the tag of a tagged union
+                    self.advance()
+                    member = "#"
                 else:
                     self.error("Expected member name after '.' in stringify expression", TokenType.IDENTIFIER)
             return Stringify(name, member).set_location(tok.line, tok.column)

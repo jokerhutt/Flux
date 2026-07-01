@@ -2,21 +2,27 @@
 
 using standard::io::console;
 
-struct A<T>
+comptime
 {
-	T x;
-};
-
-struct B<U> : A<T>
-{
-	U y;
+    byte*[] types = ["int", "float", "long"];
+    byte* T;
+    for (int i = 0; i < 3; i++)
+    {
+        T = types[i];
+        emitflux
+        {
+            def print_typed(~$f"{T}" x) -> void
+            {
+                println(x);
+            };
+        };
+    };
 };
 
 def main() -> int
 {
-	B<int,long> b = {6,9};
-
-	println(f"{b.x}{b.y}");
-
-	return 0;
+    print_typed(42);
+    print_typed(3.14f);
+    print_typed(999l);
+    return 0;
 };
