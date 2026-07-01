@@ -55,8 +55,27 @@ def _typesys_src_loc(node, module: ir.Module) -> str:
         # Strip leading whitespace from the display line so tabs/spaces in the
         # source don't push the caret further right than the column says.
         stripped = src_text.lstrip()
+        leading_ws = src_text[:len(src_text) - len(stripped)]
         indent = '    '  # 4-space prefix applied to the source line
-        pointer = '-' * (col - 1) + '^'
+        # col is in display-column space (tabs already expanded to 4 columns
+        # each by the lexer's advance()). The displayed line replaces the
+        # original leading whitespace with a fixed 4-space indent, so the
+        # caret must be shifted by (display width of stripped leading
+        # whitespace) - (width of the indent that replaced it), not just
+        # assumed to equal col-1 -- that only coincidentally works when the
+        # source has exactly one leading tab, since 1 tab's display width (4)
+        # happens to equal the hardcoded indent width (4). Two leading tabs
+        # (display width 8) would otherwise leave the caret 4 columns short.
+        leading_ws_display_width = 0
+        for ch in leading_ws:
+            if ch == '\t':
+                leading_ws_display_width += 4
+            else:
+                leading_ws_display_width += 1
+        pointer_col = (col - 1) - leading_ws_display_width + len(indent)
+        if pointer_col < 0:
+            pointer_col = 0
+        pointer = '-' * pointer_col + '^'
         return f"{loc_label}\n\n{indent}{stripped}\n{pointer}"
 
     return loc_label
@@ -5201,7 +5220,7 @@ class StructTypeHandler:
                 has_data_types = True
             
             # Get the LLVM type for this field
-            llvm_field_type = TypeSystem.get_llvm_type(member_type, module, include_array=True)
+            llvm_field_type = TypeSystem.get_llvm_type(member_type, module, include_array=True, node=member)
             field_types[member.name] = llvm_field_type
 
             if member_type.bit_width is not None and not member_type.is_array:
@@ -5456,8 +5475,19 @@ class StructTypeHandler:
                     result = builder.insert_value(result, field_value, i)
                 instance = result
             else:
-                # All constants — build a constant struct directly
-                instance = ir.Constant(llvm_struct_type, field_vals)
+                # All constants: build a constant struct directly.
+                # Cast each constant to the correct field type so that e.g. an i32
+                # literal initializing an i64 field produces the right element type.
+                cast_vals = []
+                for i, fv in enumerate(field_vals):
+                    field_llvm_type = llvm_struct_type.elements[i]
+                    if isinstance(fv, ir.Constant) and fv.type != field_llvm_type:
+                        if isinstance(fv.type, ir.IntType) and isinstance(field_llvm_type, ir.IntType):
+                            fv = ir.Constant(field_llvm_type, fv.constant)
+                        elif isinstance(fv.type, (ir.FloatType, ir.DoubleType)) and isinstance(field_llvm_type, (ir.FloatType, ir.DoubleType)):
+                            fv = ir.Constant(field_llvm_type, fv.constant)
+                    cast_vals.append(fv)
+                instance = ir.Constant(llvm_struct_type, cast_vals)
         else:
             # For packed integer or byte array structs, use the old packing method
             for field_name, field_value_expr in field_values.items():

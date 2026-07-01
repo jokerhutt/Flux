@@ -638,6 +638,13 @@ class FluxLexer:
         if self.position < self.length and self.source[self.position] == '\n':
             self.line += 1
             self.column = 1
+        elif self.position < self.length and count == 1 and self.source[self.position] == '\t':
+            # Tabs expand to 4-column tab stops for diagnostic column reporting,
+            # matching common editor display, rather than advancing by 1 like
+            # every other character. Only applies to single-character advances
+            # (count==1) -- the count>1 call sites are all fixed-content
+            # multi-char tokens (quotes, keywords) that never contain a tab.
+            self.column += 4
         else:
             self.column += count
         self.position += count

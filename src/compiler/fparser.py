@@ -2960,25 +2960,69 @@ class FluxParser:
         members = []
         nested_structs = []
 
-        # Pre-composition: struct BMP : Header, InfoHeader;
-        # Post-composition (no body): struct BMP : Header, InfoHeader : PostData;
-        if self.expect(TokenType.COLON):
-            self.advance()
-            base_structs.append(self.consume(TokenType.IDENTIFIER).value)
+        def _parse_base_struct_ref(extra_template_params_out):
+            """Parse a base struct name, optionally followed by <T,U,...> template args.
+            Returns the struct ref as a plain name or deferred "Name<T,U>" string.
+            Also collects any new template param names (identifiers in active params
+            or unknown names that look like type params) into extra_template_params_out.
+            """
+            base_name = self.consume(TokenType.IDENTIFIER).value
+            if not self.expect(TokenType.LESS_THAN):
+                return base_name
+            # Lookahead: confirm all angle-bracket contents are identifiers (template args).
+            with self._lookahead():
+                _ok = False
+                self.advance()  # consume '<' tentatively
+                if self.expect(TokenType.IDENTIFIER):
+                    self.advance()
+                    while self.expect(TokenType.COMMA):
+                        self.advance()
+                        if not self.expect(TokenType.IDENTIFIER):
+                            break
+                        self.advance()
+                    if self.expect(TokenType.GREATER_THAN):
+                        _ok = True
+            if not _ok:
+                return base_name
+            # Consume the template arg list
+            self.advance()  # consume '<'
+            args = [self.consume(TokenType.IDENTIFIER).value]
             while self.expect(TokenType.COMMA):
                 self.advance()
-                base_structs.append(self.consume(TokenType.IDENTIFIER).value)
+                args.append(self.consume(TokenType.IDENTIFIER).value)
+            self.consume(TokenType.GREATER_THAN)
+            # Collect args that are new template params (not already declared)
+            known = set(template_params)
+            for arg in args:
+                if arg not in known and arg not in extra_template_params_out:
+                    extra_template_params_out.append(arg)
+                    known.add(arg)
+            return f"{base_name}<{','.join(args)}>"
+
+        # Pre-composition: struct BMP : Header, InfoHeader;
+        # Also: struct B<U> : A<T>  (generic struct inheriting from generic base)
+        # Post-composition (no body): struct BMP : Header, InfoHeader : PostData;
+        extra_tparams = []  # extra template params gathered from base struct generic args
+        if self.expect(TokenType.COLON):
+            self.advance()
+            base_structs.append(_parse_base_struct_ref(extra_tparams))
+            while self.expect(TokenType.COMMA):
+                self.advance()
+                base_structs.append(_parse_base_struct_ref(extra_tparams))
             # Second colon = post-composition list
             post_structs = []
             if self.expect(TokenType.COLON):
                 self.advance()
-                post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+                post_structs.append(_parse_base_struct_ref(extra_tparams))
                 while self.expect(TokenType.COMMA):
                     self.advance()
-                    post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+                    post_structs.append(_parse_base_struct_ref(extra_tparams))
+            # Merge extra template params into this struct's template_params
+            if extra_tparams:
+                template_params = template_params + extra_tparams
             if self.expect(TokenType.SEMICOLON):
                 self.advance()
-                return StructDef(name, members, base_structs, post_structs=post_structs, nested_structs=nested_structs).set_location(tok.line, tok.column)
+                return StructDef(name, members, base_structs, post_structs=post_structs, nested_structs=nested_structs, template_params=template_params).set_location(tok.line, tok.column)
 
         # Handle forward declarations (prototypes) - not a prototype if base_structs present
         if self.expect(TokenType.SEMICOLON) and not base_structs:
@@ -3062,13 +3106,18 @@ class FluxParser:
 
         # Post-composition: struct BMP : Header, InfoHeader { ... } : PostData;
         # Members from post_structs are appended after the struct's own inline members.
+        # Also supports generic bases: struct B<U> { U y; } : A<T>;
         post_structs = []
         if self.expect(TokenType.COLON):
             self.advance()
-            post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+            post_structs.append(_parse_base_struct_ref(extra_tparams))
             while self.expect(TokenType.COMMA):
                 self.advance()
-                post_structs.append(self.consume(TokenType.IDENTIFIER).value)
+                post_structs.append(_parse_base_struct_ref(extra_tparams))
+            # Merge any new template params collected from post-body base refs
+            new_from_post = [p for p in extra_tparams if p not in template_params]
+            if new_from_post:
+                template_params = template_params + new_from_post
 
         self.consume(TokenType.SEMICOLON)
         sd = StructDef(name, members, base_structs, post_structs=post_structs,
@@ -3980,6 +4029,7 @@ class FluxParser:
                 self.advance()  # consume '<'
                 type_names = []
                 type_specs_list = []
+                _first_arg_tok = self.current_token
                 ts = self.type_spec()
                 type_names.append(self._type_system_to_mangle_str(ts))
                 type_specs_list.append(ts)
@@ -3993,9 +4043,11 @@ class FluxParser:
                 if any(n in self._active_template_params for n in type_names):
                     custom_typename = f"{_tmpl_key}<{','.join(type_names)}>"
                 elif _is_object_tmpl:
-                    custom_typename = self._resolve_template_object(_tmpl_key, type_names, type_specs_list)
+                    custom_typename = self._resolve_template_object(
+                        _tmpl_key, type_names, type_specs_list, usage_tok=_first_arg_tok)
                 else:
-                    custom_typename = self._resolve_template_struct(_tmpl_key, type_names, type_specs_list)
+                    custom_typename = self._resolve_template_struct(
+                        _tmpl_key, type_names, type_specs_list, usage_tok=_first_arg_tok)
 
         # Bit width and alignment for data types
         bit_width = None
@@ -6618,6 +6670,28 @@ class FluxParser:
                 return [walk(item) for item in obj]
             if isinstance(obj, dict):
                 return {k: walk(v) for k, v in obj.items()}
+            # Resolve deferred template struct refs stored as strings in
+            # base_structs / post_structs: e.g. "A<T>" where T is in mapping.
+            if isinstance(obj, str):
+                if '<' in obj and '>' in obj and any(p in obj for p in mapping):
+                    bracket = obj.index('<')
+                    struct_base = obj[:bracket]
+                    raw_args = obj[bracket + 1:-1].split(',')
+                    _sentry = self._templates.lookup(struct_base)
+                    if _sentry is not None and _sentry.kind == 'struct' and any(a.strip() in mapping for a in raw_args):
+                        concrete_type_names = []
+                        concrete_type_specs = []
+                        for arg in raw_args:
+                            arg = arg.strip()
+                            if arg in mapping:
+                                concrete_ts = mapping[arg]
+                                concrete_type_names.append(self._type_system_to_mangle_str(concrete_ts))
+                                concrete_type_specs.append(concrete_ts)
+                            else:
+                                concrete_type_names.append(arg)
+                                concrete_type_specs.append(TypeSystem(base_type=DataType.DATA, custom_typename=arg))
+                        return self._resolve_template_struct(struct_base, concrete_type_names, concrete_type_specs)
+                return obj
             if not hasattr(obj, '__dataclass_fields__'):
                 return obj
             # Identifier used as expression whose name is a template param
@@ -6721,10 +6795,21 @@ class FluxParser:
             return f"data_{sign}{ts.bit_width}"
         return base
 
-    def _resolve_template_struct(self, struct_name, type_names, type_specs=None):
+    def _resolve_template_struct(self, struct_name, type_names, type_specs=None, usage_tok=None):
         """
         Instantiate a template struct with concrete type arguments.
         Returns the mangled concrete struct name.
+
+        usage_tok, when provided, is the token at the start of the first
+        template argument (e.g. the 'T' in 'typeof(A<T>)'). If the
+        instantiation contains an unresolvable type argument, the eventual
+        codegen error should point at *this* token rather than wherever the
+        template's own field happens to be declared, since that's where the
+        bad argument was actually written. Only applies on first
+        instantiation of a given mangled name -- _templates.is_emitted
+        caches instances, so a later usage of the same bad instantiation
+        will not get its own location (a pre-existing limitation of the
+        instantiation cache, not something this fix changes).
         """
         entry = self._templates.lookup(struct_name)
         if entry is None or entry.kind != 'struct':
@@ -6753,13 +6838,21 @@ class FluxParser:
             concrete.template_params = []
             if getattr(template_sd, '_is_comptime_only', False):
                 concrete._is_comptime_only = True
+            if usage_tok is not None:
+                for member in getattr(concrete, 'members', []):
+                    member.set_location(usage_tok.line, usage_tok.column)
             self._template_struct_instances.append(concrete)
         return mangled
 
-    def _resolve_template_object(self, object_name, type_names, type_specs=None):
+    def _resolve_template_object(self, object_name, type_names, type_specs=None, usage_tok=None):
         """
         Instantiate a template object with concrete type arguments.
         Returns the mangled concrete object name.
+
+        usage_tok: see _resolve_template_struct -- same purpose (the first
+        template argument's token), applied to the object's members so an
+        unresolvable member type error points at the bad argument instead
+        of the template's own definition.
         """
         entry = self._templates.lookup(object_name)
         if entry is None or entry.kind != 'object':
@@ -6786,6 +6879,9 @@ class FluxParser:
             concrete = self._substitute_template(template_od, mapping)
             concrete.name = mangled
             concrete.template_params = []
+            if usage_tok is not None:
+                for member in getattr(concrete, 'members', []):
+                    member.set_location(usage_tok.line, usage_tok.column)
             self._parsed_objects[mangled] = concrete
             self._object_init_params[mangled] = self._object_init_params.get(template_od.name, 0)
             self._template_object_instances.append(concrete)
@@ -8275,11 +8371,11 @@ class FluxParser:
         elif self.expect(TokenType.STRUCT):
             tok = self.current_token
             self.advance()
-            return Literal(value=12, type=DataType.SINT).set_location(tok.line, tok.column)  # TypeOf.KIND_STRUCT
+            return Literal(value=DataType.STRUCT.value, type=DataType.STRUCT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.OBJECT):
             tok = self.current_token
             self.advance()
-            return Literal(value=13, type=DataType.SINT).set_location(tok.line, tok.column)  # TypeOf.KIND_OBJECT
+            return Literal(value=DataType.OBJECT.value, type=DataType.OBJECT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRINGIFY):
             # Stringify operator: $x or $x.member produces the name/value as a string.
             # Parsed here (primary level) so that the postfix loop can handle ($X)(args)

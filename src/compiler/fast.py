@@ -543,27 +543,12 @@ class AlignOf(Expression):
 @dataclass
 class TypeOf(Expression):
     expression: Expression
-
-    # Type-kind constants used for comparison (typeof(x) == struct)
-    KIND_UNKNOWN   = 0
-    KIND_SINT      = 1
-    KIND_UINT      = 2
-    KIND_FLOAT     = 3
-    KIND_DOUBLE    = 4
-    KIND_BOOL      = 5
-    KIND_CHAR      = 6
-    KIND_BYTE      = 7
-    KIND_SLONG     = 8
-    KIND_ULONG     = 9
-    KIND_POINTER   = 10  # generic fallback (depth=1, unknown pointee)
-    KIND_ARRAY     = 11
-    KIND_STRUCT    = 12
-    KIND_OBJECT    = 13
-    KIND_VOID      = 14
-    KIND_FUNCTION  = 15
-    # Pointer kinds are encoded as: depth * 100 + pointee_base_kind
-    # e.g. byte* = 107, int* = 101, int** = 201, byte*** = 307
-    KIND_POINTER_BASE = 100
+    # typeof() returns the Flux type name as a byte* string (e.g. "int",
+    # "byte*", "myStru1"). Bare 'struct'/'object' keywords used as the
+    # argument resolve to the literal strings "struct"/"object" via
+    # DataType.STRUCT.value / DataType.OBJECT.value, so
+    # typeof(x) == typeof(struct) is true for any struct-typed x while
+    # typeof(x) == typeof(myStru1) is true only for that exact named type.
 
 
 

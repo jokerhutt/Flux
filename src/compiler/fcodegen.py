@@ -523,27 +523,6 @@ class CodegenVisitor:
                 f"{ref_list}"
             )
 
-    # typeof() kind constants
-    _TYPEOF_KIND_UNKNOWN  = 0
-    _TYPEOF_KIND_SINT     = 1
-    _TYPEOF_KIND_UINT     = 2
-    _TYPEOF_KIND_FLOAT    = 3
-    _TYPEOF_KIND_DOUBLE   = 4
-    _TYPEOF_KIND_BOOL     = 5
-    _TYPEOF_KIND_CHAR     = 6
-    _TYPEOF_KIND_BYTE     = 7
-    _TYPEOF_KIND_SLONG    = 8
-    _TYPEOF_KIND_ULONG    = 9
-    _TYPEOF_KIND_POINTER  = 10  # generic fallback
-    _TYPEOF_KIND_ARRAY    = 11
-    _TYPEOF_KIND_STRUCT   = 12
-    _TYPEOF_KIND_OBJECT   = 13
-    _TYPEOF_KIND_VOID     = 14
-    _TYPEOF_KIND_FUNCTION = 15
-    # Pointer kinds: depth * 100 + pointee_base_kind
-    # e.g. byte* = 107, int* = 101, int** = 201, byte*** = 307
-    _TYPEOF_KIND_POINTER_BASE = 100
-
     def visit_Literal(self, node, builder, module):
         from fast import Literal
         if node.type in (DataType.SINT, DataType.UINT):
@@ -570,6 +549,11 @@ class CodegenVisitor:
             return ir.Constant(llvm_type, char_val)
         elif node.type == DataType.VOID:
             return ir.Constant(ir.IntType(1), 0)
+        elif node.type in (DataType.STRUCT, DataType.OBJECT) and node.value in (
+                DataType.STRUCT.value, DataType.OBJECT.value):
+            raise FluxCodegenError(
+                f"Bare '{node.value}' keyword is only valid as the argument to typeof(), "
+                f"e.g. typeof(x) == typeof({node.value})", node, module)
         elif node.type == DataType.DATA:
             if isinstance(node.value, list):
                 raise FluxCodegenError(
@@ -1022,114 +1006,283 @@ class CodegenVisitor:
         from ftypesys import TypeSystem as _TS
         expr = node.expression
         if isinstance(expr, _TS):
-            if expr.is_pointer:
-                depth = getattr(expr, 'pointer_depth', 1) or 1
-                base_kind = self._typeof_kind_from_datatype(expr.base_type)
-                return ir.Constant(ir.IntType(32), self._typeof_kind_for_pointer(base_kind, depth))
-            kind = self._typeof_kind_from_datatype(expr.base_type)
-            return ir.Constant(ir.IntType(32), kind)
+            type_name = self._typeof_name_from_typespec(expr, module)
+            return self._typeof_const_str(type_name, module)
         if isinstance(expr, Identifier):
-            kind = self._typeof_resolve_identifier_kind(expr.name, module)
-            if kind is not None:
-                return ir.Constant(ir.IntType(32), kind)
+            type_name = self._typeof_resolve_identifier_name(expr.name, module)
+            if type_name is not None:
+                return self._typeof_const_str(type_name, module)
         if isinstance(expr, Literal):
-            kind = self._typeof_kind_from_datatype(expr.type)
-            return ir.Constant(ir.IntType(32), kind)
+            type_name = self._typeof_name_from_datatype(expr.type)
+            return self._typeof_const_str(type_name, module)
         val = self.visit(expr, builder, module)
-        return ir.Constant(ir.IntType(32), self._typeof_kind_from_llvm_type(val.type))
+        spec = getattr(val, '_flux_type_spec', None)
+        if spec is not None:
+            if isinstance(spec, _TS):
+                type_name = self._typeof_name_from_typespec(spec, module)
+            else:
+                type_name = self._typeof_name_from_datatype(spec)
+            return self._typeof_const_str(type_name, module)
+        type_name = self._typeof_name_from_llvm_type(val.type, module)
+        return self._typeof_const_str(type_name, module)
 
-    def _typeof_resolve_identifier_kind(self, name: str, module) -> Optional[int]:
+    def _typeof_const_str(self, type_name: str, module):
+        """
+        Return a deduplicated global byte* constant for a typeof() result string.
+        Identical type names always share the same global, so typeof(x) == typeof(y)
+        is a correct pointer comparison when x and y share a type.
+        """
+        if not hasattr(module, '_typeof_str_cache'):
+            module._typeof_str_cache = {}
+        cached = module._typeof_str_cache.get(type_name)
+        if cached is not None:
+            return cached
+        string_bytes = type_name.encode('ascii')
+        str_array_ty = ir.ArrayType(ir.IntType(8), len(string_bytes))
+        str_val = ir.Constant(str_array_ty, bytearray(string_bytes))
+        gv = ir.GlobalVariable(module, str_array_ty, name=f".typeof.{type_name}")
+        gv.linkage = 'internal'
+        gv.global_constant = True
+        gv.initializer = str_val
+        gv.type._is_array_pointer = True
+        module._typeof_str_cache[type_name] = gv
+        return gv
+
+    def _typeof_name_from_datatype(self, dt) -> str:
+        """
+        Primitive DataType -> Flux keyword string. DataType enum values are
+        already the canonical Flux keyword spellings (e.g. DataType.SINT.value
+        == "int"), so this needs no hand-maintained mapping that could omit
+        a member the way the old integer-kind dict did (it silently dropped
+        DataType.BYTE and never handled ENUM/UNION at all).
+        """
+        if isinstance(dt, DataType):
+            return dt.value
+        return str(dt)
+
+    def _typeof_name_from_typespec(self, ts, module) -> str:
+        from ftypesys import TypeSystem as _TS
+        if not isinstance(ts, _TS):
+            return self._typeof_name_from_datatype(ts)
+        if getattr(ts, 'custom_typename', None):
+            base_name = ts.custom_typename
+        else:
+            base_name = self._typeof_name_from_datatype(ts.base_type)
+        depth = getattr(ts, 'pointer_depth', 0) or 0
+        if getattr(ts, 'is_pointer', False) and depth < 1:
+            depth = 1
+        if getattr(ts, 'is_array', False):
+            # Array-to-pointer decay: byte[5] is the same type as byte* for
+            # typeof() purposes, same as a string literal or a raw LLVM
+            # array decays. One array dimension == one pointer level.
+            depth += 1
+        return base_name + ('*' * depth)
+
+    def _typeof_resolve_identifier_name(self, name: str, module) -> Optional[str]:
+        """
+        Resolve a bare identifier used as typeof()'s argument to its type name
+        string. Checks (in order): declared type name, registered struct,
+        registered union, registered enum, registered object/vtable, then
+        falls back to the variable's own declared type_spec.
+        """
         current_ns = (getattr(module, '_current_namespace', '') or
                       module.symbol_table.current_namespace)
         if module.symbol_table.lookup_type(name, current_ns) is not None:
-            return self._TYPEOF_KIND_STRUCT
+            return name
+        if hasattr(module, '_struct_types') and name in module._struct_types:
+            return name
+        if hasattr(module, '_union_types') and name in module._union_types:
+            return name
+        if hasattr(module, '_enum_types') and name in module._enum_types:
+            return name
+        if hasattr(module, '_struct_vtables') and name in module._struct_vtables:
+            return name
         if hasattr(module, '_struct_types'):
-            if name in module._struct_types:
-                return self._TYPEOF_KIND_STRUCT
             namespaces = (list(getattr(module, '_namespaces', [])) +
                           list(getattr(module.symbol_table, 'registered_namespaces', [])) +
                           list(getattr(module.symbol_table, 'using_namespaces', [])))
             for ns in namespaces:
                 if ns.replace('::', '__') + '__' + name in module._struct_types:
-                    return self._TYPEOF_KIND_STRUCT
+                    return name
             if current_ns and current_ns.replace('::', '__') + '__' + name in module._struct_types:
-                return self._TYPEOF_KIND_STRUCT
-        if hasattr(module, '_struct_vtables') and name in module._struct_vtables:
-            return self._TYPEOF_KIND_STRUCT
+                return name
         var_entry = module.symbol_table.lookup_variable(name, current_ns)
         if var_entry is not None and var_entry.type_spec is not None:
-            ts = var_entry.type_spec
-            if getattr(ts, 'is_pointer', False):
-                depth = getattr(ts, 'pointer_depth', 1) or 1
-                base_kind = self._typeof_kind_from_datatype(ts.base_type)
-                return self._typeof_kind_for_pointer(base_kind, depth)
-            return self._typeof_kind_from_datatype(ts.base_type)
+            return self._typeof_name_from_typespec(var_entry.type_spec, module)
         try:
             if module.context.get_identified_type(name) is not None:
-                return self._TYPEOF_KIND_STRUCT
+                return name
         except Exception:
             pass
         if hasattr(module, '_struct_types'):
             for key in module._struct_types:
                 if key == name or key.endswith('__' + name) or key.endswith('.' + name):
-                    return self._TYPEOF_KIND_STRUCT
+                    return name
         return None
 
-    def _typeof_kind_for_pointer(self, base_kind: int, depth: int) -> int:
-        """Encode a pointer kind as depth * 100 + pointee_base_kind."""
-        return depth * self._TYPEOF_KIND_POINTER_BASE + base_kind
-
-    def _typeof_kind_from_datatype(self, dt) -> int:
-        mapping = {
-            DataType.SINT:   self._TYPEOF_KIND_SINT,
-            DataType.UINT:   self._TYPEOF_KIND_UINT,
-            DataType.FLOAT:  self._TYPEOF_KIND_FLOAT,
-            DataType.DOUBLE: self._TYPEOF_KIND_DOUBLE,
-            DataType.BOOL:   self._TYPEOF_KIND_BOOL,
-            DataType.CHAR:   self._TYPEOF_KIND_CHAR,
-            DataType.DATA:   self._TYPEOF_KIND_BYTE,
-            DataType.SLONG:  self._TYPEOF_KIND_SLONG,
-            DataType.ULONG:  self._TYPEOF_KIND_ULONG,
-            DataType.STRUCT: self._TYPEOF_KIND_STRUCT,
-            DataType.OBJECT: self._TYPEOF_KIND_OBJECT,
-            DataType.VOID:   self._TYPEOF_KIND_VOID,
-        }
-        return mapping.get(dt, self._TYPEOF_KIND_UNKNOWN)
-
-    def _typeof_kind_from_llvm_type(self, llvm_type) -> int:
+    def _typeof_name_from_llvm_type(self, llvm_type, module) -> str:
+        """
+        Fallback when no _flux_type_spec metadata is attached to the value.
+        This path is inherently lossy at the LLVM level (e.g. i8 cannot
+        distinguish 'char' from 'byte', i32 cannot distinguish 'int' from
+        'uint') -- the same ambiguity existed in the old integer-kind scheme.
+        Prefer the _flux_type_spec path in visit_TypeOf whenever possible.
+        """
         if isinstance(llvm_type, ir.IntType):
             if llvm_type.width == 1:
-                return self._TYPEOF_KIND_BOOL
+                return DataType.BOOL.value
             if llvm_type.width == 8:
-                return self._TYPEOF_KIND_BYTE
+                return DataType.BYTE.value
             if llvm_type.width == 32:
-                return self._TYPEOF_KIND_SINT
+                return DataType.SINT.value
             if llvm_type.width == 64:
-                return self._TYPEOF_KIND_SLONG
-            return self._TYPEOF_KIND_SINT
+                return DataType.SLONG.value
+            return DataType.SINT.value
         if isinstance(llvm_type, ir.FloatType):
-            return self._TYPEOF_KIND_FLOAT
+            return DataType.FLOAT.value
         if isinstance(llvm_type, ir.DoubleType):
-            return self._TYPEOF_KIND_DOUBLE
+            return DataType.DOUBLE.value
         if isinstance(llvm_type, ir.PointerType):
-            # Walk pointer chain to get depth and innermost base type kind
+            if getattr(llvm_type, '_is_array_pointer', False) and isinstance(llvm_type.pointee, ir.ArrayType):
+                # Array-to-pointer decay (string literals, stack/global char
+                # arrays used as expressions): byte[5] decays to byte*, the
+                # array dimension is dropped entirely, matching C decay rules.
+                elem_name = self._typeof_name_from_llvm_type(llvm_type.pointee.element, module)
+                return elem_name + '*'
             depth = 0
             inner = llvm_type
             while isinstance(inner, ir.PointerType):
                 depth += 1
                 inner = inner.pointee
-            base_kind = self._typeof_kind_from_llvm_type(inner)
-            return self._typeof_kind_for_pointer(base_kind, depth)
+            base_name = self._typeof_name_from_llvm_type(inner, module)
+            return base_name + ('*' * depth)
         if isinstance(llvm_type, ir.ArrayType):
-            return self._TYPEOF_KIND_ARRAY
-        if isinstance(llvm_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
-            return self._TYPEOF_KIND_STRUCT
+            # Same decay as the _is_array_pointer case above: an array type,
+            # however it was reached, is the same typeof() identity as a
+            # pointer to its element type. No elemtype[N] form is ever
+            # produced -- typeof(byte[5]) == typeof("hello") == typeof(byte*).
+            elem_name = self._typeof_name_from_llvm_type(llvm_type.element, module)
+            return elem_name + '*'
+        if isinstance(llvm_type, ir.IdentifiedStructType):
+            if llvm_type.name:
+                return llvm_type.name
+            return DataType.STRUCT.value
+        if isinstance(llvm_type, ir.LiteralStructType):
+            return DataType.STRUCT.value
         if isinstance(llvm_type, ir.VoidType):
-            return self._TYPEOF_KIND_VOID
-        return self._TYPEOF_KIND_UNKNOWN
+            return DataType.VOID.value
+        raise FluxCodegenError(
+            f"typeof(): cannot determine a Flux type name for LLVM type {llvm_type}",
+            None, module)
+
+    def _typeof_arg_category(self, expr, module):
+        """
+        Resolve a typeof()-argument expression to its DataType category
+        (STRUCT or OBJECT), or None if it isn't a struct/object at all.
+        Used only for the == struct / == object category predicate, kept
+        separate from the name-string resolution used by typeof() itself
+        because category membership and specific identity are different
+        questions (A == struct is true, A == B is false, even though both
+        A and B are structs).
+        """
+        from fast import Identifier, Literal
+        from ftypesys import TypeSystem as _TS
+        if isinstance(expr, _TS):
+            if getattr(expr, 'custom_typename', None):
+                name = expr.custom_typename
+                return self._typeof_category_for_name(name, module)
+            if expr.base_type == DataType.STRUCT:
+                return DataType.STRUCT
+            if expr.base_type == DataType.OBJECT:
+                return DataType.OBJECT
+            return None
+        if isinstance(expr, Identifier):
+            return self._typeof_category_for_name(expr.name, module)
+        if isinstance(expr, Literal):
+            if expr.type in (DataType.STRUCT, DataType.OBJECT):
+                return expr.type
+            return None
+        return None
+
+    def _typeof_category_for_name(self, name: str, module):
+        """
+        Determine whether 'name' (a struct/object type name, or a variable
+        of such a type) belongs to the STRUCT or OBJECT category.
+
+        Objects are backed by the same LLVM struct machinery as plain
+        structs (module._struct_types / _struct_vtables) since they need
+        layout, vtables, and methods, but visit_ObjectDef separately tags
+        every object name into module._object_type_names specifically so
+        callers can tell objects apart from plain structs -- check that
+        first.
+        """
+        current_ns = (getattr(module, '_current_namespace', '') or
+                      module.symbol_table.current_namespace)
+        if hasattr(module, '_object_type_names') and name in module._object_type_names:
+            return DataType.OBJECT
+        if hasattr(module, '_struct_types') and name in module._struct_types:
+            return DataType.STRUCT
+        if hasattr(module, '_struct_vtables') and name in module._struct_vtables:
+            return DataType.STRUCT
+        if hasattr(module, '_union_types') and name in module._union_types:
+            return None
+        if hasattr(module, '_enum_types') and name in module._enum_types:
+            return None
+        var_entry = module.symbol_table.lookup_variable(name, current_ns)
+        if var_entry is not None and var_entry.type_spec is not None:
+            ts = var_entry.type_spec
+            if getattr(ts, 'custom_typename', None):
+                return self._typeof_category_for_name(ts.custom_typename, module)
+            if ts.base_type in (DataType.STRUCT, DataType.OBJECT):
+                return ts.base_type
+        try:
+            if module.context.get_identified_type(name) is not None:
+                return DataType.STRUCT
+        except Exception:
+            pass
+        return None
+
+    def _typeof_bare_category_literal(self, typeof_node):
+        """
+        If a TypeOf node's argument is the bare 'struct' or 'object' keyword
+        (parsed as Literal(value=DataType.STRUCT.value/OBJECT.value,
+        type=DataType.STRUCT/OBJECT)), return that DataType, else None.
+        """
+        from fast import Literal
+        expr = typeof_node.expression
+        if isinstance(expr, Literal) and expr.type in (DataType.STRUCT, DataType.OBJECT):
+            if expr.value in (DataType.STRUCT.value, DataType.OBJECT.value):
+                return expr.type
+        return None
 
     def visit_BinaryOp(self, node, builder, module):
+        from fast import TypeOf as _TypeOf
         ctx = CoercionContext(builder)
+
+        # typeof(X) == typeof(struct)  /  typeof(X) == typeof(object)
+        # This is a compile-time category predicate ("is X a struct/object
+        # at all"), not a string-identity comparison -- struct/object are
+        # not real type identities themselves, so they cannot be compared
+        # via the normal deduplicated-string == used elsewhere for typeof().
+        # A == struct and B == struct are both true; A == B is still false.
+        if node.operator in (Operator.EQUAL, Operator.NOT_EQUAL):
+            _left_is_typeof = isinstance(node.left, _TypeOf)
+            _right_is_typeof = isinstance(node.right, _TypeOf)
+            if _left_is_typeof and _right_is_typeof:
+                _left_cat = self._typeof_bare_category_literal(node.left)
+                _right_cat = self._typeof_bare_category_literal(node.right)
+                if _left_cat is not None or _right_cat is not None:
+                    if _left_cat is not None and _right_cat is not None:
+                        raise FluxCodegenError(
+                            "typeof(struct) == typeof(struct)-style comparison has no "
+                            "specific type on either side to check category membership for",
+                            node, module)
+                    bare_cat = _left_cat if _left_cat is not None else _right_cat
+                    other_node = node.right if _left_cat is not None else node.left
+                    other_cat = self._typeof_arg_category(other_node.expression, module)
+                    matches = (other_cat == bare_cat)
+                    result = matches if node.operator is Operator.EQUAL else (not matches)
+                    return ir.Constant(ir.IntType(1), 1 if result else 0)
 
         # Pointer-param overload check
         _ptr_overload_func = None
@@ -6071,9 +6224,12 @@ class CodegenVisitor:
 
         from fast import StructMember as _StructMember
         # Composition: flatten members from all base structs in declaration order.
-        # This handles:  struct BMP : Header, InfoHeader;
-        # which is syntactic sugar for inlining all fields from the base structs.
-        if not node.members and node.base_structs:
+        # Pre-body base structs are prepended before the struct's own members.
+        # This handles both:
+        #   struct BMP : Header, InfoHeader;          (pure alias, no own members)
+        #   struct B<U> : A<T> { U y; };              (pre-body, base fields first)
+        if node.base_structs:
+            prepended = []
             for base_name in node.base_structs:
                 base_specs = module._struct_member_type_specs.get(base_name)
                 if base_specs is None:
@@ -6084,9 +6240,8 @@ class CodegenVisitor:
                 base_vtable = module._struct_vtables.get(base_name)
                 ordered_names = [fname for fname, _, _, _ in base_vtable.fields] if base_vtable else list(base_specs.keys())
                 for fname in ordered_names:
-                    node.members.append(
-                        _StructMember(name=fname, type_spec=base_specs[fname])
-                    )
+                    prepended.append(_StructMember(name=fname, type_spec=base_specs[fname]))
+            node.members = prepended + node.members
 
         # Post-composition: append members from post_structs after inline members.
         # struct BMP : Header, InfoHeader { int extra; } : PostData;

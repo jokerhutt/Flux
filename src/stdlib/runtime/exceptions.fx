@@ -1,322 +1,423 @@
-// ============================================================
-//  exceptions.fx  -  Flux exceptions library  (Windows x86-64)
-//
-//  Provides:
-//    : __intrinsic_setjmp / setjmp / longjmp  (pure inline ASM)
-//    : Vectored Exception Handler registration (Win32 FFI)
-//    : __exc_push / __exc_pop  (jmp_buf guard helpers)
-//
-//  Hardware faults caught:
-//    0xC0000005  EXCEPTION_ACCESS_VIOLATION
-//    0xC0000094  EXCEPTION_INT_DIVIDE_BY_ZERO
-//    0xC000001D  EXCEPTION_ILLEGAL_INSTRUCTION
-//    0xC00000FD  EXCEPTION_STACK_OVERFLOW
-//
-//  Usage:
-//    #import "exceptions.fx";
-//    exceptions::init();           // once at program start
-//
-//    exceptions::jmp_buf buf;
-//    long rc = exceptions::__exc_push(@buf);
-//    switch (rc)
-//    {
-//        case (0)
-//        {
-//            int* bad = (int*)0;
-//            int  x   = *bad;      // hardware fault -> longjmp -> rc=1
-//            exceptions::__exc_pop();
-//        }
-//        default
-//        {
-//            exceptions::__exc_pop();
-//            println(exceptions::__exc_fault_addr());
-//        };
-//    };
-// ============================================================
+// Author: Karac V. Thweatt
 
-#ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
-#endif;
+// Flux Hardware Exception System
+// Hardware fault detection/delivery, sharing catch syntax with software throw.
+// Windows/x86-64 only for now. POSIX and stack-underflow detection are out of scope.
 
 #ifndef FLUX_STANDARD_EXCEPTIONS
 #def FLUX_STANDARD_EXCEPTIONS 1;
 
-        // ----------------------------------------------------------
-        //  Win32 FFI
-        // ----------------------------------------------------------
-        extern
-        {
-            stdcall !! AddVectoredExceptionHandler(uint first, void* handler) -> void*;
-            stdcall !! RemoveVectoredExceptionHandler(void* handle) -> uint;
-        };
+#ifndef FLUX_STANDARD_TYPES
+#import <..\types.fx>;
+#endif;
+
+// Not a layout-compatible overlay of the real CONTEXT; populated field-by-field.
+#ifdef __ARCH_X86_64__
+struct ExceptionState
+{
+    u64 RAX, RBX, RCX, RDX,
+        RSI, RDI, RBP, RSP,
+        R8,  R9,  R10, R11,
+        R12, R13, R14, R15,
+        RIP, RFLAGS;
+};
+#endif;
+
+#ifdef __ARCH_X86__
+struct ExceptionState
+{
+    u32 EAX, EBX, ECX, EDX,
+        ESI, EDI, EBP, ESP,
+        EIP, EFLAGS;
+};
+#endif;
+
+#ifdef __ARCH_ARM64__
+struct ExceptionState
+{
+    u64 X0,  X1,  X2,  X3,
+        X4,  X5,  X6,  X7,
+        X8,  X9,  X10, X11,
+        X12, X13, X14, X15,
+        X16, X17, X18, X19,
+        X20, X21, X22, X23,
+        X24, X25, X26, X27,
+        X28, X29, X30, SP, PC;
+};
+#endif;
+
+// Fault-class tags. Must match RESERVED_EXCEPTION_TYPES in ftypesys.py.
+const i32 EC_NONE             = 0,
+          EC_NULLPTR           = 1,
+          EC_WILDPTR           = 2,
+          EC_PROTFAULT         = 3,
+          EC_STACKOVERFLOW     = 4,
+          EC_ILLEGALINSTR      = 5,
+          EC_DIVBYZERO         = 6,
+          EC_INTOVERFLOW       = 7,
+          EC_ALIGNFAULT        = 8,
+          EC_PRIVINSTR         = 9;
+
+struct Exception
+{
+    byte*          msg;
+    i32            ec;
+    ExceptionState regs;
+};
+
+#ifdef __WINDOWS__
+
+// Verified against Wine winnt.h/ntstatus.h, nxdk minwinbase.h port.
+const u32 WIN_EXCEPTION_ACCESS_VIOLATION       = 0xC0000005u,
+          WIN_EXCEPTION_DATATYPE_MISALIGNMENT  = 0x80000002u,
+          WIN_EXCEPTION_ILLEGAL_INSTRUCTION    = 0xC000001Du,
+          WIN_EXCEPTION_INT_DIVIDE_BY_ZERO     = 0xC0000094u,
+          WIN_EXCEPTION_INT_OVERFLOW           = 0xC0000095u,
+          WIN_EXCEPTION_PRIV_INSTRUCTION       = 0xC0000096u,
+          WIN_EXCEPTION_STACK_OVERFLOW         = 0xC00000FDu;
+
+const i32 WIN_EXCEPTION_CONTINUE_EXECUTION = -1,
+          WIN_EXCEPTION_CONTINUE_SEARCH    = 0;
+
+// Field order/widths match real winnt.h through Rip; FP/vector state not modeled.
+struct WinExceptionRecord
+{
+    u32                  ExceptionCode;
+    u32                  ExceptionFlags;
+    WinExceptionRecord*  ExceptionRecordNext;
+    void*                ExceptionAddress;
+    u32                  NumberParameters;
+    u64[15]              ExceptionInformation;
+};
+
+struct WinContext
+{
+    u64 P1Home, P2Home, P3Home, P4Home, P5Home, P6Home;
+    u32 ContextFlags;
+    u32 MxCsr;
+    u16 SegCs, SegDs, SegEs, SegFs, SegGs, SegSs;
+    u32 EFlags;
+    u64 Dr0, Dr1, Dr2, Dr3, Dr6, Dr7;
+    u64 Rax, Rcx, Rdx, Rbx, Rsp, Rbp, Rsi, Rdi;
+    u64 R8, R9, R10, R11, R12, R13, R14, R15;
+    u64 Rip;
+};
+
+struct WinExceptionPointers
+{
+    WinExceptionRecord* ExceptionRecord;
+    WinContext*         ContextRecord;
+};
+
+extern
+{
+    stdcall !!
+        AddVectoredExceptionHandler(u32 First, void* Handler) -> void*,
+        SetThreadStackGuarantee(u32* StackSizeInBytes) -> i32,
+        VirtualAlloc(void*, u64, u32, u32) -> void*,
+        VirtualFree(void*, u64, u32)       -> i32;
+};
+
+const u32 FEXC_MEM_COMMIT_RESERVE = 0x3000u,
+          FEXC_PAGE_READWRITE    = 0x04u;
+
+const u32 FEXC_STACK_GUARANTEE_BYTES = 0x10000u; // 64 KB
+
+#endif; // __WINDOWS__
+
+// Jump-point stack: a try block pushes on entry, pops on normal exit. A
+// hardware fault or escaped throw longjmps to the top entry. Phase 1:
+// single global stack, single main thread, not real TLS.
+struct FluxJmpBuf
+{
+    u64    rip, rsp, rbp, rbx, r12, r13, r14, r15;
+    bool*  exc_flag_ptr;
+    u64*   exc_value_ptr;
+    bool*  exc_origin_ptr;
+    i32*   exc_type_tag_ptr;
+};
+
+const u64 FEXC_JMPSTACK_CAPACITY = 64;
+
+global FluxJmpBuf* FEXC_JMPSTACK_BASE = (FluxJmpBuf*)NULL;
+global u64         FEXC_JMPSTACK_TOP  = 0;
+global bool        FEXC_INITIALIZED   = false;
+
+global Exception FEXC_PENDING;
 
 namespace standard
 {
-    namespace exceptions
+    namespace runtime
     {
-        // ----------------------------------------------------------
-        //  jmp_buf  - 10 × 8-byte slots (80 bytes)
-        //
-        //  Slot  Offset  Register  Notes
-        //  ----  ------  --------  --------------------------------
-        //   0    0x00    RBX       non-volatile
-        //   1    0x08    RBP       frame pointer
-        //   2    0x10    RSI       non-volatile
-        //   3    0x18    RDI       non-volatile
-        //   4    0x20    RSP       caller's pre-call RSP (RSP+8 at point of call)
-        //   5    0x28    R12       non-volatile
-        //   6    0x30    R13       non-volatile
-        //   7    0x38    R14       non-volatile
-        //   8    0x40    R15       non-volatile
-        //   9    0x48    RIP       return address sitting at [RSP] at point of call
-        // ----------------------------------------------------------
-        struct jmp_buf
+        namespace exceptions
         {
-            long[10] regs;
-        };
-
-
-        // ----------------------------------------------------------
-        //  Internal state
-        // ----------------------------------------------------------
-        jmp_buf*  _active_buf  = (jmp_buf*)0;
-        long      _fault_addr  = 0;
-        void*     _handler_ptr = (void*)0;
-
-        // ----------------------------------------------------------
-        //  _setjmp_impl
-        //
-        //  Snapshots all Windows x64 non-volatile registers into buf,
-        //  then stores 0 into *out.
-        //
-        //  $0 = jmp_buf*   buf
-        //  $1 = long*      out
-        //
-        //  We move both inputs into RSI/RDI first to free RCX/RDX,
-        //  then save RSI's original call-time value (= buf ptr) into
-        //  slot 2.  That stored value is used by longjmp purely to
-        //  restore the ABI register state; the pointer arithmetic is
-        //  done through R11 in longjmp, not through the restored RSI.
-        // ----------------------------------------------------------
-        def _setjmp_impl(jmp_buf* buf, long* out) -> void
-        {
-            #ifdef __ARCH_X86_64__
-            volatile asm
+            def fexc_init() -> bool
             {
-                movq  $0,    %rsi            // rsi  = buf
-                movq  $1,    %rdi            // rdi  = out
-                movq  %rbx,  0x00(%rsi)
-                movq  %rbp,  0x08(%rsi)
-                movq  %rsi,  0x10(%rsi)      // save RSI (its value here = buf ptr, but that's fine)
-                movq  %rdi,  0x18(%rsi)      // save RDI (its value here = out ptr)
-                leaq  0x08(%rsp), %rax       // caller's RSP before the call pushed ret addr
-                movq  %rax,  0x20(%rsi)
-                movq  %r12,  0x28(%rsi)
-                movq  %r13,  0x30(%rsi)
-                movq  %r14,  0x38(%rsi)
-                movq  %r15,  0x40(%rsi)
-                movq  (%rsp), %rax           // return address = saved RIP
-                movq  %rax,  0x48(%rsi)
-                movq  $$0,   (%rdi)          // *out = 0
-            } : : "r"(buf), "r"(out) : "rax", "rsi", "rdi", "memory";
-            #endif;
-        };
-
-        // ----------------------------------------------------------
-        //  __intrinsic_setjmp
-        // ----------------------------------------------------------
-        def !! __intrinsic_setjmp(jmp_buf* buf) -> long
-        {
-            long result;
-            _setjmp_impl(buf, @result);
-            return result;
-        };
-
-        // ----------------------------------------------------------
-        //  setjmp
-        // ----------------------------------------------------------
-        def !! setjmp(jmp_buf* buf) -> long
-        {
-            return __intrinsic_setjmp(buf);
-        };
-
-        // ----------------------------------------------------------
-        //  longjmp
-        //
-        //  $0 = jmp_buf*   buf
-        //  $1 = long       val   (clamped to 1 if 0)
-        //
-        //  Strategy:
-        //    1. Move buf into R11 (volatile scratch in Windows x64).
-        //       R11 survives the RSI/RDI restore because it is not
-        //       one of the slots we are restoring.
-        //    2. Clamp val to 1 if it is 0.
-        //    3. Restore RBX, RBP, R12-R15.
-        //    4. Stash saved RIP into RAX (we need it after RSP changes).
-        //    5. Restore RDI then RSI from their saved slots.
-        //    6. Restore RSP from slot 4 (R11 still valid here).
-        //    7. Write saved RIP into the new [RSP] (ret address slot).
-        //    8. Move val -> RAX and ret.  Execution resumes at the
-        //       original setjmp call site with RAX = val.
-        // ----------------------------------------------------------
-        def !! longjmp(jmp_buf* buf, long val) -> void
-        {
-            #ifdef __ARCH_X86_64__
-            volatile asm
-            {
-                movq  $0,    %r11            // r11 = buf  (volatile; safe scratch)
-                movq  $1,    %rdx            // rdx = val
-
-                // Clamp: val 0 -> 1
-                testq %rdx,  %rdx
-                jnz   .Ljmp_nonzero
-                movq  $$1,   %rdx
-            .Ljmp_nonzero:
-
-                // Restore non-volatiles (all except RSI, RDI, RSP - those come later)
-                movq  0x00(%r11), %rbx
-                movq  0x08(%r11), %rbp
-                movq  0x28(%r11), %r12
-                movq  0x30(%r11), %r13
-                movq  0x38(%r11), %r14
-                movq  0x40(%r11), %r15
-
-                // Stash saved RIP in RAX before RSP is restored
-                movq  0x48(%r11), %rax
-
-                // Restore RDI then RSI - R11 still holds buf after this
-                movq  0x18(%r11), %rdi
-                movq  0x10(%r11), %rsi
-
-                // Restore RSP - R11 still valid (not a saved slot)
-                movq  0x20(%r11), %rsp
-
-                // Write saved RIP into the return-address slot and return
-                movq  %rax,  (%rsp)
-                movq  %rdx,  %rax            // RAX = return value
-                ret
-            } : : "r"(buf), "r"(val) : "rax", "rbx", "rbp", "rdx", "r11",
-                                        "rsi", "rdi", "r12", "r13", "r14", "r15",
-                                        "memory";
-            #endif;
-        };
-
-        // ----------------------------------------------------------
-        //  _veh_handler  (PVECTORED_EXCEPTION_HANDLER)
-        //
-        //  EXCEPTION_POINTERS (x64):
-        //    +0x00  EXCEPTION_RECORD*
-        //    +0x08  CONTEXT*            (ignored)
-        //
-        //  EXCEPTION_RECORD (relevant):
-        //    +0x00  DWORD  ExceptionCode
-        //    +0x14  DWORD  NumberParameters
-        //    +0x18  ptr    ExceptionInformation[0]  (r/w flag, AV only)
-        //    +0x20  ptr    ExceptionInformation[1]  (faulting VA, AV only)
-        //
-        //  Returns -1 (EXCEPTION_CONTINUE_EXECUTION) if handled,
-        //           0 (EXCEPTION_CONTINUE_SEARCH) otherwise.
-        // ----------------------------------------------------------
-        stdcall !! _veh_handler(void* exc_ptrs) -> int
-        {
-            if (_active_buf == (jmp_buf*)0)
-            {
-                return 0;
-            };
-
-            long rec_ptr  = ((long*)exc_ptrs)[0];
-            uint exc_code = ((uint*)rec_ptr)[0];
-
-            switch (exc_code)
-            {
-                case (0xC0000005u)
+                #ifdef __WINDOWS__
+                void* page = VirtualAlloc(
+                    (ulong)NULL,
+                    (u64)FEXC_JMPSTACK_CAPACITY * (u64)sizeof(FluxJmpBuf),
+                    FEXC_MEM_COMMIT_RESERVE,
+                    FEXC_PAGE_READWRITE
+                );
+                if (page == (void*)NULL)
                 {
-                    _fault_addr = ((long*)(rec_ptr + 0x20))[0];
-                }
-                case (0xC0000094u) { _fault_addr = 0; }
-                case (0xC000001Du) { _fault_addr = 0; }
-                case (0xC00000FDu) { _fault_addr = 0; }
-                default
-                {
-                    return 0;
+                    return false;
                 };
+                FEXC_JMPSTACK_BASE = (FluxJmpBuf*)page;
+                FEXC_JMPSTACK_TOP  = 0;
+                FEXC_INITIALIZED   = true;
+                return true;
+                #endif;
+
+                #ifdef __LINUX__
+                return false;
+                #endif;
+
+                #ifdef __MACOS__
+                return false;
+                #endif;
             };
 
-            // Disarm *before* longjmp so re-entrant faults pass through.
-            jmp_buf* buf = _active_buf;
-            _active_buf  = (jmp_buf*)0;
-            longjmp(buf, 1);
-
-            return -1;
-        };
-
-        // ----------------------------------------------------------
-        //  __exc_push  -  arm guard, snapshot call site.
-        //  Returns 0 initially; returns 1 after a hardware fault.
-        // ----------------------------------------------------------
-        def !! __exc_push(jmp_buf* buf) -> long
-        {
-            _active_buf = buf;
-            _fault_addr = 0;
-
-            long result;
-            volatile asm
+            def fexc_push(bool* exc_flag_ptr, u64* exc_value_ptr, bool* exc_origin_ptr, i32* exc_type_tag_ptr) -> FluxJmpBuf*
             {
-                movq  $1,    %r11
-                movq  %rbx,  0x00(%r11)
-                movq  %rbp,  0x08(%r11)
-                movq  %rsi,  0x10(%r11)
-                movq  %rdi,  0x18(%r11)
-                leaq  0x10(%rbp), %rax       // caller's RSP (rbp+16, ABI-stable)
-                movq  %rax,  0x20(%r11)
-                movq  %r12,  0x28(%r11)
-                movq  %r13,  0x30(%r11)
-                movq  %r14,  0x38(%r11)
-                movq  %r15,  0x40(%r11)
-                movq  0x08(%rbp), %rax       // return address to caller (rbp+8, ABI-stable)
-                movq  %rax,  0x48(%r11)
-                xorq  %rax,  %rax            // RAX = 0 on normal path
-            } : "={rax}"(result) : "r"(buf) : "r11", "memory";
-
-            return result;
-        };
-
-        // ----------------------------------------------------------
-        //  __exc_pop  -  disarm the guard.
-        // ----------------------------------------------------------
-        def !! __exc_pop() -> void
-        {
-            _active_buf = (jmp_buf*)0;
-        };
-
-        // ----------------------------------------------------------
-        //  __exc_fault_addr  -  faulting VA from last AV; 0 for non-AV.
-        // ----------------------------------------------------------
-        def !! __exc_fault_addr() -> long
-        {
-            return _fault_addr;
-        };
-
-        // ----------------------------------------------------------
-        //  init  -  register VEH handler; call once at program start.
-        // ----------------------------------------------------------
-        def seh_init() -> void
-        {
-            _handler_ptr = AddVectoredExceptionHandler(1u, (void*)@standard::exceptions::_veh_handler);
-        };
-
-        // ----------------------------------------------------------
-        //  shutdown  -  deregister; optional.
-        // ----------------------------------------------------------
-        def seh_shutdown() -> void
-        {
-            if (_handler_ptr != (void*)0)
-            {
-                RemoveVectoredExceptionHandler(_handler_ptr);
-                _handler_ptr = (void*)0;
+                if (!FEXC_INITIALIZED)
+                {
+                    return (FluxJmpBuf*)NULL;
+                };
+                if (FEXC_JMPSTACK_TOP >= FEXC_JMPSTACK_CAPACITY)
+                {
+                    return (FluxJmpBuf*)NULL;
+                };
+                FluxJmpBuf* slot = FEXC_JMPSTACK_BASE + FEXC_JMPSTACK_TOP;
+                slot.exc_flag_ptr     = exc_flag_ptr;
+                slot.exc_value_ptr    = exc_value_ptr;
+                slot.exc_origin_ptr   = exc_origin_ptr;
+                slot.exc_type_tag_ptr = exc_type_tag_ptr;
+                FEXC_JMPSTACK_TOP = FEXC_JMPSTACK_TOP + 1;
+                return slot;
             };
+
+            def fexc_pop() -> void
+            {
+                if (FEXC_JMPSTACK_TOP == 0)
+                {
+                    return;
+                };
+                FEXC_JMPSTACK_TOP = FEXC_JMPSTACK_TOP - 1;
+            };
+
+            def fexc_top() -> FluxJmpBuf*
+            {
+                if (!FEXC_INITIALIZED | FEXC_JMPSTACK_TOP == 0)
+                {
+                    return (FluxJmpBuf*)NULL;
+                };
+                return FEXC_JMPSTACK_BASE + (FEXC_JMPSTACK_TOP - 1);
+            };
+
+            #ifdef __ARCH_X86_64__
+
+            // Hand-rolled setjmp: saves nonvolatile regs + resume RIP via local label.
+            // Runs inside a normal Flux function body, not a naked function, so it
+            // captures its own resume point rather than reading the raw return address.
+            def flux_setjmp(FluxJmpBuf* buf) -> i32
+            {
+                i32 result = 0;
+                volatile asm
+                {
+                    movq $1, %rdi
+                    movq %rsp, 8(%rdi)
+                    movq %rbp, 16(%rdi)
+                    movq %rbx, 24(%rdi)
+                    movq %r12, 32(%rdi)
+                    movq %r13, 40(%rdi)
+                    movq %r14, 48(%rdi)
+                    movq %r15, 56(%rdi)
+                    leaq .fexc_resume_point(%rip), %rax
+                    movq %rax, 0(%rdi)
+                    movl $$0, %eax
+                .fexc_resume_point:
+                    movl %eax, $0
+                } : "=r"(result) : "r"(buf) : "rax", "rdi", "rsp", "rbp", "rbx",
+                                 "r12", "r13", "r14", "r15", "memory";
+                return result;
+            };
+
+            def flux_longjmp(FluxJmpBuf* buf, i32 value) -> void
+            {
+                i32 actual_value = value;
+                if (actual_value == 0)
+                {
+                    actual_value = 1;
+                };
+                volatile asm
+                {
+                    movq $0, %rdi
+                    movl $1, %eax
+                    movq 32(%rdi), %r12
+                    movq 40(%rdi), %r13
+                    movq 48(%rdi), %r14
+                    movq 56(%rdi), %r15
+                    movq 16(%rdi), %rbp
+                    movq 24(%rdi), %rbx
+                    movq 0(%rdi),  %rcx
+                    movq 8(%rdi),  %rsp
+                    jmpq *%rcx
+                } : : "r"(buf), "r"(actual_value) : "rax", "rcx", "rdi",
+                                 "rsp", "rbp", "rbx", "r12", "r13",
+                                 "r14", "r15", "memory";
+                noreturn;
+            };
+
+            #endif; // __ARCH_X86_64__
+
+            #ifdef __WINDOWS__
+
+            def fexc_classify(WinExceptionRecord* record) -> i32
+            {
+                u32 code = record.ExceptionCode;
+
+                if (code == WIN_EXCEPTION_STACK_OVERFLOW)
+                {
+                    return EC_STACKOVERFLOW;
+                };
+
+                if (code == WIN_EXCEPTION_ACCESS_VIOLATION)
+                {
+                    // ExceptionInformation[0]: 0=read 1=write 8=execute. [1]: fault addr.
+                    u64 fault_addr = record.ExceptionInformation[1];
+
+                    if (fault_addr < (u64)0x10000u)
+                    {
+                        return EC_NULLPTR;
+                    };
+
+                    // TODO: no stack-bounds API exists yet to disambiguate stack
+                    // overflow delivered as a plain access violation; see design plan.
+                    if (record.ExceptionInformation[0] == (u64)1)
+                    {
+                        return EC_PROTFAULT;
+                    };
+
+                    return EC_WILDPTR;
+                };
+
+                if (code == WIN_EXCEPTION_ILLEGAL_INSTRUCTION)
+                {
+                    return EC_ILLEGALINSTR;
+                };
+
+                if (code == WIN_EXCEPTION_INT_DIVIDE_BY_ZERO)
+                {
+                    return EC_DIVBYZERO;
+                };
+
+                if (code == WIN_EXCEPTION_INT_OVERFLOW)
+                {
+                    return EC_INTOVERFLOW;
+                };
+
+                if (code == WIN_EXCEPTION_DATATYPE_MISALIGNMENT)
+                {
+                    return EC_ALIGNFAULT;
+                };
+
+                if (code == WIN_EXCEPTION_PRIV_INSTRUCTION)
+                {
+                    return EC_PRIVINSTR;
+                };
+
+                return EC_NONE;
+            };
+
+            // Static message per fault class; no allocation in a fault handler.
+            def fexc_message(i32 ec) -> byte*
+            {
+                if (ec == EC_NULLPTR)        { return "Null pointer dereference\0"; };
+                if (ec == EC_WILDPTR)        { return "Wild pointer access\0"; };
+                if (ec == EC_PROTFAULT)      { return "Write to protected memory\0"; };
+                if (ec == EC_STACKOVERFLOW)  { return "Stack overflow\0"; };
+                if (ec == EC_ILLEGALINSTR)   { return "Illegal instruction\0"; };
+                if (ec == EC_DIVBYZERO)      { return "Integer divide by zero\0"; };
+                if (ec == EC_INTOVERFLOW)    { return "Integer overflow\0"; };
+                if (ec == EC_ALIGNFAULT)     { return "Data type misalignment\0"; };
+                if (ec == EC_PRIVINSTR)      { return "Privileged instruction\0"; };
+                return "Unknown hardware exception\0";
+            };
+
+            // Field-by-field; CONTEXT and ExceptionState are not layout-compatible.
+            def fexc_populate_state(WinContext* ctx, ExceptionState* out) -> void
+            {
+                out.RAX    = ctx.Rax;
+                out.RBX    = ctx.Rbx;
+                out.RCX    = ctx.Rcx;
+                out.RDX    = ctx.Rdx;
+                out.RSI    = ctx.Rsi;
+                out.RDI    = ctx.Rdi;
+                out.RBP    = ctx.Rbp;
+                out.RSP    = ctx.Rsp;
+                out.R8     = ctx.R8;
+                out.R9     = ctx.R9;
+                out.R10    = ctx.R10;
+                out.R11    = ctx.R11;
+                out.R12    = ctx.R12;
+                out.R13    = ctx.R13;
+                out.R14    = ctx.R14;
+                out.R15    = ctx.R15;
+                out.RIP    = ctx.Rip;
+                out.RFLAGS = (u64)ctx.EFlags;
+            };
+
+            def FluxVectoredHandler(void* exception_info) -> i32
+            {
+                WinExceptionPointers* info = (WinExceptionPointers*)exception_info;
+                WinExceptionRecord*   record = info.ExceptionRecord;
+                WinContext*           ctx    = info.ContextRecord;
+
+                i32 ec = fexc_classify(record);
+
+                if (ec == EC_NONE)
+                {
+                    return WIN_EXCEPTION_CONTINUE_SEARCH;
+                };
+
+                FluxJmpBuf* target = fexc_top();
+                if (target == (FluxJmpBuf*)NULL)
+                {
+                    return WIN_EXCEPTION_CONTINUE_SEARCH;
+                };
+
+                FEXC_PENDING.ec  = ec;
+                FEXC_PENDING.msg = fexc_message(ec);
+                fexc_populate_state(ctx, @FEXC_PENDING.regs);
+
+                *(target.exc_value_ptr)  = (u64)@FEXC_PENDING;
+                *(target.exc_origin_ptr) = true;
+                *(target.exc_flag_ptr)   = true;
+
+                flux_longjmp(target, 1);
+                return WIN_EXCEPTION_CONTINUE_SEARCH;
+            };
+
+            def fexc_register() -> bool
+            {
+                if (!fexc_init())
+                {
+                    return false;
+                };
+
+                u32 guarantee = FEXC_STACK_GUARANTEE_BYTES;
+                SetThreadStackGuarantee(@guarantee);
+
+                void* handle = AddVectoredExceptionHandler((u32)1, (void*)@FluxVectoredHandler);
+
+                return handle != (void*)NULL;
+            };
+
+            #endif; // __WINDOWS__
         };
     };
 };
 
-#endif;
+#endif; // FLUX_STANDARD_EXCEPTIONS
