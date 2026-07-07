@@ -1372,7 +1372,7 @@ class ExternBlock(Statement):
     Or single declaration:
         extern def function_name(params) -> return_type;
     """
-    declarations: List['FunctionDef']  # List of function prototypes
+    declarations: List  # List of FunctionDef prototypes or VariableDeclaration (extern vars)
 
 
 class ExportBlock(ASTNode):

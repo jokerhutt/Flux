@@ -1339,7 +1339,7 @@ class FluxParser:
             self.advance()
             
             while not self.expect(TokenType.RIGHT_BRACE):
-                # Each declaration must be a function prototype
+                # Each declaration must be a function prototype or variable declaration
                 if self.expect(TokenType.DEF) or self.current_token.type in _CALLING_CONV_TOKENS:
                     func_def = self.function_def()
                     # Handle both single FunctionDef and list of FunctionDef (multi-function prototypes)
@@ -1353,7 +1353,15 @@ class FluxParser:
                             self.error("Extern functions must be prototypes (declarations only, no body)")
                         declarations.append(func_def)
                 else:
-                    self.error("Expected function declaration inside extern block", TokenType.DEF)
+                    # Variable declaration: type_spec IDENTIFIER ;
+                    var_tok = self.current_token
+                    type_sp = self.type_spec()
+                    var_name = self.consume(TokenType.IDENTIFIER).value
+                    if self.expect(TokenType.ASSIGN) or self.expect(TokenType.ADDRESS_ASSIGN):
+                        self.error("Extern variable declarations cannot have an initializer")
+                    self.consume(TokenType.SEMICOLON)
+                    var_decl = VariableDeclaration(var_name, type_sp, None)
+                    declarations.append(var_decl.set_location(var_tok.line, var_tok.column))
             
             self.consume(TokenType.RIGHT_BRACE)
             self.consume(TokenType.SEMICOLON)
@@ -1371,7 +1379,15 @@ class FluxParser:
                     self.error("Extern functions must be prototypes (declarations only, no body)")
                 declarations.append(func_def)
         else:
-            self.error("Expected '{' or 'def' after 'extern'", TokenType.LEFT_BRACE)
+            # Single extern variable declaration: extern type_spec IDENTIFIER ;
+            var_tok = self.current_token
+            type_sp = self.type_spec()
+            var_name = self.consume(TokenType.IDENTIFIER).value
+            if self.expect(TokenType.ASSIGN) or self.expect(TokenType.ADDRESS_ASSIGN):
+                self.error("Extern variable declarations cannot have an initializer")
+            self.consume(TokenType.SEMICOLON)
+            var_decl = VariableDeclaration(var_name, type_sp, None)
+            declarations.append(var_decl.set_location(var_tok.line, var_tok.column))
         
         return ExternBlock(declarations).set_location(tok.line, tok.column)
 

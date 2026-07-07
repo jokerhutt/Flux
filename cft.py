@@ -12,10 +12,138 @@ Usage:
 
 import sys
 import os
+import configparser
 import clang.cindex as cx
 from clang.cindex import CursorKind, TypeKind
 
-cx.Config.set_library_file(r"D:\\LLVM\\bin\\libclang.dll")
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+# cft.cfg is looked for next to cft.py, then in the current working directory.
+# Example cft.cfg:
+#
+#   [cft]
+#   # Path to libclang shared library. If omitted, cft will attempt to locate
+#   # it automatically based on the current platform:
+#   #   Windows : libclang.dll  (checked in D:\LLVM\bin, C:\Program Files\LLVM\bin, PATH)
+#   #   macOS   : libclang.dylib (checked in Homebrew LLVM, Xcode CommandLineTools)
+#   #   Linux   : libclang.so   (checked in /usr/lib/llvm-*, distro paths, LD_LIBRARY_PATH)
+#   # Set this explicitly if auto-detection fails.
+#   libclang = D:\LLVM\bin\libclang.dll
+#
+#   [cstdlib]
+#   # Root directory where translated .fx files for system headers are written.
+#   output_root = C:\flux\stdlib\c
+#   # Semicolon-separated list of system include roots to mirror (optional).
+#   # When empty, cft infers roots from the include paths libclang reports.
+#   include_roots =
+#
+#   [clang]
+#   # Extra flags passed to libclang, space-separated.
+#   args = -x c -std=c11
+
+_CFT_CFG_NAME = "cft.cfg"
+
+def _find_config():
+    """Return path to cft.cfg if found, else None."""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), _CFT_CFG_NAME),
+        os.path.join(os.getcwd(), _CFT_CFG_NAME),
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+def _find_libclang():
+    """Return the path to libclang shared library for the current platform,
+    or None if it cannot be located automatically."""
+    import platform
+    system = platform.system()
+
+    if system == "Windows":
+        candidates = [
+            r"D:\LLVM\bin\libclang.dll",
+            r"C:\Program Files\LLVM\bin\libclang.dll",
+        ]
+        # Also check PATH entries for libclang.dll
+        for entry in os.environ.get("PATH", "").split(os.pathsep):
+            candidates.append(os.path.join(entry, "libclang.dll"))
+    elif system == "Darwin":
+        candidates = [
+            "/usr/local/opt/llvm/lib/libclang.dylib",
+            "/opt/homebrew/opt/llvm/lib/libclang.dylib",
+            "/Library/Developer/CommandLineTools/usr/lib/libclang.dylib",
+        ]
+        # Homebrew installs versioned dylibs; glob for them
+        import glob
+        candidates += glob.glob("/usr/local/opt/llvm*/lib/libclang.dylib")
+        candidates += glob.glob("/opt/homebrew/opt/llvm*/lib/libclang.dylib")
+    else:
+        # Linux and other Unix-likes
+        candidates = [
+            "/usr/lib/llvm/libclang.so",
+            "/usr/lib/libclang.so",
+            "/usr/lib64/libclang.so",
+        ]
+        import glob
+        # Versioned .so files (libclang-18.so.1, libclang.so.1, etc.)
+        candidates += glob.glob("/usr/lib/llvm-*/lib/libclang-*.so*")
+        candidates += glob.glob("/usr/lib/llvm-*/lib/libclang.so*")
+        candidates += glob.glob("/usr/lib/x86_64-linux-gnu/libclang-*.so*")
+        candidates += glob.glob("/usr/lib/x86_64-linux-gnu/libclang.so*")
+        candidates += glob.glob("/usr/lib/aarch64-linux-gnu/libclang-*.so*")
+        candidates += glob.glob("/usr/lib64/libclang*.so*")
+        # Also check LD_LIBRARY_PATH
+        for entry in os.environ.get("LD_LIBRARY_PATH", "").split(os.pathsep):
+            if entry:
+                candidates += glob.glob(os.path.join(entry, "libclang*.so*"))
+
+    for path in candidates:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def _load_config():
+    """Load and return a CftConfig instance."""
+    cfg_path = _find_config()
+    cp = configparser.ConfigParser()
+    if cfg_path:
+        cp.read(cfg_path)
+
+    # [cft] section
+    libclang = cp.get("cft", "libclang", fallback=None)
+    if libclang:
+        cx.Config.set_library_file(libclang)
+    else:
+        found = _find_libclang()
+        if found:
+            cx.Config.set_library_file(found)
+
+    # [cstdlib] section
+    cstdlib_root = cp.get("cstdlib", "output_root", fallback=None)
+    raw_roots = cp.get("cstdlib", "include_roots", fallback="")
+    include_roots = [r.strip() for r in raw_roots.split(";") if r.strip()]
+
+    # [clang] section
+    raw_args = cp.get("clang", "args", fallback="")
+    default_args = raw_args.split() if raw_args.strip() else ["-x", "c", "-std=c11"]
+
+    return _CftConfig(
+        cstdlib_root=cstdlib_root,
+        include_roots=include_roots,
+        default_clang_args=default_args,
+    )
+
+class _CftConfig:
+    def __init__(self, cstdlib_root, include_roots, default_clang_args):
+        self.cstdlib_root = cstdlib_root            # str or None
+        self.include_roots = include_roots          # list[str]
+        self.default_clang_args = default_clang_args  # list[str]
+
+# Loaded once at import time so all helpers can reference it.
+CFT_CONFIG = _load_config()
 
 # ---------------------------------------------------------------------------
 # Type mapping: C canonical type -> Flux type string
@@ -83,6 +211,25 @@ def _rename(name):
     return _RESERVED_RENAME.get(name, name)
 
 
+def _best_relative(abs_path, roots):
+    """Return the relative path of abs_path under the longest matching root,
+    or None if no root matches.
+
+    roots is a list of absolute directory paths.
+    """
+    best_rel = None
+    best_len = -1
+    norm = os.path.normcase(abs_path)
+    for root in roots:
+        norm_root = os.path.normcase(root)
+        if not norm_root.endswith(os.sep):
+            norm_root += os.sep
+        if norm.startswith(norm_root) and len(norm_root) > best_len:
+            best_rel = abs_path[len(norm_root):]
+            best_len = len(norm_root)
+    return best_rel
+
+
 class CTranslator:
 
     def __init__(self, filepath, args=None):
@@ -93,8 +240,12 @@ class CTranslator:
         self._need_i128 = False
         self._need_u128 = False
         self._indent = 0
+        self._switch_depth = 0  # incremented inside switch body, reset by loops
+        self._loop_depth_in_switch_stack = []  # per-switch loop nesting depth
+        self._switch_break_labels = []  # stack of label names, one per active switch
+        self._switch_has_break = []     # stack of bools, True if switch had a break
         self._index = cx.Index.create()
-        clang_args = args or ["-x", "c", "-std=c11"]
+        clang_args = args or CFT_CONFIG.default_clang_args
         self.tu = self._index.parse(filepath, args=clang_args,
                                     options=cx.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
 
@@ -102,11 +253,50 @@ class CTranslator:
     # Public entry point
     # -----------------------------------------------------------------------
 
+    def _emit_toplevel_comments(self):
+        """Emit any block or line comments that appear before the first declaration
+        in the main file, converted to Flux comment syntax."""
+        # Find the offset of the first cursor from the main file so we know
+        # how far into the token stream to look.
+        first_offset = None
+        for cursor in self.tu.cursor.get_children():
+            if self._is_from_main_file(cursor):
+                first_offset = cursor.extent.start.offset
+                break
+
+        main_abs = os.path.abspath(self.filepath)
+        for tok in self.tu.get_tokens(extent=self.tu.cursor.extent):
+            if tok.kind != cx.TokenKind.COMMENT:
+                continue
+            tok_file = tok.location.file
+            if tok_file is None:
+                continue
+            if os.path.abspath(tok_file.name) != main_abs:
+                continue
+            # Only include comments that precede the first declaration
+            if first_offset is not None and tok.extent.start.offset >= first_offset:
+                break
+            text = tok.spelling
+            if text.startswith("/*"):
+                # Convert /* ... */ to Flux /// ... ///
+                inner = text[2:]
+                if inner.endswith("*/"):
+                    inner = inner[:-2]
+                self._emit("///")
+                for line in inner.splitlines():
+                    self._emit(line.rstrip())
+                self._emit("///")
+                self._emit("")
+            elif text.startswith("//"):
+                self._emit(text)
+                self._emit("")
+
     def translate(self):
         self._emit(f"// Auto-generated by cft from: {os.path.basename(self.filepath)}")
         self._emit("// May require manual edits.")
         self._emit("")
 
+        self._emit_toplevel_comments()
         self._collect_typedef_names(self.tu.cursor)
 
         for cursor in self.tu.cursor.get_children():
@@ -298,9 +488,17 @@ class CTranslator:
             self._emit("")
             return
 
-        # Function pointer typedef via pointer-to-proto
+        # Function pointer typedef via pointer-to-proto, or pointer-to-record alias
         if canon.kind == TypeKind.POINTER:
             pointee = canon.get_pointee()
+            # Pointer to struct/interface -- emit as `PointeeName* as TypedefName;`
+            if pointee.kind in (TypeKind.RECORD, TypeKind.ELABORATED):
+                decl = pointee.get_declaration()
+                pointee_name = decl.spelling if decl and decl.spelling else pointee.spelling
+                if pointee_name and pointee_name != typedef_name:
+                    self._emit(f"{pointee_name}* as {typedef_name};")
+                    self._emit("")
+                    return
             if pointee.kind in (TypeKind.FUNCTIONPROTO, TypeKind.FUNCTIONNOPROTO):
                 ret_str = self._flux_type(pointee.get_result(), "")
                 # Collect param names from cursor children (PARM_DECL)
@@ -377,7 +575,7 @@ class CTranslator:
             val = self._emit_expr(init)
             self._emit(f"{ftype} {name} = {val};")
         else:
-            self._emit(f"// extern: {ftype} {name};")
+            self._emit(f"extern {ftype} {name};")
 
     def _emit_codegen_macro(self, name, params, body_toks):
         """Translate a ##-pasting code-generating macro into a comptime/emitflux block.
@@ -705,7 +903,15 @@ class CTranslator:
             self._emit_default(cursor)
 
         elif kind == CursorKind.BREAK_STMT:
-            self._emit(f"{pad}break;")
+            # In Flux, switch cases do not use break to exit.
+            # If inside a loop nested within a switch, break targets the loop -- emit normally.
+            # If directly inside a switch, translate to goto past the switch end label.
+            if self._switch_depth == 0 or (self._loop_depth_in_switch_stack and self._loop_depth_in_switch_stack[-1] > 0):
+                self._emit(f"{pad}break;")
+            else:
+                label = self._switch_break_labels[-1]
+                self._switch_has_break[-1] = True
+                self._emit(f"{pad}goto {label};")
 
         elif kind == CursorKind.CONTINUE_STMT:
             self._emit(f"{pad}continue;")
@@ -826,16 +1032,19 @@ class CTranslator:
             inc_str = self._emit_expr(parts[2])
 
         self._emit(f"{pad}for ({init_str}; {cond_str}; {inc_str})")
+        if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] += 1
         if body:
             self._emit_compound(body)
         else:
             self._emit(f"{pad}{{}};")
+        if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] -= 1
 
     def _emit_while(self, cursor):
         pad = "    " * self._indent
         children = list(cursor.get_children())
         cond = self._emit_expr(children[0])
         self._emit(f"{pad}while ({cond})")
+        if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] += 1
         if len(children) > 1:
             if children[1].kind == CursorKind.COMPOUND_STMT:
                 self._emit_compound(children[1])
@@ -845,6 +1054,7 @@ class CTranslator:
                 self._indent -= 1
         else:
             self._emit(f"{pad}{{}};")
+        if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] -= 1
 
     def _emit_do_while(self, cursor):
         pad = "    " * self._indent
@@ -852,12 +1062,14 @@ class CTranslator:
         body = children[0]
         cond = self._emit_expr(children[1])
         self._emit(f"{pad}do")
+        if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] += 1
         if body.kind == CursorKind.COMPOUND_STMT:
             self._emit_compound(body)
         else:
             self._indent += 1
             self._emit_stmt(body)
             self._indent -= 1
+        if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] -= 1
         # Replace trailing }; with } for do/while continuation
         if self.lines and self.lines[-1].rstrip().endswith("};"):
             self.lines[-1] = self.lines[-1].rstrip()[:-1]
@@ -867,6 +1079,13 @@ class CTranslator:
         pad = "    " * self._indent
         children = list(cursor.get_children())
         cond = self._emit_expr(children[0])
+
+        # Generate a unique label for break-out-of-switch translation
+        self._switch_depth += 1
+        self._switch_break_labels.append(f"_switch_end_{id(cursor)}")
+        self._loop_depth_in_switch_stack.append(0)
+        self._switch_has_break.append(False)
+
         self._emit(f"{pad}switch ({cond})")
         self._emit(f"{pad}{{")
         self._indent += 1
@@ -879,6 +1098,13 @@ class CTranslator:
                 self._emit_stmt(body)
         self._indent -= 1
         self._emit(f"{pad}}};")
+
+        had_break = self._switch_has_break.pop()
+        label = self._switch_break_labels.pop()
+        self._loop_depth_in_switch_stack.pop()
+        self._switch_depth -= 1
+        if had_break:
+            self._emit(f"{pad}label {label}:")
 
     def _emit_case(self, cursor):
         pad = "    " * self._indent
@@ -1188,6 +1414,89 @@ class CTranslator:
             return False
         return os.path.abspath(loc.file.name) == os.path.abspath(self.filepath)
 
+    # -----------------------------------------------------------------------
+    # Include walking
+    # -----------------------------------------------------------------------
+
+    def translate_includes(self, already_translated=None, clang_args=None):
+        """Walk all headers included (transitively) by this TU and emit each
+        as a .fx file under CFT_CONFIG.cstdlib_root, mirroring the relative
+        path from whichever include root the file belongs to.
+
+        already_translated: set of abs paths already written this session.
+            Modified in-place so recursive calls skip duplicates.
+
+        Returns the set of abs paths that were written.
+        """
+        if CFT_CONFIG.cstdlib_root is None:
+            print("cft: include walking skipped -- cstdlib.output_root not set in cft.cfg",
+                  file=sys.stderr)
+            return set()
+
+        if already_translated is None:
+            already_translated = set()
+
+        written = set()
+        main_abs = os.path.abspath(self.filepath)
+
+        # Collect unique included file paths from the TU (depth-first order).
+        seen_includes = []
+        seen_set = set()
+        for inc in self.tu.get_includes():
+            if not inc.include:
+                continue
+            inc_abs = os.path.abspath(inc.include.name)
+            if inc_abs == main_abs:
+                continue
+            if inc_abs in seen_set:
+                continue
+            seen_set.add(inc_abs)
+            seen_includes.append(inc_abs)
+
+        # Determine which include roots to use for relative-path mirroring.
+        # Priority: explicitly configured roots first, then roots inferred from
+        # the actual paths of included files (longest matching prefix wins).
+        configured_roots = [os.path.abspath(r) for r in CFT_CONFIG.include_roots]
+
+        for inc_abs in seen_includes:
+            if inc_abs in already_translated:
+                continue
+
+            # Find the best-matching root for this file.
+            rel_path = _best_relative(inc_abs, configured_roots)
+            if rel_path is None:
+                # No configured root matched -- skip files that live outside
+                # known include roots (e.g. project-local headers that the
+                # caller will handle via normal translate_file paths).
+                continue
+
+            # Build the output path: cstdlib_root / relative / path.fx
+            rel_no_ext = os.path.splitext(rel_path)[0]
+            out_path = os.path.join(CFT_CONFIG.cstdlib_root,
+                                    rel_no_ext + ".fx")
+            out_dir = os.path.dirname(out_path)
+            os.makedirs(out_dir, exist_ok=True)
+
+            already_translated.add(inc_abs)
+
+            try:
+                t = CTranslator(inc_abs, args=clang_args)
+                content = t.translate()
+                with open(out_path, "w") as f:
+                    f.write(content)
+                print(f"cft: include -> {out_path}", file=sys.stderr)
+                written.add(inc_abs)
+
+                # Recurse: translate includes pulled in by this header too.
+                sub = t.translate_includes(already_translated=already_translated,
+                                           clang_args=clang_args)
+                written |= sub
+            except Exception as exc:
+                print(f"cft: error translating include {inc_abs}: {exc}",
+                      file=sys.stderr)
+
+        return written
+
     def _emit(self, line):
         self.lines.append(line)
 
@@ -1196,12 +1505,27 @@ class CTranslator:
 # CLI
 # ---------------------------------------------------------------------------
 
-def translate_file(input_path, clang_args=None):
+def translate_file(input_path, clang_args=None, walk_includes=True,
+                   already_translated=None):
+    """Translate a single C file to a Flux string.
+
+    If walk_includes is True and CFT_CONFIG.cstdlib_root is set, each header
+    included by the file is also translated and written to the cstdlib output
+    tree, mirroring the include-root-relative path.
+
+    already_translated: shared set passed across recursive calls to avoid
+        re-translating the same header multiple times in one session.
+    """
     t = CTranslator(input_path, args=clang_args)
-    return t.translate()
+    result = t.translate()
+    if walk_includes:
+        t.translate_includes(already_translated=already_translated,
+                             clang_args=clang_args)
+    return result
 
 
-def translate_pair(c_path, h_path, out_path, clang_args=None):
+def translate_pair(c_path, h_path, out_path, clang_args=None,
+                   already_translated=None):
     """Translate a .c/.h pair (either may be None) into a single .fx file."""
     # If both exist, translate .c (which will pull in the .h via includes naturally)
     # and also translate the .h separately, merging unique declarations.
@@ -1215,7 +1539,8 @@ def translate_pair(c_path, h_path, out_path, clang_args=None):
     else:
         primary = h_path
 
-    result = translate_file(primary, clang_args=clang_args)
+    result = translate_file(primary, clang_args=clang_args,
+                            already_translated=already_translated)
 
     with open(out_path, "w") as f:
         f.write(result)
@@ -1226,6 +1551,7 @@ def translate_directory(dir_path, out_dir=None, clang_args=None):
     """
     Walk a directory, pairing .c and .h files by stem, and emit one .fx per pair.
     If out_dir is None, .fx files are written alongside the source files.
+    Includes encountered across all pairs are deduplicated via a shared set.
     """
     if out_dir and not os.path.isdir(out_dir):
         os.makedirs(out_dir)
@@ -1243,13 +1569,18 @@ def translate_directory(dir_path, out_dir=None, clang_args=None):
         print(f"cft: no .c or .h files found in {dir_path}", file=sys.stderr)
         return
 
+    # Share one already_translated set so headers included by multiple source
+    # files are only emitted once.
+    already_translated = set()
+
     for stem, files in sorted(stems.items()):
         c_path = files.get("c")
         h_path = files.get("h")
         out_name = stem + ".fx"
         out_path = os.path.join(out_dir if out_dir else dir_path, out_name)
         try:
-            translate_pair(c_path, h_path, out_path, clang_args=clang_args)
+            translate_pair(c_path, h_path, out_path, clang_args=clang_args,
+                           already_translated=already_translated)
         except Exception as e:
             print(f"cft: error translating {stem}: {e}", file=sys.stderr)
 
@@ -1258,6 +1589,19 @@ def main():
     print("C -> Flux Translation Utility\n\n"
           "\tConvert C source files individually or in batch mode.\n\n"
           "\t*.c & *.h pairs will convert to a singular .fx file.\n")
+
+    cfg_path = _find_config()
+    if cfg_path:
+        print(f"cft: using config: {cfg_path}", file=sys.stderr)
+    else:
+        print("cft: no cft.cfg found -- using built-in defaults", file=sys.stderr)
+
+    if CFT_CONFIG.cstdlib_root:
+        print(f"cft: cstdlib output root: {CFT_CONFIG.cstdlib_root}", file=sys.stderr)
+    else:
+        print("cft: include walking disabled (cstdlib.output_root not configured)",
+              file=sys.stderr)
+
     if len(sys.argv) < 2:
         print("Usage:", file=sys.stderr)
         print("  cft.py <input.c|h> [output.fx]", file=sys.stderr)
@@ -1275,7 +1619,8 @@ def main():
         print(f"cft: file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
-    result = translate_file(input_path)
+    already_translated = set()
+    result = translate_file(input_path, already_translated=already_translated)
 
     if len(sys.argv) >= 3:
         out_path = sys.argv[2]

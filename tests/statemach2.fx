@@ -44,7 +44,7 @@ comptime
             if (fx == 1 & to == 2 & can_trans_1_2()) { return to; };
             if (fx == 2 & to == 1 & can_trans_2_1()) { return to; };
             if (fx == 1 & to == 3 & can_trans_1_3()) { return to; };
-            println(f"Invalid: {state_name(fx)} -> {state_name(to)}");
+            println(f"Invalid: {fx}:{state_name(fx)} -> {to}:{state_name(to)}");
             return fx;
         };
     };

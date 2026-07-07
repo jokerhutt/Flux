@@ -6469,7 +6469,22 @@ class CodegenVisitor:
         return struct_type
 
     def visit_ExternBlock(self, node, builder, module):
-        for func_def in node.declarations:
+        for decl in node.declarations:
+            if isinstance(decl, VariableDeclaration):
+                # Extern variable: declare as external global with no initializer
+                llvm_type = TypeSystem.get_llvm_type(decl.type_spec, module)
+                var_name = decl.name
+                if var_name in module.globals:
+                    gvar = module.globals[var_name]
+                else:
+                    gvar = ir.GlobalVariable(module, llvm_type, var_name)
+                    gvar.linkage = 'external'
+                if hasattr(module, 'symbol_table'):
+                    module.symbol_table.define(
+                        var_name, SymbolKind.VARIABLE,
+                        type_spec=decl.type_spec, llvm_type=llvm_type, llvm_value=gvar)
+                continue
+            func_def = decl
             if not func_def.is_prototype:
                 raise FluxCodegenError(f"Extern functions must be prototypes (no body, node, module): {func_def.name}", node, module)
             ret_type = TypeSystem.get_llvm_type(func_def.return_type, module)

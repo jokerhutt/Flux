@@ -151,7 +151,7 @@ stdlib/
 
 **Usage**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 ```
 
 **Description**:  
@@ -480,7 +480,7 @@ write32(i64 fd, byte* buffer, u32 count) -> i32
 
 **Example Usage**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 
 def main() -> int
 {
@@ -657,7 +657,7 @@ def atexit(void* fn) -> int  // Register exit callback (stub on Linux/macOS)
 
 **Example**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 
 def main(int* argc, byte** argv) -> int
 {
@@ -974,7 +974,7 @@ def file_exists(byte* filename) -> bool
 
 **Example**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 
 def main() -> int
 {
@@ -2780,7 +2780,7 @@ def dotenv::setenv(byte* name, byte* value, bool overwrite) -> int
 
 **Example**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 #import "dotenv.fx";
 
 extern { def !!getenv(byte* name) -> byte*; };
@@ -3715,7 +3715,7 @@ def plot_bar(OGLGraph* g, float* xs, float* ys, i32 n,
 
 **Example**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 #import "opengl.fx";
 #import "oglgraphing.fx";
 using standard::oglgraphing;
@@ -3887,7 +3887,7 @@ def dur_hr_part(Duration* d)  -> i64    // 0-23
 
 **Example**:
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 #import "datetime.fx";
 using standard::datetime;
 
@@ -4009,28 +4009,31 @@ Output uses 2-space indentation. Attribute values and text content are XML-escap
 
 **Example**:
 ```flux
-#import "standard.fx";
-#import "allocators.fx";
-#import "xml.fx";
-using standard::memory::allocators::stdarena;
-using xml;
+#import <standard.fx>;
+#import <xml.fx>;
+
+using standard::io::console,
+      xml;
 
 def main() -> int
 {
     Arena    a;
-    XmlNode* root;
-    XmlNode* child;
+    XmlNode* root, child;
     byte*    out;
 
     stdarena::init(@a, 65536);
+    defer stdarena::destroy(@a);
+
     root  = xml_new_element(@a, "root\0");
     child = xml_new_element(@a, "item\0");
+
     xml_set_attr(child, @a, "id\0", "1\0");
     xml_append_child(child, @a, xml_new_text(@a, "Hello\0"));
     xml_append_child(root,  @a, child);
+
     out = xml_serialize(root, @a, 512);
+
     println(out);
-    stdarena::destroy(@a);
     return 0;
 };
 ```
@@ -4107,9 +4110,11 @@ def csv_free(CsvTable* t) -> void
 
 **Example**:
 ```flux
-#import "standard.fx";
-#import "csv.fx";
-using csv;
+#import <standard.fx>;
+#import <csv.fx>;
+
+using standard::io::console,
+      csv;
 
 def main() -> int
 {
@@ -4232,8 +4237,8 @@ def url_decode(byte* src, int src_len, byte* dst, int dst_cap) -> int
 
 **Example**:
 ```flux
-#import "standard.fx";
-#import "encodings.fx";
+#import <standard.fx>, <encodings.fx>;
+
 using standard::encoding;
 
 def main() -> int
@@ -4262,7 +4267,7 @@ def main() -> int
 To use the standard library:
 
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 ```
 
 This automatically imports via `runtime.fx`:
@@ -4280,94 +4285,94 @@ Extended libraries must be imported explicitly:
 
 ```flux
 // Types only
-#import "types.fx";
+#import <types.fx>;
 
 // Math
-#import "math.fx";
+#import <math.fx>;
 
 // Collections
-#import "collections.fx";
+#import <collections.fx>;
 
 // Vectors
-#import "vectors.fx";
+#import <vectors.fx>;
 
 // Threading (pulls in atomics.fx automatically)
-#import "threading.fx";
+#import <threading.fx>;
 
 // Timing
-#import "timing.fx";
+#import <timing.fx>;
 
 // Networking (Windows)
-#import "net_windows.fx";   // or: #import "socket_object_raw.fx";
+#import <net_windows.fx>;   // or: #import "socket_object_raw.fx";
 
 // Cryptography
-#import "cryptography.fx";
+#import <cryptography.fx>;
 
 // CRC32
-#import "crc32.fx";
+#import <crc32.fx>;
 
 // Arbitrary precision
-#import "decimal.fx";  // also pulls in bigint.fx
+#import <decimal.fx>;  // also pulls in bigint.fx
 
 // TUI console control
-#import "console.fx";
+#import <console.fx>;
 
 // ANSI text formatting
-#import "format.fx";
+#import <format.fx>;
 
 // OpenGL (Windows)
-#import "opengl.fx";
+#import <opengl.fx>;
 
 // OpenGL graphing
-#import "oglgraphing.fx";
+#import <oglgraphing.fx>;
 
 // Win32 GUI
-#import "windows.fx";
+#import <windows.fx>;
 
 // WASAPI audio capture (Windows)
-#import "wasapi.fx";
+#import <wasapi.fx>;
 
 // Inline hooking (Windows x86-64)
-#import "detour.fx";
+#import <detour.fx>;
 
 // .env file loader
-#import "dotenv.fx";
+#import <dotenv.fx>;
 
 // JSON
-#import "json.fx";
+#import <json.fx>;
 
 // Matrix math (Mat3/Mat4/Mat5)
-#import "matrices.fx";
+#import <matrices.fx>;
 
 // Fourier (DFT/FFT)
-#import "fourier.fx";
+#import <fourier.fx>;
 
 // Physics engine
-#import "physics.fx";
+#import <physics.fx>;
 
 // Tensors
-#import "tensors.fx";
+#import <tensors.fx>;
 
 // Automatic differentiation
-#import "autograd.fx";
+#import <autograd.fx>;
 
 // Path tracer
-#import "raytracing.fx";
+#import <raytracing.fx>;
 
 // 2.5D raycaster
-#import "raycasting.fx";
+#import <raycasting.fx>;
 
 // DateTime / calendar
-#import "datetime.fx";
+#import <datetime.fx>;
 
 // XML (arena-backed)
-#import "xml.fx";
+#import <xml.fx>;
 
 // CSV (RFC 4180)
-#import "csv.fx";
+#import <csv.fx>;
 
 // Binary-to-text encodings
-#import "encodings.fx";
+#import <encodings.fx>;
 ```
 
 ### Namespace Usage
@@ -4375,7 +4380,7 @@ Extended libraries must be imported explicitly:
 After importing, use namespaces explicitly or with `using`:
 
 ```flux
-#import "standard.fx";
+#import <standard.fx>;
 
 // Explicit namespace
 int result = standard::math::abs(-42);
@@ -4385,12 +4390,12 @@ using standard::math;
 int result = abs(-42);
 
 // Collections
-#import "collections.fx";
+#import <collections.fx>;
 using standard::collections;
 Array myArray;
 
 // Vectors
-#import "vectors.fx";
+#import <vectors.fx>;
 using standard::vectors;
 Vec3 position = vec3(1.0, 2.0, 3.0);
 ```
@@ -4400,11 +4405,11 @@ Vec3 position = vec3(1.0, 2.0, 3.0);
 ```flux
 // Disable runtime
 #def FLUX_RUNTIME 0;
-#import "standard.fx";
+#import <standard.fx>;
 
 // Guard against double imports
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <memory.fx>;
 #endif;
 ```
 
@@ -4428,7 +4433,7 @@ Define `FLUX_SHADOW_STACK` before importing `standard.fx`. The runtime will auto
 
 ```flux
 #def FLUX_SHADOW_STACK 1;
-#import "standard.fx";
+#import <standard.fx>;
 ```
 
 #### Design
@@ -4527,7 +4532,7 @@ Because `FSS_Protect_Frame` is a pre-contract, `__fss_canary_local` is declared 
 
 ```flux
 #def FLUX_SHADOW_STACK 1;
-#import "standard.fx";
+#import <standard.fx>;
 using standard::io::console;
 
 def parse_input(byte* buf, int len) -> bool : FSS_Protect_Frame
@@ -4546,7 +4551,7 @@ def main() -> int
 
 #### Notes
 
-- `FLUX_SHADOW_STACK` must be defined before `#import "standard.fx"`
+- `FLUX_SHADOW_STACK` must be defined before `#import <standard.fx>`
 - The shadow page holds up to 170 frames; deeply recursive protected functions will hit this limit
 - Windows x86-64 only; requires a frame pointer (`%rbp`) to be present
 - `FSS_CANARY` is a process-lifetime global — direct writes to it from any code path are also detected
