@@ -28,42 +28,36 @@ cdecl bswap_neon(int in) -> int
 {
 };
 
-cdecl cksum_vmull(_IO_FILE* fp, ulong* crc_out, long* length_out) -> int
+cdecl cksum_vmull(int* fp, int* crc_out, int* length_out) -> int
 {
-    ulong crc = 0;
-    long length = 0;
     ulong bytes_read;
-    while (?)
+    while ((bytes_read = fread) > 0)
     {
-        if (__builtin_add_overflow((length), (bytes_read), (@length)))
+        if (ckd_add)
         {
-            (?__errno_location()) ? 0;
         };
         if (bytes_read >= 16 * 8)
         {
-            ulong wcrc = crc;
-            crc = 0;
             while (bytes_read >= 16 * 8)
             {
                 bytes_read -= (16 * 4);
             };
+            vst1q_u64;
+            vst1q_u64;
+            vst1q_u64;
+            vst1q_u64;
         };
         if (bytes_read >= 32)
         {
-            ulong wcrc = crc;
-            crc = 0;
             while (bytes_read >= 32)
             {
                 bytes_read -= 16;
             };
+            vst1q_u64;
         };
         byte* cp;
-        while (bytes_read--)
-            crc = (crc << 8) `^^ crctab[0][((crc >> 24) `^^ *cp++) `& 0xFF];
         if (feof(fp))
             break;
     };
-    *crc_out = crc;
-    *length_out = length;
     return !ferror(fp);
 };

@@ -44,6 +44,11 @@ macro makedev(maj, min)
     ( ( ( maj ) << 8 ) | ( min ) )
 };
 
+macro ENODATA
+{
+    ( - 1 )
+};
+
 macro D_INO(dp)
 {
     NOT_AN_INODE_NUMBER
@@ -75,9 +80,9 @@ byte* GETOPT_SELINUX_CONTEXT_OPTION_DECL = "context" , optional_argument , NULL 
 // macro (multi-statement, manual translation needed): case_GETOPT_HELP_CHAR case GETOPT_HELP_CHAR : usage ( EXIT_SUCCESS ) ; break ;
 macro USAGE_BUILTIN_WARNING
 {
-    _ ( "\n" \
-"Your shell may have its own version of %s, which usually supersedes\n" \
-"the version described here.  Please refer to your shell's documentation\n" \
+    _ ( "\n" \
+"Your shell may have its own version of %s, which usually supersedes\n" \
+"the version described here.  Please refer to your shell's documentation\n" \
 "for details about the options it supports.\n" )
 };
 
@@ -134,12 +139,12 @@ macro main_exit(status)
 
 macro LIKELY(cond)
 {
-    __builtin_expect ( ( cond ) , 1 )
+    ( cond )
 };
 
 macro UNLIKELY(cond)
 {
-    __builtin_expect ( ( cond ) , 0 )
+    ( cond )
 };
 
 // macro (multi-statement, manual translation needed): ASSIGN_STRDUPA(DEST, S) do { char const * s_ = ( S ) ; size_t len_ = strlen ( s_ ) + 1 ; char * tmp_dest_ = alloca ( len_ ) ; DEST = memcpy ( tmp_dest_ , s_ , len_ ) ; } while ( 0 )
@@ -165,10 +170,10 @@ macro emit_symlink_recurse_options(default_opt)
 
 // macro (multi-statement, manual translation needed): emit_try_help() do { fprintf ( stderr , _ ( "Try '%s --help' for more information.\n" ) , program_name ) ; } while ( 0 )
 // macro (multi-statement, manual translation needed): devmsg(...) do { if ( dev_debug ) fprintf ( stderr , __VA_ARGS__ ) ; } while ( 0 )
-// macro (multi-statement, manual translation needed): emit_cycle_warning(file_name) do { error ( 0 , 0 , _ ( "\
-WARNING: Circular directory structure.\n\
-This almost certainly means that you have a corrupted file system.\n\
-NOTIFY YOUR SYSTEM MANAGER.\n\
+// macro (multi-statement, manual translation needed): emit_cycle_warning(file_name) do { error ( 0 , 0 , _ ( "\
+WARNING: Circular directory structure.\n\
+This almost certainly means that you have a corrupted file system.\n\
+NOTIFY YOUR SYSTEM MANAGER.\n\
 The following directory is part of the cycle:\n  %s\n" ) , quotef ( file_name ) ) ; } while ( 0 )
 macro quotef(arg)
 {
@@ -208,12 +213,12 @@ cdecl to_uchar(byte ch) -> byte
     return ch;
 };
 
-cdecl c32isnbspace(uint wc) -> int
+cdecl c32isnbspace(int wc) -> int
 {
     return wc == 0x00A0 | wc == 0x2007 | wc == 0x202F | wc == 0x2060;
 };
 
-cdecl c32isvertspace(uint wc) -> int
+cdecl c32isvertspace(int wc) -> int
 {
     return wc == 0x000A | wc == 0x000B | wc == 0x000C | wc == 0x000D | wc == 0x2028 | wc == 0x2029;
 };
@@ -224,17 +229,13 @@ cdecl is_utf8_charset() -> int
     int is_utf8 = -1;
     if (is_utf8 == -1)
     {
-        uint w;
-        __mbstate_t mbs;
-        mbszero(@mbs);
-        is_utf8 = mbrtoc32(@w, "\xe2\x9f\xb8", 3, @mbs) == 3 & w == 0x27F8;
+        mbszero;
     };
     return is_utf8;
 };
 
-cdecl select_plural(ulong n) -> ulong
+cdecl select_plural(int n) -> ulong
 {
-    return (n <= (0 ? 0 ? 0) ? n : n % PLURAL_REDUCER + PLURAL_REDUCER);
 };
 
 cdecl getlogin() -> byte*;
@@ -255,12 +256,13 @@ cdecl dot_or_dotdot(byte* file_name) -> int
     else
 };
 
-cdecl readdir_ignoring_dot_and_dotdot(__dirstream* dirp) -> dirent*
+struct dirent;
+cdecl readdir_ignoring_dot_and_dotdot(int* dirp) -> dirent*
 {
-    while (?)
+    while (true)
     {
         dirent* dp = readdir(dirp);
-        if (dp == ((void*)0) | !?(dp.d_name))
+        if (dp == NULL || ! dot_or_dotdot ( dp -> d_name ))
             return dp;
     };
 };
@@ -271,26 +273,19 @@ uint DS_NONEMPTY = 0;
 
 cdecl directory_status(int fd_cwd, byte* dir) -> int
 {
-    __dirstream* dirp;
     bool;
     int saved_errno;
-    int fd;
-    if (fd < 0)
-        return (?__errno_location());
-    dirp = fdopendir(fd);
-    if (dirp == ((void*)0))
+    int fd = openat;
+    if (dirp == NULL)
     {
-        saved_errno = (?__errno_location());
         close(fd);
         return saved_errno;
     };
-    (?__errno_location()) ? 0;
-    saved_errno = (?__errno_location());
-    closedir(dirp);
+    closedir;
 };
 
-int GETOPT_HELP_CHAR = -130;
-int GETOPT_VERSION_CHAR = -131;
+uint GETOPT_HELP_CHAR = 0;
+uint GETOPT_VERSION_CHAR = 1;
 
 extern int size_t;
 extern int size_t;
@@ -312,6 +307,7 @@ cdecl oputs_(int* program, byte* option) -> void
     };
     if (help_no_sgr)
     {
+        fputs;
         return void;
     };
     bool;
@@ -326,7 +322,7 @@ cdecl oputs_(int* program, byte* option) -> void
         byte* s = first_word;
         ulong spaces = 0;
         while (s < option_text & spaces < 2)
-            spaces += ?!((?__ctype_b_loc())[(int)((*s++))] ? (uint)_ISspace);
+            spaces += ?!isspace(*s++);
         if (spaces == 2)
         {
             option_text = first_word;
@@ -336,15 +332,18 @@ cdecl oputs_(int* program, byte* option) -> void
     byte* desc_text = option_text + anchor_len;
     while (*desc_text & *desc_text != '\n')
     {
-        if (((?__ctype_b_loc())[(int)((*desc_text))] ? (uint)_ISspace))
+        if (isspace(*desc_text))
         {
-            if (*desc_text == '\t' | ((?__ctype_b_loc())[(int)((*(desc_text ? 1)))] ? (uint)_ISspace))
+            if (*desc_text == '\t' | isspace(*(desc_text + 1)))
                 break;
-            if (?)
+            if (! double_space && * ( desc_text + 1 ) != '-')
                 break;
         };
         desc_text++;
     };
+    fwrite;
+    fwrite;
+    fputs;
 };
 
 cdecl ATTRIBUTE_FORMAT(int printf) -> int;
@@ -354,6 +353,7 @@ cdecl oprintf_(byte* program, byte* message, ...) -> void
     int buflen = -1;
     if (buflen < 0)
     {
+        vprintf;
         return void;
     };
     oputs_(program, buf);
@@ -362,71 +362,77 @@ cdecl oprintf_(byte* program, byte* message, ...) -> void
 
 cdecl emit_stdin_note() -> void
 {
+    fputs;
 };
 
 cdecl emit_mandatory_arg_note() -> void
 {
+    fputs;
 };
 
 cdecl emit_size_note() -> void
 {
+    fputs;
 };
 
 cdecl emit_blocksize_note(byte* program) -> void
 {
-    printf(gettext("\n\
-Display values are in units of the first available SIZE from --block-size,\n\
-and the %s_BLOCK_SIZE, BLOCK_SIZE and BLOCKSIZE environment variables.\n\
-Otherwise, units default to 1024 bytes (or 512 if POSIXLY_CORRECT is set).\n\
+    printf(gettext("\n\
+Display values are in units of the first available SIZE from --block-size,\n\
+and the %s_BLOCK_SIZE, BLOCK_SIZE and BLOCKSIZE environment variables.\n\
+Otherwise, units default to 1024 bytes (or 512 if POSIXLY_CORRECT is set).\n\
 "), program);
 };
 
 cdecl emit_update_parameters_note() -> void
 {
+    fputs;
 };
 
 cdecl emit_backup_suffix_note() -> void
 {
+    fputs;
+    fputs;
 };
 
 cdecl emit_symlink_recurse_options_(byte* program, byte* default_opt) -> void
 {
-    printf(gettext("\
-\n\
-The following options modify how a hierarchy is traversed when the -R\n\
-option is also specified.  If more than one is specified, only the final\n\
-one takes effect. %s is the default.\n\
-\n\
+    printf(gettext("\
+\n\
+The following options modify how a hierarchy is traversed when the -R\n\
+option is also specified.  If more than one is specified, only the final\n\
+one takes effect. %s is the default.\n\
+\n\
 "), default_opt);
-    oputs_(program, gettext("\
-  -H\n\
-         if a command line argument is a symlink to a directory, traverse it\n\
+    oputs_(program, gettext("\
+  -H\n\
+         if a command line argument is a symlink to a directory, traverse it\n\
 "));
-    oputs_(program, gettext("\
-  -L\n\
-         traverse every symbolic link to a directory encountered\n\
+    oputs_(program, gettext("\
+  -L\n\
+         traverse every symbolic link to a directory encountered\n\
 "));
-    oputs_(program, gettext("\
-  -P\n\
-         do not traverse any symbolic links\n\
-\n\
+    oputs_(program, gettext("\
+  -P\n\
+         do not traverse any symbolic links\n\
+\n\
 "));
 };
 
 cdecl emit_exec_status(byte* program) -> void
 {
-    printf(gettext("\n\
-Exit status:\n\
-  125  if the %s command itself fails\n\
-  126  if COMMAND is found but cannot be invoked\n\
-  127  if COMMAND cannot be found\n\
-  -    the exit status of COMMAND otherwise\n\
+    printf(gettext("\n\
+Exit status:\n\
+  125  if the %s command itself fails\n\
+  126  if COMMAND is found but cannot be invoked\n\
+  127  if COMMAND cannot be found\n\
+  -    the exit status of COMMAND otherwise\n\
 "), program);
 };
 
 cdecl emit_ancillary_info(byte* program) -> void
 {
-    infomap[7] infomap = struct infomap { char const * program ; char const * node ; };
+    infomap* infomap = struct infomap { char const * program ; char const * node ; };
     byte* node = program;
     infomap* map_prog = infomap;
     while (map_prog.program & !streq(program, map_prog.program))
@@ -435,12 +441,13 @@ cdecl emit_ancillary_info(byte* program) -> void
         node = map_prog.node;
     emit_bug_reporting_address();
     byte* url_program = streq(program, "[") ? "test" : program;
+    printf;
     printf(gettext("or available locally via: info '(coreutils) %s%s'\n"), node, node == program ? " invocation" : "");
 };
 
-cdecl timetostr(long t, byte* buf) -> byte*
+cdecl timetostr(int t, byte* buf) -> byte*
 {
-    return (TYPE_SIGNED(?) ? imaxtostr(t, buf) : umaxtostr(t, buf));
+    return (TYPE_SIGNED ? imaxtostr(t, buf) : umaxtostr(t, buf));
 };
 
 cdecl bad_cast(byte* s) -> byte*
@@ -450,14 +457,17 @@ cdecl bad_cast(byte* s) -> byte*
 
 cdecl usable_st_size(stat* sb) -> int
 {
-    return (((((sb.st_mode)) ? 0) ? (0100000)) ? ((((sb.st_mode)) ? 0) ? (0120000)) ? S_TYPEISSHM(sb) ? S_TYPEISTMO(sb));
+    return (S_ISREG(sb) | S_ISLNK(sb) | S_TYPEISSHM(sb) | S_TYPEISTMO(sb));
 };
 
 cdecl usage(int status) -> void;
 cdecl write_error() -> void
 {
-    int saved_errno = (?__errno_location());
-    error(0, saved_errno, gettext("write error"));
+    int saved_errno;
+    fflush;
+    fpurge;
+    clearerr;
+    error;
 };
 
 cdecl stzncpy(byte* dest, byte* src, ulong len) -> byte*
@@ -470,5 +480,4 @@ cdecl stzncpy(byte* dest, byte* src, ulong len) -> byte*
 
 cdecl is_ENOTSUP(int err) -> int
 {
-    return err == 0 | (0 ? 0 ? err == 0);
 };

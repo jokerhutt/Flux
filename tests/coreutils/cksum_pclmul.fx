@@ -24,115 +24,36 @@ macro BUFLEN
     ( 1 << 16 )
 };
 
-cdecl cksum_pclmul(_IO_FILE* fp, ulong* crc_out, long* length_out) -> int
+cdecl cksum_pclmul(int* fp, int* crc_out, int* length_out) -> int
 {
-    void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */[4096] buf = (1 ? 16) / (sizeof ( __m128i ) / 8);
-    ulong crc = 0;
-    long length = 0;
     ulong bytes_read;
-    void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ single_mult_constant;
-    void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ four_mult_constant;
-    void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ shuffle_constant;
-    single_mult_constant = _mm_set_epi64x(0xC5B9CD4C, 0xE8A45605);
-    four_mult_constant = _mm_set_epi64x(0x8833794C, 0xE6228B11);
-    shuffle_constant = _mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-    while ((bytes_read = fread(buf, 1, (1 ? 16), fp)) > 0)
+    while ((bytes_read = fread) > 0)
     {
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */* datap;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ dat;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data2;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data3;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data4;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data5;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data6;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data7;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ data8;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ fold_data;
-        void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */ xor_crc;
-        if (__builtin_add_overflow((length), (bytes_read), (@length)))
+        if (ckd_add)
         {
-            (?__errno_location()) ? 0;
         };
-        datap = buf;
         if (bytes_read >= 16 * 8)
         {
-            dat = _mm_loadu_si128(datap);
-            dat = _mm_shuffle_epi8(dat, shuffle_constant);
-            xor_crc = _mm_set_epi32(crc, 0, 0, 0);
-            crc = 0;
-            dat = _mm_xor_si128(dat, xor_crc);
-            data3 = _mm_loadu_si128(datap + 1);
-            data3 = _mm_shuffle_epi8(data3, shuffle_constant);
-            data5 = _mm_loadu_si128(datap + 2);
-            data5 = _mm_shuffle_epi8(data5, shuffle_constant);
-            data7 = _mm_loadu_si128(datap + 3);
-            data7 = _mm_shuffle_epi8(data7, shuffle_constant);
             while (bytes_read >= 16 * 8)
             {
-                datap += 4;
-                data2 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(dat), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x00)));
-                dat = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(dat), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x11)));
-                data4 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(data3), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x00)));
-                data3 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(data3), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x11)));
-                data6 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(data5), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x00)));
-                data5 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(data5), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x11)));
-                data8 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(data7), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x00)));
-                data7 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(data7), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(four_mult_constant), (byte)(0x11)));
-                dat = _mm_xor_si128(dat, data2);
-                data2 = _mm_loadu_si128(datap);
-                data2 = _mm_shuffle_epi8(data2, shuffle_constant);
-                dat = _mm_xor_si128(dat, data2);
-                data3 = _mm_xor_si128(data3, data4);
-                data4 = _mm_loadu_si128(datap + 1);
-                data4 = _mm_shuffle_epi8(data4, shuffle_constant);
-                data3 = _mm_xor_si128(data3, data4);
-                data5 = _mm_xor_si128(data5, data6);
-                data6 = _mm_loadu_si128(datap + 2);
-                data6 = _mm_shuffle_epi8(data6, shuffle_constant);
-                data5 = _mm_xor_si128(data5, data6);
-                data7 = _mm_xor_si128(data7, data8);
-                data8 = _mm_loadu_si128(datap + 3);
-                data8 = _mm_shuffle_epi8(data8, shuffle_constant);
-                data7 = _mm_xor_si128(data7, data8);
                 bytes_read -= (16 * 4);
             };
-            dat = _mm_shuffle_epi8(dat, shuffle_constant);
-            _mm_storeu_si128(datap, dat);
-            data3 = _mm_shuffle_epi8(data3, shuffle_constant);
-            _mm_storeu_si128(datap + 1, data3);
-            data5 = _mm_shuffle_epi8(data5, shuffle_constant);
-            _mm_storeu_si128(datap + 2, data5);
-            data7 = _mm_shuffle_epi8(data7, shuffle_constant);
-            _mm_storeu_si128(datap + 3, data7);
+            _mm_storeu_si128;
+            _mm_storeu_si128;
+            _mm_storeu_si128;
+            _mm_storeu_si128;
         };
         if (bytes_read >= 32)
         {
-            dat = _mm_loadu_si128(datap);
-            dat = _mm_shuffle_epi8(dat, shuffle_constant);
-            xor_crc = _mm_set_epi32(crc, 0, 0, 0);
-            crc = 0;
-            dat = _mm_xor_si128(dat, xor_crc);
             while (bytes_read >= 32)
             {
-                datap++;
-                data2 = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(dat), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(single_mult_constant), (byte)(0x00)));
-                dat = ((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)__builtin_ia32_pclmulqdq128((void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(dat), (void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(void* /* untranslated: __attribute__((__vector_size__(2 * sizeof(long long)))) long long */)(single_mult_constant), (byte)(0x11)));
-                fold_data = _mm_loadu_si128(datap);
-                fold_data = _mm_shuffle_epi8(fold_data, shuffle_constant);
-                dat = _mm_xor_si128(dat, data2);
-                dat = _mm_xor_si128(dat, fold_data);
                 bytes_read -= 16;
             };
-            dat = _mm_shuffle_epi8(dat, shuffle_constant);
-            _mm_storeu_si128(datap, dat);
+            _mm_storeu_si128;
         };
-        byte* cp = (byte*)datap;
-        while (bytes_read--)
-            crc = (crc << 8) `^^ crctab[0][((crc >> 24) `^^ *cp++) `& 0xFF];
+        byte* cp;
         if (feof(fp))
             break;
     };
-    *crc_out = crc;
-    *length_out = length;
     return !ferror(fp);
 };

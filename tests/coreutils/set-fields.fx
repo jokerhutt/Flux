@@ -27,86 +27,82 @@
 field_range_pair* frp = field_range_pair;
 extern int n_frp;
 extern int n_frp_allocated;
-cdecl add_range_pair(ulong lo, ulong hi) -> void
+cdecl add_range_pair(int lo, int hi) -> void
 {
-    if (? == ?)
-        frp = xpalloc(frp, @?, 1, -1, (sizeof * frp / 8));
-    frp[?]. = lo;
-    frp[?]. = hi;
-    ++?;
+    if (n_frp == n_frp_allocated)
+        frp = xpalloc(frp, @n_frp_allocated, 1, -1, (sizeof * frp / 8));
+    frp[n_frp]. = lo;
+    frp[n_frp]. = hi;
+    ++n_frp;
 };
 
 cdecl compare_ranges(void* a, void* b) -> int
 {
     field_range_pair* ap = a;
     field_range_pair* bp = b;
-    return _GL_CMP(ap.lo, bp.lo);
+    return _GL_CMP(ap, bp);
 };
 
 cdecl complement_rp() -> void
 {
     field_range_pair* c = frp;
-    frp = ((void*)0);
     n_frp = 0;
     n_frp_allocated = 0;
-    if (c[0].lo > 1)
-        add_range_pair(1, c[0].lo - 1);
+    if (c[0] > 1)
+        add_range_pair(1, c[0] - 1);
+    if (c [ n - 1 ] . hi < UINTMAX_MAX)
+        add_range_pair;
     free(c);
 };
 
 cdecl set_fields(byte* fieldstr, uint options) -> void
 {
-    ulong initial = 1;
-    ulong value = 0;
     bool;
     bool;
     bool;
     bool;
     if ((options `& SETFLD_ALLOW_DASH) & streq(fieldstr, "-"))
     {
-        value = 1;
         fieldstr++;
     };
-    while (?)
+    while (true)
     {
         if (*fieldstr == '-')
         {
-            if (?)
+            if (dash_found)
                 do
                 {
                     error(0, 0, ((options ? SETFLD_ERRMSG_USE_POS) ? gettext("invalid byte or character range") : gettext("invalid field range")));
-                    usage(0);
+                    usage;
                 }
                 while (0);
             fieldstr++;
-            if (?)
+            if (lhs_specified && ! value)
                 do
                 {
                     error(0, 0, ((options ? SETFLD_ERRMSG_USE_POS) ? gettext("byte/character positions are numbered from 1") : gettext("fields are numbered from 1")));
-                    usage(0);
+                    usage;
                 }
                 while (0);
-            value = 0;
         }
-        elif (*fieldstr == ',' | ((?__ctype_b_loc())[(int)((to_uchar(*fieldstr)))] ? (uint)_ISblank) | *fieldstr == '\0')
+        elif (*fieldstr == ',' | isblank(to_uchar(*fieldstr)) | *fieldstr == '\0')
         {
-            if (?)
+            if (dash_found)
             {
-                if (?)
+                if (! lhs_specified && ! rhs_specified)
                 {
                     if (options `& SETFLD_ALLOW_DASH)
-                        initial = 1;
                     else
                         do
                         {
                             error(0, 0, (gettext("invalid range with no endpoint: -")));
-                            usage(0);
+                            usage;
                         }
                         while (0);
                 };
-                if (?)
+                if (! rhs_specified)
                 {
-                    add_range_pair(initial, (0));
+                    add_range_pair;
                 }
                 else
                 {
@@ -114,12 +110,11 @@ cdecl set_fields(byte* fieldstr, uint options) -> void
                         do
                         {
                             error(0, 0, (gettext("invalid decreasing range")));
-                            usage(0);
+                            usage;
                         }
                         while (0);
-                    add_range_pair(initial, value);
+                    add_range_pair;
                 };
-                value = 0;
             }
             else
             {
@@ -127,11 +122,10 @@ cdecl set_fields(byte* fieldstr, uint options) -> void
                     do
                     {
                         error(0, 0, ((options ? SETFLD_ERRMSG_USE_POS) ? gettext("byte/character positions are numbered from 1") : gettext("fields are numbered from 1")));
-                        usage(0);
+                        usage;
                     }
                     while (0);
-                add_range_pair(value, value);
-                value = 0;
+                add_range_pair;
             };
             if (*fieldstr == '\0')
                 break;
@@ -141,34 +135,33 @@ cdecl set_fields(byte* fieldstr, uint options) -> void
             if (c_isdigit(*fieldstr))
             {
                 byte* num_start;
-                if (?)
+                if (! in_digits || ! num_start)
                     num_start = fieldstr;
-                if (!(?__builtin_mul_overflow((value), (10), (@(value))) ? ?__builtin_add_overflow((value), (*fieldstr ? '0'), (@(value)))) | value == (0))
+                if (! DECIMAL_DIGIT_ACCUMULATE ( value , * fieldstr - '0' ) || value == UINTMAX_MAX)
                 {
                     byte* bad_num = ximemdup0(num_start, strspn(num_start, "0123456789"));
                     error(0, 0, (options `& SETFLD_ERRMSG_USE_POS) ? gettext("byte/character offset %s is too large") : gettext("field number %s is too large"), quote(bad_num));
                     free(bad_num);
-                    usage(0);
+                    usage;
                 };
                 fieldstr++;
             }
             else
             {
                 error(0, 0, (options `& SETFLD_ERRMSG_USE_POS) ? gettext("invalid byte/character position %s") : gettext("invalid field value %s"), quote(fieldstr));
-                usage(0);
+                usage;
             };
     };
-    if (!?)
+    if (!n_frp)
         do
         {
             error(0, 0, ((options ? SETFLD_ERRMSG_USE_POS) ? gettext("missing list of byte/character positions") : gettext("missing list of fields")));
-            usage(0);
+            usage;
         }
         while (0);
-    qsort(frp, ?, (sizeof ( frp [ 0 ] ) / 8), compare_ranges);
+    qsort(frp, n_frp, (sizeof ( frp [ 0 ] ) / 8), compare_ranges);
     if (options `& SETFLD_COMPLEMENT)
         complement_rp();
-    ++?;
-    frp = xrealloc(frp, ? * (sizeof ( struct field_range_pair ) / 8));
-    frp[? - 1]. = frp[? - 1]. = (0);
+    ++n_frp;
+    frp = xrealloc(frp, n_frp * (sizeof ( struct field_range_pair ) / 8));
 };

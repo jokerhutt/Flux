@@ -32,7 +32,8 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    printf("%s\n\n", gettext(0 ? 0 ? "Exit with a status code indicating success." : "Exit with a status code indicating failure."));
+    printf;
+    printf("%s\n\n", gettext);
     oputs_("true", gettext("      --help\n         display this help and exit\n"));
     oputs_("true", gettext("      --version\n         output version information and exit\n"));
     printf(gettext("\n"), "true");
@@ -45,9 +46,11 @@ cdecl main(int argc, byte** argv) -> int
     if (argc == 2)
     {
         set_program_name(argv[0]);
-        setlocale(0, "");
+        setlocale;
+        atexit;
         if (streq(argv[1], "--help"))
-            usage(0);
+            usage;
+        if (streq(argv[1], "--version"))
+            version_etc;
     };
-    return 0;
 };

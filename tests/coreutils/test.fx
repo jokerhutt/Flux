@@ -86,21 +86,21 @@ cdecl beyond() -> void;
 cdecl ATTRIBUTE_FORMAT(int printf) -> int;
 cdecl test_syntax_error(byte* format, ...) -> void
 {
-    __va_list_tag[1] ap;
-    __builtin_va_start(ap, format);
-    verror(0, 0, format, ap);
+    va_start;
+    verror;
     exit(TEST_FAILURE);
 };
 
 cdecl advance(int f) -> void
 {
     ++pos;
-    if (? & pos >= argc)
+    if (f & pos >= argc)
         beyond();
 };
 
 cdecl unary_advance() -> void
 {
+    advance;
     ++pos;
 };
 
@@ -108,7 +108,7 @@ cdecl find_int(byte* string) -> byte*
 {
     byte* p;
     byte* number_start;
-    for (p = string; ((?__ctype_b_loc())[(int)((to_uchar(*p)))] ? (uint)_ISspace); p++)
+    for (p = string; isspace(to_uchar(*p)); p++)
     {};
     if (*p == '+')
     {
@@ -124,7 +124,7 @@ cdecl find_int(byte* string) -> byte*
     {
         while (c_isdigit(*p))
             p++;
-        while (((?__ctype_b_loc())[(int)((to_uchar(*p)))] ? (uint)_ISspace))
+        while (isspace(to_uchar(*p)))
             p++;
         if (!*p)
             return number_start;
@@ -132,10 +132,11 @@ cdecl find_int(byte* string) -> byte*
     test_syntax_error(gettext("invalid integer %s"), quote(string));
 };
 
+struct timespec;
 cdecl get_mtime(byte* filename) -> timespec
 {
     stat finfo;
-    return (stat(filename, @finfo) < 0 ? make_timespec(TYPE_MINIMUM(?), -1) : get_stat_mtime(@finfo));
+    return (stat(filename, @finfo) < 0 ? make_timespec(TYPE_MINIMUM, -1) : get_stat_mtime(@finfo));
 };
 
 cdecl one_argument() -> int
@@ -145,167 +146,122 @@ cdecl one_argument() -> int
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Usage: test EXPRESSION\n\
-  or:  test\n\
-  or:  [ EXPRESSION ]\n\
-  or:  [ ]\n\
-  or:  [ OPTION\n\
-"), stdout);
-        fputs(gettext("\
-Exit with the status determined by EXPRESSION.\n\
-\n\
-"), stdout);
+        fputs;
+        fputs;
         oputs_("test", gettext("      --help\n         display this help and exit\n"));
         oputs_("test", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-An omitted EXPRESSION defaults to false.  Otherwise,\n\
-EXPRESSION is true or false and sets exit status.  It is one of:\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-  ( EXPRESSION )               EXPRESSION is true\n\
-  ! EXPRESSION                 EXPRESSION is false\n\
-  EXPRESSION1 -a EXPRESSION2   both EXPRESSION1 and EXPRESSION2 are true\n\
-  EXPRESSION1 -o EXPRESSION2   either EXPRESSION1 or EXPRESSION2 is true\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-"), stdout);
-        oputs_("test", gettext("\
-  -n STRING            the length of STRING is nonzero\n\
+        fputs;
+        fputs;
+        fputs;
+        oputs_("test", gettext("\
+  -n STRING            the length of STRING is nonzero\n\
 "));
-        fputs(gettext("\
-  STRING               equivalent to -n STRING\n\
-"), stdout);
-        oputs_("test", gettext("\
-  -z STRING            the length of STRING is zero\n\
+        fputs;
+        oputs_("test", gettext("\
+  -z STRING            the length of STRING is zero\n\
 "));
-        fputs(gettext("\
-  STRING1 = STRING2    the strings are equal\n\
-  STRING1 != STRING2   the strings are not equal\n\
-  STRING1 > STRING2    STRING1 is greater than STRING2 in the current locale\n\
-  STRING1 < STRING2    STRING1 is less than STRING2 in the current locale\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-"), stdout);
-        oputs_("test", gettext("\
-  INTEGER1 -eq INTEGER2   INTEGER1 is equal to INTEGER2\n\
+        fputs;
+        fputs;
+        oputs_("test", gettext("\
+  INTEGER1 -eq INTEGER2   INTEGER1 is equal to INTEGER2\n\
 "));
-        oputs_("test", gettext("\
-  INTEGER1 -ge INTEGER2   INTEGER1 is greater than or equal to INTEGER2\n\
+        oputs_("test", gettext("\
+  INTEGER1 -ge INTEGER2   INTEGER1 is greater than or equal to INTEGER2\n\
 "));
-        oputs_("test", gettext("\
-  INTEGER1 -gt INTEGER2   INTEGER1 is greater than INTEGER2\n\
+        oputs_("test", gettext("\
+  INTEGER1 -gt INTEGER2   INTEGER1 is greater than INTEGER2\n\
 "));
-        oputs_("test", gettext("\
-  INTEGER1 -le INTEGER2   INTEGER1 is less than or equal to INTEGER2\n\
+        oputs_("test", gettext("\
+  INTEGER1 -le INTEGER2   INTEGER1 is less than or equal to INTEGER2\n\
 "));
-        oputs_("test", gettext("\
-  INTEGER1 -lt INTEGER2   INTEGER1 is less than INTEGER2\n\
+        oputs_("test", gettext("\
+  INTEGER1 -lt INTEGER2   INTEGER1 is less than INTEGER2\n\
 "));
-        oputs_("test", gettext("\
-  INTEGER1 -ne INTEGER2   INTEGER1 is not equal to INTEGER2\n\
+        oputs_("test", gettext("\
+  INTEGER1 -ne INTEGER2   INTEGER1 is not equal to INTEGER2\n\
 "));
-        fputs(gettext("\
-\n\
-"), stdout);
-        oputs_("test", gettext("\
-  FILE1 -ef FILE2   FILE1 and FILE2 have the same device and inode numbers\n\
+        fputs;
+        oputs_("test", gettext("\
+  FILE1 -ef FILE2   FILE1 and FILE2 have the same device and inode numbers\n\
 "));
-        oputs_("test", gettext("\
-  FILE1 -nt FILE2   FILE1 is newer (modification date) than FILE2\n\
+        oputs_("test", gettext("\
+  FILE1 -nt FILE2   FILE1 is newer (modification date) than FILE2\n\
 "));
-        oputs_("test", gettext("\
-  FILE1 -ot FILE2   FILE1 is older than FILE2\n\
+        oputs_("test", gettext("\
+  FILE1 -ot FILE2   FILE1 is older than FILE2\n\
 "));
-        fputs(gettext("\
-\n\
-"), stdout);
-        oputs_("test", gettext("\
-  -b FILE     FILE exists and is block special\n\
+        fputs;
+        oputs_("test", gettext("\
+  -b FILE     FILE exists and is block special\n\
 "));
-        oputs_("test", gettext("\
-  -c FILE     FILE exists and is character special\n\
+        oputs_("test", gettext("\
+  -c FILE     FILE exists and is character special\n\
 "));
-        oputs_("test", gettext("\
-  -d FILE     FILE exists and is a directory\n\
+        oputs_("test", gettext("\
+  -d FILE     FILE exists and is a directory\n\
 "));
-        oputs_("test", gettext("\
-  -e FILE     FILE exists\n\
+        oputs_("test", gettext("\
+  -e FILE     FILE exists\n\
 "));
-        oputs_("test", gettext("\
-  -f FILE     FILE exists and is a regular file\n\
+        oputs_("test", gettext("\
+  -f FILE     FILE exists and is a regular file\n\
 "));
-        oputs_("test", gettext("\
-  -g FILE     FILE exists and its set-group-ID bit is set\n\
+        oputs_("test", gettext("\
+  -g FILE     FILE exists and its set-group-ID bit is set\n\
 "));
-        oputs_("test", gettext("\
-  -G FILE     FILE exists and is owned by the effective group ID\n\
+        oputs_("test", gettext("\
+  -G FILE     FILE exists and is owned by the effective group ID\n\
 "));
-        oputs_("test", gettext("\
-  -h FILE     FILE exists and is a symbolic link (same as -L)\n\
+        oputs_("test", gettext("\
+  -h FILE     FILE exists and is a symbolic link (same as -L)\n\
 "));
-        oputs_("test", gettext("\
-  -k FILE     FILE exists and has its sticky bit set\n\
+        oputs_("test", gettext("\
+  -k FILE     FILE exists and has its sticky bit set\n\
 "));
-        oputs_("test", gettext("\
-  -L FILE     FILE exists and is a symbolic link (same as -h)\n\
+        oputs_("test", gettext("\
+  -L FILE     FILE exists and is a symbolic link (same as -h)\n\
 "));
-        oputs_("test", gettext("\
-  -N FILE     FILE exists and has been modified since it was last read\n\
+        oputs_("test", gettext("\
+  -N FILE     FILE exists and has been modified since it was last read\n\
 "));
-        oputs_("test", gettext("\
-  -O FILE     FILE exists and is owned by the effective user ID\n\
+        oputs_("test", gettext("\
+  -O FILE     FILE exists and is owned by the effective user ID\n\
 "));
-        oputs_("test", gettext("\
-  -p FILE     FILE exists and is a named pipe\n\
+        oputs_("test", gettext("\
+  -p FILE     FILE exists and is a named pipe\n\
 "));
-        oputs_("test", gettext("\
-  -r FILE     FILE exists and the user has read access\n\
+        oputs_("test", gettext("\
+  -r FILE     FILE exists and the user has read access\n\
 "));
-        oputs_("test", gettext("\
-  -s FILE     FILE exists and has a size greater than zero\n\
+        oputs_("test", gettext("\
+  -s FILE     FILE exists and has a size greater than zero\n\
 "));
-        oputs_("test", gettext("\
-  -S FILE     FILE exists and is a socket\n\
+        oputs_("test", gettext("\
+  -S FILE     FILE exists and is a socket\n\
 "));
-        oputs_("test", gettext("\
-  -t FD       file descriptor FD is opened on a terminal\n\
+        oputs_("test", gettext("\
+  -t FD       file descriptor FD is opened on a terminal\n\
 "));
-        oputs_("test", gettext("\
-  -u FILE     FILE exists and its set-user-ID bit is set\n\
+        oputs_("test", gettext("\
+  -u FILE     FILE exists and its set-user-ID bit is set\n\
 "));
-        oputs_("test", gettext("\
-  -w FILE     FILE exists and the user has write access\n\
+        oputs_("test", gettext("\
+  -w FILE     FILE exists and the user has write access\n\
 "));
-        oputs_("test", gettext("\
-  -x FILE     FILE exists and the user has execute (or search) access\n\
+        oputs_("test", gettext("\
+  -x FILE     FILE exists and the user has execute (or search) access\n\
 "));
-        fputs(gettext("\
-\n\
-Except for -h and -L, all FILE-related tests dereference symbolic links.\n\
-Beware that parentheses need to be escaped (e.g., by backslashes) for shells.\n\
-INTEGER may also be -l STRING, which evaluates to the length of STRING.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Binary -a and -o are ambiguous.  Use 'test EXPR1 && test EXPR2'\n\
-or 'test EXPR1 || test EXPR2' instead.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-'[' honors --help and --version, but 'test' treats them as STRINGs.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
         printf(gettext("\n"), gettext("test and/or ["));
         emit_ancillary_info("test");
     };
@@ -316,18 +272,19 @@ cdecl main(int margc, byte** margv) -> int
 {
     bool;
     set_program_name(margv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(TEST_FAILURE);
+    atexit;
     argv = margv;
     if (0)
     {
         if (margc == 2)
         {
             if (streq(margv[1], "--help"))
-                usage(0);
+                usage;
             if (streq(margv[1], "--version"))
             {
-                return 0;
+                version_etc;
             };
         };
         if (margc < 2 | !streq(margv[margc - 1], "]"))

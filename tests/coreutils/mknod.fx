@@ -29,48 +29,38 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-option[5] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Create the special file NAME of the given TYPE.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("mknod", gettext("\
-  -m, --mode=MODE\n\
-         set file permission bits to MODE, not a=rw - umask\n\
+        oputs_("mknod", gettext("\
+  -m, --mode=MODE\n\
+         set file permission bits to MODE, not a=rw - umask\n\
 "));
-        oputs_("mknod", gettext("\
-  -Z\n\
-         set the SELinux security context to default type\n\
+        oputs_("mknod", gettext("\
+  -Z\n\
+         set the SELinux security context to default type\n\
 "));
-        oputs_("mknod", gettext("\
-      --context[=CTX]\n\
-         like -Z, or if CTX is specified then set the\n\
-         SELinux or SMACK security context to CTX\n\
+        oputs_("mknod", gettext("\
+      --context[=CTX]\n\
+         like -Z, or if CTX is specified then set the\n\
+         SELinux or SMACK security context to CTX\n\
 "));
         oputs_("mknod", gettext("      --help\n         display this help and exit\n"));
         oputs_("mknod", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Both MAJOR and MINOR must be specified when TYPE is b, c, or u, and they\n\
-must be omitted when TYPE is p.  If MAJOR or MINOR begins with 0x or 0X,\n\
-it is interpreted as hexadecimal; otherwise, if it begins with 0, as octal;\n\
-otherwise, as decimal.  TYPE may be:\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-  b      create a block (buffered) special file\n\
-  c, u   create a character (unbuffered) special file\n\
-  p      create a FIFO\n\
-"), stdout);
+        fputs;
+        fputs;
         printf(gettext("\n"), "mknod");
         emit_ancillary_info("mknod");
     };
@@ -79,35 +69,34 @@ otherwise, as decimal.  TYPE may be:\n\
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* specified_mode = ((void*)0);
-    byte* scontext = ((void*)0);
-    selabel_handle* set_security_context = ((void*)0);
+    byte* specified_mode;
+    byte* scontext;
+    selabel_handle* set_security_context;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "m:Z", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('m')
             {
-                specified_mode = optarg;
+                break switch;
             }
-            goto _switch_end_139188883807824;
             case ('Z')
             {
                 if (is_smack_enabled())
                 {
-                    scontext = optarg;
                 }
                 elif (is_selinux_enabled() > 0)
                 {
                     if (optarg)
-                        scontext = optarg;
                     else
                     {
+                        set_security_context = selabel_open;
                         if (!set_security_context)
-                            error(0, (?__errno_location()), gettext("warning: ignoring --context"));
+                            error;
                     };
                 };
                 else
@@ -115,54 +104,51 @@ cdecl main(int argc, byte** argv) -> int
                     {
                         error(0, 0, gettext("warning: ignoring --context; "));
                     };
+                break switch;
             }
-            goto _switch_end_139188883807824;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188883807824;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188883807824;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188883807824:
     };
-    uint newmode = (0 ? 0 ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0));
     if (specified_mode)
     {
         mode_change* change = mode_compile(specified_mode);
         if (!change)
-            error(0, 0, gettext("invalid mode"));
-        uint umask_value = umask(0);
-        umask(umask_value);
+            error;
+        umask;
         free(change);
-        if (?)
-            error(0, 0, gettext("mode must specify only file permission bits"));
+        if (newmode & ~ S_IRWXUGO)
+            error;
     };
-    int expected_operands = (argc <= optind | (optind + 1 < argc & argv[optind + 1][0] == 'p') ? 2 : 4);
+    int expected_operands;
     if (argc - optind < expected_operands)
     {
         if (argc <= optind)
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        if (expected_operands == 4 & argc - optind == 2)
-            fprintf(stderr, "%s\n", gettext("Special files require major and minor device numbers."));
-        usage(0);
+        if (expected_operands == 4 && argc - optind == 2)
+            fprintf;
+        usage;
     };
     if (expected_operands < argc - optind)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind + expected_operands]));
-        if (expected_operands == 2 & argc - optind == 4)
-            fprintf(stderr, "%s\n", gettext("Fifos do not have major and minor device numbers."));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        if (expected_operands == 2 && argc - optind == 4)
+            fprintf;
+        usage;
     };
     if (scontext)
     {
@@ -172,49 +158,46 @@ cdecl main(int argc, byte** argv) -> int
         else
             ret = setfscreatecon(scontext);
         if (ret < 0)
-            error(0, (?__errno_location()), gettext("failed to set default file creation context to %s"), quote(scontext));
+            error;
     };
-    uint node_type;
-    switch (argv[optind + 1][0])
+    switch (argv [ optind + 1 ] [ 0 ])
     {
         case ('b')
         {
-            error(0, 0, gettext("block special files not supported"));
+            error;
+            goto block_or_character;
         }
-        goto block_or_character;
         case ('c')
         {
-            case ('u')
+            goto block_or_character;
+            label block_or_character:
             {
-                error(0, 0, gettext("character special files not supported"));
-            }
+                byte* s_major;
+                if (xstrtoumax ( s_major , NULL , 0 , & i_major , "" ) != LONGINT_OK || i_major != ( major_t ) i_major)
+                    error;
+                byte* s_minor;
+                if (xstrtoumax ( s_minor , NULL , 0 , & i_minor , "" ) != LONGINT_OK || i_minor != ( minor_t ) i_minor)
+                    error;
+                if (set_security_context)
+                    defaultcon;
+                if (mknod != 0)
+                    error;
+            };
+            break switch;
         }
-        goto block_or_character;
-        label block_or_character:
-        {
-            byte* s_major = argv[optind + 2];
-            ulong i_major;
-            if (?)
-                error(0, 0, gettext("invalid major device number %s"), quote(s_major));
-            byte* s_minor = argv[optind + 3];
-            ulong i_minor;
-            if (?)
-                error(0, 0, gettext("invalid minor device number %s"), quote(s_minor));
-            ulong device = (((i_major) ? 0) ? (i_minor));
-            if (set_security_context)
-                defaultcon(set_security_context, argv[optind], node_type);
-        };
-        goto _switch_end_139188883805264;
         case ('p')
         {
+            if (set_security_context)
+                defaultcon;
+            if (mkfifo != 0)
+                error;
+            break switch;
         }
-        goto _switch_end_139188883805264;
         default
         {
-            error(0, 0, gettext("invalid device type %s"), quote(argv[optind + 1]));
+            usage;
         };
-        usage(0);
     };
-    label _switch_end_139188883805264:
-    return 0;
+    if (specified_mode & lchmod != 0)
+        error;
 };

@@ -38,28 +38,25 @@ enum sync_mode
     MODE_SYNC
 };
 
-option[5] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Synchronize cached writes to persistent storage\n\
-\n\
-If one or more files are specified, sync only them,\n\
-or their containing file systems.\n\
-\n\
-"), stdout);
-        oputs_("sync", gettext("\
-  -d, --data             sync only file data, no unneeded metadata\n\
+        printf;
+        fputs;
+        oputs_("sync", gettext("\
+  -d, --data             sync only file data, no unneeded metadata\n\
 "));
-        oputs_("sync", gettext("\
-  -f, --file-system      sync the file systems that contain the files\n\
+        oputs_("sync", gettext("\
+  -f, --file-system      sync the file systems that contain the files\n\
 "));
         oputs_("sync", gettext("      --help\n         display this help and exit\n"));
         oputs_("sync", gettext("      --version\n         output version information and exit\n"));
@@ -70,23 +67,25 @@ or their containing file systems.\n\
 
 cdecl sync_arg(sync_mode mode, byte* file) -> int
 {
-    int open_flags = 0 ? 0;
+    int open_flags;
     int fd = open(file, open_flags);
     if (fd < 0)
     {
-        int rd_errno = (?__errno_location());
-        if (open_flags != (0 ? 0))
-            fd = open(file, 0 ? 0);
+        int rd_errno;
+        if (open_flags != ( O_WRONLY | O_NONBLOCK ))
+            fd = open;
         if (fd < 0)
         {
+            error(0, rd_errno, gettext("error opening %s"), quotearg_style);
         };
     };
     bool;
-    int fdflags = fcntl(fd, 0);
-    if (fdflags == -1 | fcntl(fd, 0, fdflags `& `!0) < 0)
+    int fdflags = fcntl;
+    if (fdflags == -1 | fcntl < 0)
     {
+        error;
     };
-    if (?)
+    if (ret)
     {
         int sync_status = -1;
         switch (mode)
@@ -94,31 +93,25 @@ cdecl sync_arg(sync_mode mode, byte* file) -> int
             case (MODE_DATA)
             {
                 sync_status = fdatasync(fd);
+                break switch;
             }
-            goto _switch_end_139188887580112;
             case (MODE_FILE)
             {
                 sync_status = fsync(fd);
+                break switch;
             }
-            goto _switch_end_139188887580112;
             case (MODE_FILE_SYSTEM)
             {
-                case (MODE_SYNC)
-                {
-                    default
-                    {
-                        unreachable();
-                    };
-                }
             }
         };
-        label _switch_end_139188887580112:
         if (sync_status < 0)
         {
+            error;
         };
     };
     if (close(fd) < 0)
     {
+        error;
     };
 };
 
@@ -127,49 +120,49 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int c;
-    while ((c = getopt_long(argc, argv, "df", long_options, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('d')
             {
+                break switch;
             }
-            goto _switch_end_139188887579088;
             case ('f')
             {
+                break switch;
             }
-            goto _switch_end_139188887579088;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188887579088;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188887579088;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188887579088:
     };
     bool;
-    if (?)
-        error(0, 0, gettext("cannot specify both --data and --file-system"));
-    if (?)
-        error(0, 0, gettext("--data needs at least one argument"));
+    if (arg_data && arg_file_system)
+        error;
+    if (! args_specified && arg_data)
+        error;
     sync_mode mode;
-    if (?)
+    if (! args_specified || ( arg_file_system && ! HAVE_SYNCFS ))
         mode = MODE_SYNC;
-    elif (?)
+    elif (arg_file_system)
         mode = MODE_FILE_SYSTEM;
     else
-        if (?)
+        if (! arg_data)
             mode = MODE_FILE;
         else
             mode = MODE_DATA;

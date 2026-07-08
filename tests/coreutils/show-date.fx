@@ -4,14 +4,14 @@
 cdecl show_date(byte* format, timespec when, int tz) -> int
 {
     tm tm;
-    if (!localtime_rz(?, @when.tv_sec, @tm))
+    if (!localtime_rz(tz, @when., @tm))
     {
-        void* /* untranslated: char[INT_BUFSIZE_BOUND(<recovery-expr>())] */ buf = INT_BUFSIZE_BOUND(?);
-        error(0, 0, gettext("time %s is out of range"), quote(timetostr(when.tv_sec, buf)));
+        void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = INT_BUFSIZE_BOUND;
+        error(0, 0, gettext("time %s is out of range"), quote(timetostr(when., buf)));
     };
-    if (fprintftime(stdout, format, @tm, ?, when.tv_nsec) < 0)
+    if (fprintftime < 0)
     {
-        if (!ferror(stdout))
-            error(0, (?__errno_location()), gettext("fprintftime error"));
+        if (!ferror)
+            error;
     };
 };

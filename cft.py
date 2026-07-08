@@ -240,14 +240,14 @@ class CTranslator:
         self._need_i128 = False
         self._need_u128 = False
         self._indent = 0
-        self._switch_depth = 0  # incremented inside switch body, reset by loops
+        self._switch_depth = 0  # incremented inside switch body
         self._loop_depth_in_switch_stack = []  # per-switch loop nesting depth
-        self._switch_break_labels = []  # stack of label names, one per active switch
-        self._switch_has_break = []     # stack of bools, True if switch had a break
         self._index = cx.Index.create()
         clang_args = args or CFT_CONFIG.default_clang_args
         self.tu = self._index.parse(filepath, args=clang_args,
                                     options=cx.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD)
+        with open(filepath, 'rb') as _f:
+            self._src_bytes = _f.read()
 
     # -----------------------------------------------------------------------
     # Public entry point
@@ -284,7 +284,13 @@ class CTranslator:
                     inner = inner[:-2]
                 self._emit("///")
                 for line in inner.splitlines():
-                    self._emit(line.rstrip())
+                    # Strip the leading " * " or " " that C block comments use
+                    stripped = line.rstrip()
+                    if stripped.startswith("   "):
+                        stripped = stripped[3:]
+                    elif stripped.startswith(" "):
+                        stripped = stripped[1:]
+                    self._emit(stripped)
                 self._emit("///")
                 self._emit("")
             elif text.startswith("//"):
@@ -753,6 +759,10 @@ class CTranslator:
                     result.append('`&')
                 i += 1
                 continue
+            if s == '~':
+                result.append('`!')
+                i += 1
+                continue
             result.append(s)
             i += 1
         return " ".join(result).strip()
@@ -897,21 +907,19 @@ class CTranslator:
             self._emit_switch(cursor)
 
         elif kind == CursorKind.CASE_STMT:
-            self._emit_case(cursor)
+            # Should be handled by _emit_switch_body_flat; fallback if encountered standalone
+            self._emit_case(cursor, [])
 
         elif kind == CursorKind.DEFAULT_STMT:
-            self._emit_default(cursor)
+            # Should be handled by _emit_switch_body_flat; fallback if encountered standalone
+            self._emit_default(cursor, [])
 
         elif kind == CursorKind.BREAK_STMT:
-            # In Flux, switch cases do not use break to exit.
-            # If inside a loop nested within a switch, break targets the loop -- emit normally.
-            # If directly inside a switch, translate to goto past the switch end label.
+            # In Flux, plain break exits loops. To exit a switch, use 'break switch;'.
             if self._switch_depth == 0 or (self._loop_depth_in_switch_stack and self._loop_depth_in_switch_stack[-1] > 0):
                 self._emit(f"{pad}break;")
             else:
-                label = self._switch_break_labels[-1]
-                self._switch_has_break[-1] = True
-                self._emit(f"{pad}goto {label};")
+                self._emit(f"{pad}break switch;")
 
         elif kind == CursorKind.CONTINUE_STMT:
             self._emit(f"{pad}continue;")
@@ -1042,7 +1050,14 @@ class CTranslator:
     def _emit_while(self, cursor):
         pad = "    " * self._indent
         children = list(cursor.get_children())
-        cond = self._emit_expr(children[0])
+        cond_cursor = children[0]
+        # while(1) / while(true) -- libclang folds 'true' to integer 1
+        if cond_cursor.kind == CursorKind.INTEGER_LITERAL:
+            toks = list(cond_cursor.get_tokens())
+            raw = toks[0].spelling if toks else "0"
+            cond = "true" if raw == "1" else raw
+        else:
+            cond = self._emit_expr(cond_cursor)
         self._emit(f"{pad}while ({cond})")
         if self._loop_depth_in_switch_stack: self._loop_depth_in_switch_stack[-1] += 1
         if len(children) > 1:
@@ -1080,53 +1095,149 @@ class CTranslator:
         children = list(cursor.get_children())
         cond = self._emit_expr(children[0])
 
-        # Generate a unique label for break-out-of-switch translation
         self._switch_depth += 1
-        self._switch_break_labels.append(f"_switch_end_{id(cursor)}")
         self._loop_depth_in_switch_stack.append(0)
-        self._switch_has_break.append(False)
 
         self._emit(f"{pad}switch ({cond})")
         self._emit(f"{pad}{{")
         self._indent += 1
         if len(children) > 1:
-            body = children[1]
-            if body.kind == CursorKind.COMPOUND_STMT:
-                for child in body.get_children():
-                    self._emit_stmt(child)
-            else:
-                self._emit_stmt(body)
+            self._emit_switch_body_flat(children[1])
         self._indent -= 1
         self._emit(f"{pad}}};")
 
-        had_break = self._switch_has_break.pop()
-        label = self._switch_break_labels.pop()
         self._loop_depth_in_switch_stack.pop()
         self._switch_depth -= 1
-        if had_break:
-            self._emit(f"{pad}label {label}:")
 
-    def _emit_case(self, cursor):
+    def _emit_case(self, cursor, body_stmts):
+        """Emit a case block. body_stmts is the list of sibling statements
+        that belong to this case (collected by _emit_switch_body_flat)."""
         pad = "    " * self._indent
         children = list(cursor.get_children())
         val = self._emit_expr(children[0])
         self._emit(f"{pad}case ({val})")
         self._emit(f"{pad}{{")
         self._indent += 1
-        for child in children[1:]:
-            self._emit_stmt(child)
+        # child[1] of the CASE_STMT itself is the first inline stmt (if any)
+        if len(children) > 1:
+            first = children[1]
+            if first.kind not in (CursorKind.CASE_STMT, CursorKind.DEFAULT_STMT,
+                                  CursorKind.BREAK_STMT, CursorKind.NULL_STMT):
+                self._emit_stmt(first)
+        for stmt in body_stmts:
+            self._emit_stmt(stmt)
         self._indent -= 1
         self._emit(f"{pad}}}")
 
-    def _emit_default(self, cursor):
+    def _emit_default(self, cursor, body_stmts):
         pad = "    " * self._indent
         self._emit(f"{pad}default")
         self._emit(f"{pad}{{")
         self._indent += 1
-        for child in cursor.get_children():
-            self._emit_stmt(child)
+        for stmt in body_stmts:
+            self._emit_stmt(stmt)
         self._indent -= 1
         self._emit(f"{pad}}};")
+
+    def _emit_switch_body_flat(self, body_cursor):
+        """Iterate the flat list of children inside a switch compound body,
+        grouping non-case siblings into the preceding case's body."""
+        if body_cursor.kind != CursorKind.COMPOUND_STMT:
+            self._emit_stmt(body_cursor)
+            return
+
+        children = list(body_cursor.get_children())
+
+        # Group into (case_cursor, [body_stmts]) entries
+        groups = []  # list of (cursor, [stmts], is_break)
+        current_case = None
+        current_body = []
+        current_break = False
+
+        for child in children:
+            if child.kind in (CursorKind.CASE_STMT, CursorKind.DEFAULT_STMT):
+                if current_case is not None:
+                    groups.append((current_case, current_body, current_break))
+                current_case = child
+                current_body = []
+                current_break = False
+            elif child.kind == CursorKind.BREAK_STMT:
+                current_break = True
+                # close current case
+                if current_case is not None:
+                    groups.append((current_case, current_body, True))
+                    current_case = None
+                    current_body = []
+                    current_break = False
+            else:
+                if current_case is not None:
+                    current_body.append(child)
+                # else: orphan stmt before first case -- emit directly
+                else:
+                    self._emit_stmt(child)
+
+        # flush last group (no trailing break -- default often has none)
+        if current_case is not None:
+            groups.append((current_case, current_body, current_break))
+
+        for case_cursor, body_stmts, has_break in groups:
+            if case_cursor.kind == CursorKind.DEFAULT_STMT:
+                self._emit_default(case_cursor, body_stmts)
+            else:
+                pad = "    " * self._indent
+                children_c = list(case_cursor.get_children())
+                val = self._emit_expr(children_c[0])
+                self._emit(f"{pad}case ({val})")
+                self._emit(f"{pad}{{")
+                self._indent += 1
+                # child[1] of CASE_STMT is the first inline body statement
+                if len(children_c) > 1:
+                    first = children_c[1]
+                    if first.kind not in (CursorKind.CASE_STMT, CursorKind.DEFAULT_STMT,
+                                          CursorKind.BREAK_STMT, CursorKind.NULL_STMT):
+                        self._emit_stmt(first)
+                for stmt in body_stmts:
+                    self._emit_stmt(stmt)
+                if has_break:
+                    self._emit(f"{'    ' * self._indent}break switch;")
+                self._indent -= 1
+                self._emit(f"{pad}}}")
+
+    def _norm(self, s):
+        """Normalise a raw C expression string to Flux conventions."""
+        s = s.replace("->", ".")
+        # Bitwise NOT: ~ -> `!  (must be preceded by non-identifier, i.e. operator context)
+        import re as _re
+        s = _re.sub(r'(?<![a-zA-Z0-9_])~', '`!', s)
+        # Uppercase hex literals
+        s = _re.sub(r'0x([0-9a-fA-F]+)', lambda m: "0x" + m.group(1).upper(), s)
+        return s
+
+    def _src_slice(self, cursor):
+        """Return the raw source text for a cursor's extent, or None if
+        the extent is not from the main file."""
+        ext = cursor.extent
+        start_file = ext.start.file
+        if not start_file:
+            return None
+        if os.path.abspath(start_file.name) != os.path.abspath(self.filepath):
+            return None
+        raw = self._src_bytes[ext.start.offset:ext.end.offset].decode('utf-8', errors='replace').strip()
+        # Flux uses . for all member access including pointer dereference
+        return self._norm(raw)
+
+    def _macro_source_spelling(self, cursor):
+        """If the cursor's extent in the source file is a single macro invocation
+        (i.e. the raw tokens spell a macro name followed by optional parens),
+        return the raw source text. Otherwise return None."""
+        tokens = list(cursor.get_tokens())
+        if not tokens:
+            return None
+        first = tokens[0]
+        if first.kind != cx.TokenKind.IDENTIFIER:
+            return None
+        raw = " ".join(t.spelling for t in tokens)
+        return raw
 
     # -----------------------------------------------------------------------
     # Expression emission -- returns a string
@@ -1137,7 +1248,11 @@ class CTranslator:
 
         if kind == CursorKind.INTEGER_LITERAL:
             tokens = list(cursor.get_tokens())
-            return tokens[0].spelling if tokens else "0"
+            spelling = tokens[0].spelling if tokens else "0"
+            # Uppercase hex literals: 0xdeadbeef -> 0xDEADBEEF
+            if spelling.lower().startswith("0x"):
+                spelling = "0x" + spelling[2:].upper()
+            return spelling
 
         if kind == CursorKind.FLOATING_LITERAL:
             tokens = list(cursor.get_tokens())
@@ -1199,7 +1314,11 @@ class CTranslator:
         if kind == CursorKind.BINARY_OPERATOR:
             children = list(cursor.get_children())
             lhs = self._emit_expr(children[0]) if len(children) > 0 else "?"
-            rhs = self._emit_expr(children[1]) if len(children) > 1 else "?"
+            rhs_cursor = children[1] if len(children) > 1 else None
+            if rhs_cursor is not None:
+                rhs = self._src_slice(rhs_cursor) or self._emit_expr(rhs_cursor)
+            else:
+                rhs = "?"
             c_op = self._extract_binary_op(cursor, children)
             flux_op = _BINOP_MAP.get(c_op, c_op)
             return f"{lhs} {flux_op} {rhs}"
@@ -1207,13 +1326,20 @@ class CTranslator:
         if kind == CursorKind.COMPOUND_ASSIGNMENT_OPERATOR:
             children = list(cursor.get_children())
             lhs = self._emit_expr(children[0]) if len(children) > 0 else "?"
-            rhs = self._emit_expr(children[1]) if len(children) > 1 else "?"
+            rhs_cursor = children[1] if len(children) > 1 else None
+            if rhs_cursor is not None:
+                rhs = self._src_slice(rhs_cursor) or self._emit_expr(rhs_cursor)
+            else:
+                rhs = "?"
             c_op = self._extract_binary_op(cursor, children)
             flux_op = _BINOP_MAP.get(c_op, c_op)
             return f"{lhs} {flux_op} {rhs}"
 
         if kind == CursorKind.CONDITIONAL_OPERATOR:
             children = list(cursor.get_children())
+            raw = self._src_slice(cursor)
+            if raw:
+                return raw
             cond = self._emit_expr(children[0])
             then = self._emit_expr(children[1])
             else_ = self._emit_expr(children[2])
@@ -1248,7 +1374,12 @@ class CTranslator:
             children = list(cursor.get_children())
             if children:
                 return self._emit_expr(children[0])
-            return cursor.spelling or "?"
+            if cursor.spelling:
+                return cursor.spelling
+            tokens = list(cursor.get_tokens())
+            if tokens:
+                return " ".join(t.spelling for t in tokens)
+            return "?"
 
         if kind == CursorKind.ADDR_LABEL_EXPR:
             return f"@{cursor.spelling}"
@@ -1262,7 +1393,7 @@ class CTranslator:
         # Fallback: reconstruct from tokens
         tokens = list(cursor.get_tokens())
         if tokens:
-            return " ".join(t.spelling for t in tokens)
+            return self._norm(" ".join(t.spelling for t in tokens))
         return f"/* untranslated expr: {kind.name} */"
 
     # -----------------------------------------------------------------------

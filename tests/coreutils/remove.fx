@@ -37,6 +37,7 @@ cdecl cache_fstatat(int fd, byte* file, stat* st, int flag) -> int
     return fstatat(fd, file, st, flag);
 };
 
+struct stat;
 cdecl cache_stat_init(stat* st) -> stat*
 {
     return st;
@@ -46,35 +47,34 @@ cdecl write_protected_non_symlink(int fd_cwd, byte* file, stat* buf) -> int
 {
     if (can_write_any_file())
         return 0;
-    if (?)
+    if (cache_fstatat != 0)
         return -1;
-    if (((((buf.st_mode)) ? 0) ? (0120000)))
+    if (S_ISLNK(buf))
         return 0;
     {
-        if (?)
+        if (faccessat == 0)
             return 0;
-        return (?__errno_location()) ? 0 ? 1 : -1;
     };
 };
 
 cdecl get_dir_status(int* fts, int* ent, int* dir_status) -> int
 {
     if (*dir_status == DS_UNKNOWN)
-        *dir_status = directory_status(?., ?.);
+        *dir_status = directory_status(fts., ent.);
     return *dir_status;
 };
 
 cdecl prompt(int* fts, int* ent, int is_dir, rm_options* x, Prompt_action mode, int* dir_status) -> RM_status
 {
-    int fd_cwd = ?.;
-    byte* full_name = ?.;
-    byte* filename = ?.;
+    int fd_cwd = fts.;
+    byte* full_name = ent.;
+    byte* filename = ent.;
     stat st;
     stat* sbuf = @st;
     cache_stat_init(sbuf);
-    int dirent_type = ? ? 1 : 0;
+    int dirent_type = is_dir ? 1 : 0;
     int write_protected = 0;
-    if (?.)
+    if (ent.)
         return RM_USER_DECLINED;
     if (x.interactive == RMI_NEVER)
         return RM_OK;
@@ -82,23 +82,21 @@ cdecl prompt(int* fts, int* ent, int is_dir, rm_options* x, Prompt_action mode, 
     if (!x & (x.interactive == RMI_ALWAYS | x) & dirent_type != 2)
     {
         write_protected = write_protected_non_symlink(fd_cwd, filename, sbuf);
-        wp_errno = (?__errno_location());
     };
     if (write_protected | x.interactive == RMI_ALWAYS)
     {
         if (0 <= write_protected & dirent_type == 0)
         {
-            if (?)
+            if (cache_fstatat == 0)
             {
-                if (((((sbuf.st_mode)) ? 0) ? (0120000)))
+                if (S_ISLNK(sbuf))
                     dirent_type = 2;
-                elif (((((sbuf.st_mode)) ? 0) ? (0040000)))
+                elif (S_ISDIR(sbuf))
                     dirent_type = 1;
             }
             else
             {
                 write_protected = -1;
-                wp_errno = (?__errno_location());
             };
         };
         if (0 <= write_protected)
@@ -108,43 +106,44 @@ cdecl prompt(int* fts, int* ent, int is_dir, rm_options* x, Prompt_action mode, 
                 {
                     if (x.interactive != RMI_ALWAYS)
                         return RM_OK;
+                    break switch;
                 }
-                goto _switch_end_139188839775952;
                 case (1)
                 {
-                    if (!(x | (x & ?(?, ?, dir_status) != 0)))
+                    if (!(x | (x & get_dir_status(fts, ent, dir_status) != 0)))
                     {
                         write_protected = -1;
-                        wp_errno = *dir_status <= 0 ? 0 : *dir_status;
                     };
+                    break switch;
                 }
-                goto _switch_end_139188839775952;
             };
-            label _switch_end_139188839775952:
-        byte* quoted_name;
+        byte* quoted_name = quotearg_style;
         if (write_protected < 0)
         {
             error(0, wp_errno, gettext("cannot remove %s"), quoted_name);
             return RM_ERROR;
         };
-        if (dirent_type == 1 & mode == PA_DESCEND_INTO_DIR & ?(?, ?, dir_status) == DS_NONEMPTY)
+        if (dirent_type == 1 & mode == PA_DESCEND_INTO_DIR & get_dir_status(fts, ent, dir_status) == DS_NONEMPTY)
+            fprintf;
         elif (0 < *dir_status)
         {
-            if (!(x & *dir_status == 0))
+            if (! ( x -> remove_empty_directories && * dir_status == EACCES ))
             {
                 error(0, *dir_status, gettext("cannot remove %s"), quoted_name);
                 return RM_ERROR;
             };
             if (mode == PA_DESCEND_INTO_DIR)
                 return RM_OK;
+            fprintf;
         };
         else
         {
-            if (?)
+            if (cache_fstatat != 0)
             {
-                error(0, (?__errno_location()), gettext("cannot remove %s"), quoted_name);
+                error;
                 return RM_ERROR;
             };
+            fprintf;
         };
         return yesno() ? RM_USER_ACCEPTED : RM_USER_DECLINED;
     };
@@ -155,18 +154,6 @@ cdecl nonexistent_file_errno(int errnum) -> int
 {
     switch (errnum)
     {
-        case (0)
-        {
-            case (0)
-            {
-                case (0)
-                {
-                    case (0)
-                    {
-                    }
-                }
-            }
-        }
         default
         {
         };
@@ -175,12 +162,13 @@ cdecl nonexistent_file_errno(int errnum) -> int
 
 cdecl ignorable_missing(rm_options* x, int errnum) -> int
 {
-    return x & ?(errnum);
+    return x & nonexistent_file_errno(errnum);
 };
 
 cdecl fts_skip_tree(int* fts, int* ent) -> void
 {
-    ignore_value(fts_read(?));
+    fts_set;
+    ignore_value(fts_read(fts));
 };
 
 cdecl mark_ancestor_dirs(int* ent) -> void
@@ -190,109 +178,121 @@ cdecl mark_ancestor_dirs(int* ent) -> void
 cdecl excise(int* fts, int* ent, rm_options* x, int is_dir) -> RM_status
 {
     int flag;
-    if (unlinkat(?., ?., flag) == 0)
+    if (unlinkat(fts., ent., flag) == 0)
     {
         if (x)
         {
+            printf((is_dir ? gettext("removed directory %s\n") : gettext("removed %s\n")), quotearg_style);
         };
         return RM_OK;
     };
-    if ((?__errno_location()) ? 0)
+    if (errno == EROFS)
     {
         stat st;
-        if (?)
-            (?__errno_location()) ? 0;
     };
-    if (?(x, (?__errno_location())))
+    if (ignorable_missing)
         return RM_OK;
-    if (?)
-        (?__errno_location()) ? ?.;
-    mark_ancestor_dirs(?);
+    error;
+    mark_ancestor_dirs(ent);
     return RM_ERROR;
 };
 
 cdecl rm_fts(int* fts, int* ent, rm_options* x) -> RM_status
 {
     int dir_status = DS_UNKNOWN;
-    switch (?.)
+    switch (ent.)
     {
         if (!x)
         {
+            fts_set;
             if (x)
                 return RM_OK;
-            ignore_value(fts_read(?));
+            error;
+            ignore_value(fts_read(fts));
             return RM_ERROR;
         };
-        if (?)
+        if (ent -> fts_level == FTS_ROOTLEVEL)
         {
-            if (?(last_component(?.)))
+            if (dot_or_dotdot(last_component(ent.)))
             {
-                fts_skip_tree(?, ?);
+                error(0, 0, gettext("refusing to remove %s or %s directory: skipping %s"), quotearg_n_style, quotearg_n_style, quotearg_n_style);
+                fts_skip_tree(fts, ent);
                 return RM_ERROR;
             };
-            if (ROOT_DEV_INO_CHECK(x.root_dev_ino, ?.))
+            if (ROOT_DEV_INO_CHECK(x.root_dev_ino, ent.))
             {
-                ROOT_DEV_INO_WARN(?.);
-                fts_skip_tree(?, ?);
+                ROOT_DEV_INO_WARN(ent.);
+                fts_skip_tree(fts, ent);
                 return RM_ERROR;
             };
             if (x)
             {
                 bool;
-                byte* parent = file_name_concat(?., "..", ((void*)0));
+                byte* parent = file_name_concat;
                 stat statbuf;
                 if (!parent | lstat(parent, @statbuf))
                 {
+                    error(0, 0, gettext("failed to stat %s: skipping %s"), quotearg_n_style, quotearg_n_style);
                 };
                 free(parent);
-                if (?)
+                if (failed || fts -> fts_dev != statbuf . st_dev)
                 {
-                    if (?)
+                    if (! failed)
                     {
+                        error(0, 0, gettext("skipping %s, since it's on a different device"), quotearg_style);
                         error(0, 0, gettext("and --preserve-root=all is in effect"));
                     };
-                    fts_skip_tree(?, ?);
+                    fts_skip_tree(fts, ent);
                     return RM_ERROR;
                 };
             };
         };
         {
-            RM_status s;
+            RM_status s = prompt;
             if (s == RM_USER_ACCEPTED & dir_status == DS_EMPTY)
             {
+                s = excise;
                 if (s == RM_OK)
-                    fts_skip_tree(?, ?);
+                    fts_skip_tree(fts, ent);
             };
             if (!(s == RM_OK | s == RM_USER_ACCEPTED))
             {
-                mark_ancestor_dirs(?);
-                fts_skip_tree(?, ?);
+                mark_ancestor_dirs(ent);
+                fts_skip_tree(fts, ent);
             };
             return s;
         };
         {
-            if (?)
+            if (ent -> fts_info == FTS_DP && x -> one_file_system && FTS_ROOTLEVEL < ent -> fts_level && ent -> fts_statp -> st_dev != fts -> fts_dev)
             {
-                mark_ancestor_dirs(?);
+                mark_ancestor_dirs(ent);
+                error(0, 0, gettext("skipping %s, since it's on a different device"), quotearg_style);
                 return RM_ERROR;
             };
             bool;
-            RM_status s;
+            RM_status s = prompt;
             if (!(s == RM_OK | s == RM_USER_ACCEPTED))
                 return s;
+            return excise;
         };
         do
         {
+            error(0, 0, gettext("\
+WARNING: Circular directory structure.\n\
+This almost certainly means that you have a corrupted file system.\n\
+NOTIFY YOUR SYSTEM MANAGER.\n\
+The following directory is part of the cycle:\n  %s\n"), quotearg_n_style_colon);
         }
         while (0);
-        fts_skip_tree(?, ?);
+        fts_skip_tree(fts, ent);
         return RM_ERROR;
-        fts_skip_tree(?, ?);
+        error(0, ent., gettext("traversal failed: %s"), quotearg_n_style_colon);
+        fts_skip_tree(fts, ent);
         return RM_ERROR;
         default
         {
+            abort();
         };
-        abort();
     };
 };
 
@@ -302,18 +302,18 @@ cdecl rm(byte** file, rm_options* x) -> RM_status
     if (*file)
     {
         int bit_flags;
-        while (?)
+        while (true)
         {
-            if (?)
+            if (ent == NULL)
             {
-                if ((?__errno_location()) ? 0)
+                if (errno != 0)
                 {
-                    error(0, (?__errno_location()), gettext("fts_read failed"));
+                    error;
                     rm_status = RM_ERROR;
                 };
                 break;
             };
-            RM_status s;
+            RM_status s = rm_fts;
             affirm(((s) ? RM_OK ? (s) ? RM_USER_ACCEPTED ? (s) ? RM_USER_DECLINED ? (s) ? RM_ERROR));
             do
             {
@@ -322,9 +322,9 @@ cdecl rm(byte** file, rm_options* x) -> RM_status
             }
             while (0);
         };
-        if (?)
+        if (fts_close != 0)
         {
-            error(0, (?__errno_location()), gettext("fts_close failed"));
+            error;
             rm_status = RM_ERROR;
         };
     };

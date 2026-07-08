@@ -29,39 +29,39 @@ macro AUTHORS
     proper_name ( "Joseph Arceneaux" ) , proper_name ( "David MacKenzie" ) , proper_name ( "Kaveh Ghazi" )
 };
 
-bool include_idle = 0;
-bool include_heading = 0;
-bool include_fullname = 0;
-bool include_project = 0;
-bool include_plan = 0;
-bool include_home_and_shell = 0;
-bool do_short_format = 0;
-extern bool do_lookup;
+extern int include_idle;
+extern int include_heading;
+extern int include_fullname;
+extern int include_project;
+extern int include_plan;
+extern int include_home_and_shell;
+extern int do_short_format;
+extern int do_lookup;
 extern byte* time_format;
 extern int time_format_width;
-uint LOOKUP_OPTION = 128;
+uint LOOKUP_OPTION = 0;
 
-option[4] longopts = option;
+struct option;
+extern int longopts;
 extern int idx_t;
 cdecl create_fullname(byte* gecos_name, byte* user_name) -> byte*
 {
     idx_t;
     idx_t;
-    if (?)
+    if (ampersands != 0)
     {
         idx_t;
-        long product;
-        if (?)
+        if (ckd_mul | ckd_add)
             xalloc_die();
     };
-    byte* result;
+    byte* result = xmalloc;
     byte* r = result;
     while (*gecos_name)
     {
         if (*gecos_name == '&')
         {
             byte* uname = user_name;
-            if (((?__ctype_b_loc())[(int)((to_uchar(*uname)))] ? (uint)_ISlower))
+            if (islower(to_uchar(*uname)))
                 *r++ = toupper(to_uchar(*uname++));
             while (*uname)
                 *r++ = *uname++;
@@ -76,45 +76,43 @@ cdecl create_fullname(byte* gecos_name, byte* user_name) -> byte*
     return result;
 };
 
-cdecl idle_string(long when) -> byte*
+cdecl idle_string(int when) -> byte*
 {
-    long now = 0;
-    void* /* untranslated: char[INT_STRLEN_BOUND(<recovery-expr>()) + sizeof "d"] */ buf = INT_STRLEN_BOUND(?) + (sizeof "d" / 8);
+    int now = 0;
+    void* /* untranslated: char[<recovery-expr>(INT_STRLEN_BOUND) + sizeof "d"] */ buf = INT_STRLEN_BOUND + (sizeof "d" / 8);
     if (now == 0)
         time(@now);
-    long seconds_idle = now - when;
     if (seconds_idle < 60)
         return "     ";
-    if (seconds_idle < (24 * 60 * 60))
+    if (seconds_idle < ( 24 * 60 * 60 ))
     {
-        int hours = seconds_idle / (60 * 60);
-        int minutes = (seconds_idle % (60 * 60)) / 60;
+        int hours;
+        int minutes;
         sprintf(buf, "%02d:%02d", hours, minutes);
     }
     else
     {
-        long days = seconds_idle / (24 * 60 * 60);
-        sprintf(buf, "%jdd", days);
+        sprintf;
     };
     return buf;
 };
 
 cdecl time_string(int* utmp_ent) -> byte*
 {
-    void* /* untranslated: char[INT_STRLEN_BOUND(<recovery-expr>()) + sizeof "-%m-%d %H:%M"] */ buf = INT_STRLEN_BOUND(?) + (sizeof "-%m-%d %H:%M" / 8);
-    tm* tmp = localtime(@?..);
+    void* /* untranslated: char[<recovery-expr>(INT_STRLEN_BOUND) + sizeof "-%m-%d %H:%M"] */ buf = INT_STRLEN_BOUND + (sizeof "-%m-%d %H:%M" / 8);
+    tm* tmp = localtime(@utmp_ent..);
     if (tmp)
     {
         strftime(buf, (sizeof buf / 8), time_format, tmp);
         return buf;
     }
     else
-        return timetostr(?.., buf);
+        return timetostr(utmp_ent.., buf);
 };
 
 cdecl print_entry(int* utmp_ent) -> void
 {
-    byte* line = ?.;
+    byte* line = utmp_ent.;
     byte* space = strchr(line, ' ');
     line = space ? space + 1 : line;
     int dirfd;
@@ -124,72 +122,69 @@ cdecl print_entry(int* utmp_ent) -> void
         int dev_dirfd;
         if (!dev_dirfd)
         {
+            dev_dirfd = open;
         };
         dirfd = dev_dirfd;
     };
     stat stats;
-    long last_change;
     byte mesg;
-    if (?)
+    if (AT_FDCWD <= dirfd && fstatat ( dirfd , line , & stats , 0 ) == 0)
     {
-        mesg = (stats.st_mode `& (0 ? 0)) ? ' ' : '*';
-        last_change = stats.st_atime;
     }
     else
     {
         mesg = '?';
-        last_change = 0;
     };
-    byte* ut_user = ?.;
+    byte* ut_user = utmp_ent.;
     if (strnlen(ut_user, 8) < 8)
         printf("%-8s", ut_user);
     else
-        fputs(ut_user, stdout);
+        fputs;
     if (include_fullname)
     {
         passwd* pw = getpwnam(ut_user);
-        if (pw == ((void*)0))
+        if (pw == NULL)
             printf(" %19s", gettext("        ???"));
         else
         {
-            byte* comma = strchr(pw.pw_gecos, ',');
+            byte* comma = strchr(pw, ',');
             if (comma)
                 *comma = '\0';
-            byte* result = create_fullname(pw.pw_gecos, pw.pw_name);
+            byte* result = create_fullname(pw, pw);
             printf(" %-19.19s", result);
             free(result);
         };
     };
-    fputc(' ', stdout);
-    fputc(mesg, stdout);
-    if (strnlen(?., 8) < 8)
-        printf("%-8s", ?.);
+    fputc;
+    fputc;
+    if (strnlen(utmp_ent., 8) < 8)
+        printf("%-8s", utmp_ent.);
     else
-        fputs(?., stdout);
+        fputs;
     if (include_idle)
     {
         if (last_change)
-            printf(" %-6s", idle_string(last_change));
+            printf(" %-6s", idle_string);
         else
             printf(" %-6s", gettext("?????"));
     };
-    printf(" %s", ?(?));
+    printf(" %s", time_string(utmp_ent));
     putchar('\n');
-    if (ferror(stdout))
+    if (ferror)
         write_error();
 };
 
 cdecl cat_file(byte* header, byte* home, byte* file) -> void
 {
-    byte* full_name = file_name_concat(home, file, ((void*)0));
-    _IO_FILE* fp = fopen(full_name, "r");
+    byte* full_name = file_name_concat;
     if (fp)
     {
-        fputs(header, stdout);
-        byte[8192] buf = 0;
-        for (ulong bytes_read; 0 < (bytes_read = fread(buf, 1, (sizeof buf / 8), fp)); if ( fwrite ( buf , 1 , bytes_read , stdout ) != bytes_read ) write_error ( ))
+        fputs;
+        fadvise;
+        byte buf;
+        for (ulong bytes_read; 0 < (bytes_read = fread); if ( fwrite ( buf , 1 , bytes_read , stdout ) != bytes_read ) write_error ( ))
         {};
-        fclose(fp);
+        fclose;
     };
     free(full_name);
 };
@@ -200,17 +195,17 @@ cdecl print_long_entry(byte* name) -> void
     printf(gettext("Login name: "));
     printf("%-28s", name);
     printf(gettext("In real life: "));
-    if (pw == ((void*)0))
+    if (pw == NULL)
     {
         printf(" %s", gettext("???\n"));
         return void;
     }
     else
     {
-        byte* comma = strchr(pw.pw_gecos, ',');
+        byte* comma = strchr(pw, ',');
         if (comma)
             *comma = '\0';
-        byte* result = create_fullname(pw.pw_gecos, pw.pw_name);
+        byte* result = create_fullname(pw, pw);
         printf(" %s", result);
         free(result);
     };
@@ -218,17 +213,17 @@ cdecl print_long_entry(byte* name) -> void
     if (include_home_and_shell)
     {
         printf(gettext("Directory: "));
-        printf("%-29s", pw.pw_dir);
+        printf("%-29s", pw);
         printf(gettext("Shell: "));
-        printf(" %s", pw.pw_shell);
+        printf(" %s", pw);
         putchar('\n');
     };
     if (include_project)
-        cat_file(gettext("Project: "), pw.pw_dir, ".project");
+        cat_file(gettext("Project: "), pw, ".project");
     if (include_plan)
-        cat_file(gettext("Plan:\n"), pw.pw_dir, ".plan");
+        cat_file(gettext("Plan:\n"), pw, ".plan");
     putchar('\n');
-    if (ferror(stdout))
+    if (ferror)
         write_error();
 };
 
@@ -246,7 +241,7 @@ cdecl print_heading() -> void
 
 cdecl scan_entries(int n, int* utmp_buf, int argc_names, byte** argv_names) -> void
 {
-    if (hard_locale(0))
+    if (hard_locale)
     {
         time_format = "%Y-%m-%d %H:%M";
         time_format_width = 4 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2;
@@ -258,9 +253,9 @@ cdecl scan_entries(int n, int* utmp_buf, int argc_names, byte** argv_names) -> v
     };
     if (include_heading)
         print_heading();
-    while (?--)
+    while (n--)
     {
-        if (IS_USER_PROCESS(?))
+        if (IS_USER_PROCESS(utmp_buf))
         {
             if (argc_names)
             {
@@ -268,7 +263,7 @@ cdecl scan_entries(int n, int* utmp_buf, int argc_names, byte** argv_names) -> v
                 {};
             }
             else
-                print_entry(?);
+                print_entry(utmp_buf);
         };
         utmp_buf++;
     };
@@ -277,7 +272,10 @@ cdecl scan_entries(int n, int* utmp_buf, int argc_names, byte** argv_names) -> v
 cdecl short_pinky(byte* filename, int argc_names, byte** argv_names) -> void
 {
     idx_t;
-    exit(0);
+    if (read_utmp != 0)
+        error;
+    scan_entries;
+    exit;
 };
 
 cdecl long_pinky(int argc_names, byte** argv_names) -> void
@@ -288,49 +286,50 @@ cdecl long_pinky(int argc_names, byte** argv_names) -> void
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-\n\
-"), stdout);
-        oputs_("pinky", gettext("\
-  -l     produce long format output for the specified USERs\n\
+        printf;
+        fputs;
+        oputs_("pinky", gettext("\
+  -l     produce long format output for the specified USERs\n\
 "));
-        oputs_("pinky", gettext("\
-  -b     omit the user's home directory and shell in long format\n\
+        oputs_("pinky", gettext("\
+  -b     omit the user's home directory and shell in long format\n\
 "));
-        oputs_("pinky", gettext("\
-  -h     omit the user's project file in long format\n\
+        oputs_("pinky", gettext("\
+  -h     omit the user's project file in long format\n\
 "));
-        oputs_("pinky", gettext("\
-  -p     omit the user's plan file in long format\n\
+        oputs_("pinky", gettext("\
+  -p     omit the user's plan file in long format\n\
 "));
-        oputs_("pinky", gettext("\
-  -s     do short format output, this is the default\n\
+        oputs_("pinky", gettext("\
+  -s     do short format output, this is the default\n\
 "));
-        oputs_("pinky", gettext("\
-  -f     omit the line of column headings in short format\n\
+        oputs_("pinky", gettext("\
+  -f     omit the line of column headings in short format\n\
 "));
-        oputs_("pinky", gettext("\
-  -w     omit the user's full name in short format\n\
+        oputs_("pinky", gettext("\
+  -w     omit the user's full name in short format\n\
 "));
-        oputs_("pinky", gettext("\
-  -i     omit the user's full name and remote host in short format\n\
+        oputs_("pinky", gettext("\
+  -i     omit the user's full name and remote host in short format\n\
 "));
-        oputs_("pinky", gettext("\
-  -q     omit the user's full name, remote host and idle time in short format\n\
+        oputs_("pinky", gettext("\
+  -q     omit the user's full name, remote host and idle time in short format\n\
 "));
-        oputs_("pinky", gettext("\
-      --lookup\n\
-         attempt to canonicalize hostnames via DNS\n\
+        oputs_("pinky", gettext("\
+      --lookup\n\
+         attempt to canonicalize hostnames via DNS\n\
 "));
         oputs_("pinky", gettext("      --help\n         display this help and exit\n"));
         oputs_("pinky", gettext("      --version\n         output version information and exit\n"));
+        printf;
         emit_ancillary_info("pinky");
     };
     exit(status);
@@ -339,89 +338,21 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "sfwiqbhlp", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('s')
-            {
-                do_short_format = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('l')
-            {
-                do_short_format = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('f')
-            {
-                include_heading = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('w')
-            {
-                include_fullname = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('i')
-            {
-                include_fullname = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('q')
-            {
-                include_fullname = 0;
-            }
-            include_idle = 0;
-            goto _switch_end_139188749113296;
-            case ('h')
-            {
-                include_project = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('p')
-            {
-                include_plan = 0;
-            }
-            goto _switch_end_139188749113296;
-            case ('b')
-            {
-                include_home_and_shell = 0;
-            }
-            goto _switch_end_139188749113296;
-            case (LOOKUP_OPTION)
-            {
-                do_lookup = 0;
-            }
-            goto _switch_end_139188749113296;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188749113296;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188749113296;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188749113296:
     };
-    int n_users = argc - optind;
+    int n_users;
     if (!do_short_format & n_users == 0)
     {
-        error(0, 0, gettext("no username specified; at least one must be\
+        error(0, 0, gettext("no username specified; at least one must be\
  specified when using -l"));
-        usage(0);
+        usage;
     };
     if (do_short_format)
+        short_pinky;
     else
-        long_pinky(n_users, argv + optind);
-    return 0;
+        long_pinky;
 };

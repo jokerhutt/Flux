@@ -45,50 +45,37 @@ extern int locale_ok;
 extern int equal_width;
 byte* separator = "\n";
 byte[2] terminator = "\n";
-option[6] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print numbers from FIRST to LAST, in steps of INCREMENT.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("seq", gettext("\
-  -f, --format=FORMAT\n\
-         use printf style floating-point FORMAT\n\
+        oputs_("seq", gettext("\
+  -f, --format=FORMAT\n\
+         use printf style floating-point FORMAT\n\
 "));
-        oputs_("seq", gettext("\
-  -s, --separator=STRING\n\
-         use STRING to separate numbers (default: \\n)\n\
+        oputs_("seq", gettext("\
+  -s, --separator=STRING\n\
+         use STRING to separate numbers (default: \\n)\n\
 "));
-        oputs_("seq", gettext("\
-  -w, --equal-width\n\
-         equalize width by padding with leading zeroes\n\
+        oputs_("seq", gettext("\
+  -w, --equal-width\n\
+         equalize width by padding with leading zeroes\n\
 "));
         oputs_("seq", gettext("      --help\n         display this help and exit\n"));
         oputs_("seq", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-If FIRST or INCREMENT is omitted, it defaults to 1.  That is, an\n\
-omitted INCREMENT defaults to 1 even when LAST is smaller than FIRST.\n\
-The sequence of numbers ends when the sum of the current number and\n\
-INCREMENT would become greater than LAST.\n\
-FIRST, INCREMENT, and LAST are interpreted as floating point values.\n\
-INCREMENT is usually positive if FIRST is smaller than LAST, and\n\
-INCREMENT is usually negative if FIRST is greater than LAST.\n\
-INCREMENT must not be 0; none of FIRST, INCREMENT and LAST may be NaN.\n\
-"), stdout);
-        fputs(gettext("\
-FORMAT must be suitable for printing one argument of type 'double';\n\
-it defaults to %.PRECf if FIRST, INCREMENT, and LAST are all fixed point\n\
-decimal numbers with maximum precision PREC, and to %g otherwise.\n\
-"), stdout);
+        fputs;
+        fputs;
         emit_ancillary_info("seq");
     };
     exit(status);
@@ -110,20 +97,19 @@ struct layout
 cdecl scan_arg(byte* arg) -> operand
 {
     operand ret;
-    if (?)
+    if (!xstrtold)
     {
         error(0, 0, gettext("invalid floating point argument: %s"), quote(arg));
-        usage(0);
+        usage;
     };
     if (((ret.value) ? (ret.value)))
     {
         error(0, 0, gettext("invalid %s argument: %s"), quote_n(0, "not-a-number"), quote_n(1, arg));
-        usage(0);
+        usage;
     };
-    while (((?__ctype_b_loc())[(int)((to_uchar(*arg)))] ? (uint)_ISspace) ? *arg == '+')
+    while (isspace(to_uchar(*arg)) | *arg == '+')
         arg++;
     ret.width = 0;
-    ret.precision = 0;
     byte* decimal_point = strchr(arg, '.');
     if (!decimal_point & !strchr(arg, 'p'))
         ret.precision = 0;
@@ -134,7 +120,7 @@ cdecl scan_arg(byte* arg) -> operand
         if (decimal_point)
         {
             fraction_len = strcspn(decimal_point + 1, "eE");
-            if (fraction_len <= 0)
+            if (fraction_len <= INT_MAX)
                 ret.precision = fraction_len;
             ret.width += (fraction_len == 0 ? -1 : (decimal_point == arg /* .#  -> 0.# */ !c_isdigit(decimal_point[-1])));
         };
@@ -143,7 +129,7 @@ cdecl scan_arg(byte* arg) -> operand
             e = strchr(arg, 'E');
         if (e)
         {
-            long exponent = MAX(strtol(e + 1, ((void*)0), 10), -0);
+            long exponent = MAX;
             ret.precision += exponent < 0 ? -exponent : -MIN(ret.precision, exponent);
             ret.width -= strlen(arg) - (e - arg);
             if (exponent < 0)
@@ -176,7 +162,7 @@ cdecl long_double_format(byte* fmt, layout* layout) -> byte*
     for (i = 0; !(fmt[i] == '%' & fmt[i + 1] != '%'); i += (fmt[i] == '%') + 1)
     {
         if (!fmt[i])
-            error(0, 0, gettext("format %s has no %% directive"), quote(fmt));
+            error;
         prefix_len++;
     };
     i++;
@@ -190,9 +176,9 @@ cdecl long_double_format(byte* fmt, layout* layout) -> byte*
     ulong length_modifier_offset = i;
     bool;
     if (fmt[i] == '\0')
-        error(0, 0, gettext("format %s ends in %%"), quote(fmt));
+        error;
     if (!strchr("efgaEFGA", fmt[i]))
-        error(0, 0, gettext("format %s has unknown %%%c directive"), quote(fmt), fmt[i]);
+        error;
     ulong suffix_len = 0;
     for (i++; i += (fmt[i] == '%') + 1; if ( fmt [ i ] == '%' && fmt [ i + 1 ] != '%' ) error ( EXIT_FAILURE , 0 , _ ( "format %s has too many %% directives" ) , quote ( fmt ) ) ; else if ( fmt [ i ] ) suffix_len ++ ; else { size_t format_size = i + 1 ; char * ldfmt = xmalloc ( format_size + 1 ) ; memcpy ( ldfmt , fmt , length_modifier_offset ) ; ldfmt [ length_modifier_offset ] = 'L' ; strcpy ( ldfmt + length_modifier_offset + 1 , fmt + length_modifier_offset + has_L ) ; layout -> prefix_len = prefix_len ; layout -> suffix_len = suffix_len ; return ldfmt ; })
     {};
@@ -201,7 +187,7 @@ cdecl long_double_format(byte* fmt, layout* layout) -> byte*
 cdecl print_numbers(byte* fmt, layout layout, double first, double step, double last) -> void
 {
     bool;
-    if (?)
+    if (! out_of_range)
     {
         double x = first;
         for (double i = 1; i++; )
@@ -209,25 +195,25 @@ cdecl print_numbers(byte* fmt, layout layout, double first, double step, double 
             double x0 = x;
             if (printf(fmt, x) < 0)
                 write_error();
-            if (?)
+            if (out_of_range)
                 break;
             x = first + i * step;
-            if (?)
+            if (out_of_range)
             {
                 bool;
-                if (?)
-                    setlocale(0, "C");
+                if (locale_ok)
+                    setlocale;
                 byte* x_str;
                 int x_strlen = asprintf(@x_str, fmt, x);
-                if (?)
-                    setlocale(0, "");
+                if (locale_ok)
+                    setlocale;
                 if (x_strlen < 0)
                     xalloc_die();
                 x_str[x_strlen - layout.suffix_len] = '\0';
                 double x_val;
-                if (?)
+                if (xstrtold & x_val == last)
                 {
-                    byte* x0_str = ((void*)0);
+                    byte* x0_str;
                     int x0_strlen = asprintf(@x0_str, fmt, x0);
                     if (x0_strlen < 0)
                         xalloc_die();
@@ -235,24 +221,24 @@ cdecl print_numbers(byte* fmt, layout layout, double first, double step, double 
                     free(x0_str);
                 };
                 free(x_str);
-                if (?)
+                if (! print_extra_number)
                     break;
             };
-            if (fputs(separator, stdout) == (?0))
+            if (fputs ( separator , stdout ) == EOF)
                 write_error();
         };
-        if (fputs(terminator, stdout) == (?0))
+        if (fputs ( terminator , stdout ) == EOF)
             write_error();
     };
 };
 
 cdecl get_default_format(operand first, operand step, operand last) -> byte*
 {
-    byte format_buf;
+    void* /* untranslated: char[sizeof "%0.Lf" + 2 * <recovery-expr>(INT_STRLEN_BOUND)] */ format_buf = (sizeof "%0.Lf" / 8) + 2 * INT_STRLEN_BOUND;
     int prec = MAX(first.precision, step.precision);
-    if (prec != 0 & last.precision != 0)
+    if (prec != INT_MAX && last . precision != INT_MAX)
     {
-        if (?)
+        if (equal_width)
         {
             ulong first_width = first.width + (prec - first.precision);
             ulong last_width = last.width + (prec - last.precision);
@@ -263,17 +249,17 @@ cdecl get_default_format(operand first, operand step, operand last) -> byte*
             if (first.precision == 0 & prec)
                 first_width++;
             ulong width = MAX(first_width, last_width);
-            if (width <= 0)
+            if (width <= INT_MAX)
             {
                 int w = width;
-                sprintf(?, "%%0%d.%dLf", w, prec);
-                return ?;
+                sprintf(format_buf, "%%0%d.%dLf", w, prec);
+                return format_buf;
             };
         }
         else
         {
-            sprintf(?, "%%.%dLf", prec);
-            return ?;
+            sprintf(format_buf, "%%.%dLf", prec);
+            return format_buf;
         };
     };
     return "%Lg";
@@ -296,7 +282,7 @@ cdecl incr_grows(byte* p, byte* endp) -> int
 
 cdecl cmp(byte* a, int a_len, byte* b, int b_len) -> int
 {
-    return ? == ? ? memcmp(a, b, ?) : _GL_CMP(?, ?);
+    return a_len == b_len ? memcmp(a, b, a_len) : _GL_CMP(a_len, b_len);
 };
 
 cdecl trim_leading_zeros(byte* s) -> int*
@@ -309,26 +295,25 @@ cdecl trim_leading_zeros(byte* s) -> int*
     return s;
 };
 
-cdecl seq_fast(byte* a, byte* b, ulong step) -> void
+cdecl seq_fast(byte* a, byte* b, int step) -> void
 {
-    a = ?(a);
-    b = ?(b);
+    a = trim_leading_zeros(a);
+    b = trim_leading_zeros(b);
     bool;
-    static_assert(3 < INITIAL_ALLOC_DIGITS - 1);
-    byte* p0;
+    byte* p0 = xmalloc;
     byte* endp;
-    byte* p;
-    byte[8192] buf = 0;
+    byte* p = memcpy;
+    byte buf;
     byte* buf_end = buf + (sizeof buf / 8);
     byte* bufp = buf;
-    while (?)
+    while (inf || cmp ( p , endp - p , b , b_len ) <= 0)
     {
         byte* pp = p;
         while (buf_end - bufp <= endp - pp)
         {
             memcpy(bufp, pp, buf_end - bufp);
             pp += buf_end - bufp;
-            if (full_write(0, buf, (sizeof buf / 8)) != (sizeof buf / 8))
+            if (full_write != (sizeof buf / 8))
                 write_error();
             bufp = buf;
         };
@@ -336,117 +321,114 @@ cdecl seq_fast(byte* a, byte* b, ulong step) -> void
         *bufp++ = *separator;
         if (p == p0)
         {
-            byte* new_p0;
+            byte* new_p0 = xpalloc;
+            p = memcpy;
             free(p0);
             p0 = new_p0;
         };
-        for (ulong n_incr = step; n_incr; n_incr--)
-        {};
     };
-    if (?)
+    if (remaining)
     {
         bufp[-1] = *terminator;
-        if (?)
+        if (full_write ( STDOUT_FILENO , buf , remaining ) != remaining)
             write_error();
     };
-    exit(0);
+    exit;
 };
 
 extern int bool;
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* format_str = ((void*)0);
+    byte* format_str;
     set_program_name(argv[0]);
-    locale_ok = ?!setlocale(0, "");
+    locale_ok = ?!setlocale;
+    atexit;
     while (optind < argc)
     {
         int optc;
-        if (argv[optind][0] == '-' & ((optc = argv[optind][1]) == '.' | c_isdigit(optc)))
+        if (argv [ optind ] [ 0 ] == '-' && ( ( optc = argv [ optind ] [ 1 ] ) == '.' || c_isdigit ( optc ) ))
         {
             break;
         };
-        optc = getopt_long(argc, argv, "+f:s:w", long_options, ((void*)0));
+        optc = getopt_long;
         if (optc == -1)
             break;
         switch (optc)
         {
             case ('f')
             {
-                format_str = optarg;
+                break switch;
             }
-            goto _switch_end_139188829612624;
             case ('s')
             {
-                separator = optarg;
+                break switch;
             }
-            goto _switch_end_139188829612624;
             case ('w')
             {
+                break switch;
             }
-            goto _switch_end_139188829612624;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188829612624;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188829612624;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188829612624:
     };
-    int n_args = argc - optind;
+    int n_args;
     if (n_args < 1)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     if (3 < n_args)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind + 3]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
     layout layout = {0, 0};
     if (format_str)
         format_str = long_double_format(format_str, @layout);
-    if (format_str != ((void*)0) & ?)
+    if (format_str != NULL && equal_width)
     {
         error(0, 0, gettext("format string may not be specified"));
-        usage(0);
+        usage;
     };
-    byte* user_start = n_args == 1 ? "1" : argv[optind];
+    byte* user_start;
     operand step = {1, 1, 0};
     bool;
-    if (?)
+    if (all_digits_p ( argv [ optind ] ) && ( n_args == 1 || all_digits_p ( argv [ optind + 1 ] ) ) && ( n_args < 3 || ( fast_step_ok && all_digits_p ( argv [ optind + 2 ] ) ) ) && ! equal_width && ! format_str && strlen ( separator ) == 1)
     {
         byte* s1 = user_start;
-        byte* s2 = argv[optind + (n_args - 1)];
+        byte* s2;
         seq_fast(s1, s2, step.value);
     };
     operand first = {1, 1, 0};
-    operand last = scan_arg(argv[optind++]);
+    operand last = scan_arg;
     if (optind < argc)
     {
         first = last;
-        last = scan_arg(argv[optind++]);
+        last = scan_arg;
         if (optind < argc)
         {
             step = last;
             if (step.value == 0)
             {
-                error(0, 0, gettext("invalid Zero increment value: %s"), quote(argv[optind - 1]));
-                usage(0);
+                error(0, 0, gettext("invalid Zero increment value: %s"), quote);
+                usage;
             };
-            last = scan_arg(argv[optind++]);
+            last = scan_arg;
         };
     };
-    if (first.precision == 0 & step.precision == 0 & last.precision == 0 & ((first.value) ? 0 ? 0) & 0 <= first.value & 0 <= last.value & 0 < step.value & step.value <= 200 & !? & !format_str & strlen(separator) == 1)
+    if (first.precision == 0 & step.precision == 0 & last.precision == 0 & ((first.value) ? 0 ? 0) & 0 <= first.value & 0 <= last.value & 0 < step.value & step.value <= 200 & !equal_width & !format_str & strlen(separator) == 1)
     {
         byte* s1 = (all_digits_p(user_start) ? xstrdup(user_start) : xasprintf("%0.Lf", first.value));
         byte* s2 = (?((last.value) ? 0 ? 0) ? xstrdup("inf") : xasprintf("%0.Lf", last.value));
@@ -455,8 +437,7 @@ cdecl main(int argc, byte** argv) -> int
         free(s1);
         free(s2);
     };
-    if (format_str == ((void*)0))
+    if (format_str == NULL)
         format_str = get_default_format(first, step, last);
     print_numbers(format_str, layout, first.value, step.value, last.value);
-    return 0;
 };

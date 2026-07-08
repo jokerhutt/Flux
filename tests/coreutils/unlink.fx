@@ -37,14 +37,16 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("Call the unlink function to remove the specified FILE.\n\n"), stdout);
+        printf;
+        fputs;
         oputs_("unlink", gettext("      --help\n         display this help and exit\n"));
         oputs_("unlink", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("unlink");
@@ -55,15 +57,19 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    if (argc < optind + 1)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (optind + 1 < argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    return 0;
+    if (unlink != 0)
+        error;
 };

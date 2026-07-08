@@ -40,9 +40,6 @@ enum RCH_status
 cdecl chopt_init(Chown_option* chopt) -> void
 {
     chopt.verbosity = V_off;
-    chopt.root_dev_ino = ((void*)0);
-    chopt.user_name = ((void*)0);
-    chopt.group_name = ((void*)0);
 };
 
 cdecl chopt_free(Chown_option* chopt) -> void
@@ -51,33 +48,33 @@ cdecl chopt_free(Chown_option* chopt) -> void
     free(chopt.group_name);
 };
 
-cdecl uid_to_str(uint uid) -> byte*
+cdecl uid_to_str(int uid) -> byte*
 {
-    void* /* untranslated: char[INT_BUFSIZE_BOUND(<recovery-expr>())] */ buf = INT_BUFSIZE_BOUND(?);
-    return xstrdup(TYPE_SIGNED(?) ? imaxtostr(uid, buf) : umaxtostr(uid, buf));
+    void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = INT_BUFSIZE_BOUND;
+    return xstrdup(TYPE_SIGNED ? imaxtostr(uid, buf) : umaxtostr(uid, buf));
 };
 
-cdecl gid_to_str(uint gid) -> byte*
+cdecl gid_to_str(int gid) -> byte*
 {
-    void* /* untranslated: char[INT_BUFSIZE_BOUND(<recovery-expr>())] */ buf = INT_BUFSIZE_BOUND(?);
-    return xstrdup(TYPE_SIGNED(?) ? imaxtostr(gid, buf) : umaxtostr(gid, buf));
+    void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = INT_BUFSIZE_BOUND;
+    return xstrdup(TYPE_SIGNED ? imaxtostr(gid, buf) : umaxtostr(gid, buf));
 };
 
-cdecl gid_to_name(uint gid) -> byte*
+cdecl gid_to_name(int gid) -> byte*
 {
     group* grp = getgrgid(gid);
-    return grp ? xstrdup(grp.gr_name) : gid_to_str(gid);
+    return grp ? xstrdup(grp) : gid_to_str(gid);
 };
 
-cdecl uid_to_name(uint uid) -> byte*
+cdecl uid_to_name(int uid) -> byte*
 {
     passwd* pwd = getpwuid(uid);
-    return pwd ? xstrdup(pwd.pw_name) : uid_to_str(uid);
+    return pwd ? xstrdup(pwd) : uid_to_str(uid);
 };
 
 cdecl user_group_str(byte* user, byte* group) -> byte*
 {
-    byte* spec = ((void*)0);
+    byte* spec;
     if (user)
     {
         if (group)
@@ -101,18 +98,19 @@ cdecl describe_change(byte* file, Change_status changed, byte* old_user, byte* o
 {
     if (changed == CH_NOT_APPLIED)
     {
+        printf(gettext("neither symbolic link %s nor referent has been changed\n"), quotearg_style);
         return void;
     };
     byte* spec = user_group_str(user, group);
-    byte* old_spec = user_group_str(user ? old_user : ((void*)0), group ? old_group : ((void*)0));
+    byte* old_spec = user_group_str;
     byte* fmt;
     switch (changed)
     {
         case (CH_SUCCEEDED)
         {
             fmt = (user ? gettext("changed ownership of %s from %s to %s\n") : group ? gettext("changed group of %s from %s to %s\n") : gettext("no change to ownership of %s\n"));
+            break switch;
         }
-        goto _switch_end_139188887542480;
         case (CH_FAILED)
         {
             if (old_spec)
@@ -124,41 +122,35 @@ cdecl describe_change(byte* file, Change_status changed, byte* old_user, byte* o
                 fmt = (user ? gettext("failed to change ownership of %s to %s\n") : group ? gettext("failed to change group of %s to %s\n") : gettext("failed to change ownership of %s\n"));
                 free(old_spec);
                 old_spec = spec;
-                spec = ((void*)0);
             };
+            break switch;
         }
-        goto _switch_end_139188887542480;
         case (CH_NO_CHANGE_REQUESTED)
         {
             fmt = (user ? gettext("ownership of %s retained as %s\n") : group ? gettext("group of %s retained as %s\n") : gettext("ownership of %s retained\n"));
+            break switch;
         }
-        goto _switch_end_139188887542480;
         case (CH_NOT_APPLIED)
         {
-            default
-            {
-            };
         }
     };
-    label _switch_end_139188887542480:
+    printf(fmt, quotearg_style, old_spec, spec);
     free(old_spec);
     free(spec);
 };
 
-cdecl restricted_chown(int cwd_fd, byte* file, stat* orig_st, uint uid, uint gid, uint required_uid, uint required_gid) -> RCH_status
+cdecl restricted_chown(int cwd_fd, byte* file, stat* orig_st, int uid, int gid, int required_uid, int required_gid) -> RCH_status
 {
-    if (required_uid == (uint)-1 & required_gid == (uint)-1)
+    if (required_uid == ( uid_t ) - 1 && required_gid == ( gid_t ) - 1)
         return RC_do_ordinary_chown;
-    int open_flags = 0 ? 0;
-    if (!((((orig_st.st_mode)) ? 0) ? (0100000)))
+    int open_flags;
+    if (!S_ISREG(orig_st))
     {
-        if (((((orig_st.st_mode)) ? 0) ? (0040000)))
+        if (S_ISDIR(orig_st))
         else
             return RC_do_ordinary_chown;
     };
-    int fd = openat(cwd_fd, file, 0 ? open_flags);
-    if (!(0 <= fd | ((?__errno_location()) ? 0 ? ((((orig_st.st_mode)) ? 0) ? (0100000)) ? 0 <= (fd = openat(cwd_fd, file, 0 ? open_flags)))))
-        return ((?__errno_location()) ? 0 ? RC_do_ordinary_chown : RC_error);
+    int fd = openat;
     RCH_status status = RC_ok;
     stat st;
     if (fstat(fd, @st) != 0)
@@ -166,131 +158,132 @@ cdecl restricted_chown(int cwd_fd, byte* file, stat* orig_st, uint uid, uint gid
     elif (!psame_inode(orig_st, @st))
         status = RC_inode_changed;
     else
-        if ((required_uid == (uint)-1 | required_uid == st.st_uid) & (required_gid == (uint)-1 | required_gid == st.st_gid))
+        if (( required_uid == ( uid_t ) - 1 || required_uid == st . st_uid ) && ( required_gid == ( gid_t ) - 1 || required_gid == st . st_gid ))
         {
             status = RC_error;
         };
-    int saved_errno = (?__errno_location());
+    int saved_errno;
     close(fd);
-    (?__errno_location()) ? saved_errno;
     return status;
 };
 
-cdecl change_file_owner(int* fts, int* ent, uint uid, uint gid, uint required_uid, uint required_gid, Chown_option* chopt) -> int
+cdecl change_file_owner(int* fts, int* ent, int uid, int gid, int required_uid, int required_gid, Chown_option* chopt) -> int
 {
-    byte* file_full_name = ?.;
-    byte* file = ?.;
+    byte* file_full_name = ent.;
+    byte* file = ent.;
     bool;
-    switch (?.)
+    switch (ent.)
     {
         if (chopt)
         {
-            if (ROOT_DEV_INO_CHECK(chopt.root_dev_ino, ?.))
+            if (ROOT_DEV_INO_CHECK(chopt.root_dev_ino, ent.))
             {
                 ROOT_DEV_INO_WARN(file_full_name);
-                ignore_value(fts_read(?));
+                fts_set;
+                ignore_value(fts_read(fts));
             };
         };
-        goto _switch_end_139188887542736;
-        goto _switch_end_139188887542736;
-        if (?)
+        if (ent -> fts_level == FTS_ROOTLEVEL && ent -> fts_number == 0)
         {
             ent. = 1;
+            fts_set;
         };
-        goto _switch_end_139188887542736;
-        goto _switch_end_139188887542736;
-        goto _switch_end_139188887542736;
-        if (cycle_warning_required(?, ?))
+        if (!chopt)
+            error(0, ent., gettext("cannot access %s"), quotearg_style);
+        if (!chopt)
+            error(0, ent., "%s", quotearg_n_style_colon);
+        if (!chopt)
+            error(0, ent., gettext("cannot read directory %s"), quotearg_style);
+        if (cycle_warning_required(fts, ent))
         {
             do
             {
+                error(0, 0, gettext("\
+WARNING: Circular directory structure.\n\
+This almost certainly means that you have a corrupted file system.\n\
+NOTIFY YOUR SYSTEM MANAGER.\n\
+The following directory is part of the cycle:\n  %s\n"), quotearg_n_style_colon);
             }
             while (0);
         };
-        goto _switch_end_139188887542736;
         default
         {
-            goto _switch_end_139188887542736;
         };
     };
-    label _switch_end_139188887542736:
     bool;
     stat stat_buf;
     stat* file_stats;
-    if (?)
+    if (! ok)
     {
-        file_stats = ((void*)0);
     }
-    elif (required_uid == (uint)-1 & required_gid == (uint)-1 & chopt.verbosity == V_off & !chopt.root_dev_ino & !chopt)
+    elif (required_uid == ( uid_t ) - 1 && required_gid == ( gid_t ) - 1 && chopt -> verbosity == V_off && ! chopt -> root_dev_ino && ! chopt -> affect_symlink_referent)
     {
-        file_stats = ?.;
+        file_stats = ent.;
     };
     else
     {
-        file_stats = ?.;
-        if (chopt & ((((file_stats.st_mode)) ? 0) ? (0120000)))
+        file_stats = ent.;
+        if (chopt & S_ISLNK(file_stats))
         {
-            if (fstatat(?., file, @stat_buf, 0) != 0)
+            if (fstatat(fts., file, @stat_buf, 0) != 0)
             {
+                if (!chopt)
+                    error;
             };
             file_stats = @stat_buf;
         };
     };
-    if (?)
+    if (ok && FTSENT_IS_DIRECTORY ( ent ) && ROOT_DEV_INO_CHECK ( chopt -> root_dev_ino , file_stats ))
     {
         ROOT_DEV_INO_WARN(file_full_name);
     };
     bool;
-    if (?)
+    if (do_chown)
     {
         if (!chopt)
         {
-            if (?)
+            if (! ok && is_ENOTSUP ( errno ))
             {
             };
         }
         else
         {
-            RCH_status err = restricted_chown(?., file, file_stats, uid, gid, required_uid, required_gid);
+            RCH_status err = restricted_chown(fts., file, file_stats, uid, gid, required_uid, required_gid);
             switch (err)
             {
                 case (RC_ok)
                 {
-                    goto _switch_end_139188887588688;
                 }
                 case (RC_do_ordinary_chown)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188887588688;
                 case (RC_error)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188887588688;
                 case (RC_inode_changed)
                 {
-                    case (RC_excluded)
-                    {
-                    }
+                    break switch;
                 }
-                goto _switch_end_139188887588688;
                 default
                 {
-                    unreachable();
                 };
             };
-            label _switch_end_139188887588688:
         };
+        if (do_chown && ! ok && ! chopt -> force_silent)
+            error;
     };
     if (chopt.verbosity != V_off)
     {
         bool;
-        if (?)
+        if (changed || chopt -> verbosity == V_high)
         {
             Change_status ch_status;
-            byte* old_usr = (file_stats ? uid_to_name(file_stats.st_uid) : ((void*)0));
-            byte* old_grp = (file_stats ? gid_to_name(file_stats.st_gid) : ((void*)0));
-            byte* new_usr = chopt.user_name ? chopt.user_name : uid != -1 ? uid_to_str(uid) : ((void*)0);
-            byte* new_grp = chopt.group_name ? chopt.group_name : gid != -1 ? gid_to_str(gid) : ((void*)0);
+            byte* old_usr;
+            byte* old_grp;
+            byte* new_usr;
+            byte* new_grp;
             describe_change(file_full_name, ch_status, old_usr, old_grp, new_usr, new_grp);
             free(old_usr);
             free(old_grp);
@@ -300,26 +293,28 @@ cdecl change_file_owner(int* fts, int* ent, uint uid, uint gid, uint required_ui
                 free(new_grp);
         };
     };
+    if (!chopt)
+        fts_set;
 };
 
-cdecl chown_files(byte** files, int bit_flags, uint uid, uint gid, uint required_uid, uint required_gid, Chown_option* chopt) -> int
+cdecl chown_files(byte** files, int bit_flags, int uid, int gid, int required_uid, int required_gid, Chown_option* chopt) -> int
 {
     bool;
     int stat_flags;
-    while (?)
+    while (true)
     {
-        if (?)
+        if (ent == NULL)
         {
-            if ((?__errno_location()) ? 0)
+            if (errno != 0)
             {
                 if (!chopt)
-                    error(0, (?__errno_location()), gettext("fts_read failed"));
+                    error;
             };
             break;
         };
     };
-    if (?)
+    if (fts_close != 0)
     {
-        error(0, (?__errno_location()), gettext("fts_close failed"));
+        error;
     };
 };

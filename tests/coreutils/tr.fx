@@ -44,9 +44,9 @@ macro REPEAT_COUNT_MAXIMUM
     BEGIN_STATE
 };
 
-uint N_CHARS = 256;
+uint N_CHARS = 0;
 
-// typedef: count = ulong
+// typedef: count = int
 enum Char_class
 {
     CC_ALNUM = 0,
@@ -91,8 +91,8 @@ struct Spec_list
 {
     List_element* head;
     List_element* tail;
-    ulong state;
-    ulong length;
+    int state;
+    int length;
     ulong n_indefinite_repeats;
     List_element* indefinite_repeat_element;
     int has_equiv_class;
@@ -117,92 +117,49 @@ extern int delete;
 extern int complement;
 extern int truncate_set1;
 extern int translating;
-byte[8192] io_buf = 0;
+extern byte io_buf;
 byte*[12] char_class_name = {"alnum", "alpha", "blank", "cntrl", "digit", "graph", "lower", "print", "punct", "space", "upper", "xdigit"};
-int[256] in_squeeze_set = N_CHARS;
-int[256] in_delete_set = N_CHARS;
-byte[256] xlate = N_CHARS;
-option[7] long_options = option;
+int[0] in_squeeze_set = N_CHARS;
+int[0] in_delete_set = N_CHARS;
+byte[0] xlate = N_CHARS;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Translate, squeeze, and/or delete characters from standard input,\n\
-writing to standard output.  STRING1 and STRING2 specify arrays of\n\
-characters ARRAY1 and ARRAY2 that control the action.\n\
-\n\
-"), stdout);
-        oputs_("tr", gettext("\
-  -c, -C, --complement\n\
-         use the complement of ARRAY1\n\
+        printf;
+        fputs;
+        oputs_("tr", gettext("\
+  -c, -C, --complement\n\
+         use the complement of ARRAY1\n\
 "));
-        oputs_("tr", gettext("\
-  -d, --delete\n\
-         delete characters in ARRAY1, do not translate\n\
+        oputs_("tr", gettext("\
+  -d, --delete\n\
+         delete characters in ARRAY1, do not translate\n\
 "));
-        oputs_("tr", gettext("\
-  -s, --squeeze-repeats\n\
-         replace each sequence of a repeated character\n\
-         that is listed in the last specified ARRAY,\n\
-         with a single occurrence of that character\n\
+        oputs_("tr", gettext("\
+  -s, --squeeze-repeats\n\
+         replace each sequence of a repeated character\n\
+         that is listed in the last specified ARRAY,\n\
+         with a single occurrence of that character\n\
 "));
-        oputs_("tr", gettext("\
-  -t, --truncate-set1\n\
-         first truncate ARRAY1 to length of ARRAY2\n\
+        oputs_("tr", gettext("\
+  -t, --truncate-set1\n\
+         first truncate ARRAY1 to length of ARRAY2\n\
 "));
         oputs_("tr", gettext("      --help\n         display this help and exit\n"));
         oputs_("tr", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-ARRAYs are specified as strings of characters.  Most represent themselves.\n\
-Interpreted sequences are:\n\
-\n\
-  \\NNN            character with octal value NNN (1 to 3 octal digits)\n\
-  \\\\              backslash\n\
-  \\a              audible BEL\n\
-  \\b              backspace\n\
-  \\f              form feed\n\
-  \\n              new line\n\
-  \\r              return\n\
-  \\t              horizontal tab\n\
-"), stdout);
-        fputs(gettext("\
-  \\v              vertical tab\n\
-  CHAR1-CHAR2     all characters from CHAR1 to CHAR2 in ascending order\n\
-  [CHAR*]         in ARRAY2, copies of CHAR until length of ARRAY1\n\
-  [CHAR*REPEAT]   REPEAT copies of CHAR, REPEAT octal if starting with 0\n\
-  [:alnum:]       all letters and digits\n\
-  [:alpha:]       all letters\n\
-  [:blank:]       all horizontal whitespace\n\
-  [:cntrl:]       all control characters\n\
-  [:digit:]       all digits\n\
-"), stdout);
-        fputs(gettext("\
-  [:graph:]       all printable characters, not including space\n\
-  [:lower:]       all lower case letters\n\
-  [:print:]       all printable characters, including space\n\
-  [:punct:]       all punctuation characters\n\
-  [:space:]       all horizontal or vertical whitespace\n\
-  [:upper:]       all upper case letters\n\
-  [:xdigit:]      all hexadecimal digits\n\
-  [=CHAR=]        all characters which are equivalent to CHAR\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Translation occurs if -d is not given and both STRING1 and STRING2 appear.\n\
--t is only significant when translating.  ARRAY2 is extended to length of\n\
-ARRAY1 by repeating its last character as necessary.  Excess characters\n\
-of ARRAY2 are ignored.  Character classes expand in unspecified order;\n\
-while translating, '[:lower:]' and '[:upper:]' may be used in pairs to\n\
-specify case conversion.  Squeezing occurs after translation or deletion.\n\
-Arguments like '[...]' should be quoted, to avoid potential shell globbing.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("tr");
     };
     exit(status);
@@ -234,119 +191,91 @@ cdecl unquote(byte* s, E_string* es) -> int
         {
             case ('\\')
             {
-            }
-            switch (s[i + 1])
-            {
-                case ('\\')
+                switch (s[i + 1])
                 {
-                    c = '\\';
-                }
-                goto _switch_end_139188887915984;
-                case ('a')
-                {
-                    c = '\a';
-                }
-                goto _switch_end_139188887915984;
-                case ('b')
-                {
-                    c = '\b';
-                }
-                goto _switch_end_139188887915984;
-                case ('f')
-                {
-                    c = '\f';
-                }
-                goto _switch_end_139188887915984;
-                case ('n')
-                {
-                    c = '\n';
-                }
-                goto _switch_end_139188887915984;
-                case ('r')
-                {
-                    c = '\r';
-                }
-                goto _switch_end_139188887915984;
-                case ('t')
-                {
-                    c = '\t';
-                }
-                goto _switch_end_139188887915984;
-                case ('v')
-                {
-                    c = '\v';
-                }
-                goto _switch_end_139188887915984;
-                case ('0')
-                {
-                    case ('1')
+                    case ('\\')
                     {
-                        case ('2')
-                        {
-                            case ('3')
-                            {
-                                case ('4')
-                                {
-                                    case ('5')
-                                    {
-                                        case ('6')
-                                        {
-                                            case ('7')
-                                            {
-                                                c = s[i + 1] - '0';
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        c = '\\';
+                        break switch;
                     }
-                }
-                oct_digit = s[i + 2] - '0';
-                if (0 <= oct_digit & oct_digit <= 7)
-                {
-                    c = 8 * c + oct_digit;
-                    ++i;
-                    oct_digit = s[i + 2] - '0';
-                    if (0 <= oct_digit & oct_digit <= 7)
+                    case ('a')
                     {
-                        if (8 * c + oct_digit < N_CHARS)
+                        c = '\a';
+                        break switch;
+                    }
+                    case ('b')
+                    {
+                        c = '\b';
+                        break switch;
+                    }
+                    case ('f')
+                    {
+                        c = '\f';
+                        break switch;
+                    }
+                    case ('n')
+                    {
+                        c = '\n';
+                        break switch;
+                    }
+                    case ('r')
+                    {
+                        c = '\r';
+                        break switch;
+                    }
+                    case ('t')
+                    {
+                        c = '\t';
+                        break switch;
+                    }
+                    case ('v')
+                    {
+                        c = '\v';
+                        break switch;
+                    }
+                    case ('0')
+                    {
+                        oct_digit = s[i + 2] - '0';
+                        if (0 <= oct_digit & oct_digit <= 7)
                         {
                             c = 8 * c + oct_digit;
                             ++i;
-                        }
-                        else
-                        {
-                            error(0, 0, gettext("warning: the ambiguous octal escape\
+                            oct_digit = s[i + 2] - '0';
+                            if (0 <= oct_digit & oct_digit <= 7)
+                            {
+                                if (8 * c + oct_digit < N_CHARS)
+                                {
+                                    c = 8 * c + oct_digit;
+                                    ++i;
+                                }
+                                else
+                                {
+                                    error(0, 0, gettext("warning: the ambiguous octal escape\
  \\%c%c%c is being\n\tinterpreted as the 2-byte sequence \\0%c%c, %c"), s[i], s[i + 1], s[i + 2], s[i], s[i + 1], s[i + 2]);
+                                };
+                            };
                         };
+                        break switch;
+                    }
+                    case ('\0')
+                    {
+                        error(0, 0, gettext("warning: an unescaped backslash "));
+                        i--;
+                        c = '\\';
+                        break switch;
+                    }
+                    default
+                    {
                     };
                 };
-                goto _switch_end_139188887915984;
-                case ('\0')
-                {
-                    error(0, 0, gettext("warning: an unescaped backslash "));
-                }
-                i--;
-                c = '\\';
-                goto _switch_end_139188887915984;
-                default
-                {
-                    c = s[i + 1];
-                };
-                goto _switch_end_139188887915984;
-            };
-            label _switch_end_139188887915984:
-            ++i;
-            es.s[j++] = c;
-            goto _switch_end_139188887919312;
+                ++i;
+                es.s[j++] = c;
+                break switch;
+            }
             default
             {
-                es.s[j++] = s[i];
             };
-            goto _switch_end_139188887919312;
         };
-        label _switch_end_139188887919312:
     };
     es.len = j;
 };
@@ -361,7 +290,7 @@ cdecl look_up_char_class(byte* class_str, ulong len) -> int
 cdecl make_printable_char(byte c) -> byte*
 {
     byte* buf = xmalloc(5);
-    if (((?__ctype_b_loc())[(int)((c))] ? (uint)_ISprint))
+    if (isprint(c))
     {
         buf[0] = c;
         buf[1] = '\0';
@@ -380,64 +309,55 @@ cdecl make_printable_str(byte* s, ulong len) -> byte*
     for (ulong i = 0; i < len; i++)
     {
         byte[5] buf = 5;
-        byte* tmp = ((void*)0);
+        byte* tmp;
         byte c = s[i];
         switch (c)
         {
             case ('\\')
             {
                 tmp = "\\";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\a')
             {
                 tmp = "\\a";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\b')
             {
                 tmp = "\\b";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\f')
             {
                 tmp = "\\f";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\n')
             {
                 tmp = "\\n";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\r')
             {
                 tmp = "\\r";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\t')
             {
                 tmp = "\\t";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             case ('\v')
             {
                 tmp = "\\v";
+                break switch;
             }
-            goto _switch_end_139188887926224;
             default
             {
-                if (((?__ctype_b_loc())[(int)((c))] ? (uint)_ISprint))
-                {
-                    buf[0] = c;
-                    buf[1] = '\0';
-                }
-                else
-                    sprintf(buf, "\\%03o", c);
+                tmp = buf;
             };
-            tmp = buf;
-            goto _switch_end_139188887926224;
         };
-        label _switch_end_139188887926224:
         p = stpcpy(p, tmp);
     };
     return printable_buf;
@@ -446,7 +366,6 @@ cdecl make_printable_str(byte* s, ulong len) -> byte*
 cdecl append_normal_char(Spec_list* list, byte c) -> void
 {
     List_element* new = xmalloc((sizeof * new / 8));
-    new.next = ((void*)0);
     new.type = RE_NORMAL_CHAR;
     new.u.normal_char = c;
     list.tail.next = new;
@@ -464,7 +383,6 @@ cdecl append_range(Spec_list* list, byte first, byte last) -> int
         free(tmp2);
     };
     List_element* new = xmalloc((sizeof * new / 8));
-    new.next = ((void*)0);
     new.type = RE_RANGE;
     new.u.range.first_char = first;
     new.u.range.last_char = last;
@@ -474,19 +392,17 @@ cdecl append_range(Spec_list* list, byte first, byte last) -> int
 
 cdecl append_char_class(Spec_list* list, byte* char_class_str, ulong len) -> int
 {
-    Char_class char_class = ?(char_class_str, len);
+    Char_class char_class = look_up_char_class(char_class_str, len);
     List_element* new = xmalloc((sizeof * new / 8));
-    new.next = ((void*)0);
     new.type = RE_CHAR_CLASS;
     new.u.char_class = char_class;
     list.tail.next = new;
     list.tail = new;
 };
 
-cdecl append_repeated_char(Spec_list* list, byte the_char, ulong repeat_count) -> void
+cdecl append_repeated_char(Spec_list* list, byte the_char, int repeat_count) -> void
 {
     List_element* new = xmalloc((sizeof * new / 8));
-    new.next = ((void*)0);
     new.type = RE_REPEATED_CHAR;
     new.u.repeated_char.the_repeated_char = the_char;
     new.u.repeated_char.repeat_count = repeat_count;
@@ -497,7 +413,6 @@ cdecl append_repeated_char(Spec_list* list, byte the_char, ulong repeat_count) -
 cdecl append_equiv_class(Spec_list* list, byte* equiv_class_str, ulong len) -> int
 {
     List_element* new = xmalloc((sizeof * new / 8));
-    new.next = ((void*)0);
     new.type = RE_EQUIV_CLASS;
     new.u.equiv_code = *equiv_class_str;
     list.tail.next = new;
@@ -510,10 +425,10 @@ cdecl find_closing_delim(E_string* es, ulong start_idx, byte pre_bracket_char, u
     {};
 };
 
-cdecl find_bracketed_repeat(E_string* es, ulong start_idx, byte* char_to_repeat, ulong* repeat_count, ulong* closing_bracket_idx) -> int
+cdecl find_bracketed_repeat(E_string* es, ulong start_idx, byte* char_to_repeat, int* repeat_count, ulong* closing_bracket_idx) -> int
 {
     affirm(start_idx + 1 < es.len);
-    if (!?(es, start_idx + 1, '*'))
+    if (!es_match(es, start_idx + 1, '*'))
         return -1;
     for (ulong i = start_idx + 2; i < es.len & !es[i]; i++)
     {
@@ -529,7 +444,7 @@ cdecl find_bracketed_repeat(E_string* es, ulong start_idx, byte* char_to_repeat,
             {
                 byte* digit_str = @es.s[start_idx + 2];
                 byte* d_end;
-                if (?)
+                if (( xstrtoumax ( digit_str , & d_end , * digit_str == '0' ? 8 : 10 , repeat_count , NULL ) != LONGINT_OK ) || REPEAT_COUNT_MAXIMUM < * repeat_count || digit_str + digit_str_len != d_end)
                 {
                     byte* tmp = make_printable_str(digit_str, digit_str_len);
                     error(0, 0, gettext("invalid repeat count %s in [c*n] construct"), quote(tmp));
@@ -551,17 +466,17 @@ cdecl build_spec_list(E_string* es, Spec_list* result) -> int
     ulong i;
     for (i = 0; i + 2 < es.len; )
     {
-        if (?(es, i, '['))
+        if (es_match(es, i, '['))
         {
             bool;
             ulong closing_bracket_idx;
             byte char_to_repeat;
-            ulong repeat_count;
+            int repeat_count;
             int err;
-            if (?(es, i + 1, ':') | ?(es, i + 1, '='))
+            if (es_match(es, i + 1, ':') | es_match(es, i + 1, '='))
             {
                 ulong closing_delim_idx;
-                if (?(es, i + 2, p[i + 1], @closing_delim_idx))
+                if (find_closing_delim(es, i + 2, p[i + 1], @closing_delim_idx))
                 {
                     ulong opnd_str_len = closing_delim_idx - 1 - (i + 2) + 1;
                     byte* opnd_str = p + i + 2;
@@ -574,7 +489,7 @@ cdecl build_spec_list(E_string* es, Spec_list* result) -> int
                     };
                     if (p[i + 1] == ':')
                     {
-                        if (!?(result, opnd_str, opnd_str_len))
+                        if (!append_char_class(result, opnd_str, opnd_str_len))
                         {
                             if (star_digits_closebracket(es, i + 2))
                                 goto try_bracketed_repeat;
@@ -588,7 +503,7 @@ cdecl build_spec_list(E_string* es, Spec_list* result) -> int
                     }
                     else
                     {
-                        if (!?(result, opnd_str, opnd_str_len))
+                        if (!append_equiv_class(result, opnd_str, opnd_str_len))
                         {
                             if (star_digits_closebracket(es, i + 2))
                                 goto try_bracketed_repeat;
@@ -617,10 +532,10 @@ cdecl build_spec_list(E_string* es, Spec_list* result) -> int
             else
             {
             };
-            if (?)
+            if (matched_multi_char_construct)
                 continue;
         };
-        if (?(es, i + 1, '-'))
+        if (es_match(es, i + 1, '-'))
         {
             i += 3;
         }
@@ -637,7 +552,6 @@ cdecl build_spec_list(E_string* es, Spec_list* result) -> int
 cdecl skip_construct(Spec_list* s) -> void
 {
     s.tail = s.tail.next;
-    s.state = (((0) ? 1) ? 1);
 };
 
 cdecl get_next(Spec_list* s, Upper_Lower_class* class) -> int
@@ -647,37 +561,34 @@ cdecl get_next(Spec_list* s, Upper_Lower_class* class) -> int
     int i;
     if (class)
         *class = UL_NONE;
-    if (s.state == ((0) ? 1))
+    if (s -> state == BEGIN_STATE)
     {
         s.tail = s.head.next;
-        s.state = (((0) ? 1) ? 1);
     };
     p = s.tail;
-    if (p == ((void*)0))
+    if (p == NULL)
         return -1;
     switch (p.type)
     {
         case (RE_NORMAL_CHAR)
         {
             return_val = p.u.normal_char;
+            s.tail = p.next;
+            break switch;
         }
-        s.state = (((0) ? 1) ? 1);
-        s.tail = p.next;
-        goto _switch_end_139188839613392;
         case (RE_RANGE)
         {
-            if (s.state == (((0) ? 1) ? 1))
+            if (s -> state == NEW_ELEMENT)
                 s.state = p.u.range.first_char;
             else
                 ++(s.state);
+            return_val = s.state;
+            if (s.state == p.u.range.last_char)
+            {
+                s.tail = p.next;
+            };
+            break switch;
         }
-        return_val = s.state;
-        if (s.state == p.u.range.last_char)
-        {
-            s.tail = p.next;
-            s.state = (((0) ? 1) ? 1);
-        };
-        goto _switch_end_139188839613392;
         case (RE_CHAR_CLASS)
         {
             if (class)
@@ -687,54 +598,50 @@ cdecl get_next(Spec_list* s, Upper_Lower_class* class) -> int
                     case (CC_LOWER)
                     {
                         *class = UL_LOWER;
+                        break switch;
                     }
-                    goto _switch_end_139188829092432;
                     case (CC_UPPER)
                     {
                         *class = UL_UPPER;
+                        break switch;
                     }
-                    goto _switch_end_139188829092432;
                 };
-                label _switch_end_139188829092432:
             };
-        }
-        if (s.state == (((0) ? 1) ? 1))
-        {
-            for (i = 0; i < N_CHARS; i++)
+            if (s -> state == NEW_ELEMENT)
+            {
+                for (i = 0; i < N_CHARS; i++)
+                {};
+                affirm(i < N_CHARS);
+                s.state = i;
+            };
+            assure(is_char_class_member(p.u.char_class, s.state));
+            return_val = s.state;
+            for (i = s.state + 1; i < N_CHARS; i++)
             {};
-            affirm(i < N_CHARS);
-            s.state = i;
-        };
-        assure(is_char_class_member(p.u.char_class, s.state));
-        return_val = s.state;
-        for (i = s.state + 1; i < N_CHARS; i++)
-        {};
-        if (i < N_CHARS)
-            s.state = i;
-        else
-        {
-            s.tail = p.next;
-            s.state = (((0) ? 1) ? 1);
-        };
-        goto _switch_end_139188839613392;
+            if (i < N_CHARS)
+                s.state = i;
+            else
+            {
+                s.tail = p.next;
+            };
+            break switch;
+        }
         case (RE_EQUIV_CLASS)
         {
             return_val = p.u.equiv_code;
+            s.tail = p.next;
+            break switch;
         }
-        s.state = (((0) ? 1) ? 1);
-        s.tail = p.next;
-        goto _switch_end_139188839613392;
         case (RE_REPEATED_CHAR)
         {
             if (p.u.repeated_char.repeat_count == 0)
             {
                 s.tail = p.next;
-                s.state = (((0) ? 1) ? 1);
                 return_val = get_next(s, class);
             }
             else
             {
-                if (s.state == (((0) ? 1) ? 1))
+                if (s -> state == NEW_ELEMENT)
                 {
                     s.state = 0;
                 };
@@ -743,17 +650,14 @@ cdecl get_next(Spec_list* s, Upper_Lower_class* class) -> int
                 if (s.state == p.u.repeated_char.repeat_count)
                 {
                     s.tail = p.next;
-                    s.state = (((0) ? 1) ? 1);
                 };
             };
+            break switch;
         }
-        goto _switch_end_139188839613392;
         default
         {
-            unreachable();
         };
     };
-    label _switch_end_139188839613392:
     return return_val;
 };
 
@@ -762,8 +666,7 @@ cdecl card_of_complement(Spec_list* s) -> int
     int c;
     int cardinality = N_CHARS;
     bool;
-    s.state = ((0) ? 1);
-    while ((c = get_next(s, ((void*)0))) != -1)
+    while ((c = get_next) != -1)
     {
     };
     return cardinality;
@@ -779,25 +682,23 @@ cdecl validate_case_classes(Spec_list* s1, Spec_list* s2) -> void
     List_element* s2_tail = s2.tail;
     bool;
     bool;
-    if (? | !s2)
+    if (complement | !s2)
         return void;
     for (int i = 0; i < N_CHARS; i++)
     {
-        if (((?__ctype_b_loc())[(int)((i))] ? (uint)_ISupper))
+        if (isupper(i))
             n_upper++;
-        if (((?__ctype_b_loc())[(int)((i))] ? (uint)_ISlower))
+        if (islower(i))
             n_lower++;
     };
-    s1.state = ((0) ? 1);
-    s2.state = ((0) ? 1);
     while (c1 != -1 & c2 != -1)
     {
         Upper_Lower_class class_s1;
         Upper_Lower_class class_s2;
         c1 = get_next(s1, @class_s1);
         c2 = get_next(s2, @class_s2);
-        if (?)
-            error(0, 0, gettext("misaligned [:upper:] and/or [:lower:] construct"));
+        if (s2_new_element && class_s2 != UL_NONE && ! ( s1_new_element && class_s1 != UL_NONE ))
+            error;
         if (class_s2 != UL_NONE)
         {
             skip_construct(s1);
@@ -806,57 +707,52 @@ cdecl validate_case_classes(Spec_list* s1, Spec_list* s2) -> void
             s2.length -= (class_s2 == UL_UPPER ? n_upper : n_lower) - 1;
         };
     };
+    affirm;
     s1.tail = s1_tail;
     s2.tail = s2_tail;
 };
 
 cdecl get_spec_stats(Spec_list* s) -> void
 {
-    ulong length = 0;
+    int length = 0;
     s.n_indefinite_repeats = 0;
     for (List_element* p = s.head.next; p; p = p.next)
     {
-        ulong len = 0;
+        int len = 0;
         switch (p.type)
         {
             case (RE_NORMAL_CHAR)
             {
                 len = 1;
+                break switch;
             }
-            goto _switch_end_139188836027472;
             case (RE_RANGE)
             {
                 affirm(p.u.range.last_char >= p.u.range.first_char);
+                len = p.u.range.last_char - p.u.range.first_char + 1;
+                break switch;
             }
-            len = p.u.range.last_char - p.u.range.first_char + 1;
-            goto _switch_end_139188836027472;
             case (RE_CHAR_CLASS)
             {
-            }
-            for (int i = 0; i < N_CHARS; i++)
-            {};
-            switch (+p.u.char_class)
-            {
-                case (CC_UPPER)
+                for (int i = 0; i < N_CHARS; i++)
+                {};
+                switch (+p.u.char_class)
                 {
-                    case (CC_LOWER)
+                    case (CC_UPPER)
                     {
-                        goto _switch_end_139188836037968;
                     }
-                }
-                default
-                {
+                    default
+                    {
+                    };
                 };
-                goto _switch_end_139188836037968;
-            };
-            label _switch_end_139188836037968:
-            goto _switch_end_139188836027472;
+                break switch;
+            }
             case (RE_EQUIV_CLASS)
             {
                 for (int i = 0; i < N_CHARS; i++)
                 {};
+                break switch;
             }
-            goto _switch_end_139188836027472;
             case (RE_REPEATED_CHAR)
             {
                 if (p.u.repeated_char.repeat_count > 0)
@@ -866,16 +762,14 @@ cdecl get_spec_stats(Spec_list* s) -> void
                     s.indefinite_repeat_element = p;
                     ++(s.n_indefinite_repeats);
                 };
+                break switch;
             }
-            goto _switch_end_139188836027472;
             default
             {
-                unreachable();
             };
         };
-        label _switch_end_139188836027472:
-        if (__builtin_add_overflow((length), (len), (@length)) ? ((0) ? 1) < length)
-            error(0, 0, gettext("too many characters in set"));
+        if (ckd_add ( & length , length , len ) || REPEAT_COUNT_MAXIMUM < length)
+            error;
     };
     s.length = length;
 };
@@ -883,11 +777,11 @@ cdecl get_spec_stats(Spec_list* s) -> void
 cdecl get_s1_spec_stats(Spec_list* s1) -> void
 {
     get_spec_stats(s1);
-    if (?)
+    if (complement)
         s1.length = card_of_complement(s1);
 };
 
-cdecl get_s2_spec_stats(Spec_list* s2, ulong len_s1) -> void
+cdecl get_s2_spec_stats(Spec_list* s2, int len_s1) -> void
 {
     get_spec_stats(s2);
     if (len_s1 >= s2.length & s2.n_indefinite_repeats == 1)
@@ -901,7 +795,6 @@ cdecl spec_init(Spec_list* spec_list) -> void
 {
     List_element* new = xmalloc((sizeof * new / 8));
     spec_list.head = spec_list.tail = new;
-    spec_list.head.next = ((void*)0);
 };
 
 cdecl parse_str(byte* s, Spec_list* spec_list) -> int
@@ -915,7 +808,7 @@ cdecl string2_extend(Spec_list* s1, Spec_list* s2) -> void
 {
     List_element* p;
     byte char_to_repeat;
-    affirm(?);
+    affirm(translating);
     affirm(s1.length > s2.length);
     affirm(s2.length > 0);
     p = s2.tail;
@@ -924,31 +817,30 @@ cdecl string2_extend(Spec_list* s1, Spec_list* s2) -> void
         case (RE_NORMAL_CHAR)
         {
             char_to_repeat = p.u.normal_char;
+            break switch;
         }
-        goto _switch_end_139188829312208;
         case (RE_RANGE)
         {
             char_to_repeat = p.u.range.last_char;
+            break switch;
         }
-        goto _switch_end_139188829312208;
         case (RE_CHAR_CLASS)
         {
-            error(0, 0, gettext("when translating with string1 longer than string2,\n"));
+            error;
         }
         case (RE_REPEATED_CHAR)
         {
             char_to_repeat = p.u.repeated_char.the_repeated_char;
+            break switch;
         }
-        goto _switch_end_139188829312208;
         case (RE_EQUIV_CLASS)
         {
+            affirm;
         }
         default
         {
-            unreachable();
         };
     };
-    label _switch_end_139188829312208:
     append_repeated_char(s2, char_to_repeat, s1.length - s2.length);
     s2.length = s1.length;
 };
@@ -957,53 +849,52 @@ cdecl homogeneous_spec_list(Spec_list* s) -> int
 {
     int b;
     int c;
-    s.state = ((0) ? 1);
 };
 
 cdecl validate(Spec_list* s1, Spec_list* s2) -> void
 {
     get_s1_spec_stats(s1);
     if (s1.n_indefinite_repeats > 0)
-        error(0, 0, gettext("the [c*] repeat construct may not appear in string1"));
+        error;
     if (s2)
     {
         get_s2_spec_stats(s2, s1.length);
         if (s2.n_indefinite_repeats > 1)
-            error(0, 0, gettext("only one [c*] repeat construct may appear in string2"));
-        if (?)
+            error;
+        if (translating)
         {
             if (s2)
-                error(0, 0, gettext("[=c=] expressions may not appear in string2"));
+                error;
             if (s2)
-                error(0, 0, gettext("when translating, the only character classes"));
+                error;
             validate_case_classes(s1, s2);
             if (s1.length > s2.length)
             {
-                if (!?)
+                if (!truncate_set1)
                 {
                     if (s2.length == 0)
-                        error(0, 0, gettext("when not truncating set1,"));
+                        error;
                     string2_extend(s1, s2);
                 };
             };
-            if (? & s1 & !(s2.length == s1.length & ?(s2)))
-                error(0, 0, gettext("when translating with complemented character classes,\n"));
+            if (complement & s1 & !(s2.length == s1.length & homogeneous_spec_list(s2)))
+                error;
         }
         else
         {
             if (s2.n_indefinite_repeats > 0)
-                error(0, 0, gettext("the [c*] construct may appear in string2"));
+                error;
         };
     };
 };
 
 cdecl squeeze_filter(byte* buf, ulong size, def{}*(byte*, ulong) -> ulong reader) -> void
 {
-    int NOT_A_CHAR = 0;
+    int NOT_A_CHAR;
     int char_to_squeeze = NOT_A_CHAR;
     ulong i = 0;
     ulong nr = 0;
-    while (?)
+    while (true)
     {
         if (i >= nr)
         {
@@ -1016,9 +907,9 @@ cdecl squeeze_filter(byte* buf, ulong size, def{}*(byte*, ulong) -> ulong reader
         if (char_to_squeeze == NOT_A_CHAR)
         {
             ulong out_len;
-            for (i < nr & !?[to_uchar(buf[i])]; i += 2; continue)
+            for (i < nr & !in_squeeze_set[to_uchar(buf[i])]; i += 2; continue)
             {};
-            if (i == nr & ?[to_uchar(buf[i - 1])])
+            if (i == nr & in_squeeze_set[to_uchar(buf[i - 1])])
                 --i;
             if (i >= nr)
                 out_len = nr - begin;
@@ -1030,7 +921,7 @@ cdecl squeeze_filter(byte* buf, ulong size, def{}*(byte*, ulong) -> ulong reader
                     --out_len;
                 ++i;
             };
-            if (out_len > 0 & fwrite(@buf[begin], 1, out_len, stdout) != out_len)
+            if (out_len > 0 & fwrite != out_len)
                 write_error();
         };
         if (char_to_squeeze != NOT_A_CHAR)
@@ -1045,10 +936,8 @@ cdecl squeeze_filter(byte* buf, ulong size, def{}*(byte*, ulong) -> ulong reader
 
 cdecl plain_read(byte* buf, ulong size) -> ulong
 {
-    long nr = read(0, buf, size);
     if (nr < 0)
-        error(0, (?__errno_location()), gettext("read error"));
-    return nr;
+        error;
 };
 
 cdecl read_and_delete(byte* buf, ulong size) -> ulong
@@ -1060,7 +949,7 @@ cdecl read_and_delete(byte* buf, ulong size) -> ulong
         if (nr == 0)
             return 0;
         ulong i;
-        for (i = 0; i < nr & !?[to_uchar(buf[i])]; i++)
+        for (i = 0; i < nr & !in_delete_set[to_uchar(buf[i])]; i++)
         {};
         n_saved = i;
         for (++i; i < nr; i++)
@@ -1081,8 +970,7 @@ cdecl read_and_xlate(byte* buf, ulong size) -> ulong
 cdecl set_initialize(Spec_list* s, int complement_this_set, int* in_set) -> void
 {
     int c;
-    s.state = ((0) ? 1);
-    if (?)
+    if (complement_this_set)
         for (ulong i = 0; i < N_CHARS; i++)
         {};
 };
@@ -1098,58 +986,53 @@ cdecl main(int argc, byte** argv) -> int
     Spec_list* s1 = @buf1;
     Spec_list* s2 = @buf2;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((c = getopt_long(argc, argv, "+AcCdst", long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('A')
             {
-                setlocale(0, "C");
+                setlocale;
+                setlocale;
+                break switch;
             }
-            setlocale(0, "C");
-            goto _switch_end_139188887964368;
             case ('c')
             {
-                case ('C')
-                {
-                }
+                break switch;
             }
-            goto _switch_end_139188887964368;
             case ('d')
             {
+                break switch;
             }
-            goto _switch_end_139188887964368;
             case ('s')
             {
+                break switch;
             }
-            goto _switch_end_139188887964368;
             case ('t')
             {
+                break switch;
             }
-            goto _switch_end_139188887964368;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188887964368;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188887964368;
             default
             {
-                usage(0);
             };
-            goto _switch_end_139188887964368;
         };
-        label _switch_end_139188887964368:
     };
-    non_option_args = argc - optind;
-    translating = (non_option_args == 2 & !?);
-    min_operands = 1 + (? == ?);
-    max_operands = 1 + (? <= ?);
+    translating = (non_option_args == 2 & !delete);
+    min_operands = 1 + (delete == squeeze_repeats);
+    max_operands = 1 + (delete <= squeeze_repeats);
     if (non_option_args < min_operands)
     {
         if (non_option_args == 0)
@@ -1157,65 +1040,64 @@ cdecl main(int argc, byte** argv) -> int
         else
         {
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-            fprintf(stderr, "%s\n", gettext(? ? "Two strings must be given when " : "Two strings must be given when translating."));
+            fprintf;
         };
-        usage(0);
+        usage;
     };
     if (max_operands < non_option_args)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind + max_operands]));
+        error(0, 0, gettext("extra operand %s"), quote);
         if (non_option_args == 2)
-            fprintf(stderr, "%s\n", gettext("Only one string may be given when "));
-        usage(0);
+            fprintf;
+        usage;
     };
     spec_init(s1);
-    if (!?(argv[optind], s1))
-        return 1;
     if (non_option_args == 2)
     {
         spec_init(s2);
-        if (!?(argv[optind + 1], s2))
-            return 1;
     }
     else
-        s2 = ((void*)0);
     validate(s1, s2);
-    if (? & non_option_args == 1)
+    xset_binary_mode;
+    xset_binary_mode;
+    fadvise;
+    if (squeeze_repeats & non_option_args == 1)
     {
-        set_initialize(s1, ?, ?);
+        set_initialize(s1, complement, in_squeeze_set);
         squeeze_filter(io_buf, (sizeof io_buf / 8), plain_read);
     }
-    elif (? & non_option_args == 1)
+    elif (delete & non_option_args == 1)
     {
-        set_initialize(s1, ?, ?);
-        while (?)
+        set_initialize(s1, complement, in_delete_set);
+        while (true)
         {
             ulong nr = read_and_delete(io_buf, (sizeof io_buf / 8));
             if (nr == 0)
                 break;
-            if (fwrite(io_buf, 1, nr, stdout) != nr)
+            if (fwrite != nr)
                 write_error();
         };
     };
     else
-        if (? & ? & non_option_args == 2)
+        if (squeeze_repeats & delete & non_option_args == 2)
         {
-            set_initialize(s1, ?, ?);
+            set_initialize(s1, complement, in_delete_set);
+            set_initialize;
             squeeze_filter(io_buf, (sizeof io_buf / 8), read_and_delete);
         }
-        elif (?)
+        elif (translating)
         {
-            if (?)
+            if (complement)
             {
-                s2.state = ((0) ? 1);
+                set_initialize;
                 for (int i = 0; i < N_CHARS; i++)
                 {};
                 for (int i = 0; i < N_CHARS; i++)
                 {
-                    if (?)
+                    if (! in_s1 [ i ])
                     {
-                        int ch = get_next(s2, ((void*)0));
-                        affirm(ch != -1 | ?);
+                        int ch = get_next;
+                        affirm(ch != -1 | truncate_set1);
                         if (ch == -1)
                         {
                             break;
@@ -1232,9 +1114,7 @@ cdecl main(int argc, byte** argv) -> int
                 Upper_Lower_class class_s2;
                 for (int i = 0; i < N_CHARS; i++)
                 {};
-                s1.state = ((0) ? 1);
-                s2.state = ((0) ? 1);
-                while (?)
+                while (true)
                 {
                     c1 = get_next(s1, @class_s1);
                     c2 = get_next(s2, @class_s2);
@@ -1260,25 +1140,25 @@ cdecl main(int argc, byte** argv) -> int
                         skip_construct(s2);
                     };
                 };
-                affirm(c1 == -1 | ?);
+                affirm(c1 == -1 | truncate_set1);
             };
-            if (?)
+            if (squeeze_repeats)
             {
+                set_initialize;
                 squeeze_filter(io_buf, (sizeof io_buf / 8), read_and_xlate);
             }
             else
             {
-                while (?)
+                while (true)
                 {
                     ulong bytes_read = read_and_xlate(io_buf, (sizeof io_buf / 8));
                     if (bytes_read == 0)
                         break;
-                    if (fwrite(io_buf, 1, bytes_read, stdout) != bytes_read)
+                    if (fwrite != bytes_read)
                         write_error();
                 };
             };
         };
-    if (close(0) != 0)
-        error(0, (?__errno_location()), gettext("standard input"));
-    return 0;
+    if (close != 0)
+        error;
 };

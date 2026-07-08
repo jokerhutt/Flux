@@ -29,32 +29,33 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-option[5] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Create named pipes (FIFOs) with the given NAMEs.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("mkfifo", gettext("\
-  -m, --mode=MODE\n\
-         set file permission bits to MODE, not a=rw - umask\n\
+        oputs_("mkfifo", gettext("\
+  -m, --mode=MODE\n\
+         set file permission bits to MODE, not a=rw - umask\n\
 "));
-        oputs_("mkfifo", gettext("\
-  -Z\n\
-         set the SELinux security context to default type\n\
+        oputs_("mkfifo", gettext("\
+  -Z\n\
+         set the SELinux security context to default type\n\
 "));
-        oputs_("mkfifo", gettext("\
-      --context[=CTX]\n\
-         like -Z, or if CTX is specified then set the\n\
-         SELinux or SMACK security context to CTX\n\
+        oputs_("mkfifo", gettext("\
+      --context[=CTX]\n\
+         like -Z, or if CTX is specified then set the\n\
+         SELinux or SMACK security context to CTX\n\
 "));
         oputs_("mkfifo", gettext("      --help\n         display this help and exit\n"));
         oputs_("mkfifo", gettext("      --version\n         output version information and exit\n"));
@@ -65,35 +66,34 @@ Create named pipes (FIFOs) with the given NAMEs.\n\
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* specified_mode = ((void*)0);
-    byte* scontext = ((void*)0);
-    selabel_handle* set_security_context = ((void*)0);
+    byte* specified_mode;
+    byte* scontext;
+    selabel_handle* set_security_context;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "m:Z", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('m')
             {
-                specified_mode = optarg;
+                break switch;
             }
-            goto _switch_end_139188839609552;
             case ('Z')
             {
                 if (is_smack_enabled())
                 {
-                    scontext = optarg;
                 }
                 elif (is_selinux_enabled() > 0)
                 {
                     if (optarg)
-                        scontext = optarg;
                     else
                     {
+                        set_security_context = selabel_open;
                         if (!set_security_context)
-                            error(0, (?__errno_location()), gettext("warning: ignoring --context"));
+                            error;
                     };
                 };
                 else
@@ -101,29 +101,28 @@ cdecl main(int argc, byte** argv) -> int
                     {
                         error(0, 0, gettext("warning: ignoring --context; "));
                     };
+                break switch;
             }
-            goto _switch_end_139188839609552;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188839609552;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188839609552;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188839609552:
     };
     if (optind == argc)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     if (scontext)
     {
@@ -133,31 +132,18 @@ cdecl main(int argc, byte** argv) -> int
         else
             ret = setfscreatecon(scontext);
         if (ret < 0)
-            error(0, (?__errno_location()), gettext("failed to set default file creation context to %s"), quote(scontext));
+            error;
     };
-    uint newmode = (0 ? 0 ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0));
     if (specified_mode)
     {
         mode_change* change = mode_compile(specified_mode);
         if (!change)
-            error(0, 0, gettext("invalid mode"));
-        uint umask_value = umask(0);
-        umask(umask_value);
+            error;
+        umask;
         free(change);
-        if (?)
-            error(0, 0, gettext("mode must specify only file permission bits"));
+        if (newmode & ~ S_IRWXUGO)
+            error;
     };
-    int exit_status = 0;
-    for (optind < argc; ++optind; )
-    {
-        if (mkfifo(argv[optind], newmode) != 0)
-        {
-            exit_status = 0;
-        }
-        elif (specified_mode & lchmod(argv[optind], newmode) != 0)
-        {
-            exit_status = 0;
-        };
-    };
+    int exit_status;
     return exit_status;
 };

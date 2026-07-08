@@ -31,19 +31,20 @@ macro AUTHORS
 
 cdecl sethostname(byte* name, ulong namelen) -> int
 {
-    (?__errno_location()) ? 0;
     return -1;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         oputs_("hostname", gettext("      --help\n         display this help and exit\n"));
         oputs_("hostname", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("hostname");
@@ -55,23 +56,25 @@ cdecl main(int argc, byte** argv) -> int
 {
     byte* hostname;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    if (optind + 1 < argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    if (?)
+    if (optind + 1 == argc)
     {
         byte* name;
         if (sethostname(name, strlen(name)) != 0)
-            error(0, (?__errno_location()), gettext("cannot set name to %s"), quote(name));
+            error;
     }
     else
     {
         hostname = xgethostname();
-        if (hostname == ((void*)0))
-            error(0, (?__errno_location()), gettext("cannot determine hostname"));
+        if (hostname == NULL)
+            error;
         puts(hostname);
     };
-    return 0;
 };

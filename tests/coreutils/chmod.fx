@@ -32,8 +32,8 @@ macro AUTHORS
 struct change_status
 {
     enum (unnamed at tests/coreutils/chmod.c:43:3) status;
-    uint old_mode;
-    uint new_mode;
+    int old_mode;
+    int new_mode;
 };
 
 enum Verbosity
@@ -45,7 +45,7 @@ enum Verbosity
 
 struct mode_change;
 mode_change* change = mode_change;
-uint umask_value = mode_t;
+extern int umask_value;
 extern int recurse;
 int dereference = -1;
 extern int force_silent;
@@ -53,21 +53,24 @@ extern int diagnose_surprises;
 Verbosity verbosity = Verbosity;
 struct dev_ino;
 dev_ino* root_dev_ino = dev_ino;
-uint DEREFERENCE_OPTION = 128;
-uint NO_PRESERVE_ROOT = 129;
-uint PRESERVE_ROOT = 130;
-uint REFERENCE_FILE_OPTION = 131;
+uint DEREFERENCE_OPTION = 0;
+uint NO_PRESERVE_ROOT = 1;
+uint PRESERVE_ROOT = 2;
+uint REFERENCE_FILE_OPTION = 3;
 
-option[13] long_options = option;
-cdecl mode_changed(int dir_fd, byte* file, byte* file_full_name, uint old_mode, uint new_mode) -> int
+struct option;
+extern int long_options;
+cdecl mode_changed(int dir_fd, byte* file, byte* file_full_name, int old_mode, int new_mode) -> int
 {
-    if (?)
+    if (new_mode & ( S_ISUID | S_ISGID | S_ISVTX ))
     {
         stat new_stats;
         if (fstatat(dir_fd, file, @new_stats, 0) != 0)
         {
+            if (!force_silent)
+                error;
         };
-        new_mode = new_stats.st_mode;
+        new_mode = new_stats.;
     };
 };
 
@@ -76,239 +79,232 @@ cdecl describe_change(byte* file, change_status* ch) -> void
     byte[12] perms = 12;
     byte[12] old_perms = 12;
     byte* fmt;
-    byte* quoted_file;
+    byte* quoted_file = quotearg_style;
     switch (ch.status)
     {
         case (CH_NOT_APPLIED)
         {
             printf(gettext("neither symbolic link %s nor referent has been changed\n"), quoted_file);
+            return void;
         }
-        return void;
         case (CH_NO_STAT)
         {
             printf(gettext("%s could not be accessed\n"), quoted_file);
+            return void;
         }
-        return void;
         case (CH_FAILED)
         {
-            case (CH_NO_CHANGE_REQUESTED)
-            {
-                case (CH_SUCCEEDED)
-                {
-                    goto _switch_end_139188883453264;
-                }
-            }
         }
     };
-    label _switch_end_139188883453264:
     ulong old_m;
     ulong m;
-    strmode(ch.new_mode, perms);
+    strmode(ch, perms);
     perms[10] = '\0';
-    strmode(ch.old_mode, old_perms);
+    strmode(ch, old_perms);
     old_perms[10] = '\0';
     switch (ch.status)
     {
         case (CH_SUCCEEDED)
         {
             fmt = gettext("mode of %s changed from %04lo (%s) to %04lo (%s)\n");
+            break switch;
         }
-        goto _switch_end_139188883453904;
         case (CH_FAILED)
         {
             fmt = gettext("failed to change mode of %s from %04lo (%s) to %04lo (%s)\n");
+            break switch;
         }
-        goto _switch_end_139188883453904;
         case (CH_NO_CHANGE_REQUESTED)
         {
             fmt = gettext("mode of %s retained as %04lo (%s)\n");
+            printf(fmt, quoted_file, m, @perms[1]);
+            return void;
         }
-        printf(fmt, quoted_file, m, @perms[1]);
-        return void;
         case (CH_NO_STAT)
         {
-            case (CH_NOT_APPLIED)
-            {
-                default
-                {
-                };
-            }
         }
     };
-    label _switch_end_139188883453904:
     printf(fmt, quoted_file, old_m, @old_perms[1], m, @perms[1]);
 };
 
 cdecl process_file(int* fts, int* ent) -> int
 {
-    byte* file_full_name = ?.;
-    byte* file = ?.;
-    stat* file_stats = ?.;
+    byte* file_full_name = ent.;
+    byte* file = ent.;
+    stat* file_stats = ent.;
     change_status ch = {0};
     ch.status = CH_NO_STAT;
     stat stat_buf;
-    switch (?.)
+    switch (ent.)
     {
-        if (?)
+        if (ent -> fts_level == FTS_ROOTLEVEL && ent -> fts_number == 0)
         {
             ent. = 1;
+            fts_set;
         };
-        goto _switch_end_139188883454160;
-        goto _switch_end_139188883454160;
-        goto _switch_end_139188883454160;
+        if (!force_silent)
+            error(0, ent., gettext("cannot access %s"), quotearg_style);
+        if (!force_silent)
+            error(0, ent., "%s", quotearg_n_style_colon);
+        if (!force_silent)
+            error(0, ent., gettext("cannot read directory %s"), quotearg_style);
         if (dereference)
         {
-            goto _switch_end_139188883454160;
+            if (!force_silent)
+                error(0, 0, gettext("cannot operate on dangling symlink %s"), quotearg_style);
+            break switch;
         };
         ch.status = CH_NOT_APPLIED;
-        goto _switch_end_139188883454160;
         if (dereference == 1)
         {
-            if (fstatat(?., file, @stat_buf, 0) != 0)
+            if (fstatat(fts., file, @stat_buf, 0) != 0)
             {
-                goto _switch_end_139188883454160;
+                if (!force_silent)
+                    error;
+                break switch;
             };
             file_stats = @stat_buf;
         };
         ch.status = CH_NOT_APPLIED;
-        goto _switch_end_139188883454160;
-        if (cycle_warning_required(?, ?))
+        if (cycle_warning_required(fts, ent))
         {
             do
             {
+                error(0, 0, gettext("\
+WARNING: Circular directory structure.\n\
+This almost certainly means that you have a corrupted file system.\n\
+NOTIFY YOUR SYSTEM MANAGER.\n\
+The following directory is part of the cycle:\n  %s\n"), quotearg_n_style_colon);
             }
             while (0);
         };
         default
         {
-            ch.status = CH_NOT_APPLIED;
         };
-        goto _switch_end_139188883454160;
     };
-    label _switch_end_139188883454160:
     if (ch.status == CH_NOT_APPLIED & ROOT_DEV_INO_CHECK(root_dev_ino, file_stats))
     {
         ROOT_DEV_INO_WARN(file_full_name);
-        ignore_value(fts_read(?));
+        fts_set;
+        ignore_value(fts_read(fts));
     };
     if (ch.status == CH_NOT_APPLIED)
     {
-        ch.old_mode = file_stats.st_mode;
-        ch.new_mode = mode_adjust(ch.old_mode, ((((ch.old_mode)) ? 0) ? (0040000)) ? 0, umask_value, change, ((void*)0));
+        ch = file_stats;
+        ch = mode_adjust;
         bool;
-        if (?)
+        if (fchmodat == 0)
             ch.status = CH_SUCCEEDED;
         else
         {
-            if (!?((?__errno_location())))
+            if (!is_ENOTSUP)
             {
+                if (!force_silent)
+                    error;
                 ch.status = CH_FAILED;
             };
         };
     };
     if (verbosity != V_off)
     {
-        if (ch.status == CH_SUCCEEDED & !?(?., file, file_full_name, ch.old_mode, ch.new_mode))
+        if (ch.status == CH_SUCCEEDED & !mode_changed(fts., file, file_full_name, ch, ch))
             ch.status = CH_NO_CHANGE_REQUESTED;
         if (ch.status == CH_SUCCEEDED | verbosity == V_high)
             describe_change(file_full_name, @ch);
     };
-    if (CH_NO_CHANGE_REQUESTED <= ch.status & ?)
+    if (CH_NO_CHANGE_REQUESTED <= ch.status & diagnose_surprises)
     {
-        uint naively_expected_mode = mode_adjust(ch.old_mode, ((((ch.old_mode)) ? 0) ? (0040000)) ? 0, 0, change, ((void*)0));
-        if (ch.new_mode `& `!naively_expected_mode)
+        if (ch . new_mode & ~ naively_expected_mode)
         {
             byte[12] new_perms = 12;
             byte[12] naively_expected_perms = 12;
-            strmode(ch.new_mode, new_perms);
-            strmode(naively_expected_mode, naively_expected_perms);
+            strmode(ch, new_perms);
+            strmode;
             new_perms[10] = naively_expected_perms[10] = '\0';
+            error(0, 0, gettext("%s: new permissions are %s, not %s"), quotearg_n_style_colon, new_perms + 1, naively_expected_perms + 1);
             ch.status = CH_FAILED;
         };
     };
+    if (!recurse)
+        fts_set;
     return CH_NOT_APPLIED <= ch.status;
 };
 
 cdecl process_files(byte** files, int bit_flags) -> int
 {
     bool;
-    while (?)
+    while (true)
     {
-        if (?)
+        if (ent == NULL)
         {
-            if ((?__errno_location()) ? 0)
+            if (errno != 0)
             {
-                if (!?)
-                    error(0, (?__errno_location()), gettext("fts_read failed"));
+                if (!force_silent)
+                    error;
             };
             break;
         };
     };
-    if (?)
+    if (fts_close != 0)
     {
-        error(0, (?__errno_location()), gettext("fts_close failed"));
+        error;
     };
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Change the mode of each FILE to MODE.\n\
-With --reference, change the mode of each FILE to that of RFILE.\n\
-\n\
-"), stdout);
-        oputs_("chmod", gettext("\
-  -c, --changes\n\
-         like verbose but report only when a change is made\n\
+        printf;
+        fputs;
+        oputs_("chmod", gettext("\
+  -c, --changes\n\
+         like verbose but report only when a change is made\n\
 "));
-        oputs_("chmod", gettext("\
-  -f, --silent, --quiet\n\
-         suppress most error messages\n\
+        oputs_("chmod", gettext("\
+  -f, --silent, --quiet\n\
+         suppress most error messages\n\
 "));
-        oputs_("chmod", gettext("\
-  -v, --verbose\n\
-         output a diagnostic for every file processed\n\
+        oputs_("chmod", gettext("\
+  -v, --verbose\n\
+         output a diagnostic for every file processed\n\
 "));
-        oputs_("chmod", gettext("\
-      --dereference\n\
-         affect the referent of each symbolic link,\n\
-         rather than the symbolic link itself\n\
+        oputs_("chmod", gettext("\
+      --dereference\n\
+         affect the referent of each symbolic link,\n\
+         rather than the symbolic link itself\n\
 "));
-        oputs_("chmod", gettext("\
-  -h, --no-dereference\n\
-         affect each symbolic link, rather than the referent\n\
+        oputs_("chmod", gettext("\
+  -h, --no-dereference\n\
+         affect each symbolic link, rather than the referent\n\
 "));
-        oputs_("chmod", gettext("\
-      --no-preserve-root\n\
-         do not treat '/' specially (the default)\n\
+        oputs_("chmod", gettext("\
+      --no-preserve-root\n\
+         do not treat '/' specially (the default)\n\
 "));
-        oputs_("chmod", gettext("\
-      --preserve-root\n\
-         fail to operate recursively on '/'\n\
+        oputs_("chmod", gettext("\
+      --preserve-root\n\
+         fail to operate recursively on '/'\n\
 "));
-        oputs_("chmod", gettext("\
-      --reference=RFILE\n\
-         use RFILE's mode instead of specifying MODE values.\n\
-         RFILE is always dereferenced if a symbolic link.\n\
+        oputs_("chmod", gettext("\
+      --reference=RFILE\n\
+         use RFILE's mode instead of specifying MODE values.\n\
+         RFILE is always dereferenced if a symbolic link.\n\
 "));
-        oputs_("chmod", gettext("\
-  -R, --recursive\n\
-         change files and directories recursively\n\
+        oputs_("chmod", gettext("\
+  -R, --recursive\n\
+         change files and directories recursively\n\
 "));
         emit_symlink_recurse_options_("chmod", "-H");
         oputs_("chmod", gettext("      --help\n         display this help and exit\n"));
         oputs_("chmod", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Each MODE is of the form '[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+'.\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("chmod");
     };
     exit(status);
@@ -316,190 +312,53 @@ Each MODE is of the form '[ugoa]*([-+=]([rwxXst]*|[ugo]))+|[-+=][0-7]+'.\n\
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* mode = ((void*)0);
+    byte* mode;
     bool;
     bool;
-    byte* reference_file = ((void*)0);
+    byte* reference_file;
     int c;
     int bit_flags;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((c = getopt_long(argc, argv, ("HLPRcfhvr::w::x::X::s::t::u::g::o::a::,::+::=::"), long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('H')
-            {
-            }
-            goto _switch_end_139188887925072;
-            case ('L')
-            {
-            }
-            goto _switch_end_139188887925072;
-            case ('P')
-            {
-            }
-            goto _switch_end_139188887925072;
-            case ('h')
-            {
-                dereference = 0;
-            }
-            goto _switch_end_139188887925072;
-            case (DEREFERENCE_OPTION)
-            {
-                dereference = 1;
-            }
-            goto _switch_end_139188887925072;
-            case ('r')
-            {
-                case ('w')
-                {
-                    case ('x')
-                    {
-                        case ('X')
-                        {
-                            case ('s')
-                            {
-                                case ('t')
-                                {
-                                    case ('u')
-                                    {
-                                        case ('g')
-                                        {
-                                            case ('o')
-                                            {
-                                                case ('a')
-                                                {
-                                                    case (',')
-                                                    {
-                                                        case ('+')
-                                                        {
-                                                            case ('=')
-                                                            {
-                                                                case ('0')
-                                                                {
-                                                                    case ('1')
-                                                                    {
-                                                                        case ('2')
-                                                                        {
-                                                                            case ('3')
-                                                                            {
-                                                                                case ('4')
-                                                                                {
-                                                                                    case ('5')
-                                                                                    {
-                                                                                        case ('6')
-                                                                                        {
-                                                                                            case ('7')
-                                                                                            {
-                                                                                                {
-                                                                                                    byte* arg = argv[optind - 1];
-                                                                                                };
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            goto _switch_end_139188887925072;
-            case (NO_PRESERVE_ROOT)
-            {
-            }
-            goto _switch_end_139188887925072;
-            case (PRESERVE_ROOT)
-            {
-            }
-            goto _switch_end_139188887925072;
-            case (REFERENCE_FILE_OPTION)
-            {
-                reference_file = optarg;
-            }
-            goto _switch_end_139188887925072;
-            case ('R')
-            {
-            }
-            goto _switch_end_139188887925072;
-            case ('c')
-            {
-                verbosity = V_changes_only;
-            }
-            goto _switch_end_139188887925072;
-            case ('f')
-            {
-            }
-            goto _switch_end_139188887925072;
-            case ('v')
-            {
-                verbosity = V_high;
-            }
-            goto _switch_end_139188887925072;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188887925072;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188887925072;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188887925072:
     };
-    if (?)
+    if (recurse)
     {
-        if (?)
+        if (bit_flags == FTS_PHYSICAL)
         {
             if (dereference == 1)
-                error(0, 0, gettext("-R --dereference requires either -H or -L"));
+                error;
             dereference = 0;
         };
     };
-    if (?)
+    if (dereference == - 1 && bit_flags == FTS_LOGICAL)
         dereference = 1;
     if (reference_file)
     {
         if (mode)
         {
             error(0, 0, gettext("cannot combine mode and --reference options"));
-            usage(0);
+            usage;
         };
     }
     else
     {
-        if (!mode)
-            mode = argv[optind++];
     };
     if (optind >= argc)
     {
-        if (!mode | mode != argv[optind - 1])
+        if (! mode || mode != argv [ optind - 1 ])
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        usage(0);
+        usage;
     };
     if (reference_file)
     {
         change = mode_create_from_ref(reference_file);
+        if (!change)
+            error;
     }
     else
     {
@@ -507,17 +366,18 @@ cdecl main(int argc, byte** argv) -> int
         if (!change)
         {
             error(0, 0, gettext("invalid mode: %s"), quote(mode));
-            usage(0);
+            usage;
         };
         umask_value = umask(0);
     };
-    if (?)
+    if (recurse && preserve_root)
     {
         dev_ino dev_ino_buf;
-        root_dev_ino = get_root_dev_ino(@?);
+        root_dev_ino = get_root_dev_ino(@dev_ino_buf);
+        if (root_dev_ino == NULL)
+            error;
     }
     else
     {
-        root_dev_ino = ((void*)0);
     };
 };

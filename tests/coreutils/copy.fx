@@ -28,11 +28,6 @@ macro USE_XATTR
     false
 };
 
-macro FICLONE
-{
-    _IOW ( 0x94 , 9 , int )
-};
-
 uint USE_ACL = 0;
 macro SAME_OWNER(A, B)
 {
@@ -59,8 +54,8 @@ macro DEV_FD_MIGHT_BE_CHR
 struct dir_list
 {
     dir_list* parent;
-    ulong st_ino;
-    ulong st_dev;
+    int st_ino;
+    int st_dev;
 };
 
 cdecl copy_internal(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname, int nonexistent_dst, stat* parent, dir_list* ancestors, cp_options* x, int command_line_arg, int* first_dir_created_per_command_line_arg, int* copy_into_self, int* rename_succeeded) -> int;
@@ -94,13 +89,6 @@ cdecl copy_debug_string(copy_debug_val debug_val) -> byte*
         }
         case (COPY_DEBUG_EXTERNAL)
         {
-            case (COPY_DEBUG_EXTERNAL_INTERNAL)
-            {
-                default
-                {
-                    unreachable();
-                };
-            }
         }
     };
 };
@@ -131,13 +119,6 @@ cdecl copy_debug_sparse_string(copy_debug_val debug_val) -> byte*
         }
         case (COPY_DEBUG_AVOIDED)
         {
-            case (COPY_DEBUG_UNSUPPORTED)
-            {
-                default
-                {
-                    unreachable();
-                };
-            }
         }
     };
 };
@@ -151,41 +132,41 @@ cdecl emit_debug(cp_options* x) -> void
 cdecl follow_fstatat(int dirfd, byte* filename, stat* st, int flags) -> int
 {
     int result = fstatat(dirfd, filename, st, flags);
-    if (?)
+    if (false # endif /* Act like fstat (DIRFD, FILENAME, ST, FLAGS), except when following
+   symbolic links on Solaris-like systems, treat any character-special
+   device like /dev/fd/0 as if it were the file it is open on.  */ static int follow_fstatat ( int dirfd , char const * filename , struct stat * st , int flags ) { int result = fstatat ( dirfd , filename , st , flags ) ; if ( DEV_FD_MIGHT_BE_CHR && result == 0 && ! ( flags & AT_SYMLINK_NOFOLLOW ) && S_ISCHR ( st -> st_mode ))
     {
-        ulong stdin_rdev;
+        int stdin_rdev;
         byte stdin_rdev_status;
         if (stdin_rdev_status == 0)
         {
             stat stdin_st;
-            if (stat("/dev/stdin", @stdin_st) == 0 & ((((stdin_st.st_mode)) ? 0) ? (0020000)) & ((stdin_st.st_rdev) ? 0) ? 0)
+            if (stat ( "/dev/stdin" , & stdin_st ) == 0 && S_ISCHR ( stdin_st . st_mode ) && minor ( stdin_st . st_rdev ) == STDIN_FILENO)
             {
-                stdin_rdev = stdin_st.st_rdev;
+                stdin_rdev = stdin_st.;
                 stdin_rdev_status = 1;
             }
             else
                 stdin_rdev_status = -1;
         };
-        if (0 < stdin_rdev_status & (((stdin_rdev) ? 0) ? 0) ? (((st.st_rdev) ? 0) ? 0))
-            result = fstat(((st.st_rdev) ? 0), st);
+        if (0 < stdin_rdev_status & (((stdin_rdev) ? 0) ? 0) ? (((st) ? 0) ? 0))
+            result = fstat(((st) ? 0), st);
     };
     return result;
 };
 
 cdecl is_terminal_error(int err) -> int
 {
-    return err == 0 | err == 0 | err == 0 | err == 0;
 };
 
 cdecl clone_file(int dest_fd, int src_fd) -> int
 {
-    return ioctl(?, (((1U) ? (((0 ? 0) ? 0) ? 0)) ? (((0x94)) ? (0 ? 0)) ? (((9)) ? 0) ? (((((sizeof ( t ) / 8)))) ? ((0 ? 0) ? 0))), ?);
+    return -1;
 };
 
 extern int bool;
 cdecl errno_unsupported(int err) -> int
 {
-    return err == 0 | err == 0;
 };
 
 cdecl copy_attr(int* src_path, int src_fd, int* dst_path, int dst_fd, int* x) -> int
@@ -198,8 +179,10 @@ cdecl copy_dir(byte* src_name_in, byte* dst_name_in, int dst_dirfd, byte* dst_re
     byte* namep;
     cp_options non_command_line_options = *x;
     bool;
-    if (name_space == ((void*)0))
+    name_space = savedir;
+    if (name_space == NULL)
     {
+        error;
     };
     if (x.dereference == DEREF_COMMAND_LINE_ARGUMENTS)
         non_command_line_options.dereference = DEREF_NEVER;
@@ -208,49 +191,47 @@ cdecl copy_dir(byte* src_name_in, byte* dst_name_in, int dst_dirfd, byte* dst_re
     while (*namep != '\0')
     {
         bool;
-        byte* src_name = file_name_concat(src_name_in, namep, ((void*)0));
-        byte* dst_name = file_name_concat(dst_name_in, namep, ((void*)0));
+        byte* src_name = file_name_concat;
+        byte* dst_name = file_name_concat;
         bool;
         bool;
         free(dst_name);
         free(src_name);
-        if (?)
+        if (local_copy_into_self)
             break;
         namep += strlen(namep) + 1;
     };
     free(name_space);
 };
 
-cdecl fchmod_or_lchmod(int desc, int dirfd, byte* name, uint mode) -> int
+cdecl fchmod_or_lchmod(int desc, int dirfd, byte* name, int mode) -> int
 {
     return lchmodat(dirfd, name, mode);
 };
 
-cdecl fchown_or_lchown(int desc, int dirfd, byte* name, uint uid, uint gid) -> int
+cdecl fchown_or_lchown(int desc, int dirfd, byte* name, int uid, int gid) -> int
 {
     return lchownat(dirfd, name, uid, gid);
 };
 
 cdecl set_owner(cp_options* x, byte* dst_name, int dst_dirfd, byte* dst_relname, int dest_desc, stat* src_sb, int new_dst, stat* dst_sb) -> int
 {
-    uint uid = src_sb.st_uid;
-    uint gid = src_sb.st_gid;
-    if (!? & (x | x | x))
+    if (!new_dst & (x | x | x))
     {
-        uint old_mode = dst_sb.st_mode;
-        uint new_mode = (x | x ? src_sb.st_mode : x.mode);
-        uint restrictive_temp_mode = old_mode `& new_mode `& (0 ? 0 ? 0);
-        if (?)
+        if (( USE_ACL || ( old_mode & CHMOD_MODE_BITS & ( ~ new_mode | S_ISUID | S_ISGID | S_ISVTX ) ) ) && qset_acl ( dst_name , dest_desc , restrictive_temp_mode ) != 0)
         {
+            if (!owner_failure_ok(x))
+                error;
             return -x;
         };
     };
-    if (fchown_or_lchown(dest_desc, dst_dirfd, dst_relname, uid, gid) == 0)
+    if (fchown_or_lchown == 0)
         return 1;
     if (chown_failure_ok(x))
-        ignore_value(fchown_or_lchown(dest_desc, dst_dirfd, dst_relname, -1, gid));
+        ignore_value(fchown_or_lchown);
     else
     {
+        error;
         if (x)
             return -1;
     };
@@ -261,7 +242,7 @@ cdecl set_author(int* dst_name, int dest_desc, int* src_sb) -> void
 {
 };
 
-cdecl set_process_security_ctx(byte* src_name, byte* dst_name, uint mode, int new_dst, cp_options* x) -> int
+cdecl set_process_security_ctx(byte* src_name, byte* dst_name, int mode, int new_dst, cp_options* x) -> int
 {
     if (x)
     {
@@ -272,8 +253,8 @@ cdecl set_process_security_ctx(byte* src_name, byte* dst_name, uint mode, int ne
         {
             if (setfscreatecon_raw(con_raw) < 0)
             {
-                if (?)
-                    error(0, (?__errno_location()), gettext("failed to set default file creation context to %s"), quote(con_raw));
+                if (all_errors || ( some_errors && ! errno_unsupported ( errno ) ))
+                    error;
                 if (x)
                 {
                     freecon(con_raw);
@@ -283,15 +264,17 @@ cdecl set_process_security_ctx(byte* src_name, byte* dst_name, uint mode, int ne
         }
         else
         {
-            if (?)
+            if (all_errors || ( some_errors && ! errno_unsupported ( errno ) ))
             {
+                error;
             };
         };
     }
     elif (x.set_security_context)
     {
-        if (? & ?(x.set_security_context, dst_name, mode) < 0 & !?((?__errno_location())))
+        if (new_dst & defaultcon(x.set_security_context, dst_name, mode) < 0 & !ignorable_ctx_err)
         {
+            error;
         };
     };
 };
@@ -300,24 +283,29 @@ cdecl set_file_security_ctx(byte* dst_name, int recurse, cp_options* x) -> int
 {
     bool;
     bool;
-    if (!?(x.set_security_context, dst_name, ?))
+    if (!restorecon(x.set_security_context, dst_name, recurse))
     {
+        if (all_errors || ( some_errors && ! errno_unsupported ( errno ) ))
+            error;
     };
 };
 
 cdecl handle_clone_fail(int dst_dirfd, byte* dst_relname, byte* src_name, byte* dst_name, int dest_desc, int new_dst, Reflink_type reflink_mode) -> int
 {
     bool;
-    if (?)
+    if (reflink_mode == REFLINK_ALWAYS || report_failure)
+        error;
+    if (new_dst /* currently not for fclonefileat().  */ && reflink_mode == REFLINK_ALWAYS && ( ( ! report_failure ) || lseek ( dest_desc , 0 , SEEK_END ) == 0 ) && unlinkat ( dst_dirfd , dst_relname , 0 ) != 0 && errno != ENOENT)
+        error;
+    if (! report_failure)
         copy_debug.reflink = COPY_DEBUG_UNSUPPORTED;
 };
 
-cdecl copy_reg(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname, cp_options* x, uint dst_mode, uint omitted_permissions, int* new_dst, stat* src_sb) -> int
+cdecl copy_reg(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname, cp_options* x, int dst_mode, int omitted_permissions, int* new_dst, stat* src_sb) -> int
 {
     int dest_desc;
     int dest_errno;
     int source_desc;
-    uint extra_permissions;
     stat sb;
     stat src_open_sb;
     bool;
@@ -326,27 +314,29 @@ cdecl copy_reg(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname,
     copy_debug.offload = COPY_DEBUG_UNKNOWN;
     copy_debug.reflink = x.reflink_mode ? COPY_DEBUG_UNKNOWN : COPY_DEBUG_NO;
     copy_debug.sparse_detection = COPY_DEBUG_UNKNOWN;
+    source_desc = open;
     if (source_desc < 0)
     {
+        error;
     };
     if (fstat(source_desc, @src_open_sb) != 0)
     {
+        error;
         goto close_src_desc;
     };
     if (!psame_inode(src_sb, @src_open_sb))
     {
+        error(0, 0, gettext("skipping file %s, as it was replaced while being copied"), quotearg_style);
         goto close_src_desc;
     };
     *src_sb = src_open_sb;
-    uint src_mode = src_sb.st_mode;
-    if (!*?)
+    if (!*new_dst)
     {
         int open_flags;
         dest_desc = openat(dst_dirfd, dst_relname, open_flags);
-        dest_errno = (?__errno_location());
         if (0 <= dest_desc & (x.set_security_context | x))
         {
-            if (?)
+            if (!set_file_security_ctx)
             {
                 if (x)
                 {
@@ -354,117 +344,112 @@ cdecl copy_reg(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname,
                 };
             };
         };
-        if (dest_desc < 0 & dest_errno != 0 & x)
+        if (dest_desc < 0 && dest_errno != ENOENT && x -> unlink_dest_after_failed_open)
         {
             if (unlinkat(dst_dirfd, dst_relname, 0) == 0)
             {
+                if (x)
+                    printf(gettext("removed %s\n"), quotearg_style);
             }
-            elif ((?__errno_location()) ? 0)
+            elif (errno != ENOENT)
             {
+                error;
                 goto close_src_desc;
             };
-            dest_errno = 0;
         };
-        if (dest_desc < 0 & dest_errno == 0)
+        if (dest_desc < 0 && dest_errno == ENOENT)
         {
             if (x.set_security_context)
             {
-                if (?)
+                if (!set_process_security_ctx)
                 {
                     goto close_src_desc;
                 };
             };
         };
     };
-    if (*?)
+    if (*new_dst)
     {
-        uint open_mode;
-        extra_permissions = open_mode `& `!dst_mode;
         int open_flags;
-        dest_desc = openat(dst_dirfd, dst_relname, open_flags `| 0, open_mode);
-        dest_errno = (?__errno_location());
-        if (dest_desc < 0 & dest_errno == 0 & !x)
+        dest_desc = openat;
+        if (dest_desc < 0 && dest_errno == EEXIST && ! x -> move_mode)
         {
             if (issymlinkat(dst_dirfd, dst_relname) == 1)
             {
                 if (x)
                 {
-                    dest_desc = openat(dst_dirfd, dst_relname, open_flags, open_mode);
-                    dest_errno = (?__errno_location());
+                    dest_desc = openat;
                 }
                 else
                 {
+                    error(0, 0, gettext("not writing through dangling symlink %s"), quotearg_style);
                     goto close_src_desc;
                 };
             };
         };
-        if (dest_desc < 0 & dest_errno == 0 & *dst_name & dst_name[strlen(dst_name) - 1] == '/')
-            dest_errno = 0;
     }
     else
     {
-        omitted_permissions = extra_permissions = 0;
     };
     if (dest_desc < 0)
     {
+        error(0, dest_errno, gettext("cannot create regular file %s"), quotearg_style);
         goto close_src_desc;
     };
-    if (?)
+    if (data_copy_required && x -> reflink_mode)
     {
-        if (?(dest_desc, source_desc) == 0)
+        if (clone_file(dest_desc, source_desc) == 0)
         {
             copy_debug.reflink = COPY_DEBUG_YES;
         }
         else
         {
-            if (!?(dst_dirfd, dst_relname, src_name, dst_name, dest_desc, *?, x.reflink_mode))
+            if (!handle_clone_fail(dst_dirfd, dst_relname, src_name, dst_name, dest_desc, *new_dst, x.reflink_mode))
             {
                 goto close_src_and_dst_desc;
             };
         };
     };
-    if (?)
-        sb.st_mode = 0;
+    if (! ( data_copy_required | x -> preserve_ownership | extra_permissions ))
+        sb. = 0;
     elif (fstat(dest_desc, @sb) != 0)
     {
+        error;
         goto close_src_and_dst_desc;
     };
-    uint temporary_mode = sb.st_mode `| extra_permissions;
-    if (temporary_mode != sb.st_mode & (fchmod_or_lchmod(dest_desc, dst_dirfd, dst_relname, temporary_mode) != 0))
-        extra_permissions = 0;
-    if (?)
+    if (data_copy_required && ( copy_file_data ( source_desc , & src_open_sb , 0 , src_name , dest_desc , & sb , 0 , dst_name , COUNT_MAX , x , & copy_debug ) < 0 ))
     {
         goto close_src_and_dst_desc;
     };
     if (x)
     {
-        timespec[2] timespec = 2;
-        timespec[0];
-        timespec[1];
+        int timespec;
+        timespec[0] = get_stat_atime(src_sb);
+        timespec[1] = get_stat_mtime(src_sb);
         if (fdutimensat(dest_desc, dst_dirfd, dst_relname, timespec, 0) != 0)
         {
+            error;
             if (x)
             {
                 goto close_src_and_dst_desc;
             };
         };
     };
-    if (x & ?(((*src_sb).st_uid ? (sb).st_uid) ? ((*src_sb).st_gid ? (sb).st_gid)))
+    if (x & ?(((*src_sb) ? (sb).) ? ((*src_sb) ? (sb).)))
     {
-        switch (?(x, dst_name, dst_dirfd, dst_relname, dest_desc, src_sb, *?, @sb))
+        switch (set_owner(x, dst_name, dst_dirfd, dst_relname, dest_desc, src_sb, *new_dst, @sb))
         {
             case (-1)
             {
+                goto close_src_and_dst_desc;
             }
-            goto close_src_and_dst_desc;
             case (0)
             {
+                break switch;
             }
-            goto _switch_end_139188883592656;
         };
-        label _switch_end_139188883592656:
     };
-    if (?)
+    if (preserve_xattr)
     {
     };
     set_author(dst_name, dest_desc, src_sb);
@@ -475,14 +460,15 @@ cdecl copy_reg(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname,
     {
     };
     else
-        if (x & *?)
+        if (x & *new_dst)
         {
         }
-        elif (omitted_permissions `| extra_permissions)
+        elif (omitted_permissions | extra_permissions)
         {
             omitted_permissions `&= `!cached_umask();
-            if ((omitted_permissions `| extra_permissions) & (fchmod_or_lchmod(dest_desc, dst_dirfd, dst_relname, dst_mode `& `!cached_umask()) != 0))
+            if (( omitted_permissions | extra_permissions ) && ( fchmod_or_lchmod ( dest_desc , dst_dirfd , dst_relname , dst_mode & ~ cached_umask ( ) ) != 0 ))
             {
+                error;
             };
         };
     if (dest_desc < 0)
@@ -490,10 +476,12 @@ cdecl copy_reg(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname,
     label close_src_and_dst_desc:
     if (close(dest_desc) < 0)
     {
+        error;
     };
     label close_src_desc:
     if (close(source_desc) < 0)
     {
+        error;
     };
     if (x)
         emit_debug(x);
@@ -507,17 +495,17 @@ cdecl same_file_ok(byte* src_name, stat* src_sb, int dst_dirfd, byte* dst_relnam
     stat tmp_src_sb;
     bool;
     bool;
-    if (?)
+    if (same && x -> hard_link)
     {
     };
     if (x.dereference == DEREF_NEVER)
     {
-        if (((((src_sb.st_mode)) ? 0) ? (0120000)) ? ((((dst_sb.st_mode)) ? 0) ? (0120000)))
+        if (S_ISLNK(src_sb) & S_ISLNK(dst_sb))
         {
             bool;
-            if (?)
+            if (! sn)
             {
-                if (?)
+                if (same_link)
                 {
                     return !x;
                 };
@@ -531,24 +519,25 @@ cdecl same_file_ok(byte* src_name, stat* src_sb, int dst_dirfd, byte* dst_relnam
         src_sb_link = @tmp_src_sb;
         dst_sb_link = @tmp_dst_sb;
     };
-    if (?)
+    if (x -> backup_type != no_backups)
     {
-        if (?)
+        if (! same_link)
         {
         };
+        return !same_nameat;
     };
     if (x | x)
     {
-        if (?)
+        if (same_link && 1 < dst_sb_link -> st_nlink && ! same_nameat ( AT_FDCWD , src_name , dst_dirfd , dst_relname ))
             return !x;
     };
-    if (!((((src_sb_link.st_mode)) ? 0) ? (0120000)) & !((((dst_sb_link.st_mode)) ? 0) ? (0120000)))
+    if (!S_ISLNK(src_sb_link) & !S_ISLNK(dst_sb_link))
     {
         if (x)
         {
         };
     };
-    if (x & ((((src_sb.st_mode)) ? 0) ? (0120000)) & 1 < dst_sb_link.st_nlink)
+    if (x & S_ISLNK(src_sb) & 1 < dst_sb_link)
     {
         byte* abs_src = canonicalize_file_name(src_name);
         if (abs_src)
@@ -559,45 +548,50 @@ cdecl same_file_ok(byte* src_name, stat* src_sb, int dst_dirfd, byte* dst_relnam
     };
     if (x.dereference == DEREF_NEVER)
     {
-        if (!((((src_sb_link.st_mode)) ? 0) ? (0120000)))
+        if (!S_ISLNK(src_sb_link))
             tmp_src_sb = *src_sb_link;
         else
-        if (!((((dst_sb_link.st_mode)) ? 0) ? (0120000)))
+        if (!S_ISLNK(dst_sb_link))
             tmp_dst_sb = *dst_sb_link;
         else
         if (x)
         {
-            *? = !((((dst_sb_link.st_mode)) ? 0) ? (0120000));
+            *return_now = !S_ISLNK(dst_sb_link);
         };
     };
 };
 
-cdecl writable_destination(int dst_dirfd, byte* dst_relname, uint mode) -> int
+cdecl writable_destination(int dst_dirfd, byte* dst_relname, int mode) -> int
 {
+    return (S_ISLNK(mode) | can_write_any_file() | faccessat == 0);
 };
 
 cdecl overwrite_ok(cp_options* x, byte* dst_name, int dst_dirfd, byte* dst_relname, stat* dst_sb) -> int
 {
-    if (!?(dst_dirfd, dst_relname, dst_sb.st_mode))
+    if (!writable_destination(dst_dirfd, dst_relname, dst_sb))
     {
         byte[12] perms = 12;
-        strmode(dst_sb.st_mode, perms);
+        strmode(dst_sb, perms);
         perms[10] = '\0';
+        fprintf;
     }
     else
     {
+        fprintf;
     };
     return yesno();
 };
 
 cdecl dest_info_init(cp_options* x) -> void
 {
+    x = hash_initialize;
     if (!x)
         xalloc_die();
 };
 
 cdecl src_info_init(cp_options* x) -> void
 {
+    x = hash_initialize;
     if (!x)
         xalloc_die();
 };
@@ -605,35 +599,43 @@ cdecl src_info_init(cp_options* x) -> void
 cdecl abandon_move(cp_options* x, byte* dst_name, int dst_dirfd, byte* dst_relname, stat* dst_sb) -> int
 {
     affirm(x);
-    return (x.update == UPDATE_NONE | x.update == UPDATE_NONE_FAIL | ((x.interactive == I_ASK_USER | (x.interactive == I_UNSPECIFIED & x & !?(dst_dirfd, dst_relname, dst_sb.st_mode))) & !?(x, dst_name, dst_dirfd, dst_relname, dst_sb)));
+    return (x.update == UPDATE_NONE | x.update == UPDATE_NONE_FAIL | ((x.interactive == I_ASK_USER | (x.interactive == I_UNSPECIFIED & x & !writable_destination(dst_dirfd, dst_relname, dst_sb))) & !overwrite_ok(x, dst_name, dst_dirfd, dst_relname, dst_sb)));
 };
 
 cdecl emit_verbose(byte* format, byte* src, byte* dst, byte* backup_dst_name) -> void
 {
+    printf(format, quotearg_n_style, quotearg_n_style);
+    if (backup_dst_name)
+        printf(gettext(" (backup: %s)"), quotearg_style);
     putchar('\n');
 };
 
 cdecl restore_default_fscreatecon_or_die() -> void
 {
-    if (setfscreatecon(((void*)0)) != 0)
-        error(0, (?__errno_location()), gettext("failed to restore the default file creation context"));
+    if (setfscreatecon != 0)
+        error;
 };
 
 cdecl subst_suffix(byte* str, byte* suffix, byte* newsuffix) -> byte*
 {
-    byte* r;
+    byte* r = ximalloc;
+    memcpy;
+    return memcpy;
 };
 
 cdecl create_hard_link(byte* src_name, int src_dirfd, byte* src_relname, byte* dst_name, int dst_dirfd, byte* dst_relname, int replace, int verbose, int dereference) -> int
 {
-    int err;
+    int err = force_linkat;
     if (0 < err)
     {
-        byte* a_src_name = ((void*)0);
+        byte* a_src_name;
         if (!src_name)
             src_name = a_src_name = subst_suffix(dst_name, dst_relname, src_relname);
+        error(0, err, gettext("cannot create hard link %s to %s"), quotearg_n_style, quotearg_n_style);
         free(a_src_name);
     };
+    if (err < 0 & verbose)
+        printf(gettext("removed %s\n"), quotearg_style);
 };
 
 extern int bool;
@@ -642,8 +644,8 @@ cdecl source_is_dst_backup(byte* srcbase, stat* src_st, int dst_dirfd, byte* dst
     ulong srcbaselen = strlen(srcbase);
     byte* dstbase = last_component(dst_relname);
     ulong dstbaselen = strlen(dstbase);
-    ulong suffixlen;
-    byte* dst_back;
+    ulong suffixlen = strlen;
+    byte* dst_back = subst_suffix;
     stat dst_back_sb;
     int dst_back_status = fstatat(dst_dirfd, dst_back, @dst_back_sb, 0);
     free(dst_back);
@@ -652,7 +654,7 @@ cdecl source_is_dst_backup(byte* srcbase, stat* src_st, int dst_dirfd, byte* dst
 
 cdecl valid_options(cp_options* co) -> void
 {
-    affirm(VALID_BACKUP_TYPE(co));
+    affirm(VALID_BACKUP_TYPE(co.backup_type));
     affirm(((co.sparse_mode) ? SPARSE_NEVER ? (co.sparse_mode) ? SPARSE_AUTO ? (co.sparse_mode) ? SPARSE_ALWAYS));
     affirm(((co.reflink_mode) ? REFLINK_NEVER ? (co.reflink_mode) ? REFLINK_AUTO ? (co.reflink_mode) ? REFLINK_ALWAYS));
     affirm(!(co & co));
@@ -665,6 +667,7 @@ cdecl copy(byte* src_name, byte* dst_name, int dst_dirfd, byte* dst_relname, int
     top_level_src_name = src_name;
     top_level_dst_name = dst_name;
     bool;
+    return copy_internal;
 };
 
 cdecl cp_options_default(cp_options* x) -> void
@@ -675,14 +678,13 @@ cdecl cp_options_default(cp_options* x) -> void
 
 cdecl chown_failure_ok(cp_options* x) -> int
 {
-    return (((?__errno_location()) ? 0 ? (?__errno_location()) ? 0 ? (?__errno_location()) ? 0) & !x);
 };
 
-cdecl cached_umask() -> uint
+cdecl cached_umask() -> int
 {
-    uint mask;
+    int mask;
     int cached;
-    if (!?)
+    if (!cached)
     {
         mask = umask(0);
         umask(mask);

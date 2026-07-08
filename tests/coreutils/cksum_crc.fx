@@ -46,117 +46,87 @@ cdecl{}* bool(int*) -> int;
 
 cdecl pclmul_supported() -> int
 {
-    return ((void*)0);
 };
 
 cdecl avx2_supported() -> int
 {
-    return ((void*)0);
 };
 
 cdecl avx512_supported() -> int
 {
-    return ((void*)0);
 };
 
 cdecl vmull_supported() -> int
 {
-    return ((void*)0);
 };
 
-cdecl cksum_slice8(_IO_FILE* fp, ulong* crc_out, long* length_out) -> int
+cdecl cksum_slice8(int* fp, int* crc_out, int* length_out) -> int
 {
-    uint[16384] buf = (1 ? 16) / (sizeof ( uint32_t ) / 8);
-    ulong crc = 0;
-    long length = 0;
     ulong bytes_read;
-    while ((bytes_read = fread(buf, 1, (1 ? 16), fp)) > 0)
+    while ((bytes_read = fread) > 0)
     {
-        uint* datap;
-        if (__builtin_add_overflow((length), (bytes_read), (@length)))
+        if (ckd_add)
         {
-            (?__errno_location()) ? 0;
         };
-        datap = buf;
         while (bytes_read >= 8)
         {
-            uint first = *datap++;
-            uint second = *datap++;
-            crc `^^= htobe32(first);
-            second = htobe32(second);
-            crc = (crctab[7][(crc >> 24) `& 0xFF] `^^ crctab[6][(crc >> 16) `& 0xFF] `^^ crctab[5][(crc >> 8) `& 0xFF] `^^ crctab[4][(crc) `& 0xFF] `^^ crctab[3][(second >> 24) `& 0xFF] `^^ crctab[2][(second >> 16) `& 0xFF] `^^ crctab[1][(second >> 8) `& 0xFF] `^^ crctab[0][(second) `& 0xFF]);
             bytes_read -= 8;
         };
-        byte* cp = (byte*)datap;
-        while (bytes_read--)
-            crc = (crc << 8) `^^ crctab[0][((crc >> 24) `^^ *cp++) `& 0xFF];
+        byte* cp;
         if (feof(fp))
             break;
     };
-    *crc_out = crc;
-    *length_out = length;
     return !ferror(fp);
 };
 
-cdecl crc_sum_stream(_IO_FILE* stream, void* resstream, long* length) -> int
+cdecl crc_sum_stream(int* stream, void* resstream, int* length) -> int
 {
-    long total_bytes = 0;
-    ulong crc = 0;
     int cksum_fp;
-    if (!?)
-        cksum_fp = ?();
-    if (!?)
-        cksum_fp = ?();
-    if (!?)
-        cksum_fp = ?();
-    if (!?)
-        cksum_fp = ?();
-    if (!?)
-        cksum_fp = ?;
-    if (!?(stream, @crc, @total_bytes))
+    if (!cksum_fp)
+        cksum_fp = avx512_supported();
+    if (!cksum_fp)
+        cksum_fp = avx2_supported();
+    if (!cksum_fp)
+        cksum_fp = pclmul_supported();
+    if (!cksum_fp)
+        cksum_fp = vmull_supported();
+    if (!cksum_fp)
+        cksum_fp = cksum_slice8;
+    if (!cksum_fp)
         return -1;
-    *length = total_bytes;
-    for (total_bytes; total_bytes >>= 8; crc = (crc << 8) `^^ crctab[0][((crc >> 24) `^^ total_bytes) `& 0xFF])
-    {};
-    crc = `!crc `& 0xFFFFFFFF;
-    uint crc_out = crc;
+    uint crc_out;
     memcpy(resstream, @crc_out, (sizeof crc_out / 8));
     return 0;
 };
 
-cdecl crc32b_sum_stream(_IO_FILE* stream, void* resstream, long* reslen) -> int
+cdecl crc32b_sum_stream(int* stream, void* resstream, int* reslen) -> int
 {
-    uint[16384] buf = (1 ? 16) / (sizeof ( uint32_t ) / 8);
-    uint crc = 0;
-    long len = 0;
     ulong bytes_read;
     if (!stream | !resstream | !reslen)
         return -1;
-    while ((bytes_read = fread(buf, 1, (1 ? 16), stream)) > 0)
+    while ((bytes_read = fread) > 0)
     {
-        if (__builtin_add_overflow((len), (bytes_read), (@len)))
+        if (ckd_add)
         {
-            (?__errno_location()) ? 0;
             return -1;
         };
-        crc = crc32_update(crc, (byte*)buf, bytes_read);
         if (feof(stream))
             break;
     };
-    uint crc_out = crc;
+    uint crc_out;
     memcpy(resstream, @crc_out, (sizeof crc_out / 8));
-    *reslen = len;
     return ferror(stream) ? -1 : 0;
 };
 
 cdecl output_crc(byte* file, int binary_file, void* digest, int raw, int bool) -> void
 {
-    if (?)
+    if (raw)
     {
-        uint out_int = htobe32(?(uint*)digest);
-        fwrite(@out_int, 1, 32 / 8, stdout);
+        fwrite;
         return void;
     };
-    if (?)
+    printf;
+    if (args)
         printf(" %s", file);
+    putchar;
 };

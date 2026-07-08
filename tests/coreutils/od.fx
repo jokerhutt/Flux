@@ -32,8 +32,8 @@ macro AUTHORS
 uint DEFAULT_BYTES_PER_BLOCK = 16;
 uint FLOAT16_SUPPORTED = 0;
 uint BF16_SUPPORTED = 0;
-// macro (multi-statement, manual translation needed): PRINT_FIELDS(N, T, FMT_STRING_DECL, ACTION) static void N ( idx_t fields , idx_t blank , void const * block , FMT_STRING_DECL , int width , idx_t pad ) \
-{ T const * p = block ; idx_t pad_remaining = pad ; for ( idx_t i = fields ; blank < i ; i -- ) { idx_t next_pad = pad_at ( fields , i - 1 , pad ) ; int adjusted_width = pad_remaining - next_pad + width ; T x ; if ( input_swap && sizeof ( T ) > 1 ) { union { T x ; char b [ sizeof ( T ) ] ; } u ; for ( idx_t j = 0 ; j < sizeof ( T ) ; j ++ ) u . b [ j ] = ( ( char const * ) p ) [ sizeof ( T ) - 1 - j ] ; x = u . x ; } else x = * p ; p ++ ; ACTION ; pad_remaining = next_pad ; } \
+// macro (multi-statement, manual translation needed): PRINT_FIELDS(N, T, FMT_STRING_DECL, ACTION) static void N ( idx_t fields , idx_t blank , void const * block , FMT_STRING_DECL , int width , idx_t pad ) \
+{ T const * p = block ; idx_t pad_remaining = pad ; for ( idx_t i = fields ; blank < i ; i -- ) { idx_t next_pad = pad_at ( fields , i - 1 , pad ) ; int adjusted_width = pad_remaining - next_pad + width ; T x ; if ( input_swap && sizeof ( T ) > 1 ) { union { T x ; char b [ sizeof ( T ) ] ; } u ; for ( idx_t j = 0 ; j < sizeof ( T ) ; j ++ ) u . b [ j ] = ( ( char const * ) p ) [ sizeof ( T ) - 1 - j ] ; x = u . x ; } else x = * p ; p ++ ; ACTION ; pad_remaining = next_pad ; } \
 }
 macro PRINT_TYPE(N, T)
 {
@@ -51,13 +51,13 @@ enum size_spec
     SHORT = 2,
     INT = 3,
     LONG = 4,
-    LONG_LONG = 4,
-    INTMAX = 4,
-    FLOAT_HALF = 5,
-    FLOAT_SINGLE = 5,
-    FLOAT_DOUBLE = 6,
-    FLOAT_LONG_DOUBLE = 7,
-    N_SIZE_SPECS = 8
+    LONG_LONG = 5,
+    INTMAX = 6,
+    FLOAT_HALF = 7,
+    FLOAT_SINGLE = 7,
+    FLOAT_DOUBLE = 8,
+    FLOAT_LONG_DOUBLE = 9,
+    N_SIZE_SPECS = 10
 };
 
 enum output_format
@@ -77,7 +77,6 @@ uint MAX_INTEGRAL_TYPE_WIDTH = 0;
 
 uint FMT_BYTES_ALLOCATED = 0;
 
-cdecl static_assert(int) -> int;
 cdecl{}* print_function_type(int fields, int blank, void* dat, byte* fmt, int width, int pad) -> void;
 
 struct tspec
@@ -91,7 +90,7 @@ struct tspec
     int pad_width;
 };
 
-int[8] width_bytes = {-1, (sizeof ( unsigned char ) / 8), (sizeof ( unsigned short int ) / 8), (sizeof ( unsigned int ) / 8), (sizeof ( unsigned long int ) / 8), (sizeof ( float ) / 8), (sizeof ( double ) / 8), (sizeof ( long double ) / 8)};
+int[3] width_bytes = {-1, (sizeof ( unsigned char ) / 8), (sizeof ( double ) / 8)};
 byte[4][33] charname = 4;
 int address_base = 8;
 uint MAX_ADDRESS_LENGTH = 0;
@@ -101,11 +100,11 @@ extern int string_min;
 extern int flag_dump_strings;
 extern int traditional;
 extern int flag_pseudo_start;
-long pseudo_offset = intmax_t;
-cdecl format_address_std(long, byte) -> void;
-def{}*(long, byte) -> void format_address = intmax_t;
-long n_bytes_to_skip = intmax_t;
-long end_offset = intmax_t;
+extern int pseudo_offset;
+cdecl format_address_std() -> void;
+def{}*() -> void format_address = format_address_std;
+extern int n_bytes_to_skip;
+int end_offset = -1;
 extern int abbreviate_duplicate_blocks;
 tspec* spec = tspec;
 extern int n_specs;
@@ -113,15 +112,15 @@ extern int n_specs_allocated;
 extern int bytes_per_block;
 extern byte* input_filename;
 extern byte** file_list;
-byte*[2] default_file_list = {"-", ((void*)0)};
-_IO_FILE* in_stream = FILE;
+extern byte** default_file_list;
+extern int* in_stream;
 extern int have_read_stdin;
-size_spec[9] integral_type_size = size_spec;
-size_spec[17] fp_type_size = size_spec;
+size_spec[5] integral_type_size = size_spec;
+size_spec[9] fp_type_size = size_spec;
 extern int input_swap;
 byte[35] short_options = "A:aBbcDdeFfHhIij:LlN:OoS:st:vw::Xx";
-uint TRADITIONAL_OPTION = 128;
-uint ENDIAN_OPTION = 129;
+uint TRADITIONAL_OPTION = 0;
+uint ENDIAN_OPTION = 1;
 
 enum endian_type
 {
@@ -129,155 +128,108 @@ enum endian_type
     endian_big
 };
 
-byte*[3] endian_args = {"little", "big", ((void*)0)};
+extern byte** endian_args;
 endian_type[2] endian_types = endian_type;
-option[12] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\n\
-Write an unambiguous representation, octal bytes by default,\n\
-of FILE to standard output.  With more than one FILE argument,\n\
-concatenate them in the listed order to form the input.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
-        fputs(gettext("\
-\n\
-If first and second call formats both apply, the second format is assumed\n\
-if the last operand begins with + or (if there are 2 operands) a digit.\n\
-An OFFSET operand means -j OFFSET.  LABEL is the pseudo-address\n\
-at first byte printed, incremented when dump is progressing.\n\
-For OFFSET and LABEL, a 0x or 0X prefix indicates hexadecimal;\n\
-suffixes may be . for octal and b for multiply by 512.\n\
-"), stdout);
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("od", gettext("\
-  -A, --address-radix=RADIX\n\
-         output format for file offsets;\n\
-         RADIX is one of [doxn], for Decimal, Octal, Hex or None\n\
+        oputs_("od", gettext("\
+  -A, --address-radix=RADIX\n\
+         output format for file offsets;\n\
+         RADIX is one of [doxn], for Decimal, Octal, Hex or None\n\
 "));
-        oputs_("od", gettext("\
-      --endian={big|little}\n\
-         swap input bytes according the specified order\n\
+        oputs_("od", gettext("\
+      --endian={big|little}\n\
+         swap input bytes according the specified order\n\
 "));
-        oputs_("od", gettext("\
-  -j, --skip-bytes=BYTES\n\
-         skip BYTES input bytes first\n\
+        oputs_("od", gettext("\
+  -j, --skip-bytes=BYTES\n\
+         skip BYTES input bytes first\n\
 "));
-        oputs_("od", gettext("\
-  -N, --read-bytes=BYTES\n\
-         limit dump to BYTES input bytes\n\
+        oputs_("od", gettext("\
+  -N, --read-bytes=BYTES\n\
+         limit dump to BYTES input bytes\n\
 "));
-        oputs_("od", gettext("\
-  -S BYTES, --strings[=BYTES]\n\
-         show only NUL terminated strings\n\
-         of at least BYTES (default 3) printable characters\n\
+        oputs_("od", gettext("\
+  -S BYTES, --strings[=BYTES]\n\
+         show only NUL terminated strings\n\
+         of at least BYTES (default 3) printable characters\n\
 "));
-        oputs_("od", gettext("\
-  -t, --format=TYPE\n\
-         select output format or formats\n\
+        oputs_("od", gettext("\
+  -t, --format=TYPE\n\
+         select output format or formats\n\
 "));
-        oputs_("od", gettext("\
-  -v, --output-duplicates\n\
-         do not use * to mark line suppression\n\
+        oputs_("od", gettext("\
+  -v, --output-duplicates\n\
+         do not use * to mark line suppression\n\
 "));
-        oputs_("od", gettext("\
-  -w[BYTES], --width[=BYTES]\n\
-         output BYTES bytes per output line;\n\
-         32 is implied when BYTES is not specified\n\
+        oputs_("od", gettext("\
+  -w[BYTES], --width[=BYTES]\n\
+         output BYTES bytes per output line;\n\
+         32 is implied when BYTES is not specified\n\
 "));
-        oputs_("od", gettext("\
-      --traditional\n\
-         accept arguments in third form above\n\
+        oputs_("od", gettext("\
+      --traditional\n\
+         accept arguments in third form above\n\
 "));
         oputs_("od", gettext("      --help\n         display this help and exit\n"));
         oputs_("od", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-\n\
-Traditional format specifications may be intermixed; they accumulate:\n\
-"), stdout);
-        oputs_("od", gettext("\
-  -a   same as -t a,  select named characters, ignoring high-order bit\n\
+        fputs;
+        oputs_("od", gettext("\
+  -a   same as -t a,  select named characters, ignoring high-order bit\n\
 "));
-        oputs_("od", gettext("\
-  -b   same as -t o1, select octal bytes\n\
+        oputs_("od", gettext("\
+  -b   same as -t o1, select octal bytes\n\
 "));
-        oputs_("od", gettext("\
-  -c   same as -t c,  select printable characters or backslash escapes\n\
+        oputs_("od", gettext("\
+  -c   same as -t c,  select printable characters or backslash escapes\n\
 "));
-        oputs_("od", gettext("\
-  -d   same as -t u2, select unsigned decimal 2-byte units\n\
+        oputs_("od", gettext("\
+  -d   same as -t u2, select unsigned decimal 2-byte units\n\
 "));
-        oputs_("od", gettext("\
-  -f   same as -t fF, select floats\n\
+        oputs_("od", gettext("\
+  -f   same as -t fF, select floats\n\
 "));
-        oputs_("od", gettext("\
-  -i   same as -t dI, select decimal ints\n\
+        oputs_("od", gettext("\
+  -i   same as -t dI, select decimal ints\n\
 "));
-        oputs_("od", gettext("\
-  -l   same as -t dL, select decimal longs\n\
+        oputs_("od", gettext("\
+  -l   same as -t dL, select decimal longs\n\
 "));
-        oputs_("od", gettext("\
-  -o   same as -t o2, select octal 2-byte units\n\
+        oputs_("od", gettext("\
+  -o   same as -t o2, select octal 2-byte units\n\
 "));
-        oputs_("od", gettext("\
-  -s   same as -t d2, select decimal 2-byte units\n\
+        oputs_("od", gettext("\
+  -s   same as -t d2, select decimal 2-byte units\n\
 "));
-        oputs_("od", gettext("\
-  -x   same as -t x2, select hexadecimal 2-byte units\n\
+        oputs_("od", gettext("\
+  -x   same as -t x2, select hexadecimal 2-byte units\n\
 "));
-        fputs(gettext("\
-\n\
-\n\
-TYPE is made up of one or more of these specifications:\n\
-  a          named character, ignoring high-order bit\n\
-  c          printable character or backslash escape\n\
-"), stdout);
-        fputs(gettext("\
-  d[SIZE]    signed decimal, SIZE bytes per integer\n\
-  f[SIZE]    floating point, SIZE bytes per float\n\
-  o[SIZE]    octal, SIZE bytes per integer\n\
-  u[SIZE]    unsigned decimal, SIZE bytes per integer\n\
-  x[SIZE]    hexadecimal, SIZE bytes per integer\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-SIZE is a number.  For TYPE in [doux], SIZE may also be C for\n\
-sizeof(char), S for sizeof(short), I for sizeof(int) or L for\n\
-sizeof(long).  If TYPE is f, SIZE may also be B for Brain 16 bit,\n\
-H for Half precision float, F for sizeof(float), D for sizeof(double),\n\
-or L for sizeof(long double).\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Adding a z suffix to any type displays printable characters at the end of\n\
-each output line.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-\n\
-BYTES is hex with 0x or 0X prefix, and may have a multiplier suffix:\n\
-  b    512\n\
-  KB   1000\n\
-  K    1024\n\
-  MB   1000*1000\n\
-  M    1024*1024\n\
-and so on for G, T, P, E, Z, Y, R, Q.\n\
-Binary prefixes can be used, too: KiB=K, MiB=M, and so on.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("od");
     };
     exit(status);
 };
 
-cdecl print_n_spaces(long n) -> void
+cdecl print_n_spaces(int n) -> void
 {
     for (0 < n; n--; putchar(' '))
     {};
@@ -285,14 +237,11 @@ cdecl print_n_spaces(long n) -> void
 
 cdecl pad_at(int fields, int i, int pad) -> int
 {
-    long m = ? % ?;
-    return ? / ? * ? + m * ? / ?;
 };
 
 cdecl pad_at_overflow(int fields) -> int
 {
-    long product;
-    return __builtin_mul_overflow((? ? 1), (? ? 1), (@product));
+    return ckd_mul;
 };
 
 cdecl print_s_char(int fields, int blank, void* block, byte* fmt_string, int width, int pad) -> void
@@ -332,7 +281,6 @@ cdecl print_long_long(int fields, int blank, void* block, byte* fmt_string, int 
 
 cdecl print_intmax(int fields, int blank, void* block, byte* fmt_string, int width, int pad) -> void
 {
-    ulong* p = block;
 };
 
 cdecl print_bfloat(int fields, int blank, void* block, int* fmt_string, int width, int pad) -> void
@@ -362,7 +310,7 @@ cdecl print_long_double(int fields, int blank, void* block, int* fmt_string, int
 
 cdecl dump_hexl_mode_trailer(int n_bytes, byte* block) -> void
 {
-    fputs("  >", stdout);
+    fputs;
     putchar('<');
 };
 

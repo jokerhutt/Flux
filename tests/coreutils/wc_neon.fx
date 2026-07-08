@@ -25,15 +25,9 @@
 
 cdecl wc_lines_neon(int fd) -> wc_lines
 {
-    long lines = 0;
-    long bytes = 0;
-    int endlines;
-    while (0)
+    int endlines = vdupq_n_u8('\n');
+    while (true)
     {
-        long bytes_read;
-        if (bytes_read <= 0)
-            return ( struct wc_lines ) { bytes_read == 0 ? 0 : errno , lines , bytes };
-        bytes += bytes_read;
         byte* datap;
         while (8192 <= bytes_read)
         {
@@ -41,10 +35,7 @@ cdecl wc_lines_neon(int fd) -> wc_lines
             {
                 datap += 64;
             };
-            bytes_read -= 8192;
         };
-        byte* end = (byte*)datap + bytes_read;
-        for (byte* p = (byte*)datap; p < end; p++)
-        {};
+        byte* end;
     };
 };

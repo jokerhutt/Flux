@@ -35,9 +35,9 @@ uint START_SIZE = 8191;
 uint CTRL_SIZE = 80;
 struct control
 {
-    long offset;
-    long lines_required;
-    long repeat;
+    int offset;
+    int lines_required;
+    int repeat;
     int argnum;
     int repeat_forever;
     int ignore;
@@ -64,8 +64,8 @@ struct buffer_record
 {
     int bytes_alloc;
     int bytes_used;
-    long start_line;
-    long first_available;
+    int start_line;
+    int first_available;
     int num_lines;
     byte* buffer;
     line* line_start;
@@ -78,19 +78,19 @@ cdecl create_output_file() -> void;
 cdecl delete_all_files() -> void;
 cdecl save_line_to_file(cstring* line) -> void;
 buffer_record* head = buffer_record;
-byte* hold_area = ((void*)0);
-extern int hold_count;
-long last_line_number = intmax_t;
-long current_line = intmax_t;
+extern byte* hold_area;
+int hold_count = 0;
+int last_line_number = 0;
+int current_line = 0;
 extern int have_read_eof;
-byte* filename_space = ((void*)0);
+extern byte* filename_space;
 byte* prefix = "xx";
-byte* suffix = ((void*)0);
+extern byte* suffix;
 int digits = 2;
 int files_created = 0;
-long bytes_written = intmax_t;
+extern int bytes_written;
 extern int* output_stream;
-byte* output_filename = ((void*)0);
+extern byte* output_filename;
 extern byte** global_argv;
 extern int suppress_count;
 extern int remove_files;
@@ -98,20 +98,23 @@ extern int elide_empty_files;
 extern int suppress_matched;
 control* controls = control;
 extern int control_used;
-__sigset_t caught_signals = sigset_t;
-uint SUPPRESS_MATCHED_OPTION = 128;
+extern int caught_signals;
+uint SUPPRESS_MATCHED_OPTION = 0;
 
-option[11] longopts = option;
+struct option;
+extern int longopts;
 cdecl cleanup() -> void
 {
-    __sigset_t oldset;
     close_output_file();
+    sigprocmask;
+    delete_all_files;
+    sigprocmask;
 };
 
 cdecl cleanup_fatal() -> void
 {
     cleanup();
-    exit(0);
+    exit;
 };
 
 cdecl xalloc_die() -> void
@@ -122,7 +125,8 @@ cdecl xalloc_die() -> void
 
 cdecl interrupt_handler(int sig) -> void
 {
-    signal(sig, ((def{}*(int) -> void)0));
+    delete_all_files;
+    signal;
     raise(sig);
 };
 
@@ -130,20 +134,18 @@ cdecl save_to_hold_area(byte* start, int num) -> void
 {
     free(hold_area);
     hold_area = start;
-    hold_count = ?;
+    hold_count = num;
 };
 
 cdecl read_input(byte* dest, int max_n_bytes) -> int
 {
-    if (? == 0)
+    if (max_n_bytes == 0)
         return 0;
-    long bytes_read = safe_read(0, dest, ?);
     if (bytes_read < 0)
     {
-        error(0, (?__errno_location()), gettext("read error"));
+        error;
         cleanup_fatal();
     };
-    return bytes_read;
 };
 
 cdecl clear_line_control(line* p) -> void
@@ -156,7 +158,6 @@ cdecl clear_line_control(line* p) -> void
 cdecl new_line_control() -> line*
 {
     line* p = xmalloc((sizeof * p / 8));
-    p.next = ((void*)0);
     clear_line_control(p);
     return p;
 };
@@ -164,7 +165,7 @@ cdecl new_line_control() -> line*
 cdecl keep_new_line(buffer_record* b, byte* line_start, int line_len) -> void
 {
     line* l;
-    if (b.line_start == ((void*)0))
+    if (b -> line_start == NULL)
         b.line_start = b.curr_line = new_line_control();
     if (b.curr_line == 80)
     {
@@ -173,7 +174,7 @@ cdecl keep_new_line(buffer_record* b, byte* line_start, int line_len) -> void
     };
     l = b.curr_line;
     l[l]. = line_start;
-    l[l]. = ?;
+    l[l]. = line_len;
     l++;
     l++;
 };
@@ -186,21 +187,24 @@ cdecl record_line_starts(buffer_record* b) -> int
     line_start = b.buffer;
     byte* buffer_end = line_start + b;
     *buffer_end = '\n';
-    while (?)
+    while (true)
     {
         byte* line_end = rawmemchr(line_start, '\n');
         if (line_end == buffer_end)
             break;
+        keep_new_line;
         line_start = line_end + 1;
     };
-    if (?)
+    if (bytes_left)
     {
-        if (?)
+        if (have_read_eof)
         {
+            keep_new_line;
         }
         else
+            save_to_hold_area;
     };
-    b.first_available = b.start_line = last_line_number + 1;
+    b = b = last_line_number + 1;
 };
 
 cdecl free_buffer(buffer_record* buf) -> void
@@ -220,20 +224,17 @@ cdecl get_new_buffer(int min_size) -> buffer_record*
 {
     buffer_record* new_buffer = xmalloc((sizeof * new_buffer / 8));
     new_buffer = 0;
-    new_buffer.buffer = xpalloc(((void*)0), @new_buffer, ?, -1, 1);
+    new_buffer.buffer = xpalloc;
     new_buffer = 0;
-    new_buffer.start_line = new_buffer.first_available = last_line_number + 1;
+    new_buffer = new_buffer = last_line_number + 1;
     new_buffer = 0;
-    new_buffer.line_start = new_buffer.curr_line = ((void*)0);
-    new_buffer.next = ((void*)0);
     return new_buffer;
 };
 
 cdecl save_buffer(buffer_record* buf) -> void
 {
-    buf.next = ((void*)0);
     buf.curr_line = buf.line_start;
-    if (head == ((void*)0))
+    if (head == NULL)
         head = buf;
     else
     {
@@ -246,54 +247,52 @@ cdecl save_buffer(buffer_record* buf) -> void
 
 cdecl load_buffer() -> int
 {
-    while (?)
+    while (true)
     {
-        buffer_record* b;
+        buffer_record* b = get_new_buffer;
         byte* p = b.buffer;
-        if (?)
+        if (hold_count)
         {
-            p = mempcpy(p, hold_area, ?);
-            b += ?;
+            p = mempcpy(p, hold_area, hold_count);
+            b += hold_count;
             hold_count = 0;
         };
-        if (?(b) != 0)
+        b += read_input;
+        if (record_line_starts(b) != 0)
         {
             save_buffer(b);
         };
         free_buffer(b);
-        if (?)
+        if (ckd_add)
             xalloc_die();
     };
 };
 
-cdecl get_first_line_in_buffer() -> long
+cdecl get_first_line_in_buffer() -> int
 {
-    if (head == ((void*)0) & !?())
+    if (head == NULL && ! load_buffer ( ))
         return 0;
-    return head.first_available;
+    return head;
 };
 
 cdecl remove_line() -> cstring*
 {
-    buffer_record* prev_buf = ((void*)0);
+    buffer_record* prev_buf;
     cstring* line;
     line* l;
     if (prev_buf)
     {
         free_buffer(prev_buf);
-        prev_buf = ((void*)0);
     };
-    if (head == ((void*)0) & !?())
-        return ((void*)0);
-    if (current_line < head.first_available)
-        current_line = head.first_available;
-    ++(head.first_available);
+    if (current_line < head)
+        current_line = head;
+    ++(head);
     l = head.curr_line;
     line = @l[l];
     if (++l == l)
     {
         head.curr_line = l.next;
-        if (head.curr_line == ((void*)0) | head.curr_line == 0)
+        if (head -> curr_line == NULL || head -> curr_line -> used == 0)
         {
             prev_buf = head;
             head = head.next;
@@ -302,102 +301,90 @@ cdecl remove_line() -> cstring*
     return line;
 };
 
-cdecl find_line(long linenum) -> cstring*
+cdecl find_line(int linenum) -> cstring*
 {
-    if (head == ((void*)0) & !?())
-        return ((void*)0);
-    if (linenum < head.start_line)
-        return ((void*)0);
     for (buffer_record* b = head; ; )
     {
-        if (linenum < b.start_line + b)
+        if (linenum < b + b)
         {
             line* l;
             l = b.line_start;
-            while (?)
+            while (offset >= CTRL_SIZE)
             {
                 l = l.next;
             };
         };
-        if (b.next == ((void*)0) & !?())
-            return ((void*)0);
         b = b.next;
     };
 };
 
 cdecl no_more_lines() -> int
 {
-    return find_line(current_line + 1) == ((void*)0);
 };
 
 cdecl set_input_file(byte* name) -> void
 {
+    if (!streq(name, "-") & fd_reopen < 0)
+        error;
 };
 
-cdecl write_to_file(long last_line, int ignore, int argnum) -> void
+cdecl write_to_file(int last_line, int ignore, int argnum) -> void
 {
     cstring* line;
-    long first_line;
-    long lines;
-    first_line = get_first_line_in_buffer();
-    if (!first_line | first_line > last_line)
+    if (! first_line || first_line > last_line)
     {
         error(0, 0, gettext("%s: line number out of range"), quote(global_argv[argnum]));
         cleanup_fatal();
-    };
-    lines = last_line - first_line;
-    for (long i = 0; i < lines; i++)
-    {
-        line = remove_line();
-        if (line == ((void*)0))
-        {
-            error(0, 0, gettext("%s: line number out of range"), quote(global_argv[argnum]));
-            cleanup_fatal();
-        };
-        if (!?)
-            save_line_to_file(line);
     };
 };
 
 cdecl dump_rest_of_file() -> void
 {
     cstring* line;
-    while ((line = remove_line()) != ((void*)0))
+    while (( line = remove_line ( ) ) != NULL)
         save_line_to_file(line);
 };
 
-cdecl handle_line_error(control* p, long repetition) -> void
+cdecl handle_line_error(control* p, int repetition) -> void
 {
-    void* /* untranslated: char[INT_BUFSIZE_BOUND(<recovery-expr>())] */ buf = INT_BUFSIZE_BOUND(?);
+    void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = INT_BUFSIZE_BOUND;
+    fprintf;
+    if (repetition)
+        fprintf;
+    else
+        fprintf;
     cleanup_fatal();
 };
 
-cdecl process_line_count(control* p, long repetition) -> void
+cdecl process_line_count(control* p, int repetition) -> void
 {
-    long linenum;
-    long last_line_to_save = p.lines_required * (repetition + 1);
     create_output_file();
-    if (?() & ?)
+    if (no_more_lines() & suppress_matched)
         handle_line_error(p, repetition);
-    if (!(linenum = get_first_line_in_buffer()))
+    if (! ( linenum = get_first_line_in_buffer ( ) ))
         handle_line_error(p, repetition);
-    while (linenum++ < last_line_to_save)
+    while (linenum ++ < last_line_to_save)
     {
         cstring* line = remove_line();
-        if (line == ((void*)0))
+        if (line == NULL)
             handle_line_error(p, repetition);
         save_line_to_file(line);
     };
     close_output_file();
-    if (?)
+    if (suppress_matched)
         remove_line();
-    if (?() & !?)
+    if (no_more_lines() & !suppress_matched)
         handle_line_error(p, repetition);
 };
 
-cdecl regexp_error(control* p, long repetition, int ignore) -> void
+cdecl regexp_error(control* p, int repetition, int ignore) -> void
 {
-    if (!?)
+    fprintf;
+    if (repetition)
+        fprintf;
+    else
+        fprintf;
+    if (!ignore)
     {
         dump_rest_of_file();
         close_output_file();
@@ -405,41 +392,40 @@ cdecl regexp_error(control* p, long repetition, int ignore) -> void
     cleanup_fatal();
 };
 
-cdecl process_regexp(control* p, long repetition) -> void
+cdecl process_regexp(control* p, int repetition) -> void
 {
     cstring* line;
-    long break_line;
     bool;
-    int ret;
-    if (?)
+    if (! ignore)
         create_output_file();
-    if (p.offset >= 0)
+    if (p >= 0)
     {
-        while (?)
+        while (true)
         {
             line = find_line(++current_line);
-            if (line == ((void*)0))
+            if (line == NULL)
             {
                 if (p)
                 {
-                    if (?)
+                    if (! ignore)
                     {
                         dump_rest_of_file();
                         close_output_file();
                     };
-                    exit(0);
+                    exit;
                 }
                 else
+                    regexp_error;
             };
-            if (ret == -2)
+            if (ret == - 2)
             {
                 error(0, 0, gettext("error in regular expression search"));
                 cleanup_fatal();
             };
-            if (ret == -1)
+            if (ret == - 1)
             {
                 line = remove_line();
-                if (?)
+                if (! ignore)
                     save_line_to_file(line);
             }
             else
@@ -448,37 +434,36 @@ cdecl process_regexp(control* p, long repetition) -> void
     }
     else
     {
-        while (?)
+        while (true)
         {
             line = find_line(++current_line);
-            if (line == ((void*)0))
+            if (line == NULL)
             {
                 if (p)
                 {
-                    if (?)
+                    if (! ignore)
                     {
                         dump_rest_of_file();
                         close_output_file();
                     };
-                    exit(0);
+                    exit;
                 }
                 else
+                    regexp_error;
             };
-            if (ret == -2)
+            if (ret == - 2)
             {
                 error(0, 0, gettext("error in regular expression search"));
                 cleanup_fatal();
             };
-            if (ret != -1)
+            if (ret != - 1)
                 break;
         };
     };
-    break_line = current_line + p.offset;
-    if (?)
+    write_to_file;
+    if (! ignore)
         close_output_file();
-    if (p.offset > 0)
-        current_line = break_line;
-    if (?)
+    if (suppress_matched)
         remove_line();
 };
 
@@ -501,21 +486,21 @@ cdecl make_filename(int num) -> byte*
 
 cdecl new_control_record() -> control*
 {
-    int control_allocated;
+    int control_allocated = 0;
     control* p;
-    if (? == ?)
-        controls = xpalloc(controls, @?, 1, -1, (sizeof * controls / 8));
-    p = @controls[?++];
-    p.repeat = 0;
-    p.lines_required = 0;
-    p.offset = 0;
+    if (control_used == control_allocated)
+        controls = xpalloc(controls, @control_allocated, 1, -1, (sizeof * controls / 8));
+    p = @controls[control_used++];
+    p = 0;
+    p = 0;
+    p = 0;
     return p;
 };
 
 cdecl check_for_offset(control* p, byte* str, byte* num) -> void
 {
-    if (?)
-        error(0, 0, gettext("%s: integer expected after delimiter"), quote(str));
+    if (xstrtoimax ( num , NULL , 10 , & p -> offset , "" ) != LONGINT_OK)
+        error;
 };
 
 cdecl parse_repeat_count(int argnum, control* p, byte* str) -> void
@@ -523,15 +508,14 @@ cdecl parse_repeat_count(int argnum, control* p, byte* str) -> void
     byte* end;
     end = str + strlen(str) - 1;
     if (*end != '}')
-        error(0, 0, gettext("%s: '}' is required in repeat count"), quote(str));
+        error;
     *end = '\0';
     if (str + 1 == end - 1 & *(str + 1) == '*')
     else
     {
-        ulong val;
-        if (?)
+        if (xstrtoumax ( str + 1 , NULL , 10 , & val , "" ) != LONGINT_OK || ckd_add ( & p -> repeat , val , 0 ))
         {
-            error(0, 0, gettext("%s}: integer required between '{' and '}'"), quote(global_argv[argnum]));
+            error;
         };
     };
     *end = '}';
@@ -544,15 +528,14 @@ cdecl extract_regexp(int argnum, int ignore, byte* str) -> control*
     control* p;
     byte* err;
     closing_delim = strrchr(str + 1, delim);
-    if (closing_delim == ((void*)0))
-        error(0, 0, gettext("%s: closing delimiter '%c' missing"), str, delim);
+    if (closing_delim == NULL)
+        error;
     p = new_control_record();
     p.argnum = argnum;
-    p = ?;
-    p.re_compiled = ((void*)0);
-    p.re_compiled = 0;
-    p.re_compiled = xmalloc((0 ? 0 ? 0) ? 1);
-    p.re_compiled = ((void*)0);
+    p = ignore;
+    p. = 0;
+    p. = xmalloc;
+    err = re_compile_pattern;
     if (err)
     {
         error(0, 0, gettext("%s: invalid regular expression: %s"), quote(str), err);
@@ -566,28 +549,25 @@ cdecl extract_regexp(int argnum, int ignore, byte* str) -> control*
 cdecl parse_patterns(int argc, int start, byte** argv) -> void
 {
     control* p;
-    long last_val = 0;
+    int last_val = 0;
     for (int i = start; i < argc; i++)
     {
         if (*argv[i] == '/' | *argv[i] == '%')
         {
-            p = ?(i, *argv[i] == '%', argv[i]);
+            p = extract_regexp(i, *argv[i] == '%', argv[i]);
         }
         else
         {
             p = new_control_record();
             p.argnum = i;
-            ulong val;
-            if (?)
-                error(0, 0, gettext("%s: invalid pattern"), quote(argv[i]));
+            if (xstrtoumax ( argv [ i ] , NULL , 10 , & val , "" ) != LONGINT_OK || INTMAX_MAX < val)
+                error;
             if (val == 0)
-                error(0, 0, gettext("%s: line number must be greater than zero"), argv[i]);
+                error;
             if (val < last_val)
-                error(0, 0, gettext("line number %s is smaller than preceding line number,"), quote(argv[i]), last_val);
+                error;
             if (val == last_val)
                 error(0, 0, gettext("warning: line number %s is the same as preceding line number"), quote(argv[i]));
-            last_val = val;
-            p.lines_required = val;
         };
         if (i + 1 < argc & *argv[i + 1] == '{')
         {
@@ -605,31 +585,25 @@ cdecl get_format_flags(byte* format, int* flags_ptr) -> int
     int flags = 0;
     for (; ; )
     {
-        switch (?)
+        switch (format [ count ])
         {
             case ('-')
             {
-                case ('0')
-                {
-                    goto _switch_end_139188839541584;
-                }
             }
             case ('\'')
             {
                 flags `|= FLAG_THOUSANDS;
+                break switch;
             }
-            goto _switch_end_139188839541584;
             case ('#')
             {
                 flags `|= FLAG_ALTERNATIVE;
+                break switch;
             }
-            goto _switch_end_139188839541584;
             default
             {
-                *flags_ptr = flags;
             };
         };
-        label _switch_end_139188839541584:
     };
 };
 
@@ -641,42 +615,26 @@ cdecl check_format_conv_type(byte* format, int flags) -> void
     {
         case ('d')
         {
-            case ('i')
-            {
-                goto _switch_end_139188839541968;
-            }
         }
         case ('u')
         {
             *format = 'd';
+            break switch;
         }
-        goto _switch_end_139188839541968;
         case ('o')
         {
-            case ('x')
-            {
-                case ('X')
-                {
-                    compatible_flags = FLAG_ALTERNATIVE;
-                }
-            }
+            break switch;
         }
-        goto _switch_end_139188839541968;
         case (0)
         {
-            error(0, 0, gettext("missing conversion specifier in suffix"));
+            error;
         }
         default
         {
-            if (((?__ctype_b_loc())[(int)((ch))] ? (uint)_ISprint))
-                error(0, 0, gettext("invalid conversion specifier in suffix: %c"), ch);
-            else
-                error(0, 0, gettext("invalid conversion specifier in suffix: \\%.3o"), ch);
         };
     };
-    label _switch_end_139188839541968:
     if (flags `& `!compatible_flags)
-        error(0, 0, gettext("invalid flags in conversion specification: %%%c%c"), (flags `& `!compatible_flags `& FLAG_ALTERNATIVE ? '#' : '\''), ch);
+        error;
 };
 
 cdecl max_out(byte* format) -> int
@@ -684,10 +642,10 @@ cdecl max_out(byte* format) -> int
     bool;
     for (byte* f = format; *f; f++)
     {};
-    if (?)
-        error(0, 0, gettext("missing %% conversion specification in suffix"));
-    int maxlen = snprintf(((void*)0), 0, format, 0);
-    if (?)
+    if (! percent)
+        error;
+    int maxlen = snprintf;
+    if (! ( 0 <= maxlen && maxlen <= IDX_MAX ))
         xalloc_die();
     return maxlen;
 };
@@ -696,79 +654,29 @@ cdecl main(int argc, byte** argv) -> int
 {
     int optc;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     global_argv = argv;
-    while ((optc = getopt_long(argc, argv, "f:b:kn:sqz", longopts, ((void*)0))) != -1)
-        switch (optc)
-        {
-            case ('f')
-            {
-                prefix = optarg;
-            }
-            goto _switch_end_139188839923280;
-            case ('b')
-            {
-                suffix = optarg;
-            }
-            goto _switch_end_139188839923280;
-            case ('k')
-            {
-            }
-            goto _switch_end_139188839923280;
-            case ('n')
-            {
-            }
-            goto _switch_end_139188839923280;
-            case ('s')
-            {
-                case ('q')
-                {
-                }
-            }
-            goto _switch_end_139188839923280;
-            case ('z')
-            {
-            }
-            goto _switch_end_139188839923280;
-            case (SUPPRESS_MATCHED_OPTION)
-            {
-            }
-            goto _switch_end_139188839923280;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188839923280;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188839923280;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188839923280:
     if (argc - optind < 2)
     {
         if (argc <= optind)
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (ckd_add)
         xalloc_die();
-    set_input_file(argv[optind++]);
-    parse_patterns(argc, optind, argv);
+    filename_space = ximalloc;
+    set_input_file;
+    parse_patterns;
     {
         sigaction act;
         sigemptyset(@caught_signals);
         for (int i = 0; i < nsigs; i++)
         {
-            sigaction(term_sig[i], ((void*)0), @?);
-            if (?. != ((def{}*(int) -> void)0))
+            sigaction;
+            if (act . sa_handler != SIG_IGN)
                 sigaddset(@caught_signals, term_sig[i]);
         };
         act. = interrupt_handler;
@@ -778,54 +686,58 @@ cdecl main(int argc, byte** argv) -> int
         {};
     };
     split_file();
-    if (close(0) != 0)
+    if (close != 0)
     {
-        error(0, (?__errno_location()), gettext("read error"));
+        error;
         cleanup_fatal();
     };
-    return 0;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        fputs;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("csplit", gettext("\
-  -b, --suffix-format=FORMAT\n\
-         use sprintf FORMAT instead of %02d\n\
+        oputs_("csplit", gettext("\
+  -b, --suffix-format=FORMAT\n\
+         use sprintf FORMAT instead of %02d\n\
 "));
-        oputs_("csplit", gettext("\
-  -f, --prefix=PREFIX\n\
-         use PREFIX instead of 'xx'\n\
+        oputs_("csplit", gettext("\
+  -f, --prefix=PREFIX\n\
+         use PREFIX instead of 'xx'\n\
 "));
-        oputs_("csplit", gettext("\
-  -k, --keep-files\n\
-         do not remove output files on errors\n\
+        oputs_("csplit", gettext("\
+  -k, --keep-files\n\
+         do not remove output files on errors\n\
 "));
-        oputs_("csplit", gettext("\
-      --suppress-matched\n\
-         suppress the lines matching PATTERN\n\
+        oputs_("csplit", gettext("\
+      --suppress-matched\n\
+         suppress the lines matching PATTERN\n\
 "));
-        oputs_("csplit", gettext("\
-  -n, --digits=DIGITS\n\
-         use specified number of digits instead of 2\n\
+        oputs_("csplit", gettext("\
+  -n, --digits=DIGITS\n\
+         use specified number of digits instead of 2\n\
 "));
-        oputs_("csplit", gettext("\
-  -s, --quiet, --silent\n\
-         do not print counts of output file sizes\n\
+        oputs_("csplit", gettext("\
+  -s, --quiet, --silent\n\
+         do not print counts of output file sizes\n\
 "));
-        oputs_("csplit", gettext("\
-  -z, --elide-empty-files\n\
-         suppress empty output files\n\
+        oputs_("csplit", gettext("\
+  -z, --elide-empty-files\n\
+         suppress empty output files\n\
 "));
         oputs_("csplit", gettext("      --help\n         display this help and exit\n"));
         oputs_("csplit", gettext("      --version\n         output version information and exit\n"));
+        fputs;
         emit_ancillary_info("csplit");
     };
     exit(status);

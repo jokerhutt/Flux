@@ -29,42 +29,43 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-option[7] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Create the DIRECTORY(ies), if they do not already exist.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("mkdir", gettext("\
-  -m, --mode=MODE\n\
-         set file mode (as in chmod), not a=rwx - umask\n\
+        oputs_("mkdir", gettext("\
+  -m, --mode=MODE\n\
+         set file mode (as in chmod), not a=rwx - umask\n\
 "));
-        oputs_("mkdir", gettext("\
-  -p, --parents\n\
-         no error if existing, make parent directories as needed,\n\
-         with their file modes unaffected by any -m option\n\
+        oputs_("mkdir", gettext("\
+  -p, --parents\n\
+         no error if existing, make parent directories as needed,\n\
+         with their file modes unaffected by any -m option\n\
 "));
-        oputs_("mkdir", gettext("\
-  -v, --verbose\n\
-         print a message for each created directory\n\
+        oputs_("mkdir", gettext("\
+  -v, --verbose\n\
+         print a message for each created directory\n\
 "));
-        oputs_("mkdir", gettext("\
-  -Z\n\
-         set SELinux security context of each created directory\n\
-         to the default type\n\
+        oputs_("mkdir", gettext("\
+  -Z\n\
+         set SELinux security context of each created directory\n\
+         to the default type\n\
 "));
-        oputs_("mkdir", gettext("\
-      --context[=CTX]\n\
-         like -Z, or if CTX is specified then set the\n\
-         SELinux or SMACK security context to CTX\n\
+        oputs_("mkdir", gettext("\
+      --context[=CTX]\n\
+         like -Z, or if CTX is specified then set the\n\
+         SELinux or SMACK security context to CTX\n\
 "));
         oputs_("mkdir", gettext("      --help\n         display this help and exit\n"));
         oputs_("mkdir", gettext("      --version\n         output version information and exit\n"));
@@ -76,10 +77,10 @@ Create the DIRECTORY(ies), if they do not already exist.\n\
 struct mkdir_options
 {
     def{}*(byte*, byte*, void*) -> int make_ancestor_function;
-    uint umask_ancestor;
-    uint umask_self;
-    uint mode;
-    uint mode_bits;
+    int umask_ancestor;
+    int umask_self;
+    int mode;
+    int mode_bits;
     selabel_handle* set_security_context;
     byte* created_directory_format;
 };
@@ -87,23 +88,25 @@ struct mkdir_options
 cdecl announce_mkdir(byte* dir, void* options) -> void
 {
     mkdir_options* o = options;
+    if (o.created_directory_format)
+        prog_fprintf;
 };
 
 cdecl make_ancestor(byte* dir, byte* component, void* options) -> int
 {
     mkdir_options* o = options;
-    if (o.umask_ancestor != o.umask_self)
-        umask(o.umask_ancestor);
-    int r;
-    if (o.umask_ancestor != o.umask_self)
+    if (o.set_security_context & defaultcon < 0 & !ignorable_ctx_err)
+        error;
+    if (o != o)
+        umask(o);
+    int r = mkdir;
+    if (o != o)
     {
-        int mkdir_errno = (?__errno_location());
-        umask(o.umask_self);
-        (?__errno_location()) ? mkdir_errno;
+        int mkdir_errno;
+        umask(o);
     };
     if (r == 0)
     {
-        r = (o.umask_ancestor `& 0) != 0;
         announce_mkdir(dir, options);
     };
     return r;
@@ -114,59 +117,59 @@ cdecl process_dir(byte* dir, savewd* wd, void* options) -> int
     mkdir_options* o = options;
     if (o.set_security_context)
     {
+        if (!o.make_ancestor_function & defaultcon < 0 & !ignorable_ctx_err)
+            error;
     };
     int ret;
-    if (ret == 0 & o.set_security_context & o.make_ancestor_function)
+    if (ret == EXIT_SUCCESS && o -> set_security_context && o -> make_ancestor_function)
     {
+        if (!restorecon & !ignorable_ctx_err)
+            error;
     };
     return ret;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* specified_mode = ((void*)0);
+    byte* specified_mode;
     int optc;
-    byte* scontext = ((void*)0);
+    byte* scontext;
     mkdir_options options;
-    options.make_ancestor_function = ((void*)0);
-    options.mode_bits = 0;
-    options.created_directory_format = ((void*)0);
-    options.set_security_context = ((void*)0);
+    options = 0;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "pm:vZ", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('p')
             {
                 options.make_ancestor_function = make_ancestor;
+                break switch;
             }
-            goto _switch_end_139188839610192;
             case ('m')
             {
-                specified_mode = optarg;
+                break switch;
             }
-            goto _switch_end_139188839610192;
             case ('v')
             {
                 options.created_directory_format = gettext("created directory %s");
+                break switch;
             }
-            goto _switch_end_139188839610192;
             case ('Z')
             {
                 if (is_smack_enabled())
                 {
-                    scontext = optarg;
                 }
                 elif (is_selinux_enabled() > 0)
                 {
                     if (optarg)
-                        scontext = optarg;
                     else
                     {
+                        options.set_security_context = selabel_open;
                         if (!options.set_security_context)
-                            error(0, (?__errno_location()), gettext("warning: ignoring --context"));
+                            error;
                     };
                 };
                 else
@@ -174,29 +177,28 @@ cdecl main(int argc, byte** argv) -> int
                     {
                         error(0, 0, gettext("warning: ignoring --context; "));
                     };
+                break switch;
             }
-            goto _switch_end_139188839610192;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188839610192;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188839610192;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188839610192:
     };
     if (optind == argc)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     if (scontext)
     {
@@ -206,25 +208,22 @@ cdecl main(int argc, byte** argv) -> int
         else
             ret = setfscreatecon(scontext);
         if (ret < 0)
-            error(0, (?__errno_location()), gettext("failed to set default file creation context to %s"), quote(scontext));
+            error;
     };
     if (options.make_ancestor_function | specified_mode)
     {
-        uint umask_value = umask(0);
-        options.umask_ancestor = umask_value `& `!(0 ? 0);
         if (specified_mode)
         {
             mode_change* change = mode_compile(specified_mode);
             if (!change)
-                error(0, 0, gettext("invalid mode %s"), quote(specified_mode));
-            options.umask_self = umask_value `& `!options.mode;
+                error;
+            options = mode_adjust;
             free(change);
         }
         else
         {
-            options.umask_self = umask_value;
         };
-        umask(options.umask_self);
+        umask(options);
     };
-    return savewd_process_files(argc - optind, argv + optind, process_dir, @options);
+    return savewd_process_files;
 };

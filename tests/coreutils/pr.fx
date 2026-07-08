@@ -338,7 +338,7 @@ cdecl read_line(COLUMN* p) -> int;
 cdecl print_page() -> int;
 cdecl print_stored(COLUMN* p) -> int;
 cdecl open_file(byte* name, COLUMN* p) -> int;
-cdecl skip_to_page(ulong page) -> int;
+cdecl skip_to_page(int page) -> int;
 cdecl print_header() -> void;
 cdecl pad_across_to(int position) -> void;
 cdecl add_line_number(COLUMN* p) -> void;
@@ -402,10 +402,10 @@ extern int output_position;
 extern int input_position;
 extern int failed_opens;
 int columns = 1;
-ulong first_page_number = uintmax_t;
-ulong last_page_number = uintmax_t;
+int first_page_number = 0;
+extern int last_page_number;
 int files_ready_to_read = 0;
-ulong page_number = uintmax_t;
+extern int page_number;
 extern int line_number;
 extern int numbered_lines;
 byte number_separator = '\t';
@@ -436,14 +436,15 @@ extern byte* file_text;
 extern int header_width_available;
 extern byte* clump_buff;
 extern int last_line;
-uint COLUMNS_OPTION = 128;
-uint PAGES_OPTION = 129;
+uint COLUMNS_OPTION = 0;
+uint PAGES_OPTION = 1;
 
 byte[53] short_options = "-0123456789D:FJN:S::TW:abcde::fh:i::l:mn::o:rs::tvw:";
-option[27] long_options = option;
+struct option;
+extern int long_options;
 cdecl integer_overflow() -> void
 {
-    error(0, 0, gettext("integer overflow"));
+    error;
 };
 
 cdecl cols_ready_to_print() -> int
@@ -460,14 +461,14 @@ cdecl cols_ready_to_print() -> int
 cdecl first_last_page(int oi, byte c, byte* pages) -> int
 {
     byte* p;
-    ulong first;
-    ulong last = (0);
+    if (err != LONGINT_OK && err != LONGINT_INVALID_SUFFIX_CHAR)
+        xstrtol_fatal;
     if (*p == ':')
     {
         byte* p1 = p + 1;
+        if (err != LONGINT_OK)
+            xstrtol_fatal;
     };
-    first_page_number = first;
-    last_page_number = last;
 };
 
 cdecl parse_column_count(byte* s) -> void
@@ -482,12 +483,12 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     bool;
     byte** file_names;
-    byte* column_count_string = ((void*)0);
+    byte* column_count_string;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     n_files = 0;
-    file_names = (argc > 1 ? xnmalloc(argc - 1, (sizeof ( char * ) / 8)) : ((void*)0));
-    while (?)
+    while (true)
     {
         int oi = -1;
         int c = getopt_long(argc, argv, short_options, long_options, @oi);
@@ -495,170 +496,10 @@ cdecl main(int argc, byte** argv) -> int
             break;
         if (c_isdigit(c))
         {
+            if (n_digits + 1 >= n_alloc)
+                column_count_string = xpalloc;
             continue;
         };
-        switch (c)
-        {
-            case (1)
-            {
-                if (!(first_page_number == 0 & *optarg == '+' & ?(-2, '+', optarg + 1)))
-                    file_names[n_files++] = optarg;
-            }
-            goto _switch_end_139188838867536;
-            case (PAGES_OPTION)
-            {
-                {
-                    if (!optarg)
-                        error(0, 0, gettext("'--pages=FIRST_PAGE[:LAST_PAGE]' missing argument"));
-                    elif (!?(oi, 0, optarg))
-                        error(0, 0, gettext("invalid page range %s"), quote(optarg));
-                    goto _switch_end_139188838867536;
-                };
-            }
-            case (COLUMNS_OPTION)
-            {
-                {
-                    parse_column_count(optarg);
-                    free(column_count_string);
-                    column_count_string = ((void*)0);
-                    goto _switch_end_139188838867536;
-                };
-            }
-            case ('a')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('b')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('c')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('d')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('D')
-            {
-                date_format = optarg;
-            }
-            goto _switch_end_139188838867536;
-            case ('e')
-            {
-                if (optarg)
-                    getoptarg(optarg, 'e', @input_tab_char, @chars_per_input_tab);
-            }
-            goto _switch_end_139188838867536;
-            case ('f')
-            {
-                case ('F')
-                {
-                }
-            }
-            goto _switch_end_139188838867536;
-            case ('h')
-            {
-                custom_header = optarg;
-            }
-            goto _switch_end_139188838867536;
-            case ('i')
-            {
-                if (optarg)
-                    getoptarg(optarg, 'i', @output_tab_char, @chars_per_output_tab);
-            }
-            goto _switch_end_139188838867536;
-            case ('J')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('l')
-            {
-                lines_per_page = getoptnum(optarg, 1, gettext("'-l PAGE_LENGTH' invalid number of lines"));
-            }
-            goto _switch_end_139188838867536;
-            case ('m')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('n')
-            {
-            }
-            if (optarg)
-                getoptarg(optarg, 'n', @number_separator, @chars_per_number);
-            goto _switch_end_139188838867536;
-            case ('N')
-            {
-            }
-            start_line_num = getoptnum(optarg, (?0 ? 0), gettext("'-N NUMBER' invalid starting line number"));
-            goto _switch_end_139188838867536;
-            case ('o')
-            {
-                chars_per_margin = getoptnum(optarg, 0, gettext("'-o MARGIN' invalid line offset"));
-            }
-            goto _switch_end_139188838867536;
-            case ('r')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('s')
-            {
-            }
-            if (!? & optarg)
-                separator_string(optarg);
-            goto _switch_end_139188838867536;
-            case ('S')
-            {
-            }
-            col_sep_string = "";
-            col_sep_length = 0;
-            if (optarg)
-                separator_string(optarg);
-            goto _switch_end_139188838867536;
-            case ('t')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('T')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188838867536;
-            case ('w')
-            {
-            }
-            {
-                int tmp_cpl = getoptnum(optarg, 1, gettext("'-w PAGE_WIDTH' invalid number of characters"));
-                if (!?)
-                    chars_per_line = tmp_cpl;
-            };
-            goto _switch_end_139188838867536;
-            case ('W')
-            {
-            }
-            chars_per_line = getoptnum(optarg, 1, gettext("'-W PAGE_WIDTH' invalid number of characters"));
-            goto _switch_end_139188838867536;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188838867536;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188838867536;
-            default
-            {
-                usage(0);
-            };
-            goto _switch_end_139188838867536;
-        };
-        label _switch_end_139188838867536:
     };
     if (column_count_string)
     {
@@ -666,45 +507,41 @@ cdecl main(int argc, byte** argv) -> int
         free(column_count_string);
     };
     if (!date_format)
-        date_format = (getenv("POSIXLY_CORRECT") & !hard_locale(0) ? "%b %e %H:%M %Y" : "%Y-%m-%d %H:%M");
+        date_format = (getenv("POSIXLY_CORRECT") & !hard_locale ? "%b %e %H:%M %Y" : "%Y-%m-%d %H:%M");
     localtz = tzalloc(getenv("TZ"));
     if (first_page_number == 0)
         first_page_number = 1;
-    if (? & ?)
-        error(0, 0, gettext("cannot specify number of columns when printing in parallel"));
-    if (? & ?)
-        error(0, 0, gettext("cannot specify both printing across and printing in parallel"));
-    if (?)
+    if (parallel_files & explicit_columns)
+        error;
+    if (parallel_files & print_across_flag)
+        error;
+    if (old_options)
     {
-        if (?)
+        if (old_w)
         {
-            if (? | ?)
+            if (parallel_files | explicit_columns)
             {
             }
             else
         }
-        elif (!?)
+        elif (!use_col_separator)
         {
-            if (?)
+            if (old_s && ( parallel_files || explicit_columns ))
             {
-                if (!?)
+                if (!truncate_lines)
                 {
                 }
                 else
             };
         };
     };
-    for (optind < argc; optind++; )
-    {
-        file_names[n_files++] = argv[optind];
-    };
     if (n_files == 0)
     {
-        print_files(0, ((void*)0));
+        print_files;
     }
     else
     {
-        if (?)
+        if (parallel_files)
             print_files(n_files, file_names);
         else
         {
@@ -713,9 +550,8 @@ cdecl main(int argc, byte** argv) -> int
         };
     };
     cleanup();
-    if (?)
-        error(0, (?__errno_location()), gettext("standard input"));
-    return ? ? 1 : 0;
+    if (have_read_stdin && fclose ( stdin ) == EOF)
+        error;
 };
 
 cdecl close_file(COLUMN* p) -> void
@@ -724,14 +560,15 @@ cdecl close_file(COLUMN* p) -> void
     int i;
     if (p.status == CLOSED)
         return void;
-    int err = (?__errno_location());
+    int err;
     if (!ferror(p))
         err = 0;
-    if (fileno(p) == 0)
+    if (fileno ( p -> fp ) == STDIN_FILENO)
         clearerr(p);
-    elif (fclose(p) != 0 & !err)
-        err = (?__errno_location());
-    if (!?)
+    else
+    if (err)
+        error;
+    if (!parallel_files)
     {
         for (q = column_vector , i = columns; i; ++q , --i)
         {
@@ -754,10 +591,10 @@ cdecl hold_file(COLUMN* p) -> void
 {
     COLUMN* q;
     int i;
-    if (!?)
+    if (!parallel_files)
         for (q = column_vector , i = columns; i; ++q , --i)
         {
-            if (?)
+            if (storing_columns)
                 q.status = FF_FOUND;
             else
                 q.status = ON_HOLD;
@@ -774,7 +611,7 @@ cdecl reset_status() -> void
     COLUMN* p;
     for (p = column_vector; i; --i , ++p)
     {};
-    if (?)
+    if (storing_columns)
     {
         if (column_vector.status == CLOSED)
             files_ready_to_read = 0;
@@ -787,14 +624,14 @@ cdecl init_page() -> void
 {
     int j;
     COLUMN* p;
-    if (?)
+    if (storing_columns)
     {
         store_columns();
         for (j = columns - 1 , p = column_vector; j; --j , ++p)
         {
             p.lines_to_print = p.lines_stored;
         };
-        if (?)
+        if (balance_columns)
         {
             p.lines_to_print = p.lines_stored;
         }
@@ -821,7 +658,7 @@ cdecl align_column(COLUMN* p) -> void
         pad_across_to(padding_not_printed - col_sep_length);
         padding_not_printed = 0;
     };
-    if (?)
+    if (use_col_separator)
         print_sep_string();
     if (p)
         add_line_number(p);
@@ -847,136 +684,139 @@ cdecl print_clump(COLUMN* p, int n, byte* clump) -> void
 {
     while (n--)
         (p.char_func)(*clump++);
-    if (?)
+    if (ferror)
         write_error();
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("pr", gettext("\n\
-  +FIRST_PAGE[:LAST_PAGE], --pages=FIRST_PAGE[:LAST_PAGE]\n\
-         begin [stop] printing with page FIRST_[LAST_]PAGE\n\
+        oputs_("pr", gettext("\n\
+  +FIRST_PAGE[:LAST_PAGE], --pages=FIRST_PAGE[:LAST_PAGE]\n\
+         begin [stop] printing with page FIRST_[LAST_]PAGE\n\
 "));
-        oputs_("pr", gettext("\
-  -COLS, --columns=COLS\n\
-         output COLS columns and print columns down, unless -a is used.\n\
-         Balance number of lines in the columns on each page\n\
+        oputs_("pr", gettext("\
+  -COLS, --columns=COLS\n\
+         output COLS columns and print columns down, unless -a is used.\n\
+         Balance number of lines in the columns on each page\n\
 "));
-        oputs_("pr", gettext("\
-  -a, --across\n\
-         print columns across rather than down, used together with -COLS\n\
+        oputs_("pr", gettext("\
+  -a, --across\n\
+         print columns across rather than down, used together with -COLS\n\
 "));
-        oputs_("pr", gettext("\
-  -c, --show-control-chars\n\
-         use hat notation (^G) and octal backslash notation\n\
+        oputs_("pr", gettext("\
+  -c, --show-control-chars\n\
+         use hat notation (^G) and octal backslash notation\n\
 "));
-        oputs_("pr", gettext("\
-  -d, --double-space\n\
-         double space the output\n\
+        oputs_("pr", gettext("\
+  -d, --double-space\n\
+         double space the output\n\
 "));
-        oputs_("pr", gettext("\
-  -D, --date-format=FORMAT\n\
-         use FORMAT for the header date\n\
+        oputs_("pr", gettext("\
+  -D, --date-format=FORMAT\n\
+         use FORMAT for the header date\n\
 "));
-        oputs_("pr", gettext("\
-  -e[CHAR[WIDTH]], --expand-tabs[=CHAR[WIDTH]]\n\
-         expand input CHARs (TABs) to tab WIDTH (8)\n\
+        oputs_("pr", gettext("\
+  -e[CHAR[WIDTH]], --expand-tabs[=CHAR[WIDTH]]\n\
+         expand input CHARs (TABs) to tab WIDTH (8)\n\
 "));
-        oputs_("pr", gettext("\
-  -F, -f, --form-feed\n\
-         use form feeds instead of newlines to separate pages\n\
-         (by a 3-line page header with -F or a 5-line header\n\
-         and trailer without -F)\n\
+        oputs_("pr", gettext("\
+  -F, -f, --form-feed\n\
+         use form feeds instead of newlines to separate pages\n\
+         (by a 3-line page header with -F or a 5-line header\n\
+         and trailer without -F)\n\
 "));
-        oputs_("pr", gettext("\
-  -h, --header=HEADER\n\
-         use a centered HEADER instead of filename in page header,\n\
-         -h \"\" prints a blank line, don't use -h\"\"\n\
+        oputs_("pr", gettext("\
+  -h, --header=HEADER\n\
+         use a centered HEADER instead of filename in page header,\n\
+         -h \"\" prints a blank line, don't use -h\"\"\n\
 "));
-        oputs_("pr", gettext("\
-  -i[CHAR[WIDTH]], --output-tabs[=CHAR[WIDTH]]\n\
-         replace spaces with CHARs (TABs) to tab WIDTH (8)\n\
+        oputs_("pr", gettext("\
+  -i[CHAR[WIDTH]], --output-tabs[=CHAR[WIDTH]]\n\
+         replace spaces with CHARs (TABs) to tab WIDTH (8)\n\
 "));
-        oputs_("pr", gettext("\
-  -J, --join-lines\n\
-         merge full lines, turns off -W line truncation,\n\
-         no column alignment, --sep-string[=STRING] sets separators\n\
+        oputs_("pr", gettext("\
+  -J, --join-lines\n\
+         merge full lines, turns off -W line truncation,\n\
+         no column alignment, --sep-string[=STRING] sets separators\n\
 "));
-        oputs_("pr", gettext("\
-  -l, --length=PAGE_LENGTH\n\
-         set the page length to PAGE_LENGTH (66) lines\n\
-         (default number of lines of text 56, and with -F 63).\n\
-         implies -t if PAGE_LENGTH <= 10\n\
+        oputs_("pr", gettext("\
+  -l, --length=PAGE_LENGTH\n\
+         set the page length to PAGE_LENGTH (66) lines\n\
+         (default number of lines of text 56, and with -F 63).\n\
+         implies -t if PAGE_LENGTH <= 10\n\
 "));
-        oputs_("pr", gettext("\
-  -m, --merge\n\
-         print all files in parallel, one in each column,\n\
-         truncate lines, but join lines of full length with -J\n\
+        oputs_("pr", gettext("\
+  -m, --merge\n\
+         print all files in parallel, one in each column,\n\
+         truncate lines, but join lines of full length with -J\n\
 "));
-        oputs_("pr", gettext("\
-  -n[SEP[DIGITS]], --number-lines[=SEP[DIGITS]]\n\
-         number lines, use DIGITS (5) digits, then SEP (TAB),\n\
-         default counting starts with 1st line of input file\n\
+        oputs_("pr", gettext("\
+  -n[SEP[DIGITS]], --number-lines[=SEP[DIGITS]]\n\
+         number lines, use DIGITS (5) digits, then SEP (TAB),\n\
+         default counting starts with 1st line of input file\n\
 "));
-        oputs_("pr", gettext("\
-  -N, --first-line-number=NUMBER\n\
-         start counting with NUMBER at 1st line of first\n\
-         page printed (see +FIRST_PAGE)\n\
+        oputs_("pr", gettext("\
+  -N, --first-line-number=NUMBER\n\
+         start counting with NUMBER at 1st line of first\n\
+         page printed (see +FIRST_PAGE)\n\
 "));
-        oputs_("pr", gettext("\
-  -o, --indent=MARGIN\n\
-         offset each line with MARGIN (zero) spaces, do not\n\
-         affect -w or -W, MARGIN will be added to PAGE_WIDTH\n\
+        oputs_("pr", gettext("\
+  -o, --indent=MARGIN\n\
+         offset each line with MARGIN (zero) spaces, do not\n\
+         affect -w or -W, MARGIN will be added to PAGE_WIDTH\n\
 "));
-        oputs_("pr", gettext("\
-  -r, --no-file-warnings\n\
-         omit warning when a file cannot be opened\n\
+        oputs_("pr", gettext("\
+  -r, --no-file-warnings\n\
+         omit warning when a file cannot be opened\n\
 "));
-        oputs_("pr", gettext("\
-  -s[CHAR], --separator[=CHAR]\n\
-         separate columns by a single character, default for CHAR\n\
-         is the <TAB> character without -w and \'no char\' with -w.\n\
-         -s[CHAR] turns off line truncation of all 3 column\n\
-         options (-COLS|-a -COLS|-m) except -w is set\n\
+        oputs_("pr", gettext("\
+  -s[CHAR], --separator[=CHAR]\n\
+         separate columns by a single character, default for CHAR\n\
+         is the <TAB> character without -w and \'no char\' with -w.\n\
+         -s[CHAR] turns off line truncation of all 3 column\n\
+         options (-COLS|-a -COLS|-m) except -w is set\n\
 "));
-        oputs_("pr", gettext("\
-  -S[STRING], --sep-string[=STRING]\n\
-         separate columns by STRING,\n\
-         without -S: Default separator <TAB> with -J and <space>\n\
-         otherwise (same as -S\" \"), no effect on column options\n\
+        oputs_("pr", gettext("\
+  -S[STRING], --sep-string[=STRING]\n\
+         separate columns by STRING,\n\
+         without -S: Default separator <TAB> with -J and <space>\n\
+         otherwise (same as -S\" \"), no effect on column options\n\
 "));
-        oputs_("pr", gettext("\
-  -t, --omit-header\n\
-         omit page headers and trailers; implied if PAGE_LENGTH <= 10\n\
+        oputs_("pr", gettext("\
+  -t, --omit-header\n\
+         omit page headers and trailers; implied if PAGE_LENGTH <= 10\n\
 "));
-        oputs_("pr", gettext("\
-  -T, --omit-pagination\n\
-         omit page headers and trailers,\n\
-         eliminate any pagination by form feeds set in input files\n\
+        oputs_("pr", gettext("\
+  -T, --omit-pagination\n\
+         omit page headers and trailers,\n\
+         eliminate any pagination by form feeds set in input files\n\
 "));
-        oputs_("pr", gettext("\
-  -v, --show-nonprinting\n\
-         use octal backslash notation\n\
+        oputs_("pr", gettext("\
+  -v, --show-nonprinting\n\
+         use octal backslash notation\n\
 "));
-        oputs_("pr", gettext("\
-  -w, --width=PAGE_WIDTH\n\
-         set page width to PAGE_WIDTH (72) characters for\n\
-         multiple text-column output only, -s[char] turns off (72)\n\
+        oputs_("pr", gettext("\
+  -w, --width=PAGE_WIDTH\n\
+         set page width to PAGE_WIDTH (72) characters for\n\
+         multiple text-column output only, -s[char] turns off (72)\n\
 "));
-        oputs_("pr", gettext("\
-  -W, --page-width=PAGE_WIDTH\n\
-         set page width to PAGE_WIDTH (72) characters always,\n\
-         truncate lines, except -J option is set,\n\
-         no interference with -S or -s\n\
+        oputs_("pr", gettext("\
+  -W, --page-width=PAGE_WIDTH\n\
+         set page width to PAGE_WIDTH (72) characters always,\n\
+         truncate lines, except -J option is set,\n\
+         no interference with -S or -s\n\
 "));
         oputs_("pr", gettext("      --help\n         display this help and exit\n"));
         oputs_("pr", gettext("      --version\n         output version information and exit\n"));

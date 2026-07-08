@@ -42,19 +42,22 @@ macro AUTHORS
 
 uint PRINTENV_FAILURE = 2;
 
-option[4] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        oputs_("printenv", gettext("\
-  -0, --null\n\
-         end each output line with NUL, not newline\n\
+        printf;
+        oputs_("printenv", gettext("\
+  -0, --null\n\
+         end each output line with NUL, not newline\n\
 "));
         oputs_("printenv", gettext("      --help\n         display this help and exit\n"));
         oputs_("printenv", gettext("      --version\n         output version information and exit\n"));
@@ -68,46 +71,42 @@ cdecl main(int argc, byte** argv) -> int
 {
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(PRINTENV_FAILURE);
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "+0", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('0')
             {
+                break switch;
             }
-            goto _switch_end_139188819513296;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188819513296;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188819513296;
             default
             {
-                usage(PRINTENV_FAILURE);
             };
         };
-        label _switch_end_139188819513296:
     };
     bool;
     if (optind >= argc)
     {
-        for (byte** env; *env != ((void*)0); ++env)
-        {
-            fputs(*env, stdout);
-        };
     }
     else
     {
         int matches = 0;
-        for (int i = optind; i < argc; ++i)
+        for (int i; i < argc; ++i)
         {
             bool;
             if (strchr(argv[i], '='))
@@ -120,7 +119,8 @@ cdecl main(int argc, byte** argv) -> int
                 {
                     if (*ep == '=' & *ap == '\0')
                     {
-                        fputs(ep + 1, stdout);
+                        fputs;
+                        putchar;
                         break;
                     };
                 };

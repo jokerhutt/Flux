@@ -46,87 +46,80 @@ enum SIGNAL_MODE
 };
 
 SIGNAL_MODE* signals = SIGNAL_MODE;
-__sigset_t block_signals = sigset_t;
-__sigset_t unblock_signals = sigset_t;
+extern int block_signals;
+extern int unblock_signals;
 extern int sig_mask_changed;
 extern int report_signal_handling;
 byte[19] shortopts = "+a:C:iS:u:v0";
-uint DEFAULT_SIGNAL_OPTION = 128;
-uint IGNORE_SIGNAL_OPTION = 129;
-uint BLOCK_SIGNAL_OPTION = 130;
-uint LIST_SIGNAL_HANDLING_OPTION = 131;
+uint DEFAULT_SIGNAL_OPTION = 0;
+uint IGNORE_SIGNAL_OPTION = 1;
+uint BLOCK_SIGNAL_OPTION = 2;
+uint LIST_SIGNAL_HANDLING_OPTION = 3;
 
-option[14] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Set each NAME to VALUE in the environment and run COMMAND.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("env", gettext("\
-  -a, --argv0=ARG\n\
-         pass ARG as the zeroth argument of COMMAND\n\
+        oputs_("env", gettext("\
+  -a, --argv0=ARG\n\
+         pass ARG as the zeroth argument of COMMAND\n\
 "));
-        oputs_("env", gettext("\
-  -i, --ignore-environment\n\
-         start with an empty environment\n\
+        oputs_("env", gettext("\
+  -i, --ignore-environment\n\
+         start with an empty environment\n\
 "));
-        oputs_("env", gettext("\
-  -0, --null\n\
-         end each output line with NUL, not newline\n\
+        oputs_("env", gettext("\
+  -0, --null\n\
+         end each output line with NUL, not newline\n\
 "));
-        oputs_("env", gettext("\
-  -u, --unset=NAME\n\
-         remove variable from the environment\n\
+        oputs_("env", gettext("\
+  -u, --unset=NAME\n\
+         remove variable from the environment\n\
 "));
-        oputs_("env", gettext("\
-  -C, --chdir=DIR\n\
-         change working directory to DIR\n\
+        oputs_("env", gettext("\
+  -C, --chdir=DIR\n\
+         change working directory to DIR\n\
 "));
-        oputs_("env", gettext("\
-  -S, --split-string=S\n\
-         process and split S into separate arguments;\n\
-         used to pass multiple arguments on shebang lines\n\
+        oputs_("env", gettext("\
+  -S, --split-string=S\n\
+         process and split S into separate arguments;\n\
+         used to pass multiple arguments on shebang lines\n\
 "));
-        oputs_("env", gettext("\
-      --block-signal[=SIG]\n\
-         block delivery of SIG signal(s) to COMMAND\n\
+        oputs_("env", gettext("\
+      --block-signal[=SIG]\n\
+         block delivery of SIG signal(s) to COMMAND\n\
 "));
-        oputs_("env", gettext("\
-      --default-signal[=SIG]\n\
-         reset handling of SIG signal(s) to the default\n\
+        oputs_("env", gettext("\
+      --default-signal[=SIG]\n\
+         reset handling of SIG signal(s) to the default\n\
 "));
-        oputs_("env", gettext("\
-      --ignore-signal[=SIG]\n\
-         set handling of SIG signal(s) to do nothing\n\
+        oputs_("env", gettext("\
+      --ignore-signal[=SIG]\n\
+         set handling of SIG signal(s) to do nothing\n\
 "));
-        oputs_("env", gettext("\
-      --list-signal-handling\n\
-         list non default signal handling to standard error\n\
+        oputs_("env", gettext("\
+      --list-signal-handling\n\
+         list non default signal handling to standard error\n\
 "));
-        oputs_("env", gettext("\
-  -v, --debug\n\
-         print verbose information for each processing step\n\
+        oputs_("env", gettext("\
+  -v, --debug\n\
+         print verbose information for each processing step\n\
 "));
         oputs_("env", gettext("      --help\n         display this help and exit\n"));
         oputs_("env", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-A mere - implies -i.  If no COMMAND, print the resulting environment.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-SIG may be a signal name like 'PIPE', or a signal number like '13'.\n\
-Without SIG, all known signals are included.  Multiple signals can be\n\
-comma-separated.  An empty SIG argument is a no-op.\n\
-"), stdout);
+        fputs;
+        fputs;
         emit_exec_status("env");
         emit_ancillary_info("env");
     };
@@ -135,9 +128,9 @@ comma-separated.  An empty SIG argument is a no-op.\n\
 
 cdecl append_unset_var(byte* var) -> void
 {
-    if (? == ?)
-        usvars = xpalloc(usvars, @?, 1, -1, (sizeof * usvars / 8));
-    usvars[?++] = var;
+    if (usvars_used == usvars_alloc)
+        usvars = xpalloc(usvars, @usvars_alloc, 1, -1, (sizeof * usvars / 8));
+    usvars[usvars_used++] = var;
 };
 
 cdecl unset_envvars() -> void
@@ -154,18 +147,17 @@ cdecl scan_varname(byte* str) -> int*
         if (*end == '}')
             return end;
     };
-    return ((void*)0);
 };
 
 cdecl extract_varname(byte* str) -> byte*
 {
-    byte* p = ?(str);
-    if (!p)
-        return ((void*)0);
-    if (?)
+    byte* p = scan_varname(str);
+    if (i >= vnlen)
     {
         free(varname);
+        varname = xpalloc;
     };
+    memcpy;
     return varname;
 };
 
@@ -180,11 +172,13 @@ struct splitbuf
 
 cdecl splitbuf_grow(splitbuf* ss) -> void
 {
+    ss.argv = xpalloc(ss.argv, @ss, 1, MIN, 2 * (sizeof * ss -> argv / 8));
+    memmove;
 };
 
 cdecl splitbuf_append_byte(splitbuf* ss, byte c) -> void
 {
-    if (?)
+    if (ss -> half_alloc * sizeof * ss -> argv <= string_bytes)
         splitbuf_grow(ss);
 };
 
@@ -206,8 +200,6 @@ cdecl splitbuf_finishup(splitbuf* ss) -> byte**
     int argc = ss.argc;
     byte** argv = ss.argv;
     byte* stringbase = (byte*)(ss.argv + ss);
-    for (int i = 1; i < argc; i++)
-    {};
     return argv;
 };
 
@@ -219,7 +211,6 @@ cdecl build_argv(byte* str, int extra_argc, int* argc) -> byte**
     ss.argc = 1;
     ss = extra_argc + 2;
     ss.extra_argc = extra_argc;
-    ss.argv[ss.argc] = ((void*)0);
     while (*str)
     {
         byte newc = *str;
@@ -227,163 +218,130 @@ cdecl build_argv(byte* str, int extra_argc, int* argc) -> byte**
         {
             case ('\'')
             {
-                if (?)
-                    goto _switch_end_139188883026640;
+                if (dq)
+                    break switch;
+                check_start_new_arg(@ss);
+                ++str;
+                continue;
             }
-            check_start_new_arg(@ss);
-            ++str;
-            continue;
             case ('"')
             {
-                if (?)
-                    goto _switch_end_139188883026640;
+                if (sq)
+                    break switch;
+                check_start_new_arg(@ss);
+                ++str;
+                continue;
             }
-            check_start_new_arg(@ss);
-            ++str;
-            continue;
             case (' ')
             {
-                case ('\t')
-                {
-                    case ('\n')
-                    {
-                        case ('\v')
-                        {
-                            case ('\f')
-                            {
-                                case ('\r')
-                                {
-                                    if (?)
-                                        goto _switch_end_139188883026640;
-                                }
-                            }
-                        }
-                    }
-                }
+                str += strspn(str, " \t\n\v\f\r");
+                continue;
             }
-            str += strspn(str, " \t\n\v\f\r");
-            continue;
             case ('#')
             {
                 if (!ss)
-                    goto _switch_end_139188883026640;
+                    break switch;
+                goto eos;
             }
-            goto eos;
             case ('\\')
             {
-                if (?)
-                    goto _switch_end_139188883026640;
-            }
-            newc = *++str;
-            switch (newc)
-            {
-                case ('"')
+                if (sq && str [ 1 ] != '\\' && str [ 1 ] != '\'')
+                    break switch;
+                newc = *++str;
+                switch (newc)
                 {
-                    case ('#')
+                    case ('"')
                     {
-                        case ('$')
-                        {
-                            case ('\'')
-                            {
-                                case ('\\')
-                                {
-                                    goto _switch_end_139188883015888;
-                                }
-                            }
-                        }
                     }
-                }
-                case ('_')
-                {
-                    if (?)
+                    case ('_')
                     {
-                        ++str;
-                        continue;
+                        if (! dq)
+                        {
+                            ++str;
+                            continue;
+                        };
+                        newc = ' ';
+                        break switch;
+                    }
+                    case ('c')
+                    {
+                        if (dq)
+                            error(EXIT_CANCELED, 0, gettext("'\\c' must not appear in double-quoted -S string"));
+                        goto eos;
+                    }
+                    case ('f')
+                    {
+                        newc = '\f';
+                        break switch;
+                    }
+                    case ('n')
+                    {
+                        newc = '\n';
+                        break switch;
+                    }
+                    case ('r')
+                    {
+                        newc = '\r';
+                        break switch;
+                    }
+                    case ('t')
+                    {
+                        newc = '\t';
+                        break switch;
+                    }
+                    case ('v')
+                    {
+                        newc = '\v';
+                        break switch;
+                    }
+                    case ('\0')
+                    {
+                        error(EXIT_CANCELED, 0, gettext("invalid backslash at end of string in -S"));
+                    }
+                    default
+                    {
                     };
-                }
-                newc = ' ';
-                goto _switch_end_139188883015888;
-                case ('c')
-                {
-                    if (?)
-                        error(EXIT_CANCELED, 0, gettext("'\\c' must not appear in double-quoted -S string"));
-                }
-                goto eos;
-                case ('f')
-                {
-                    newc = '\f';
-                }
-                goto _switch_end_139188883015888;
-                case ('n')
-                {
-                    newc = '\n';
-                }
-                goto _switch_end_139188883015888;
-                case ('r')
-                {
-                    newc = '\r';
-                }
-                goto _switch_end_139188883015888;
-                case ('t')
-                {
-                    newc = '\t';
-                }
-                goto _switch_end_139188883015888;
-                case ('v')
-                {
-                    newc = '\v';
-                }
-                goto _switch_end_139188883015888;
-                case ('\0')
-                {
-                    error(EXIT_CANCELED, 0, gettext("invalid backslash at end of string in -S"));
-                }
-                default
-                {
-                    error(EXIT_CANCELED, 0, gettext("invalid sequence '\\%c' in -S"), newc);
                 };
-            };
-            label _switch_end_139188883015888:
-            goto _switch_end_139188883026640;
+                break switch;
+            }
             case ('$')
             {
-                if (?)
-                    goto _switch_end_139188883026640;
-            }
-            {
-                byte* n = extract_varname(str);
-                if (!n)
-                    error(EXIT_CANCELED, 0, gettext("only ${VARNAME} expansion is supported, error at: %s"), str);
-                byte* v = getenv(n);
-                if (v)
+                if (sq)
+                    break switch;
                 {
-                    check_start_new_arg(@ss);
-                    do
+                    byte* n = extract_varname(str);
+                    if (!n)
+                        error(EXIT_CANCELED, 0, gettext("only ${VARNAME} expansion is supported, error at: %s"), str);
+                    byte* v = getenv(n);
+                    if (v)
                     {
-                        if (?)
-                            fprintf(stderr, "expanding ${%s} into %s\n", n, quote(v));
+                        check_start_new_arg(@ss);
+                        do
+                        {
+                            if (?)
+                                fprintf;
+                        }
+                        while (0);
+                        for (*v; v++; splitbuf_append_byte(@ss, *v))
+                        {};
                     }
-                    while (0);
-                    for (*v; v++; splitbuf_append_byte(@ss, *v))
-                    {};
-                }
-                else
-                    do
-                    {
-                        if (?)
-                            fprintf(stderr, "replacing ${%s} with null string\n", n);
-                    }
-                    while (0);
-                str = strchr(str, '}') + 1;
-                continue;
-            };
+                    else
+                        do
+                        {
+                            if (?)
+                                fprintf;
+                        }
+                        while (0);
+                    str = strchr(str, '}') + 1;
+                    continue;
+                };
+            }
         };
-        label _switch_end_139188883026640:
         check_start_new_arg(@ss);
         splitbuf_append_byte(@ss, newc);
         ++str;
     };
-    if (?)
+    if (dq || sq)
         error(EXIT_CANCELED, 0, gettext("no terminating quote in -S string"));
     label eos:
     splitbuf_append_byte(@ss, '\0');
@@ -397,18 +355,18 @@ cdecl parse_split_string(byte* str, int* orig_optind, int* orig_argc, byte*** or
     int newargc;
     byte** newargv = build_argv(str, extra_argc, @newargc);
     *newargv = (*orig_argv)[0];
-    if (? & 1 < newargc)
+    if (dev_debug & 1 < newargc)
     {
         do
         {
             if (?)
-                fprintf(stderr, "split -S:  %s\n", quote(str));
+                fprintf;
         }
         while (0);
         do
         {
             if (?)
-                fprintf(stderr, " into:    %s\n", quote(newargv[1]));
+                fprintf;
         }
         while (0);
         for (int i = 2; i < newargc; i++)
@@ -433,8 +391,10 @@ cdecl parse_signal_action_params(byte* arg, int set_default) -> void
         int signum = operand2sig(opt_sig);
         if (signum == 0)
             error(0, 0, gettext("%s: invalid signal"), quote(opt_sig));
-        signals[signum] = ? ? DEFAULT : IGNORE;
-        opt_sig = strtok(((void*)0), ",");
+        if (signum <= 0)
+            usage;
+        signals[signum] = set_default ? DEFAULT : IGNORE;
+        opt_sig = strtok;
     };
     free(optarg_writable);
 };
@@ -447,10 +407,10 @@ cdecl parse_block_signal_params(byte* arg, int block) -> void
 {
     if (!arg)
     {
-        sigfillset(? ? @block_signals : @unblock_signals);
-        sigemptyset(? ? @unblock_signals : @block_signals);
+        sigfillset(block ? @block_signals : @unblock_signals);
+        sigemptyset(block ? @unblock_signals : @block_signals);
     }
-    elif (!?)
+    elif (!sig_mask_changed)
     {
         sigemptyset(@block_signals);
         sigemptyset(@unblock_signals);
@@ -464,232 +424,150 @@ cdecl parse_block_signal_params(byte* arg, int block) -> void
         int signum = operand2sig(opt_sig);
         if (signum == 0)
             error(0, 0, gettext("%s: invalid signal"), quote(opt_sig));
-        if (sigaddset(? ? @block_signals : @unblock_signals, signum) == -1)
+        if (signum <= 0)
+            usage;
+        if (sigaddset(block ? @block_signals : @unblock_signals, signum) == -1)
         {
-            if (?)
-                error(EXIT_CANCELED, (?__errno_location()), gettext("failed to block signal %d"), signum);
+            if (block)
+                error;
         }
         else
-            sigdelset(? ? @unblock_signals : @block_signals, signum);
-        opt_sig = strtok(((void*)0), ",");
+            sigdelset(block ? @unblock_signals : @block_signals, signum);
+        opt_sig = strtok;
     };
     free(optarg_writable);
 };
 
 cdecl set_signal_proc_mask() -> void
 {
-    __sigset_t set;
-    sigemptyset(@set);
-    if (sigprocmask(0, ((void*)0), @set))
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to get signal process mask"));
-    if (?)
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set signal process mask"));
+    sigemptyset;
+    if (sigprocmask)
+        error;
+    if (sigprocmask)
+        error;
 };
 
 cdecl list_signal_handling() -> void
 {
-    __sigset_t set;
-    sigemptyset(@set);
-    if (sigprocmask(0, ((void*)0), @set))
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to get signal process mask"));
+    sigemptyset;
+    if (sigprocmask)
+        error;
 };
 
 cdecl initialize_signals() -> void
 {
+    signals = xmalloc;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
     bool;
-    byte* newdir = ((void*)0);
-    byte* argv0 = ((void*)0);
+    byte* newdir;
+    byte* argv0;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXIT_CANCELED);
+    atexit;
     initialize_signals();
     int optc;
-    while ((optc = getopt_long(argc, argv, shortopts, longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('a')
-            {
-                argv0 = optarg;
-            }
-            goto _switch_end_139188838432976;
-            case ('i')
-            {
-            }
-            goto _switch_end_139188838432976;
-            case ('u')
-            {
-                append_unset_var(optarg);
-            }
-            goto _switch_end_139188838432976;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188838432976;
-            case ('0')
-            {
-            }
-            goto _switch_end_139188838432976;
-            case (DEFAULT_SIGNAL_OPTION)
-            {
-            }
-            goto _switch_end_139188838432976;
-            case (IGNORE_SIGNAL_OPTION)
-            {
-            }
-            goto _switch_end_139188838432976;
-            case (BLOCK_SIGNAL_OPTION)
-            {
-            }
-            goto _switch_end_139188838432976;
-            case (LIST_SIGNAL_HANDLING_OPTION)
-            {
-            }
-            goto _switch_end_139188838432976;
-            case ('C')
-            {
-                newdir = optarg;
-            }
-            goto _switch_end_139188838432976;
-            case ('S')
-            {
-                parse_split_string(optarg, @optind, @argc, @argv);
-            }
-            goto _switch_end_139188838432976;
-            case (' ')
-            {
-                case ('\t')
-                {
-                    case ('\n')
-                    {
-                        case ('\v')
-                        {
-                            case ('\f')
-                            {
-                                case ('\r')
-                                {
-                                    error(0, 0, gettext("invalid option -- '%c'"), optc);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            error(0, 0, gettext("use -[v]S to pass options in shebang lines"));
-            usage(EXIT_CANCELED);
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188838432976;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188838432976;
-            default
-            {
-                usage(EXIT_CANCELED);
-            };
-        };
-        label _switch_end_139188838432976:
     };
-    if (optind < argc & streq(argv[optind], "-"))
+    if (optind < argc && streq ( argv [ optind ] , "-" ))
     {
-        ++optind;
     };
-    if (?)
+    if (ignore_environment)
     {
         do
         {
             if (?)
-                fprintf(stderr, "cleaning environ\n");
+                fprintf;
         }
         while (0);
-        byte*[1] dummy_environ = {((void*)0)};
+        byte** dummy_environ;
     }
     else
         unset_envvars();
     byte* eq;
-    while (optind < argc & (eq = strchr(argv[optind], '=')))
+    while (optind < argc && ( eq = strchr ( argv [ optind ] , '=' ) ))
     {
         do
         {
             if (?)
-                fprintf(stderr, "setenv:   %s\n", argv[optind]);
+                fprintf;
         }
         while (0);
-        if (putenv(argv[optind]))
+        if (putenv)
         {
             *eq = '\0';
-            error(EXIT_CANCELED, (?__errno_location()), gettext("cannot set %s"), quote(argv[optind]));
+            error;
         };
-        optind++;
     };
     bool;
-    if (?)
+    if (opt_nul_terminate_output && program_specified)
     {
         error(0, 0, gettext("cannot specify --null (-0) with command"));
         usage(EXIT_CANCELED);
     };
-    if (?)
+    if (newdir && ! program_specified)
     {
         error(0, 0, gettext("must specify command with --chdir (-C)"));
         usage(EXIT_CANCELED);
     };
-    if (?)
+    if (argv0 && ! program_specified)
     {
         error(0, 0, gettext("must specify command with --argv0 (-a)"));
         usage(EXIT_CANCELED);
     };
-    if (?)
+    if (! program_specified)
     {
         for (byte** e; *e; ++e)
         {
-            fputs(*e, stdout);
+            fputs;
+            putchar;
         };
-        return 0;
     };
     reset_signal_handlers();
-    if (?)
+    if (sig_mask_changed)
         set_signal_proc_mask();
-    if (?)
+    if (report_signal_handling)
         list_signal_handling();
     if (newdir)
     {
         do
         {
+            if (?)
+                fprintf;
         }
         while (0);
+        if (chdir(newdir) != 0)
+            error;
     };
-    byte* program = argv[optind];
+    byte* program;
     if (argv0)
     {
         do
         {
+            if (?)
+                fprintf;
         }
         while (0);
-        argv[optind] = argv0;
     };
-    if (?)
+    if (dev_debug)
     {
         do
         {
             if (?)
-                fprintf(stderr, "executing: %s\n", program);
+                fprintf;
         }
         while (0);
-        for (int i = optind; i < argc; ++i)
+        for (int i; i < argc; ++i)
         {};
     };
-    execvp(program, @argv[optind]);
-    int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-    error(0, (?__errno_location()), "%s", quote(program));
+    execvp;
+    int exit_status;
+    error;
     if (exit_status == EXIT_ENOENT & strpbrk(program, " \t\n\v\f\r"))
         error(0, 0, gettext("use -[v]S to pass options in shebang lines"));
     return exit_status;

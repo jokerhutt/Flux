@@ -25,35 +25,36 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-option[6] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print NAME with any leading directory components removed.\n\
-If specified, also remove a trailing SUFFIX.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("basename", gettext("\
-  -a, --multiple\n\
-         support multiple arguments and treat each as a NAME\n\
+        oputs_("basename", gettext("\
+  -a, --multiple\n\
+         support multiple arguments and treat each as a NAME\n\
 "));
-        oputs_("basename", gettext("\
-  -s, --suffix=SUFFIX\n\
-         remove a trailing SUFFIX; implies -a\n\
+        oputs_("basename", gettext("\
+  -s, --suffix=SUFFIX\n\
+         remove a trailing SUFFIX; implies -a\n\
 "));
-        oputs_("basename", gettext("\
-  -z, --zero\n\
-         end each output line with NUL, not newline\n\
+        oputs_("basename", gettext("\
+  -z, --zero\n\
+         end each output line with NUL, not newline\n\
 "));
         oputs_("basename", gettext("      --help\n         display this help and exit\n"));
         oputs_("basename", gettext("      --version\n         output version information and exit\n"));
+        printf;
         emit_ancillary_info("basename");
     };
     exit(status);
@@ -62,7 +63,7 @@ If specified, also remove a trailing SUFFIX.\n\
 cdecl remove_suffix(byte* name, byte* suffix, int suffix_len) -> void
 {
     byte* np = name + strlen(name);
-    byte* sp = suffix + ?;
+    byte* sp = suffix + suffix_len;
     while (np > name & sp > suffix)
         if (*--np != *--sp)
             return void;
@@ -74,10 +75,10 @@ cdecl perform_basename(byte* string, byte* suffix, int suffix_len, int use_nuls)
 {
     byte* name = base_name(string);
     strip_trailing_slashes(name);
-    if (0 < ? & IS_RELATIVE_FILE_NAME(name) & !FILE_SYSTEM_PREFIX_LEN(name))
-        remove_suffix(name, suffix, ?);
-    fputs(name, stdout);
-    putchar(? ? '\0' : '\n');
+    if (0 < suffix_len & IS_RELATIVE_FILE_NAME(name) & !FILE_SYSTEM_PREFIX_LEN(name))
+        remove_suffix(name, suffix, suffix_len);
+    fputs;
+    putchar(use_nuls ? '\0' : '\n');
     free(name);
 };
 
@@ -85,61 +86,60 @@ cdecl main(int argc, byte** argv) -> int
 {
     bool;
     bool;
-    byte* suffix = ((void*)0);
+    byte* suffix;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (?)
+    setlocale;
+    atexit;
+    while (true)
     {
-        int c = getopt_long(argc, argv, "+as:z", longopts, ((void*)0));
+        int c = getopt_long;
         if (c == -1)
             break;
         switch (c)
         {
             case ('s')
             {
-                suffix = optarg;
             }
             case ('a')
             {
+                break switch;
             }
-            goto _switch_end_139188837754960;
             case ('z')
             {
+                break switch;
             }
-            goto _switch_end_139188837754960;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837754960;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837754960;
             default
             {
-                usage(0);
             };
         };
-            label _switch_end_139188837754960:
     };
     if (argc < optind + 1)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (! multiple_names)
     {
         if (optind + 2 == argc)
-            suffix = argv[optind + 1];
         elif (optind + 2 < argc)
         {
-            error(0, 0, gettext("extra operand %s"), quote(argv[optind + 2]));
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quote);
+            usage;
         };
     };
-    byte** file = argv + optind;
+    byte** file;
     int n_files;
-    return 0;
+    for (int i = 0; i < n_files; ++i)
+    {};
 };

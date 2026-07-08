@@ -37,18 +37,20 @@ extern int no_create;
 extern int use_ref;
 extern int no_dereference;
 extern int amtime_now;
-timespec[2] newtime = timespec;
+struct timespec;
+extern int newtime;
 extern byte* ref_file;
-uint TIME_OPTION = 128;
+uint TIME_OPTION = 0;
 
-option[8] longopts = option;
-byte*[6] time_args = {"atime", "access", "use", "mtime", "modify", ((void*)0)};
+struct option;
+extern int longopts;
+extern byte** time_args;
 int[5] time_masks = {1, 1, 1, 2, 2};
 cdecl date_relative(byte* flex_date, timespec now) -> timespec
 {
     timespec result;
     if (!parse_datetime(@result, flex_date, @now))
-        error(0, 0, gettext("invalid date format %s"), quote(flex_date));
+        error;
     return result;
 };
 
@@ -58,12 +60,9 @@ cdecl touch(byte* file) -> int
     int open_errno = 0;
     timespec* t = newtime;
     if (streq(file, "-"))
-        fd = 0;
-    elif (!(? | ?))
+    elif (!(no_create | no_dereference))
     {
-        fd = fd_reopen(0, file, 0 ? 0 ? 0 ? 0, (0 ? 0 ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0)));
-        if (fd < 0)
-            open_errno = (?__errno_location());
+        fd = fd_reopen;
     };
     if (change_times != (1 `| 2))
     {
@@ -73,92 +72,88 @@ cdecl touch(byte* file) -> int
             affirm(change_times == 1);
         };
     };
-    if (?)
+    if (amtime_now)
     {
-        t = ((void*)0);
     };
-    byte* file_opt = fd == 0 ? ((void*)0) : file;
+    byte* file_opt;
     int atflag;
     int utime_errno;
-    if (fd == 0)
+    if (fd == STDIN_FILENO)
     {
-        if (close(0) != 0)
+        if (close != 0)
         {
+            error;
         };
     }
-    elif (fd == 0)
+    elif (fd == STDOUT_FILENO)
     {
     };
     if (utime_errno != 0)
     {
         stat st;
-        if (open_errno & !(open_errno == 0 | ((open_errno == 0 | open_errno == 0) & stat(file, @st) == 0 & ((((st.st_mode)) ? 0) ? (0040000)))))
+        if (open_errno && ! ( open_errno == EISDIR || ( ( open_errno == EINVAL || open_errno == EEXIST ) && stat ( file , & st ) == 0 && S_ISDIR ( st . st_mode ) ) ))
         {
+            error(0, open_errno, gettext("cannot touch %s"), quotearg_style);
         }
         else
         {
+            error(0, utime_errno, gettext("setting times of %s"), quotearg_style);
         };
     };
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Update the access and modification times of each FILE to the current time.\n\
-\n\
-A FILE argument that does not exist is created empty, unless -c or -h\n\
-is supplied.\n\
-\n\
-A FILE argument string of - is handled specially and causes touch to\n\
-change the times of the file associated with standard output.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("touch", gettext("\
-  -a\n\
-         change only the access time\n\
+        oputs_("touch", gettext("\
+  -a\n\
+         change only the access time\n\
 "));
-        oputs_("touch", gettext("\
-  -c, --no-create\n\
-         do not create any files\n\
+        oputs_("touch", gettext("\
+  -c, --no-create\n\
+         do not create any files\n\
 "));
-        oputs_("touch", gettext("\
-  -d, --date=STRING\n\
-         parse STRING and use it instead of current time\n\
+        oputs_("touch", gettext("\
+  -d, --date=STRING\n\
+         parse STRING and use it instead of current time\n\
 "));
-        oputs_("touch", gettext("\
-  -f\n\
-         (ignored)\n\
+        oputs_("touch", gettext("\
+  -f\n\
+         (ignored)\n\
 "));
-        oputs_("touch", gettext("\
-  -h, --no-dereference\n\
-         affect each symbolic link instead of any referenced file;\n\
-         useful only on systems that can change the timestamps of a symlink\n\
+        oputs_("touch", gettext("\
+  -h, --no-dereference\n\
+         affect each symbolic link instead of any referenced file;\n\
+         useful only on systems that can change the timestamps of a symlink\n\
 "));
-        oputs_("touch", gettext("\
-  -m\n\
-         change only the modification time\n\
+        oputs_("touch", gettext("\
+  -m\n\
+         change only the modification time\n\
 "));
-        oputs_("touch", gettext("\
-  -r, --reference=FILE\n\
-         use this file's times instead of current time\n\
+        oputs_("touch", gettext("\
+  -r, --reference=FILE\n\
+         use this file's times instead of current time\n\
 "));
-        oputs_("touch", gettext("\
-  -t [[CC]YY]MMDDhhmm[.ss]\n\
-         use specified time instead of current time,\n\
-         with a date-time format that differs from -d's\n\
+        oputs_("touch", gettext("\
+  -t [[CC]YY]MMDDhhmm[.ss]\n\
+         use specified time instead of current time,\n\
+         with a date-time format that differs from -d's\n\
 "));
-        oputs_("touch", gettext("\
-      --time=WORD\n\
-         specify which time to change:\n\
-         access time (-a): 'access', 'atime', 'use';\n\
-         modification time (-m): 'modify', 'mtime'\n\
+        oputs_("touch", gettext("\
+      --time=WORD\n\
+         specify which time to change:\n\
+         access time (-a): 'access', 'atime', 'use';\n\
+         modification time (-m): 'modify', 'mtime'\n\
 "));
         oputs_("touch", gettext("      --help\n         display this help and exit\n"));
         oputs_("touch", gettext("      --version\n         output version information and exit\n"));
@@ -170,88 +165,28 @@ change the times of the file associated with standard output.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
-    byte* flex_date = ((void*)0);
+    byte* flex_date;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int c;
-    while ((c = getopt_long(argc, argv, "acd:fhmr:t:", longopts, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('a')
-            {
-                change_times `|= 1;
-            }
-            goto _switch_end_139188836410064;
-            case ('c')
-            {
-            }
-            goto _switch_end_139188836410064;
-            case ('d')
-            {
-                flex_date = optarg;
-            }
-            goto _switch_end_139188836410064;
-            case ('f')
-            {
-                goto _switch_end_139188836410064;
-            }
-            case ('h')
-            {
-            }
-            goto _switch_end_139188836410064;
-            case ('m')
-            {
-                change_times `|= 2;
-            }
-            goto _switch_end_139188836410064;
-            case ('r')
-            {
-            }
-            ref_file = optarg;
-            goto _switch_end_139188836410064;
-            case ('t')
-            {
-                if (?)
-                    error(0, 0, gettext("invalid date format %s"), quote(optarg));
-            }
-            newtime[0].tv_nsec = 0;
-            newtime[1] = newtime[0];
-            goto _switch_end_139188836410064;
-            case (TIME_OPTION)
-            {
-                change_times `|= XARGMATCH("--time", optarg, time_args, time_masks);
-            }
-            goto _switch_end_139188836410064;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188836410064;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188836410064;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188836410064:
     };
     if (change_times == 0)
         change_times = 1 `| 2;
-    if (?)
+    if (date_set && ( use_ref || flex_date ))
     {
         error(0, 0, gettext("cannot specify times from more than one source"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (use_ref)
     {
         stat ref_stats;
-        newtime[0];
-        newtime[1];
+        if (no_dereference ? lstat(ref_file, @ref_stats) : stat(ref_file, @ref_stats))
+            error;
+        newtime[0] = get_stat_atime(@ref_stats);
+        newtime[1] = get_stat_mtime(@ref_stats);
         if (flex_date)
         {
             if (change_times `& 1)
@@ -264,37 +199,36 @@ cdecl main(int argc, byte** argv) -> int
     {
         if (flex_date)
         {
-            timespec now = current_timespec();
+            timespec now;
             newtime[1] = newtime[0] = date_relative(flex_date, now);
             if (change_times == (1 `| 2) & timespec_cmp(newtime[0], now) == 0)
             {
                 timespec notnow;
                 timespec notnow1;
-                notnow.tv_sec = now.tv_sec `^^ 1;
-                notnow.tv_nsec = now.tv_nsec;
+                notnow. = now. `^^ 1;
+                notnow. = now.;
                 notnow1 = date_relative(flex_date, notnow);
             };
         };
     };
-    if (?)
+    if (! date_set && 2 <= argc - optind && posix2_version ( ) < 200112 && posixtime ( & newtime [ 0 ] . tv_sec , argv [ optind ] , PDS_TRAILING_YEAR | PDS_PRE_2000 ))
     {
-        newtime[0].tv_nsec = 0;
+        newtime[0]. = 0;
         newtime[1] = newtime[0];
         if (!getenv("POSIXLY_CORRECT"))
         {
-            tm* tm = localtime(@newtime[0].tv_sec);
+            tm* tm = localtime(@newtime[0].);
             if (tm)
-                error(0, 0, gettext("warning: 'touch %s' is obsolete; use "), argv[optind], tm.tm_year + 1900L, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
+                error;
         };
-        optind++;
     };
-    if (?)
+    if (! date_set)
     {
     };
     if (optind == argc)
     {
         error(0, 0, gettext("missing file operand"));
-        usage(0);
+        usage;
     };
     bool;
 };

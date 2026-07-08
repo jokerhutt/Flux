@@ -4,7 +4,7 @@
 ///
  Factoring of uintmax_t numbers. Generation of needed tables.
 
-   Contributed to the GNU project by TorbjÃ¶rn Granlund and Niels MÃ¶ller
+   Contributed to the GNU project by Torbjörn Granlund and Niels Möller
    Contains code from GNU MP.
 
 Copyright 2012-2026 Free Software Foundation, Inc.
@@ -22,30 +22,20 @@ You should have received a copy of the GNU General Public License along with
 this program.  If not, see https://www.gnu.org/licenses/.
 ///
 
-macro ATTRIBUTE_CONST
-{
-    __attribute__ ( ( __const__ ) )
-};
-
-macro ATTRIBUTE_MALLOC
-{
-    __attribute__ ( ( __malloc__ ) )
-};
-
-// typedef: wide_uint = ulong
+// typedef: wide_uint = int
 struct prime
 {
     uint p;
-    ulong pinv;
-    ulong lim;
+    int pinv;
+    int lim;
 };
 
-cdecl binvert(ulong a) -> ulong
+cdecl binvert(int a) -> int
 {
-    ulong x = 0xf5397db1 >> (4 * ((a / 2) `& 0x7));
+    int x = 0xf5397db1 >> (4 * ((a / 2) `& 0x7));
     for (; ; )
     {
-        ulong y = 2 * x - x * x * a;
+        int y = 2 * x - x * x * a;
         if (y == x)
             return x;
         x = y;
@@ -54,13 +44,13 @@ cdecl binvert(ulong a) -> ulong
 
 cdecl process_prime(prime* info, uint p) -> void
 {
-    ulong max = -1;
+    int max = -1;
     info.p = p;
     info.pinv = binvert(p);
     info.lim = max / p;
 };
 
-cdecl print_wide_uint(ulong n, int nesting, uint wide_uint_bits) -> void
+cdecl print_wide_uint(int n, int nesting, uint wide_uint_bits) -> void
 {
     int hex_digits_per_literal = 7;
     int bits_per_literal = hex_digits_per_literal * 4;
@@ -89,7 +79,7 @@ cdecl output_primes(prime* primes, uint nprimes) -> void
     uint p;
     int is_prime;
     uint wide_uint_bits = 0;
-    ulong mask = -1;
+    int mask = -1;
     for (wide_uint_bits = 0; mask; wide_uint_bits++)
     {};
     puts("/* Generated file -- DO NOT EDIT */\n");
@@ -126,8 +116,8 @@ cdecl xalloc(ulong s) -> void*
     void* p = malloc(s);
     if (p)
         return p;
-    fprintf(stderr, "Virtual memory exhausted.\n");
-    exit(0);
+    fprintf;
+    exit;
 };
 
 cdecl main(int argc, byte** argv) -> int
@@ -140,12 +130,9 @@ cdecl main(int argc, byte** argv) -> int
     uint nprimes;
     if (argc != 2)
     {
-        fprintf(stderr, "Usage: %s LIMIT\n", argv[0]);
-        return 0;
+        fprintf;
     };
     limit = atoi(argv[1]);
-    if (limit < 3)
-        return 0;
     if (!(limit `& 1))
         limit--;
     size = (limit - 1) / 2;
@@ -165,10 +152,8 @@ cdecl main(int argc, byte** argv) -> int
     output_primes(prime_list, nprimes);
     free(sieve);
     free(prime_list);
-    if (ferror(stdout) | fclose(stdout))
+    if (ferror | fclose)
     {
-        fprintf(stderr, "write error: %s\n", strerror((?__errno_location())));
-        return 0;
+        fprintf;
     };
-    return 0;
 };

@@ -25,7 +25,7 @@
    * Usually much faster than other versions of cat, the difference
    is especially apparent when using the -v option.
 
-   By tege@sics.se, TorbjÃ¶rn Granlund, advised by rms, Richard Stallman.
+   By tege@sics.se, Torbjörn Granlund, advised by rms, Richard Stallman.
 ///
 
 byte* PROGRAM_NAME = "cat";
@@ -42,52 +42,53 @@ byte* line_num_print = line_buf + 20 - 8;
 byte* line_num_start = line_buf + 20 - 3;
 byte* line_num_end = line_buf + 20 - 3;
 int newlines2 = 0;
-bool pending_cr = 0;
+extern int pending_cr;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Concatenate FILE(s) to standard output.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
-        oputs_("cat", gettext("\
-  -A, --show-all           equivalent to -vET\n\
+        oputs_("cat", gettext("\
+  -A, --show-all           equivalent to -vET\n\
 "));
-        oputs_("cat", gettext("\
-  -b, --number-nonblank    number nonempty output lines, overrides -n\n\
+        oputs_("cat", gettext("\
+  -b, --number-nonblank    number nonempty output lines, overrides -n\n\
 "));
-        oputs_("cat", gettext("\
-  -e                       equivalent to -vE\n\
+        oputs_("cat", gettext("\
+  -e                       equivalent to -vE\n\
 "));
-        oputs_("cat", gettext("\
-  -E, --show-ends          display $ or ^M$ at end of each line\n\
+        oputs_("cat", gettext("\
+  -E, --show-ends          display $ or ^M$ at end of each line\n\
 "));
-        oputs_("cat", gettext("\
-  -n, --number             number all output lines\n\
+        oputs_("cat", gettext("\
+  -n, --number             number all output lines\n\
 "));
-        oputs_("cat", gettext("\
-  -s, --squeeze-blank      suppress repeated empty output lines\n\
+        oputs_("cat", gettext("\
+  -s, --squeeze-blank      suppress repeated empty output lines\n\
 "));
-        oputs_("cat", gettext("\
-  -t                       equivalent to -vT\n\
+        oputs_("cat", gettext("\
+  -t                       equivalent to -vT\n\
 "));
-        oputs_("cat", gettext("\
-  -T, --show-tabs          display TAB characters as ^I\n\
+        oputs_("cat", gettext("\
+  -T, --show-tabs          display TAB characters as ^I\n\
 "));
-        oputs_("cat", gettext("\
-  -u                       (ignored)\n\
+        oputs_("cat", gettext("\
+  -u                       (ignored)\n\
 "));
-        oputs_("cat", gettext("\
-  -v, --show-nonprinting   use ^ and M- notation, except for LFD and TAB\n\
+        oputs_("cat", gettext("\
+  -v, --show-nonprinting   use ^ and M- notation, except for LFD and TAB\n\
 "));
         oputs_("cat", gettext("      --help\n         display this help and exit\n"));
         oputs_("cat", gettext("      --version\n         output version information and exit\n"));
+        printf;
         emit_ancillary_info("cat");
     };
     exit(status);
@@ -111,88 +112,69 @@ cdecl next_line_num() -> void
         line_num_print--;
 };
 
-cdecl simple_cat(byte* buf, int bufsize) -> bool
+cdecl simple_cat(byte* buf, int bufsize) -> int
 {
-    while (0)
+    while (true)
     {
-        long n_read = read(input_desc, buf, ?);
         if (n_read < 0)
         {
-            return 0;
+            error;
         };
-        if (n_read == 0)
-            return 0;
-        if (full_write(0, buf, n_read) != n_read)
+        if (full_write ( STDOUT_FILENO , buf , n_read ) != n_read)
             write_error();
     };
 };
 
 cdecl write_pending(byte* outbuf, byte** bpout) -> void
 {
-    if (?)
+    if (0 < n_write)
     {
-        if (?)
+        if (full_write ( STDOUT_FILENO , outbuf , n_write ) != n_write)
             write_error();
         *bpout = outbuf;
     };
 };
 
-cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprinting, bool show_tabs, bool number, bool number_nonblank, bool show_ends, bool squeeze_blank) -> bool
+cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, int show_nonprinting, int show_tabs, int number, int number_nonblank, int show_ends, int squeeze_blank) -> int
 {
     byte ch;
     int newlines = newlines2;
-    bool use_fionread = 0;
     byte* eob = inbuf;
     byte* bpin = eob + 1;
     byte* bpout = outbuf;
-    while (0)
+    while (true)
     {
         do
         {
-            if (outbuf + ? <= bpout)
+            if (outbuf + outsize <= bpout)
             {
                 byte* wp = outbuf;
                 do
                 {
-                    if (full_write(0, wp, ?) != ?)
+                    if (full_write != outsize)
                         write_error();
-                    wp += ?;
+                    wp += outsize;
                 }
-                while (?);
+                while (outsize <= remaining_bytes);
+                memmove;
             };
             if (bpin > eob)
             {
-                bool input_pending = 0;
-                int n_to_read = 0;
-                if (use_fionread & ioctl(input_desc, 0, @n_to_read) < 0)
-                {
-                    if ((?__errno_location()) ? 0 ? (?__errno_location()) ? 0 ? (?__errno_location()) ? 0 ? (?__errno_location()) ? 0 ? (?__errno_location()) ? 0)
-                        use_fionread = 0;
-                    else
-                    {
-                        newlines2 = newlines;
-                        return 0;
-                    };
-                };
-                if (n_to_read != 0)
-                    input_pending = 0;
-                if (!input_pending)
+                bool;
+                if (! input_pending)
                     write_pending(outbuf, @bpout);
-                long n_read = read(input_desc, inbuf, ?);
                 if (n_read < 0)
                 {
+                    error;
                     write_pending(outbuf, @bpout);
                     newlines2 = newlines;
-                    return 0;
                 };
                 if (n_read == 0)
                 {
                     write_pending(outbuf, @bpout);
                     newlines2 = newlines;
-                    return 0;
                 };
                 bpin = inbuf;
-                eob = bpin + n_read;
                 *eob = '\n';
             }
             else
@@ -220,7 +202,6 @@ cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprint
                     {
                         *bpout++ = '^';
                         *bpout++ = 'M';
-                        pending_cr = 0;
                     };
                     *bpout++ = '$';
                 };
@@ -232,7 +213,6 @@ cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprint
         if (pending_cr)
         {
             *bpout++ = '\r';
-            pending_cr = 0;
         };
         if (newlines >= 0 & number)
         {
@@ -241,7 +221,7 @@ cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprint
         };
         if (show_nonprinting)
         {
-            while (0)
+            while (true)
             {
                 if (ch >= 32)
                 {
@@ -291,7 +271,7 @@ cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprint
         }
         else
         {
-            while (0)
+            while (true)
             {
                 if (ch == '\t' & show_tabs)
                 {
@@ -303,7 +283,6 @@ cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprint
                     if (ch == '\r' & *bpin == '\n' & show_ends)
                     {
                         if (bpin == eob)
-                            pending_cr = 0;
                         else
                         {
                             *bpout++ = '^';
@@ -326,206 +305,188 @@ cdecl cat(byte* inbuf, int insize, byte* outbuf, int outsize, bool show_nonprint
 
 cdecl copy_cat() -> int
 {
-    long copy_max = MIN(TYPE_MAXIMUM(?), (0)) >> 30 << 30;
-    for (bool some_copied = 0; some_copied = 0; switch ( copy_file_range ( input_desc , NULL , STDOUT_FILENO , NULL , copy_max , 0 ) ) { case 0 : return some_copied ; case - 1 : if ( errno == ENOSYS || is_ENOTSUP ( errno ) || errno == EINVAL || errno == EBADF || errno == EXDEV || errno == ETXTBSY || errno == EPERM || errno == EFBIG ) return 0 ; error ( 0 , errno , "%s" , quotef ( infile ) ) ; return - 1 ; })
-    {};
 };
 
 cdecl splice_cat() -> int
 {
-    bool some_copied = 0;
-    bool in_ok = 0;
-    bool out_ok = 0;
-    return (in_ok & out_ok) ? some_copied : -1;
+    bool;
+    bool;
+    bool;
 };
 
 cdecl ensure_buf_size(byte* buf, int* buf_alloc, int alignment, int size) -> byte*
 {
-    affirm(buf != ((void*)0) | *? < ?);
-    if (*? < ?)
+    affirm;
+    if (*buf_alloc < size)
     {
         alignfree(buf);
-        buf = xalignalloc(?, ?);
-        *? = ?;
+        buf = xalignalloc(alignment, size);
+        *buf_alloc = size;
     };
     return buf;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
-    bool have_read_stdin = 0;
+    bool;
     stat ostat_buf;
-    bool number = 0;
-    bool number_nonblank = 0;
-    bool squeeze_blank = 0;
-    bool show_ends = 0;
-    bool show_nonprinting = 0;
-    bool show_tabs = 0;
-    int file_open_mode = 0;
-    option[10] long_options = {{"number-nonblank", 0, ((void*)0), 'b'}, {"number", 0, ((void*)0), 'n'}, {"squeeze-blank", 0, ((void*)0), 's'}, {"show-nonprinting", 0, ((void*)0), 'v'}, {"show-ends", 0, ((void*)0), 'E'}, {"show-tabs", 0, ((void*)0), 'T'}, {"show-all", 0, ((void*)0), 'A'}, {"", 0, ((void*)0), GETOPT_HELP_CHAR}, {"", 0, ((void*)0), GETOPT_VERSION_CHAR}, {((void*)0), 0, ((void*)0), 0}};
+    bool;
+    bool;
+    bool;
+    bool;
+    bool;
+    bool;
+    int file_open_mode;
+    int long_options;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int c;
-    while ((c = getopt_long(argc, argv, "benstuvAET", long_options, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('b')
             {
-                number = 0;
+                break switch;
             }
-            number_nonblank = 0;
-            goto _switch_end_139188838807760;
             case ('e')
             {
-                show_ends = 0;
+                break switch;
             }
-            show_nonprinting = 0;
-            goto _switch_end_139188838807760;
             case ('n')
             {
-                number = 0;
+                break switch;
             }
-            goto _switch_end_139188838807760;
             case ('s')
             {
-                squeeze_blank = 0;
+                break switch;
             }
-            goto _switch_end_139188838807760;
             case ('t')
             {
-                show_tabs = 0;
+                break switch;
             }
-            show_nonprinting = 0;
-            goto _switch_end_139188838807760;
             case ('u')
             {
-                goto _switch_end_139188838807760;
             }
             case ('v')
             {
-                show_nonprinting = 0;
+                break switch;
             }
-            goto _switch_end_139188838807760;
             case ('A')
             {
-                show_nonprinting = 0;
+                break switch;
             }
-            show_ends = 0;
-            show_tabs = 0;
-            goto _switch_end_139188838807760;
             case ('E')
             {
-                show_ends = 0;
+                break switch;
             }
-            goto _switch_end_139188838807760;
             case ('T')
             {
-                show_tabs = 0;
+                break switch;
             }
-            goto _switch_end_139188838807760;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188838807760;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188838807760;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188838807760:
     };
-    if (fstat(0, @ostat_buf) < 0)
-        error(0, (?__errno_location()), gettext("standard output"));
+    if (fstat < 0)
+        error;
     int out_flags = -2;
-    bool out_isreg = ((((ostat_buf.st_mode)) ? 0) ? (0100000)) ? 0;
-    if (!(number | show_ends | squeeze_blank))
+    bool;
+    if (! ( number || show_ends || squeeze_blank ))
     {
+        xset_binary_mode;
     };
     infile = "-";
-    int argind = optind;
-    bool ok = 0;
-    byte* inbuf = ((void*)0);
-    byte* outbuf = ((void*)0);
+    int argind;
+    bool;
+    byte* inbuf;
+    byte* outbuf;
     do
     {
         if (argind < argc)
             infile = argv[argind];
-        bool reading_stdin = streq(infile, "-");
+        bool;
         if (reading_stdin)
         {
-            have_read_stdin = 0;
-            input_desc = 0;
+            if (file_open_mode & O_BINARY)
+                xset_binary_mode;
         }
         else
         {
             input_desc = open(infile, file_open_mode);
             if (input_desc < 0)
             {
-                ok = 0;
+                error;
                 continue;
             };
         };
         stat istat_buf;
         if (fstat(input_desc, @istat_buf) < 0)
         {
-            ok = 0;
+            error;
             goto contin;
         };
-        if (!(((((istat_buf.st_mode)) ? 0) ? (0010000)) ? S_ISSOCK(istat_buf.st_mode) ? S_TYPEISSHM(@istat_buf) ? S_TYPEISTMO(@istat_buf)) & !(S_TYPEISSHM(@ostat_buf) | S_TYPEISTMO(@ostat_buf)) & SAME_INODE(istat_buf, ostat_buf))
+        fdadvise;
+        if (!(S_ISFIFO(istat_buf.) | S_ISSOCK(istat_buf.) | S_TYPEISSHM(@istat_buf) | S_TYPEISTMO(@istat_buf)) & !(S_TYPEISSHM(@ostat_buf) | S_TYPEISTMO(@ostat_buf)) & SAME_INODE(istat_buf, ostat_buf))
         {
-            long in_pos = lseek(input_desc, 0, 0);
             if (0 <= in_pos)
             {
                 if (out_flags < -1)
-                    out_flags = fcntl(0, 0);
-                int whence = (0 <= out_flags & out_flags `& 0 ? 0 : 0);
-                if (in_pos < lseek(0, 0, whence))
+                    out_flags = fcntl;
+                int whence;
+                if (in_pos < lseek ( STDOUT_FILENO , 0 , whence ))
                 {
-                    ok = 0;
+                    error(0, 0, gettext("%s: input file is output file"), quotearg_n_style_colon);
                     goto contin;
                 };
             };
         };
-        if (!(number | show_ends | show_nonprinting | show_tabs | squeeze_blank))
+        if (! ( number || show_ends || show_nonprinting || show_tabs || squeeze_blank ))
         {
-            int copy_cat_status = out_isreg & ((((istat_buf.st_mode)) ? 0) ? (0100000)) ? copy_cat() : 0;
+            int copy_cat_status;
             if (copy_cat_status != 0)
-                ok `&= 0 < copy_cat_status;
             else
             {
-                int splice_cat_status = ((?(@istat_buf) & istat_buf.st_size <= 32768) ? 0 : splice_cat());
+                int splice_cat_status = ((usable_st_size(@istat_buf) & istat_buf. <= 32768) ? 0 : splice_cat());
                 if (splice_cat_status != 0)
-                    ok `&= 0 < splice_cat_status;
                 else
                 {
+                    inbuf = ensure_buf_size;
                 };
             };
         }
         else
         {
-            if (?)
+            inbuf = ensure_buf_size;
+            if (ckd_mul | ckd_add | ckd_add)
                 xalloc_die();
+            outbuf = ensure_buf_size;
         };
         label contin:
-        if (!reading_stdin & close(input_desc) < 0)
+        if (! reading_stdin && close ( input_desc ) < 0)
         {
-            ok = 0;
+            error;
         };
     }
     while (++argind < argc);
     if (pending_cr)
     {
-        if (full_write(0, "\r", 1) != 1)
+        if (full_write != 1)
             write_error();
     };
-    if (have_read_stdin & close(0) < 0)
-        error(0, (?__errno_location()), gettext("closing standard input"));
-    return ok ? 0 : 0;
+    if (have_read_stdin && close ( STDIN_FILENO ) < 0)
+        error;
 };

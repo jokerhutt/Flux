@@ -43,58 +43,55 @@ uint PRINT_MACHINE = 16;
 uint PRINT_PROCESSOR = 32;
 uint PRINT_HARDWARE_PLATFORM = 64;
 uint PRINT_OPERATING_SYSTEM = 128;
-option[14] uname_long_options = option;
-option[3] arch_long_options = option;
+struct option;
+extern int uname_long_options;
+extern int arch_long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         if (uname_mode == UNAME_UNAME)
         {
-            fputs(gettext("\
-Print certain system information.  With no OPTION, same as -s.\n\
-\n\
-"), stdout);
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -a, --all                print all information, in the following order,\n\
-                             except omit -p and -i if unknown\n\
+            fputs;
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -a, --all                print all information, in the following order,\n\
+                             except omit -p and -i if unknown\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -s, --kernel-name        print the kernel name\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -s, --kernel-name        print the kernel name\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -n, --nodename           print the network node hostname\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -n, --nodename           print the network node hostname\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -r, --kernel-release     print the kernel release\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -r, --kernel-release     print the kernel release\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -v, --kernel-version     print the kernel version\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -v, --kernel-version     print the kernel version\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -m, --machine            print the machine hardware name\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -m, --machine            print the machine hardware name\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -p, --processor          print the processor type (non-portable)\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -p, --processor          print the processor type (non-portable)\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -i, --hardware-platform  print the hardware platform (non-portable)\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -i, --hardware-platform  print the hardware platform (non-portable)\n\
 "));
-            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
-  -o, --operating-system   print the operating system\n\
+            oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("\
+  -o, --operating-system   print the operating system\n\
 "));
         }
         else
         {
-            fputs(gettext("\
-Print machine architecture.\n\
-\n\
-"), stdout);
+            fputs;
         };
         oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("      --help\n         display this help and exit\n"));
         oputs_((uname_mode ? UNAME_UNAME ? "uname" : "arch"), gettext("      --version\n         output version information and exit\n"));
@@ -106,9 +103,9 @@ Print machine architecture.\n\
 cdecl print_element(byte* element) -> void
 {
     int printed;
-    if (?)
+    if (printed)
         putchar(' ');
-    fputs(element, stdout);
+    fputs;
 };
 
 cdecl print_element_env(byte* element, int* envvar) -> void
@@ -122,102 +119,99 @@ cdecl decode_switches(int argc, byte** argv) -> int
     uint toprint = 0;
     if (uname_mode == UNAME_ARCH)
     {
-        while ((c = getopt_long(argc, argv, "", arch_long_options, ((void*)0))) != -1)
+        while ((c = getopt_long) != -1)
         {
             switch (c)
             {
                 case (GETOPT_HELP_CHAR)
                 {
-                    usage(0);
+                    usage;
+                    break switch;
                 }
-                goto _switch_end_139188829381712;
                 case (GETOPT_VERSION_CHAR)
                 {
+                    version_etc;
+                    exit;
+                    break switch;
                 }
-                exit(0);
-                goto _switch_end_139188829381712;
                 default
                 {
-                    usage(0);
                 };
             };
-            label _switch_end_139188829381712:
         };
         toprint = 16;
     }
     else
     {
-        while ((c = getopt_long(argc, argv, "asnrvmpio", uname_long_options, ((void*)0))) != -1)
+        while ((c = getopt_long) != -1)
         {
             switch (c)
             {
                 case ('a')
                 {
-                    toprint = (0 ? 0 ? 0);
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('s')
                 {
                     toprint `|= 1;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('n')
                 {
                     toprint `|= 2;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('r')
                 {
                     toprint `|= 4;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('v')
                 {
                     toprint `|= 8;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('m')
                 {
                     toprint `|= 16;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('p')
                 {
                     toprint `|= 32;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('i')
                 {
                     toprint `|= 64;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case ('o')
                 {
                     toprint `|= 128;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case (GETOPT_HELP_CHAR)
                 {
-                    usage(0);
+                    usage;
+                    break switch;
                 }
-                goto _switch_end_139188837982672;
                 case (GETOPT_VERSION_CHAR)
                 {
+                    version_etc;
+                    exit;
+                    break switch;
                 }
-                exit(0);
-                goto _switch_end_139188837982672;
                 default
                 {
-                    usage(0);
                 };
             };
-            label _switch_end_139188837982672:
         };
     };
     if (argc != optind)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
     return toprint;
 };
@@ -227,7 +221,8 @@ cdecl main(int argc, byte** argv) -> int
     byte[8] unknown = "unknown";
     uint toprint = 0;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     toprint = decode_switches(argc, argv);
     if (toprint == 0)
         toprint = 1;
@@ -235,30 +230,31 @@ cdecl main(int argc, byte** argv) -> int
     {
         utsname name;
         if (uname(@name) == -1)
-            error(0, (?__errno_location()), gettext("cannot get system name"));
+            error;
         if (toprint `& 1)
-            print_element_env(name.sysname, "UNAME_SYSNAME");
+            print_element_env(name., "UNAME_SYSNAME");
         if (toprint `& 2)
-            print_element_env(name.nodename, "UNAME_NODENAME");
+            print_element_env(name., "UNAME_NODENAME");
         if (toprint `& 4)
-            print_element_env(name.release, "UNAME_RELEASE");
+            print_element_env(name., "UNAME_RELEASE");
         if (toprint `& 8)
-            print_element_env(name.version, "UNAME_VERSION");
+            print_element_env(name., "UNAME_VERSION");
         if (toprint `& 16)
-            print_element_env(name.machine, "UNAME_MACHINE");
+            print_element_env(name., "UNAME_MACHINE");
     };
     if (toprint `& 32)
     {
         byte* element = unknown;
-        if (!(toprint == (0 ? 0 ? 0) & element == unknown))
+        if (! ( toprint == UINT_MAX && element == unknown ))
             print_element(element);
     };
     if (toprint `& 64)
     {
         byte* element = unknown;
-        if (!(toprint == (0 ? 0 ? 0) & element == unknown))
+        if (! ( toprint == UINT_MAX && element == unknown ))
             print_element(element);
     };
+    if (toprint `& 128)
+        print_element;
     putchar('\n');
-    return 0;
 };

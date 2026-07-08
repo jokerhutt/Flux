@@ -20,48 +20,44 @@
 ///
 
 ///
- Written by PÃ¡draig Brady.  LD_PRELOAD idea from Brian Dessent.
+ Written by Pádraig Brady.  LD_PRELOAD idea from Brian Dessent.
 ///
 
-cdecl apply_mode(_IO_FILE* stream, byte* stream_name, byte* envvar) -> void
+cdecl apply_mode(int* stream, byte* stream_name, byte* envvar) -> void
 {
-    byte* buf = ((void*)0);
+    byte* buf;
     int setvbuf_mode;
     ulong size = 0;
     byte* mode = getenv(envvar);
     if (!mode)
         return void;
     if (*mode == '0')
-        setvbuf_mode = 0;
     elif (*mode == 'L')
-        setvbuf_mode = 0;
     else
     {
-        setvbuf_mode = 0;
         byte* mode_end;
         size = strtoul(mode, @mode_end, 10);
         if (size == 0 | *mode_end)
         {
-            fprintf(stderr, gettext("invalid buffering mode %s for %s\n"), mode, stream_name);
+            fprintf;
             return void;
         };
-        buf = (size <= ((ulong)-2 < (ulong)-1 / 2 ? (ulong)-2 : (ulong)-1 / 2) ? malloc(size) : ((void*)0));
         if (!buf)
         {
-            fprintf(stderr, gettext("failed to allocate a %lu byte stdio buffer\n"), size);
+            fprintf;
             return void;
         };
     };
     if (setvbuf(stream, buf, setvbuf_mode, size) != 0)
     {
-        fprintf(stderr, gettext("could not set buffering of %s to mode %s\n"), stream_name, mode);
+        fprintf;
         free(buf);
     };
 };
 
 cdecl stdbuf() -> void
 {
-    apply_mode(stderr, "stderr", "_STDBUF_E");
-    apply_mode(stdin, "stdin", "_STDBUF_I");
-    apply_mode(stdout, "stdout", "_STDBUF_O");
+    apply_mode;
+    apply_mode;
+    apply_mode;
 };

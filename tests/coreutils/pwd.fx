@@ -32,33 +32,31 @@ struct file_name
     byte* start;
 };
 
-option[5] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print the full filename of the current working directory.\n\
-\n\
-"), stdout);
-        oputs_("pwd", gettext("\
-  -L, --logical\n\
-         use PWD from environment, even if it contains symlinks\n\
+        printf;
+        fputs;
+        oputs_("pwd", gettext("\
+  -L, --logical\n\
+         use PWD from environment, even if it contains symlinks\n\
 "));
-        oputs_("pwd", gettext("\
-  -P, --physical\n\
-         resolve all symlinks\n\
+        oputs_("pwd", gettext("\
+  -P, --physical\n\
+         resolve all symlinks\n\
 "));
         oputs_("pwd", gettext("      --help\n         display this help and exit\n"));
         oputs_("pwd", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\n\
-If no option is specified, -P is assumed.\n\
-"), stdout);
+        fputs;
         printf(gettext("\n"), "pwd");
         emit_ancillary_info("pwd");
     };
@@ -84,9 +82,10 @@ cdecl file_name_init() -> file_name*
 
 cdecl file_name_prepend(file_name* p, byte* s, ulong s_len) -> void
 {
-    if (?)
+    if (n_free < 1 + s_len)
     {
-        byte* buf;
+        byte* buf = xpalloc;
+        p.start = memcpy;
         free(p.buf);
         p.buf = buf;
     };
@@ -110,56 +109,50 @@ cdecl nth_parent(ulong n) -> byte*
 
 cdecl find_dir_entry(stat* dot_sb, file_name* file_name, ulong parent_height) -> void
 {
-    __dirstream* dirp = opendir("..");
-    if (dirp == ((void*)0))
-        error(0, (?__errno_location()), gettext("cannot open directory %s"), quote(nth_parent(parent_height)));
-    int fd = dirfd(dirp);
+    if (dirp == NULL)
+        error;
+    int fd = dirfd;
     if ((0 <= fd ? fchdir(fd) : chdir("..")) < 0)
-        error(0, (?__errno_location()), gettext("failed to chdir to %s"), quote(nth_parent(parent_height)));
+        error;
     stat parent_sb;
     if ((0 <= fd ? fstat(fd, @parent_sb) : stat(".", @parent_sb)) < 0)
-        error(0, (?__errno_location()), gettext("failed to stat %s"), quote(nth_parent(parent_height)));
+        error;
     bool;
     bool;
-    while (?)
+    while (true)
     {
         dirent* dp;
-        (?__errno_location()) ? 0;
-        if ((dp = readdir_ignoring_dot_and_dotdot(dirp)) == ((void*)0))
+        if (( dp = readdir_ignoring_dot_and_dotdot ( dirp ) ) == NULL)
         {
-            if ((?__errno_location()))
+            if (errno)
             {
-                int e = (?__errno_location());
-                closedir(dirp);
-                (?__errno_location()) ? e;
-                dirp = ((void*)0);
+                int e;
+                closedir;
             };
             break;
         };
-        ulong ino = NOT_AN_INODE_NUMBER;
         stat ent_sb;
-        if (?)
+        if (ino == NOT_AN_INODE_NUMBER || use_lstat)
         {
-            if (lstat(dp.d_name, @ent_sb) < 0)
+            if (lstat(dp, @ent_sb) < 0)
             {
                 continue;
             };
-            ino = ent_sb.st_ino;
         };
-        if (ino != dot_sb.st_ino)
+        if (ino != dot_sb -> st_ino)
             continue;
-        if (?)
+        if (! use_lstat || ent_sb . st_dev == dot_sb -> st_dev)
         {
-            file_name_prepend(file_name, dp.d_name, (strlen((dp).d_name)));
+            file_name_prepend(file_name, dp, strlen((dp)));
             break;
         };
     };
-    if (dirp == ((void*)0) | closedir(dirp) != 0)
+    if (dirp == NULL || closedir ( dirp ) != 0)
     {
-        error(0, (?__errno_location()), gettext("reading directory %s"), quote(nth_parent(parent_height)));
+        error;
     };
-    if (?)
-        error(0, 0, gettext("couldn't find directory entry in %s with matching i-node"), quote(nth_parent(parent_height)));
+    if (! found)
+        error;
     *dot_sb = parent_sb;
 };
 
@@ -167,9 +160,13 @@ cdecl robust_getcwd(file_name* file_name) -> void
 {
     ulong height = 1;
     dev_ino dev_ino_buf;
-    dev_ino* root_dev_ino = get_root_dev_ino(@?);
+    dev_ino* root_dev_ino = get_root_dev_ino(@dev_ino_buf);
+    if (root_dev_ino == NULL)
+        error;
     stat dot_sb;
-    while (?)
+    if (stat(".", @dot_sb) < 0)
+        error;
+    while (true)
     {
         if (PSAME_INODE(@dot_sb, root_dev_ino))
             break;
@@ -182,72 +179,66 @@ cdecl robust_getcwd(file_name* file_name) -> void
 cdecl logical_getcwd() -> byte*
 {
     byte* wd = getenv("PWD");
-    if (!wd | wd[0] != '/')
-        return ((void*)0);
     byte* p = wd;
     while ((p = strstr(p, "/.")))
     {
-        if (!p[2] | p[2] == '/' | (p[2] == '.' & (!p[3] | p[3] == '/')))
-            return ((void*)0);
         p++;
     };
     stat st1;
     stat st2;
     if (stat(wd, @st1) == 0 & stat(".", @st2) == 0 & psame_inode(@st1, @st2))
         return wd;
-    return ((void*)0);
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (?)
+    setlocale;
+    atexit;
+    while (true)
     {
-        int c = getopt_long(argc, argv, "LP", longopts, ((void*)0));
+        int c = getopt_long;
         if (c == -1)
             break;
         switch (c)
         {
             case ('L')
             {
+                break switch;
             }
-            goto _switch_end_139188883806800;
             case ('P')
             {
+                break switch;
             }
-            goto _switch_end_139188883806800;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188883806800;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188883806800;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188883806800:
     };
     if (optind < argc)
         error(0, 0, gettext("ignoring non-option arguments"));
-    if (?)
+    if (logical)
     {
         byte* wd = logical_getcwd();
         if (wd)
         {
             puts(wd);
-            return 0;
         };
     };
     byte* wd = xgetcwd();
-    if (wd != ((void*)0))
+    if (wd != NULL)
     {
         puts(wd);
         free(wd);
@@ -259,5 +250,4 @@ cdecl main(int argc, byte** argv) -> int
         puts(file_name.start);
         file_name_free(file_name);
     };
-    return 0;
 };

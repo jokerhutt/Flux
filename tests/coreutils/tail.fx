@@ -55,31 +55,31 @@ macro IS_TAILABLE_FILE_TYPE(Mode)
 int COPY_TO_EOF = -1;
 int COPY_A_BUFFER = -2;
 
-// typedef: count_t = long
+// typedef: count_t = int
 enum Follow_mode
 {
     Follow_name = 1,
     Follow_descriptor = 2
 };
 
-byte*[3] follow_mode_string = {"descriptor", "name", ((void*)0)};
+extern byte** follow_mode_string;
 Follow_mode[2] follow_mode_map = Follow_mode;
 struct File_spec
 {
     byte* name;
     byte* prettyname;
     timespec mtime;
-    ulong st_dev;
-    ulong st_ino;
-    uint mode;
-    long read_pos;
+    int st_dev;
+    int st_ino;
+    int mode;
+    int read_pos;
     int ignore;
     int remote;
     int tailable;
     int fd;
     int errnum;
     int blocking;
-    long n_unchanged_stats;
+    int n_unchanged_stats;
 };
 
 extern int reopen_inaccessible_files;
@@ -99,116 +99,105 @@ enum header_mode
 
 uint DEFAULT_MAX_N_UNCHANGED_STATS_BETWEEN_OPENS = 5;
 
-long max_n_unchanged_stats_between_opens = count_t;
+int max_n_unchanged_stats_between_opens = count_t;
 int nbpids = 0;
-int* pids = pid_t;
+extern int* pids;
 extern int pids_alloc;
 extern int page_size;
 extern int have_read_stdin;
 extern int presume_input_pipe;
 extern int disable_inotify;
 extern int debug;
-uint RETRY_OPTION = 128;
-uint MAX_UNCHANGED_STATS_OPTION = 129;
-uint PID_OPTION = 130;
-uint PRESUME_INPUT_PIPE_OPTION = 131;
-uint LONG_FOLLOW_OPTION = 132;
-uint DISABLE_INOTIFY_OPTION = 133;
-uint DEBUG_PROGRAM_OPTION = 134;
+uint RETRY_OPTION = 0;
+uint MAX_UNCHANGED_STATS_OPTION = 1;
+uint PID_OPTION = 2;
+uint PRESUME_INPUT_PIPE_OPTION = 3;
+uint LONG_FOLLOW_OPTION = 4;
+uint DISABLE_INOTIFY_OPTION = 5;
+uint DEBUG_PROGRAM_OPTION = 6;
 
-option[17] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        printf(gettext("\
-Print the last %d lines of each FILE to standard output.\n\
-With more than one FILE, precede each with a header giving the file name.\n\
+        printf;
+        printf(gettext("\
+Print the last %d lines of each FILE to standard output.\n\
+With more than one FILE, precede each with a header giving the file name.\n\
 "), 10);
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("tail", gettext("\
-  -c, --bytes=[+]NUM\n\
-         output the last NUM bytes;\n\
-         or use -c +NUM to output starting with byte NUM of each file\n\
+        oputs_("tail", gettext("\
+  -c, --bytes=[+]NUM\n\
+         output the last NUM bytes;\n\
+         or use -c +NUM to output starting with byte NUM of each file\n\
 "));
-        oputs_("tail", gettext("\
-      --debug\n\
-         indicate which --follow implementation is used\n\
+        oputs_("tail", gettext("\
+      --debug\n\
+         indicate which --follow implementation is used\n\
 "));
-        oputs_("tail", gettext("\
-  -f, --follow[={name|descriptor}]\n\
-         output appended data as the file grows;\n\
-         an absent option argument means 'descriptor'\n\
+        oputs_("tail", gettext("\
+  -f, --follow[={name|descriptor}]\n\
+         output appended data as the file grows;\n\
+         an absent option argument means 'descriptor'\n\
 "));
-        oputs_("tail", gettext("\
-  -F\n\
-         same as --follow=name --retry\n\
+        oputs_("tail", gettext("\
+  -F\n\
+         same as --follow=name --retry\n\
 "));
-        oprintf_("tail", gettext("\
-  -n, --lines=[+]NUM\n\
-         output the last NUM lines, instead of the last %d;\n\
-         or use -n +NUM to skip NUM-1 lines at the start\n\
+        oprintf_("tail", gettext("\
+  -n, --lines=[+]NUM\n\
+         output the last NUM lines, instead of the last %d;\n\
+         or use -n +NUM to skip NUM-1 lines at the start\n\
 "), 10);
-        oprintf_("tail", gettext("\
-      --max-unchanged-stats=N\n\
-         with --follow=name, reopen a FILE which has not\n\
-         changed size after N (default %d) iterations\n\
-         to see if it has been unlinked or renamed\n\
-         (this is the usual case of rotated log files);\n\
-         with inotify, this option is rarely useful\n\
+        oprintf_("tail", gettext("\
+      --max-unchanged-stats=N\n\
+         with --follow=name, reopen a FILE which has not\n\
+         changed size after N (default %d) iterations\n\
+         to see if it has been unlinked or renamed\n\
+         (this is the usual case of rotated log files);\n\
+         with inotify, this option is rarely useful\n\
 "), DEFAULT_MAX_N_UNCHANGED_STATS_BETWEEN_OPENS);
-        oputs_("tail", gettext("\
-      --pid=PID\n\
-         with -f, exit after PID no longer exists;\n\
-         can be repeated to watch multiple processes\n\
+        oputs_("tail", gettext("\
+      --pid=PID\n\
+         with -f, exit after PID no longer exists;\n\
+         can be repeated to watch multiple processes\n\
 "));
-        oputs_("tail", gettext("\
-  -q, --quiet, --silent\n\
-         never output headers giving file names\n\
+        oputs_("tail", gettext("\
+  -q, --quiet, --silent\n\
+         never output headers giving file names\n\
 "));
-        oputs_("tail", gettext("\
-      --retry\n\
-         keep trying to open a file if it is inaccessible\n\
+        oputs_("tail", gettext("\
+      --retry\n\
+         keep trying to open a file if it is inaccessible\n\
 "));
-        oputs_("tail", gettext("\
-  -s, --sleep-interval=N\n\
-         with -f, sleep for approximately N seconds\n\
-         (default 1.0) between iterations;\n\
-         with inotify and --pid=P,\n\
-         check process P at least once every N seconds\n\
+        oputs_("tail", gettext("\
+  -s, --sleep-interval=N\n\
+         with -f, sleep for approximately N seconds\n\
+         (default 1.0) between iterations;\n\
+         with inotify and --pid=P,\n\
+         check process P at least once every N seconds\n\
 "));
-        oputs_("tail", gettext("\
-  -v, --verbose\n\
-         always output headers giving file names\n\
+        oputs_("tail", gettext("\
+  -v, --verbose\n\
+         always output headers giving file names\n\
 "));
-        oputs_("tail", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("tail", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("tail", gettext("      --help\n         display this help and exit\n"));
         oputs_("tail", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-NUM may have a multiplier suffix:\n\
-b 512, kB 1000, K 1024, MB 1000*1000, M 1024*1024,\n\
-GB 1000*1000*1000, G 1024*1024*1024, and so on for T, P, E, Z, Y, R, Q.\n\
-Binary prefixes can be used, too: KiB=K, MiB=M, and so on.\n\
-\n\
-"), stdout);
-        fputs(gettext("\
-With --follow (-f), tail defaults to following the file descriptor, which\n\
-means that even if a tail'ed file is renamed, tail will continue to track\n\
-its end.  This default behavior is not desirable when you really want to\n\
-track the actual name of the file, not the file descriptor (e.g., log\n\
-rotation).  Use --follow=name in that case.  That causes tail to track the\n\
-named file in a way that accommodates renaming, removal and creation.\n\
-"), stdout);
+        fputs;
+        fputs;
         emit_ancillary_info("tail");
     };
     exit(status);
@@ -216,169 +205,162 @@ named file in a way that accommodates renaming, removal and creation.\n\
 
 cdecl die_pipe() -> void
 {
-    raise(0);
-    exit(0);
+    raise;
+    exit;
 };
 
 cdecl check_output_alive() -> void
 {
-    if (!?)
+    if (!monitor_output)
         return void;
-    if (?)
+    if (iopoll == ?0)
         die_pipe();
 };
 
 extern int bool;
-cdecl xlseek(int fd, long offset, int whence, byte* prettyname) -> long
+cdecl xlseek(int fd, int offset, int whence, byte* prettyname) -> int
 {
-    long new_offset = lseek(fd, offset, whence);
-    if (0 <= new_offset)
-        return new_offset;
-    byte*[3] whence_msgid = {0, 0, 0};
-    long joffset = offset;
+    byte** whence_msgid;
+    error;
 };
 
-cdecl record_open_fd(File_spec* f, int fd, long read_pos, stat* st, int blocking) -> void
+cdecl record_open_fd(File_spec* f, int fd, int read_pos, stat* st, int blocking) -> void
 {
     f.fd = fd;
-    f.mtime;
-    f.st_dev = st.st_dev;
-    f.st_ino = st.st_ino;
-    f.mode = st.st_mode;
-    if (((((st.st_mode)) ? 0) ? (0100000)))
-        f.read_pos = (read_pos < 0 ? xlseek(fd, 0, 0, f.prettyname) : read_pos);
+    f = get_stat_mtime(st);
+    f = st;
+    f = st;
+    f = st;
+    if (S_ISREG(st))
+        f = (read_pos < 0 ? xlseek : read_pos);
     f.blocking = blocking;
     f.n_unchanged_stats = 0;
 };
 
 cdecl close_fd(int fd, File_spec* f) -> void
 {
+    if (STDIN_FILENO < fd && close ( fd ) < 0)
+        error;
 };
 
 cdecl write_header(byte* prettyname) -> void
 {
     int first_file;
+    printf("%s==> %s <==\n", first_file ? "" : "\n", quotearg_n_style_colon);
 };
 
 cdecl xwrite_stdout(byte* buffer, int n_bytes) -> void
 {
-    if (? > 0 & fwrite(buffer, 1, ?, stdout) < ?)
+    if (n_bytes > 0 & fwrite < n_bytes)
     {
-        clearerr(stdout);
+        clearerr;
+        error;
     };
 };
 
-cdecl dump_remainder(int want_header, byte* prettyname, int fd, long n_bytes) -> long
+cdecl dump_remainder(int want_header, byte* prettyname, int fd, int n_bytes) -> int
 {
-    long n_read = 0;
-    long n_remaining = n_bytes;
+    int n_read = 0;
+    int n_remaining = n_bytes;
     do
     {
-        byte[8192] buffer = 0;
-        long bytes_read;
+        byte buffer;
         if (bytes_read < 0)
         {
+            if (errno != EAGAIN)
+                error;
             break;
         };
         if (bytes_read == 0)
             break;
-        n_read += bytes_read;
-        if (?)
+        if (want_header)
         {
             write_header(prettyname);
         };
-        xwrite_stdout(buffer, bytes_read);
+        xwrite_stdout;
         if (n_bytes == COPY_A_BUFFER)
             break;
-        n_remaining -= bytes_read;
     }
     while (n_remaining != 0);
     return n_read;
 };
 
-cdecl file_lines(byte* prettyname, int fd, stat* sb, long n_lines, long start_pos, long end_pos) -> long
+cdecl file_lines(byte* prettyname, int fd, stat* sb, int n_lines, int start_pos, int end_pos) -> int
 {
     byte* buffer;
-    long pos = end_pos;
-    if (n_lines == 0)
-        return pos;
-    affirm(((((sb.st_mode)) ? 0) ? (0100000)));
-    long bytes_read;
+    affirm(S_ISREG(sb));
+    buffer = ximalloc;
     if (bytes_read < 0)
     {
-        pos = -1 - (?__errno_location());
+        error;
         goto free_buffer;
     };
-    if (bytes_read & buffer[bytes_read - 1] != line_end)
+    if (bytes_read && buffer [ bytes_read - 1 ] != line_end)
         --n_lines;
     do
     {
-        pos += bytes_read;
-        while (?)
+        while (n)
         {
             byte* nl;
-            if (nl == ((void*)0))
+            nl = memrchr;
+            if (nl == NULL)
                 break;
             if (n_lines-- == 0)
             {
+                xwrite_stdout;
                 goto free_buffer;
             };
         };
         if (pos - bytes_read == start_pos)
         {
-            xwrite_stdout(buffer, bytes_read);
+            xwrite_stdout;
+            dump_remainder;
             goto free_buffer;
         };
         if (bytes_read < 0)
         {
-            pos = -1 - (?__errno_location());
+            error;
             goto free_buffer;
         };
     }
     while (bytes_read > 0);
     label free_buffer:
     free(buffer);
-    return pos;
 };
 
-cdecl pipe_lines(byte* prettyname, int fd, long n_lines) -> int
+cdecl pipe_lines(byte* prettyname, int fd, int n_lines) -> int
 {
     linebuffer* first;
     linebuffer* last;
     linebuffer* tmp;
     int ret = -1;
-    long n_read;
     first = last = xmalloc((sizeof ( LBUFFER ) / 8));
     first = first = 0;
-    first.next = ((void*)0);
     tmp = xmalloc((sizeof ( LBUFFER ) / 8));
-    while (?)
+    while (true)
     {
-        n_read = read(fd, tmp.buffer, 0);
         if (n_read <= 0)
             break;
-        tmp = n_read;
         tmp = 0;
-        tmp.next = ((void*)0);
         {
-            byte* buffer_end = tmp.buffer + n_read;
-            byte* p = tmp.buffer;
+            byte* buffer_end;
+            byte* p = tmp;
             while ((p = memchr(p, line_end, buffer_end - p)))
             {
                 ++p;
                 ++tmp;
             };
         };
-        if (tmp + last < 0)
+        if (tmp -> nbytes + last -> nbytes < BUFSIZ)
         {
-            memcpy(@last.buffer[last], tmp.buffer, tmp);
+            memcpy(@last[last], tmp, tmp);
             last += tmp;
             last += tmp;
         }
         else
         {
             last = last.next = tmp;
-            if (?)
+            if (total_lines - first -> nlines > n_lines)
             {
                 tmp = first;
                 first = first.next;
@@ -388,23 +370,23 @@ cdecl pipe_lines(byte* prettyname, int fd, long n_lines) -> int
         };
     };
     free(tmp);
-    if (n_read < 0 & (?__errno_location()) ? 0)
+    if (n_read < 0 && errno != EAGAIN)
     {
-        ret = -1 - (?__errno_location());
+        error;
         goto free_lbuffers;
     };
     if (last == 0)
         goto free_lbuffers;
     if (n_lines == 0)
         goto free_lbuffers;
-    if (last.buffer[last - 1] != line_end)
+    if (last[last - 1] != line_end)
     {
         ++last;
     };
     {
-        byte* beg = tmp.buffer;
-        byte* buffer_end = tmp.buffer + tmp;
-        if (?)
+        byte* beg = tmp;
+        byte* buffer_end = tmp + tmp;
+        if (total_lines > n_lines)
         {
         };
         xwrite_stdout(beg, buffer_end - beg);
@@ -421,40 +403,31 @@ cdecl pipe_lines(byte* prettyname, int fd, long n_lines) -> int
     return ret;
 };
 
-cdecl pipe_bytes(byte* prettyname, int fd, long n_bytes, long read_pos) -> long
+cdecl pipe_bytes(byte* prettyname, int fd, int n_bytes, int read_pos) -> int
 {
     charbuffer* first;
     charbuffer* last;
     charbuffer* tmp;
-    long total_bytes = 0;
-    long n_read;
     if (read_pos < 0)
-        read_pos = TYPE_MINIMUM(?);
+        read_pos = TYPE_MINIMUM;
     first = last = xmalloc((sizeof ( CBUFFER ) / 8));
     first = 0;
-    first.next = ((void*)0);
     tmp = xmalloc((sizeof ( CBUFFER ) / 8));
-    while (?)
+    while (true)
     {
-        n_read = read(fd, tmp.buffer, 0);
         if (n_read <= 0)
             break;
-        read_pos += n_read;
-        tmp = n_read;
-        tmp.next = ((void*)0);
-        total_bytes += tmp;
-        if (tmp + last < 0)
+        if (tmp -> nbytes + last -> nbytes < BUFSIZ)
         {
-            memcpy(@last.buffer[last], tmp.buffer, tmp);
+            memcpy(@last[last], tmp, tmp);
             last += tmp;
         }
         else
         {
             last = last.next = tmp;
-            if (total_bytes - first > n_bytes)
+            if (total_bytes - first -> nbytes > n_bytes)
             {
                 tmp = first;
-                total_bytes -= first;
                 first = first.next;
             }
             else
@@ -464,13 +437,12 @@ cdecl pipe_bytes(byte* prettyname, int fd, long n_bytes, long read_pos) -> long
         };
     };
     free(tmp);
-    if (n_read < 0 & (?__errno_location()) ? 0)
+    if (n_read < 0 && errno != EAGAIN)
     {
-        read_pos = -1 - (?__errno_location());
+        error;
         goto free_cbuffers;
     };
-    for (tmp = first; total_bytes - tmp > n_bytes; tmp = tmp.next)
-    {};
+    xwrite_stdout;
     for (tmp = tmp.next; tmp; tmp = tmp.next)
     {};
     if (read_pos < 0)
@@ -485,46 +457,45 @@ cdecl pipe_bytes(byte* prettyname, int fd, long n_bytes, long read_pos) -> long
     return read_pos;
 };
 
-cdecl start_bytes(byte* prettyname, int fd, long n_bytes) -> int
+cdecl start_bytes(byte* prettyname, int fd, int n_bytes) -> int
 {
-    byte[8192] buffer = 0;
+    byte buffer;
     while (0 < n_bytes)
     {
-        long bytes_read = read(fd, buffer, 0);
         if (bytes_read == 0)
             return -1;
         if (bytes_read < 0)
         {
-            int ret = -1 - (?__errno_location());
+            int ret;
+            error;
             return ret;
         };
         if (bytes_read <= n_bytes)
-            n_bytes -= bytes_read;
         else
         {
-            xwrite_stdout(@buffer[n_bytes], bytes_read - n_bytes);
+            xwrite_stdout;
             break;
         };
     };
     return 0;
 };
 
-cdecl start_lines(byte* prettyname, int fd, long n_lines) -> int
+cdecl start_lines(byte* prettyname, int fd, int n_lines) -> int
 {
     if (n_lines == 0)
         return 0;
-    while (?)
+    while (true)
     {
-        byte[8192] buffer = 0;
-        long bytes_read = read(fd, buffer, 0);
+        byte buffer;
         if (bytes_read == 0)
             return -1;
         if (bytes_read < 0)
         {
-            int ret = -1 - (?__errno_location());
+            int ret;
+            error;
             return ret;
         };
-        byte* buffer_end = buffer + bytes_read;
+        byte* buffer_end;
         byte* p = buffer;
         while ((p = memchr(p, line_end, buffer_end - p)))
         {
@@ -552,64 +523,73 @@ cdecl recheck(File_spec* f, int blocking) -> void
     int prev_errnum = f.errnum;
     bool;
     int fd;
-    int open_errno = fd < 0 ? (?__errno_location()) : 0;
+    int open_errno;
     affirm(valid_file_spec(f));
-    if (!? & issymlink(f.name) == 1)
+    if (!disable_inotify & issymlink(f.name) == 1)
     {
         f.errnum = -1;
+        error(0, 0, gettext("%s has been replaced with an untailable symbolic link"), quotearg_style);
     }
     elif (fd < 0 | fstat(fd, @new_stats) < 0)
     {
-        f.errnum = fd < 0 ? open_errno : (?__errno_location());
         if (fd < 0)
         {
             if (f)
             {
+                error(0, f.errnum, gettext("%s has become inaccessible"), quotearg_style);
             }
             else
             {
             };
         }
-        else
+        elif (prev_errnum != f.errnum)
+            error(0, f.errnum, "%s", quotearg_n_style_colon);
     };
     else
-        if (?(((((new_stats.st_mode)) ? 0) ? (0100000)) ? ((((new_stats.st_mode)) ? 0) ? (0010000)) ? S_ISSOCK(new_stats.st_mode) ? ((((new_stats.st_mode)) ? 0) ? (0020000))))
+        if (?(S_ISREG(new_stats.) ? S_ISFIFO(new_stats.) ? S_ISSOCK(new_stats.) ? S_ISCHR(new_stats.)))
         {
             f.errnum = -1;
-            f = !(? & follow_mode == Follow_name);
+            f = !(reopen_inaccessible_files & follow_mode == Follow_name);
+            if (f -> tailable || ! ( prev_errnum < 0 || prev_errnum == EISDIR ))
+                error(0, 0, gettext("%s has been replaced with an untailable file%s"), quotearg_style, f ? gettext("; giving up on this name") : "");
         }
-        elif ((f = ?(fd, f)) & !?)
+        elif ((f = fremote(fd, f)) & !disable_inotify)
         {
             f.errnum = -1;
+            error(0, 0, gettext("%s has been replaced with an untailable remote file"), quotearg_style);
         };
         else
         {
             f.errnum = 0;
         };
-    if (?)
+    if (! ok)
     {
         close_fd(fd, f);
         close_fd(f.fd, f);
         f.fd = -1;
     }
-    elif (prev_errnum & prev_errnum != 0)
+    elif (prev_errnum && prev_errnum != ENOENT)
     {
         affirm(f.fd < 0);
+        error(0, 0, gettext("%s has become accessible"), quotearg_style);
     };
     else
         if (f.fd < 0)
         {
+            error(0, 0, gettext("%s has appeared;  following new file"), quotearg_style);
         }
         elif (!SAME_INODE(*f, new_stats))
         {
+            error(0, 0, gettext("%s has been replaced;  following new file"), quotearg_style);
             close_fd(f.fd, f);
         };
         else
         {
             close_fd(fd, f);
         };
-    if (?)
+    if (new_file)
     {
+        record_open_fd;
     };
 };
 
@@ -633,11 +613,12 @@ cdecl tail_forever(File_spec* f, int n_files, double sleep_interval) -> void
 {
     int last = n_files - 1;
     int debugged;
-    while (?)
+    while (true)
     {
         bool;
-        if (? & !?)
+        if (debug & !debugged)
         {
+            error;
         };
         bool;
         for (int i = 0; i < n_files; i++)
@@ -648,20 +629,21 @@ cdecl tail_forever(File_spec* f, int n_files, double sleep_interval) -> void
             int fd = f[i].fd;
             if (fd < 0)
             {
+                recheck;
                 continue;
             };
             byte* prettyname = f[i].prettyname;
-            uint mode = f[i].mode;
-            if (?)
+            if (f [ i ] . blocking != blocking)
             {
-                int old_flags = fcntl(fd, 0);
+                int old_flags = fcntl;
                 int new_flags;
-                if (old_flags < 0 | (new_flags != old_flags & fcntl(fd, 0, new_flags) < 0))
+                if (old_flags < 0 | (new_flags != old_flags & fcntl < 0))
                 {
-                    if (((((f[i].mode)) ? 0) ? (0100000)) ? (?__errno_location()) ? 0)
+                    if (S_ISREG ( f [ i ] . mode ) && errno == EPERM)
                     {
                     }
                     else
+                        error;
                 }
                 else
             };
@@ -671,80 +653,80 @@ cdecl tail_forever(File_spec* f, int n_files, double sleep_interval) -> void
                 if (fstat(fd, @stats) < 0)
                 {
                     f[i].fd = -1;
-                    f[i].errnum = (?__errno_location());
+                    error;
                     close(fd);
                     continue;
                 };
-                if (f[i].mode == stats.st_mode & (!((((stats.st_mode)) ? 0) ? (0100000)) | f[i].read_pos == stats.st_size) & timespec_cmp(f[i].mtime, get_stat_mtime(@stats)) == 0)
+                if (f[i] == stats. & (!S_ISREG(stats.) | f[i] == stats.) & timespec_cmp(f[i], get_stat_mtime(@stats)) == 0)
                 {
                     if ((max_n_unchanged_stats_between_opens <= f[i].n_unchanged_stats++) & follow_mode == Follow_name)
                     {
                         recheck(@f[i], f[i].blocking);
                         f[i].n_unchanged_stats = 0;
                     };
-                    if (fd != f[i].fd | ((((stats.st_mode)) ? 0) ? (0100000)) | 1 < n_files)
+                    if (fd != f[i].fd | S_ISREG(stats.) | 1 < n_files)
                         continue;
                     else
                 };
                 affirm(fd == f[i].fd);
-                f[i].mtime;
-                f[i].mode = stats.st_mode;
-                if (?)
+                f[i] = get_stat_mtime(@stats);
+                f[i] = stats.;
+                if (! read_unchanged)
                     f[i].n_unchanged_stats = 0;
-                if (((((mode)) ? 0) ? (0100000)) ? stats.st_size < f[i].read_pos)
+                if (S_ISREG & stats. < f[i])
                 {
-                    f[i].read_pos = xlseek(fd, 0, 0, prettyname);
+                    error(0, 0, gettext("%s: file truncated"), quotearg_n_style_colon);
+                    f[i] = xlseek;
                 };
                 if (i != last)
                 {
-                    if (?)
+                    if (print_headers)
                         write_header(prettyname);
                     last = i;
                 };
             };
-            long bytes_to_read;
+            int bytes_to_read;
             if (f[i].blocking)
                 bytes_to_read = COPY_A_BUFFER;
-            elif (((((mode)) ? 0) ? (0100000)) ? f[i])
-                bytes_to_read = stats.st_size - f[i].read_pos;
+            elif (S_ISREG & f[i])
+                bytes_to_read = stats. - f[i];
             else
                 bytes_to_read = COPY_TO_EOF;
-            long nr;
+            int nr = dump_remainder;
             if (0 < nr)
             {
-                if (((((mode)) ? 0) ? (0100000)))
-                    f[i].read_pos += nr;
-                if (?)
+                if (S_ISREG)
+                    f[i] += nr;
+                if (read_unchanged)
                     f[i].n_unchanged_stats = 0;
             };
         };
-        if (!?(f, n_files))
+        if (!any_live_files(f, n_files))
         {
-            error(0, 0, gettext("no files remaining"));
+            error;
             break;
         };
-        if (?)
+        if (( ! any_input || blocking ) && fflush ( stdout ) < 0)
             write_error();
         check_output_alive();
-        if (?)
+        if (! any_input)
         {
             if (pids)
             {
                 if (!nbpids)
                     break;
-                if (!?())
+                if (!some_writers_exist())
                     continue;
             };
             if (xnanosleep(sleep_interval))
-                error(0, (?__errno_location()), gettext("cannot read realtime clock"));
+                error;
         };
     };
 };
 
-cdecl tail_bytes(byte* prettyname, int fd, stat* st, long n_bytes) -> long
+cdecl tail_bytes(byte* prettyname, int fd, stat* st, int n_bytes) -> int
 {
-    long current_pos = (? ? -1 : lseek(fd, ? ? MIN(n_bytes, TYPE_MAXIMUM(?)) : 0, 0));
-    if (?)
+    if (from_start)
     {
         if (current_pos < 0)
         {
@@ -756,140 +738,120 @@ cdecl tail_bytes(byte* prettyname, int fd, stat* st, long n_bytes) -> long
     }
     else
     {
-        long initial_pos = current_pos;
-        long end_pos = -1;
         if (0 <= current_pos)
         {
-            if (?(st))
+            if (usable_st_size(st))
             {
-                long smallish_size = STP_BLKSIZE(st);
-                if (smallish_size < st.st_size)
-                    end_pos = st.st_size;
             }
             else
             {
-                long minus_n;
-                if (__builtin_sub_overflow((0), (n_bytes), (@minus_n)))
-                    end_pos = 0;
+                if (ckd_sub)
                 else
                 {
-                    long e_n_pos = lseek(fd, minus_n, 0);
                     if (0 <= e_n_pos)
                     {
-                        current_pos = e_n_pos;
-                        end_pos = e_n_pos + n_bytes;
                     }
                     else
                     {
-                        long e_pos = lseek(fd, 0, 0);
-                        if (0 <= e_pos)
-                            current_pos = end_pos = e_pos;
                     };
                 };
             };
         };
-        long pos = (initial_pos < end_pos & n_bytes < end_pos - initial_pos ? end_pos - n_bytes : initial_pos);
-        if (pos != current_pos)
-            current_pos = xlseek(fd, pos, 0, prettyname);
         if (end_pos < 0)
-            return pipe_bytes(prettyname, fd, n_bytes, current_pos);
+            return pipe_bytes;
     };
-    long nr;
-    return current_pos < 0 ? -1 : current_pos + nr;
+    int nr = dump_remainder;
 };
 
-cdecl tail_lines(byte* prettyname, int fd, stat* st, long n_lines) -> long
+cdecl tail_lines(byte* prettyname, int fd, stat* st, int n_lines) -> int
 {
-    if (?)
+    if (from_start)
     {
-        if (TYPE_MAXIMUM(?) ? n_lines)
+        if (TYPE_MAXIMUM ? n_lines)
         {
-            long e = lseek(fd, 0, 0);
-            if (0 <= e)
-                return e;
         };
         int t = start_lines(prettyname, fd, n_lines);
         if (t < 0)
             return t;
+        dump_remainder;
         return -1;
     }
     else
     {
-        long start_pos = (!? & ((((st.st_mode)) ? 0) ? (0100000)) ? lseek(fd, 0, 0) : -1);
-        long end_pos = start_pos < 0 ? -1 : lseek(fd, 0, 0);
-        return (end_pos < 0 ? pipe_lines(prettyname, fd, n_lines) : start_pos < end_pos ? file_lines(prettyname, fd, st, n_lines, start_pos, end_pos) : start_pos != end_pos ? (xlseek(fd, start_pos, 0, prettyname)) : start_pos);
     };
 };
 
-cdecl tail(byte* filename, int fd, stat* st, long n_units) -> long
+cdecl tail(byte* filename, int fd, stat* st, int n_units) -> int
 {
-    return (? ? tail_lines : tail_bytes)(filename, fd, st, n_units);
+    return (count_lines ? tail_lines : tail_bytes)(filename, fd, st, n_units);
 };
 
-cdecl tail_file(File_spec* f, long n_files, long n_units) -> int
+cdecl tail_file(File_spec* f, int n_files, int n_units) -> int
 {
     int fd;
     bool;
     bool;
     bool;
-    if (?)
+    if (is_stdin)
     {
-        fd = 0;
+        xset_binary_mode;
     }
     else
+        fd = open;
     if (fd < 0)
     {
-        if (?)
+        if (forever)
         {
             f.fd = -1;
-            f.errnum = (?__errno_location());
-            f = !?;
-            f.st_dev = 0;
-            f.st_ino = 0;
+            f = !reopen_inaccessible_files;
+            f = 0;
+            f = 0;
         };
+        error;
     }
     else
     {
-        if (?)
+        if (print_headers)
             write_header(f.prettyname);
-        long read_pos;
         stat stats;
-        if (?)
+        if (! ok)
         {
-            f.errnum = (?__errno_location());
+            error(0, f.errnum, gettext("cannot fstat %s"), quotearg_style);
         }
         else
         {
-            read_pos = tail(f.prettyname, fd, @stats, n_units);
-            if ((((((stats.st_mode)) ? 0) ? (0100000)) ? ((((stats.st_mode)) ? 0) ? (0010000)) ? S_ISSOCK(stats.st_mode) ? ((((stats.st_mode)) ? 0) ? (0020000))))
-            elif (?)
+            if ((S_ISREG(stats.) ? S_ISFIFO(stats.) ? S_ISSOCK(stats.) ? S_ISCHR(stats.)))
+            elif (forever)
             {
                 f.errnum = -1;
+                error(0, 0, gettext("%s: cannot follow end of this type of file%s"), quotearg_n_style_colon, (reopen_inaccessible_files ? "" : gettext("; giving up on this name")));
             };
         };
-        if (?)
+        if (forever)
         {
-            if (?)
+            if (! ok)
             {
-                f = !?;
+                f = !reopen_inaccessible_files;
                 close_fd(fd, f);
                 f.fd = -1;
             }
             else
             {
-                f = ?(fd, f);
+                record_open_fd;
+                f = fremote(fd, f);
             };
         }
         else
         {
-            if (?)
+            if (! is_stdin && close ( fd ) < 0)
             {
+                error;
             };
         };
     };
 };
 
-cdecl parse_obsolete_option(int argc, byte** argv, long* n_units) -> int
+cdecl parse_obsolete_option(int argc, byte** argv, int* n_units) -> int
 {
     bool;
     bool;
@@ -905,25 +867,21 @@ cdecl parse_obsolete_option(int argc, byte** argv, long* n_units) -> int
         };
         case ('+')
         {
+            break switch;
         }
-        goto _switch_end_139188829379536;
         case ('-')
         {
+            break switch;
         }
-        goto _switch_end_139188829379536;
     };
-    label _switch_end_139188829379536:
-    long n;
+    int n;
     if (!c_isdigit(*p))
         n = 10;
     else
-        for (n = 0; c_isdigit(*p); p++)
-        {};
     switch (*p)
     {
         case ('b')
         {
-            n = __builtin_mul_overflow((n), (512), (@n)) ? (0) : n;
         }
         case ('c')
         {
@@ -931,10 +889,9 @@ cdecl parse_obsolete_option(int argc, byte** argv, long* n_units) -> int
         case ('l')
         {
             p++;
+            break switch;
         }
-        goto _switch_end_139188829387472;
     };
-    label _switch_end_139188829387472:
     if (*p == 'f')
     {
         ++p;
@@ -942,154 +899,25 @@ cdecl parse_obsolete_option(int argc, byte** argv, long* n_units) -> int
     *n_units = n;
 };
 
-cdecl parse_options(int argc, byte** argv, long* n_units, header_mode* header_mode, double* sleep_interval) -> void
+cdecl parse_options(int argc, byte** argv, int* n_units, header_mode* header_mode, double* sleep_interval) -> void
 {
     int c;
-    while ((c = getopt_long(argc, argv, "c:n:fFqs:vz0123456789", long_options, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('F')
-            {
-            }
-            follow_mode = Follow_name;
-            goto _switch_end_139188829388624;
-            case ('c')
-            {
-                case ('n')
-                {
-                    count_lines = (c == 'n');
-                }
-            }
-            if (*optarg == '+')
-            elif (*optarg == '-')
-                ++optarg;
-            goto _switch_end_139188829388624;
-            case ('f')
-            {
-                case (LONG_FOLLOW_OPTION)
-                {
-                }
-            }
-            if (optarg == ((void*)0))
-                follow_mode = Follow_descriptor;
-            else
-                follow_mode = XARGMATCH("--follow", optarg, follow_mode_string, follow_mode_map);
-            goto _switch_end_139188829388624;
-            case (RETRY_OPTION)
-            {
-            }
-            goto _switch_end_139188829388624;
-            case (MAX_UNCHANGED_STATS_OPTION)
-            {
-            }
-            goto _switch_end_139188829388624;
-            case (DEBUG_PROGRAM_OPTION)
-            {
-            }
-            goto _switch_end_139188829388624;
-            case (DISABLE_INOTIFY_OPTION)
-            {
-            }
-            goto _switch_end_139188829388624;
-            case (PID_OPTION)
-            {
-            }
-            pids[nbpids++] = xdectoumax(optarg, 0, TYPE_MAXIMUM(?), "", gettext("invalid PID"), 0);
-            goto _switch_end_139188829388624;
-            case (PRESUME_INPUT_PIPE_OPTION)
-            {
-            }
-            goto _switch_end_139188829388624;
-            case ('q')
-            {
-                *header_mode = never;
-            }
-            goto _switch_end_139188829388624;
-            case ('s')
-            {
-                {
-                    byte* ep;
-                    (?__errno_location()) ? 0;
-                    double s = cl_strtod(optarg, @ep);
-                    if (optarg == ep | *ep | !(0 <= s))
-                        error(0, 0, gettext("invalid number of seconds: %s"), quote(optarg));
-                    *sleep_interval = dtimespec_bound(s, (?__errno_location()));
-                };
-            }
-            goto _switch_end_139188829388624;
-            case ('v')
-            {
-                *header_mode = always;
-            }
-            goto _switch_end_139188829388624;
-            case ('z')
-            {
-                line_end = '\0';
-            }
-            goto _switch_end_139188829388624;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188829388624;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188829388624;
-            case ('0')
-            {
-                case ('1')
-                {
-                    case ('2')
-                    {
-                        case ('3')
-                        {
-                            case ('4')
-                            {
-                                case ('5')
-                                {
-                                    case ('6')
-                                    {
-                                        case ('7')
-                                        {
-                                            case ('8')
-                                            {
-                                                case ('9')
-                                                {
-                                                    error(0, 0, gettext("option used in invalid context -- %c"), c);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188829388624:
     };
-    if (?)
+    if (reopen_inaccessible_files)
     {
-        if (!?)
+        if (!forever)
         {
             error(0, 0, gettext("warning: --retry ignored; --retry is useful"));
         }
         elif (follow_mode == Follow_descriptor)
             error(0, 0, gettext("warning: --retry only effective for the initial open"));
     };
-    if (pids & (!? | (kill(pids[0], 0) < 0 & (?__errno_location()) ? 0)))
+    if (pids && ( ! forever || ( kill ( pids [ 0 ] , 0 ) < 0 && errno == ENOSYS ) ))
     {
-        error(0, 0, gettext(? ? "warning: --pid=PID is not supported on this system" : ("warning: PID ignored;")));
+        error(0, 0, gettext(forever ? "warning: --pid=PID is not supported on this system" : ("warning: PID ignored;")));
         free(pids);
-        pids = ((void*)0);
     };
 };
 
@@ -1099,7 +927,7 @@ cdecl ignore_fifo_and_pipe(File_spec* f, int n_files) -> int
     for (int i = 0; i < n_files; i++)
     {
         bool;
-        if (?)
+        if (is_a_fifo_or_pipe)
         {
             f[i].fd = -1;
             f[i].errnum = -1;
@@ -1112,26 +940,24 @@ cdecl main(int argc, byte** argv) -> int
 {
     header_mode header_mode = multiple_files;
     bool;
-    long n_units = 10;
+    int n_units = 10;
     int n_files;
     byte** file;
     File_spec* F;
     bool;
     double sleep_interval = 1.0;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     {
         int p = getpagesize();
-        if (?)
+        if (IDX_MAX < p)
             xalloc_die();
         page_size = p;
     };
     parse_options(argc, argv, @n_units, @header_mode, @sleep_interval);
-    n_units -= ? & 0 < n_units & n_units < (0);
     if (optind < argc)
     {
-        n_files = argc - optind;
-        file = argv + optind;
     }
     else
     {
@@ -1141,17 +967,17 @@ cdecl main(int argc, byte** argv) -> int
     };
     {
         bool;
-        if (?)
+        if (found_hyphen && follow_mode == Follow_name)
+            error;
+        if (forever && found_hyphen)
         {
             stat in_stat;
             bool;
-            if (?)
+            if (! blocking_stdin && isatty ( STDIN_FILENO ))
                 error(0, 0, gettext("warning: following standard input"));
         };
     };
-    if (!? & n_units == (? ? (0) : 0))
-        return 0;
-    if (?)
+    if (IDX_MAX < n_files)
         xalloc_die();
     F = xinmalloc(n_files, (sizeof * F / 8));
     for (int i = 0; i < n_files; i++)
@@ -1159,13 +985,14 @@ cdecl main(int argc, byte** argv) -> int
         F[i].name = file[i];
         F[i].prettyname = streq(file[i], "-") ? gettext("standard input") : file[i];
     };
-    if (? & ?(F, n_files))
+    xset_binary_mode;
+    if (forever & ignore_fifo_and_pipe(F, n_files))
     {
         stat out_stat;
-        if (fstat(0, @out_stat) < 0)
-            error(0, (?__errno_location()), gettext("standard output"));
+        if (fstat < 0)
+            error;
         tail_forever(F, n_files, sleep_interval);
     };
-    if (? & close(0) < 0)
-        error(0, (?__errno_location()), "-");
+    if (have_read_stdin & close < 0)
+        error;
 };

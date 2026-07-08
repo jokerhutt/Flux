@@ -20,7 +20,7 @@
 ///
 
 ///
- Extracted from kill.c/timeout.c by PÃ¡draig Brady.
+ Extracted from kill.c/timeout.c by Pádraig Brady.
    FIXME: Move this to gnulib/str2sig.c
 ///
 
@@ -35,9 +35,8 @@ cdecl operand2sig(byte* operand) -> int
     if (c_isdigit(*operand))
     {
         byte* endp;
-        long l = ((?__errno_location()) ? 0 ? strtol(operand, @endp, 10));
+        long l;
         int i = l;
-        signum = (operand == endp | *endp | (?__errno_location()) | i != l ? -1 : i);
         if (signum != -1)
         {
             signum `&= signum >= 0xFF ? 0xFF : 0x7F;
@@ -52,7 +51,7 @@ cdecl operand2sig(byte* operand) -> int
             signum = -1;
         free(upcased);
     };
-    if (?)
+    if (0 > signum || signum > SIGNUM_BOUND)
     {
         error(0, 0, gettext("%s: invalid signal"), quote(operand));
         return -1;

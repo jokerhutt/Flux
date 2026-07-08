@@ -30,38 +30,36 @@ macro AUTHORS
     proper_name ( "Paul Rubin" ) , proper_name ( "David MacKenzie" )
 };
 
-bool[256] wc_isprint = (0 ? 0 ? 0) ? 1;
-bool[256] wc_isspace = (0 ? 0 ? 0) ? 1;
-extern bool debug;
-ulong total_lines = uintmax_t;
-ulong total_words = uintmax_t;
-ulong total_chars = uintmax_t;
-ulong total_bytes = uintmax_t;
-extern bool total_lines_overflow;
-extern bool total_words_overflow;
-extern bool total_chars_overflow;
-extern bool total_bytes_overflow;
-long max_line_length = intmax_t;
-extern bool print_lines;
-extern bool print_words;
-extern bool print_chars;
-extern bool print_bytes;
-extern bool print_linelength;
+extern int wc_isprint;
+extern int wc_isspace;
+extern int debug;
+extern int total_lines;
+extern int total_words;
+extern int total_chars;
+extern int total_bytes;
+extern int total_lines_overflow;
+extern int total_words_overflow;
+extern int total_chars_overflow;
+extern int total_bytes_overflow;
+extern int max_line_length;
+extern int print_lines;
+extern int print_linelength;
 extern int number_width;
-extern bool have_read_stdin;
+extern int have_read_stdin;
 extern int page_size;
-extern bool posixly_correct;
+extern int posixly_correct;
 struct fstatus
 {
     int failed;
     stat st;
 };
 
-uint DEBUG_PROGRAM_OPTION = 128;
-uint FILES0_FROM_OPTION = 129;
-uint TOTAL_OPTION = 130;
+uint DEBUG_PROGRAM_OPTION = 0;
+uint FILES0_FROM_OPTION = 1;
+uint TOTAL_OPTION = 2;
 
-option[11] longopts = option;
+struct option;
+extern int longopts;
 enum total_type
 {
     total_auto,
@@ -70,64 +68,58 @@ enum total_type
     total_never
 };
 
-byte*[5] total_args = {"auto", "always", "only", "never", ((void*)0)};
+extern byte** total_args;
 total_type[4] total_types = total_type;
 cdecl ARGMATCH_VERIFY() -> int;
 total_type total_mode = total_type;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print newline, word, and byte counts for each FILE, and a total line if\n\
-more than one FILE is specified.  A word is a nonempty sequence of non white\n\
-space delimited by white space characters or by start or end of input.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
-        fputs(gettext("\
-\n\
-The options below may be used to select which counts are printed, always in\n\
-the following order: newline, word, character, byte, maximum line length.\n\
-"), stdout);
-        oputs_("wc", gettext("\
-  -c, --bytes\n\
-         print the byte counts\n\
+        fputs;
+        oputs_("wc", gettext("\
+  -c, --bytes\n\
+         print the byte counts\n\
 "));
-        oputs_("wc", gettext("\
-  -m, --chars\n\
-         print the character counts\n\
+        oputs_("wc", gettext("\
+  -m, --chars\n\
+         print the character counts\n\
 "));
-        oputs_("wc", gettext("\
-  -l, --lines\n\
-         print the newline counts\n\
+        oputs_("wc", gettext("\
+  -l, --lines\n\
+         print the newline counts\n\
 "));
-        oputs_("wc", gettext("\
-      --debug\n\
-         indicate what line count acceleration is used\n\
+        oputs_("wc", gettext("\
+      --debug\n\
+         indicate what line count acceleration is used\n\
 "));
-        oputs_("wc", gettext("\
-      --files0-from=F\n\
-         read input from the files specified by\n\
-         NUL-terminated names in file F;\n\
-         If F is -, read names from standard input\n\
+        oputs_("wc", gettext("\
+      --files0-from=F\n\
+         read input from the files specified by\n\
+         NUL-terminated names in file F;\n\
+         If F is -, read names from standard input\n\
 "));
-        oputs_("wc", gettext("\
-  -L, --max-line-length\n\
-         print the maximum display width\n\
+        oputs_("wc", gettext("\
+  -L, --max-line-length\n\
+         print the maximum display width\n\
 "));
-        oputs_("wc", gettext("\
-  -w, --words\n\
-         print the word counts\n\
+        oputs_("wc", gettext("\
+  -w, --words\n\
+         print the word counts\n\
 "));
-        oputs_("wc", gettext("\
-      --total=WHEN\n\
-         when to print a line with total counts;\n\
-         WHEN can be: auto, always, only, never\n\
+        oputs_("wc", gettext("\
+      --total=WHEN\n\
+         when to print a line with total counts;\n\
+         WHEN can be: auto, always, only, never\n\
 "));
         oputs_("wc", gettext("      --help\n         display this help and exit\n"));
         oputs_("wc", gettext("      --version\n         output version information and exit\n"));
@@ -136,16 +128,16 @@ the following order: newline, word, character, byte, maximum line length.\n\
     exit(status);
 };
 
-cdecl maybe_c32isnbspace(uint wc) -> int
+cdecl maybe_c32isnbspace(int wc) -> int
 {
-    return !posixly_correct & ?(wc);
+    return !posixly_correct & c32isnbspace(wc);
 };
 
-cdecl write_counts(ulong lines, ulong words, ulong chars, ulong bytes, long linelength, byte* file) -> void
+cdecl write_counts(int lines, int words, int chars, int bytes, int linelength, byte* file) -> void
 {
     byte[5] format_sp_int = " %*s";
     byte* format_int = format_sp_int + 1;
-    void* /* untranslated: char[MAX(INT_BUFSIZE_BOUND(<recovery-expr>()), INT_BUFSIZE_BOUND(<recovery-expr>()))] */ buf = MAX(INT_BUFSIZE_BOUND(?), INT_BUFSIZE_BOUND(?));
+    void* /* untranslated: char[MAX(<recovery-expr>(INT_BUFSIZE_BOUND), <recovery-expr>(INT_BUFSIZE_BOUND))] */ buf = MAX(INT_BUFSIZE_BOUND, INT_BUFSIZE_BOUND);
     if (print_lines)
     {
         printf(format_int, number_width, umaxtostr(lines, buf));
@@ -168,25 +160,21 @@ cdecl write_counts(ulong lines, ulong words, ulong chars, ulong bytes, long line
     };
     if (print_linelength)
         printf(format_int, number_width, imaxtostr(linelength, buf));
+    if (file)
+        printf(" %s", strchr(file, '\n') ? quotearg_n_style_colon : file);
     putchar('\n');
-    if (ferror(stdout))
+    if (ferror)
         write_error();
 };
 
 cdecl wc_lines(int fd) -> wc_lines
 {
-    long lines = 0;
-    long bytes = 0;
-    bool long_lines = 0;
-    while (0)
+    bool;
+    while (true)
     {
         byte[262145] buf = IO_BUFSIZE + 1;
-        long bytes_read = read(fd, buf, IO_BUFSIZE);
-        if (bytes_read <= 0)
-            return ( struct wc_lines ) { bytes_read == 0 ? 0 : errno , lines , bytes };
-        bytes += bytes_read;
-        byte* end = buf + bytes_read;
-        if (!long_lines)
+        byte* end;
+        if (! long_lines)
         {
         }
         else
@@ -196,187 +184,96 @@ cdecl wc_lines(int fd) -> wc_lines
     };
 };
 
-cdecl wc(int fd, byte* file_x, fstatus* fstatus) -> bool
+cdecl wc(int fd, byte* file_x, fstatus* fstatus) -> int
 {
     int err = 0;
     byte[262145] buf = IO_BUFSIZE + 1;
-    long lines;
-    long words;
-    long chars;
-    long bytes;
-    long linelength;
-    bool count_bytes;
-    bool count_chars;
-    bool count_complicated;
+    bool;
     byte* file = file_x ? file_x : gettext("standard input");
-    lines = words = chars = bytes = linelength = 0;
-    if ((__ctype_get_mb_cur_max()) ? 1)
+    if (MB_CUR_MAX > 1)
     {
-        count_bytes = print_bytes;
-        count_chars = print_chars;
     }
     else
     {
-        count_bytes = print_bytes | print_chars;
-        count_chars = 0;
     };
-    count_complicated = print_words | print_linelength;
-    if (count_bytes & !count_chars & !print_lines & !count_complicated)
+    if (! count_bytes || count_chars || print_lines || count_complicated)
+        fdadvise;
+    if (count_bytes && ! count_chars && ! print_lines && ! count_complicated)
     {
-        bool skip_read = 0;
+        bool;
         if (0 < fstatus.failed)
-            fstatus.failed = fstat(fd, @fstatus.st);
-        if (!fstatus.failed & ?(@fstatus.st) & 0 <= fstatus.st.st_size)
+            fstatus.failed = fstat(fd, @fstatus);
+        if (!fstatus.failed & usable_st_size(@fstatus) & 0 <= fstatus.)
         {
-            long end_pos = fstatus.st.st_size;
-            long current_pos = lseek(fd, 0, 0);
             if (current_pos < 0)
-            elif (end_pos % ?)
+            elif (end_pos % page_size)
             {
-                bytes = end_pos < current_pos ? 0 : end_pos - current_pos;
-                if (bytes & 0 <= lseek(fd, bytes, 0))
-                    skip_read = 0;
-                else
-                    bytes = 0;
             };
             else
             {
-                long hi_pos = (end_pos - end_pos % (STP_BLKSIZE(@fstatus.st) + 1));
-                if (0 <= current_pos & current_pos < hi_pos & 0 <= lseek(fd, hi_pos, 0))
-                    bytes = hi_pos - current_pos;
             };
         };
-        if (!skip_read)
+        if (! skip_read)
         {
-            for (long bytes_read; (bytes_read = read(fd, buf, IO_BUFSIZE)); bytes += bytes_read)
-            {};
+            fdadvise;
         };
     }
-    elif (!count_chars & !count_complicated)
+    elif (! count_chars && ! count_complicated)
     {
         wc_lines w = wc_lines(fd);
         err = w.err;
-        lines = w.lines;
-        bytes = w.bytes;
     };
     else
-        if ((__ctype_get_mb_cur_max()) ? 1)
+        if (MB_CUR_MAX > 1)
         {
-            bool in_word = 0;
-            long linepos = 0;
-            __mbstate_t state;
-            mbszero(@state);
-            bool in_shift = 0;
-            if (linepos > linelength)
-                linelength = linepos;
+            bool;
+            mbszero;
+            bool;
         }
         else
         {
-            bool in_word = 0;
-            long linepos = 0;
-            for (long bytes_read; (bytes_read = read(fd, buf, IO_BUFSIZE)); )
-            {
-                if (bytes_read < 0)
-                {
-                    err = (?__errno_location());
-                    break;
-                };
-                bytes += bytes_read;
-                byte* p = buf;
-                do
-                {
-                    byte c = *p++;
-                    switch (c)
-                    {
-                        case ('\n')
-                        {
-                            lines++;
-                        }
-                        case ('\r')
-                        {
-                            case ('\f')
-                            {
-                                if (linepos > linelength)
-                                    linelength = linepos;
-                            }
-                        }
-                        linepos = 0;
-                        in_word = 0;
-                        goto _switch_end_139188883454416;
-                        case ('\t')
-                        {
-                            linepos += 8 - (linepos % 8);
-                        }
-                        in_word = 0;
-                        goto _switch_end_139188883454416;
-                        case (' ')
-                        {
-                            linepos++;
-                        }
-                        case ('\v')
-                        {
-                            in_word = 0;
-                        }
-                        goto _switch_end_139188883454416;
-                        default
-                        {
-                            linepos += wc_isprint[c];
-                        };
-                        bool in_word2 = !wc_isspace[c];
-                        words += !in_word `& in_word2;
-                        in_word = in_word2;
-                        goto _switch_end_139188883454416;
-                    };
-                    label _switch_end_139188883454416:
-                }
-                while (--bytes_read);
-            };
-            if (linepos > linelength)
-                linelength = linepos;
+            bool;
         };
-    if (count_chars < print_chars)
-        chars = bytes;
     if (total_mode != total_only)
-        write_counts(lines, words, chars, bytes, linelength, file_x);
-    total_lines_overflow `|= __builtin_add_overflow((total_lines), (lines), (@total_lines));
-    total_words_overflow `|= __builtin_add_overflow((total_words), (words), (@total_words));
-    total_chars_overflow `|= __builtin_add_overflow((total_chars), (chars), (@total_chars));
-    total_bytes_overflow `|= __builtin_add_overflow((total_bytes), (bytes), (@total_bytes));
-    if (linelength > max_line_length)
-        max_line_length = linelength;
+        write_counts;
+    total_lines_overflow `|= ckd_add;
+    total_words_overflow `|= ckd_add;
+    total_chars_overflow `|= ckd_add;
+    total_bytes_overflow `|= ckd_add;
+    if (err)
+        error(0, err, "%s", quotearg_n_style_colon);
     return !err;
 };
 
-cdecl wc_file(byte* file, fstatus* fstatus) -> bool
+cdecl wc_file(byte* file, fstatus* fstatus) -> int
 {
     if (!file | streq(file, "-"))
     {
-        have_read_stdin = 0;
-        return wc(0, file, fstatus);
+        xset_binary_mode;
+        return wc;
     }
     else
     {
-        int fd;
+        int fd = open;
         if (fd == -1)
         {
-            return 0;
+            error;
         }
         else
         {
-            bool ok = wc(fd, file, fstatus);
+            bool;
             if (close(fd) != 0)
             {
-                return 0;
+                error;
             };
-            return ok;
         };
     };
 };
 
 cdecl get_input_fstatus(int nfiles, byte** file) -> fstatus*
 {
-    fstatus* fstatus = xnmalloc(? ? ? : 1, (sizeof * fstatus / 8));
-    if (? == 0 | (? == 1 & ((print_lines + print_words + print_chars + print_bytes + print_linelength) == 1)))
+    fstatus* fstatus = xnmalloc(nfiles ? nfiles : 1, (sizeof * fstatus / 8));
+    if (nfiles == 0 || ( nfiles == 1 && ( ( print_lines + print_words + print_chars + print_bytes + print_linelength ) == 1 ) ))
         fstatus[0].failed = 1;
     else
     {
@@ -387,12 +284,9 @@ cdecl get_input_fstatus(int nfiles, byte** file) -> fstatus*
 cdecl compute_number_width(int nfiles, fstatus* fstatus) -> int
 {
     int width = 1;
-    if (0 < ? & fstatus[0].failed <= 0)
+    if (0 < nfiles & fstatus[0].failed <= 0)
     {
         int minimum_width = 1;
-        ulong regular_total = 0;
-        for (10 <= regular_total; regular_total /= 10; width++)
-        {};
         if (width < minimum_width)
             width = minimum_width;
     };
@@ -403,194 +297,110 @@ cdecl main(int argc, byte** argv) -> int
 {
     int optc;
     byte** files;
-    byte* files_from = ((void*)0);
+    byte* files_from;
     fstatus* fstatus;
     Tokens tok;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     page_size = getpagesize();
-    setvbuf(stdout, ((void*)0), 0, 0);
-    posixly_correct = (getenv("POSIXLY_CORRECT") != ((void*)0));
-    while ((optc = getopt_long(argc, argv, "clLmw", longopts, ((void*)0))) != -1)
-        switch (optc)
-        {
-            case ('c')
-            {
-                print_bytes = 0;
-            }
-            goto _switch_end_139188829088720;
-            case ('m')
-            {
-                print_chars = 0;
-            }
-            goto _switch_end_139188829088720;
-            case ('l')
-            {
-                print_lines = 0;
-            }
-            goto _switch_end_139188829088720;
-            case ('w')
-            {
-                print_words = 0;
-            }
-            goto _switch_end_139188829088720;
-            case ('L')
-            {
-                print_linelength = 0;
-            }
-            goto _switch_end_139188829088720;
-            case (DEBUG_PROGRAM_OPTION)
-            {
-                debug = 0;
-            }
-            goto _switch_end_139188829088720;
-            case (FILES0_FROM_OPTION)
-            {
-                files_from = optarg;
-            }
-            goto _switch_end_139188829088720;
-            case (TOTAL_OPTION)
-            {
-                total_mode = XARGMATCH("--total", optarg, total_args, total_types);
-            }
-            goto _switch_end_139188829088720;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188829088720;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188829088720;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188829088720:
-    if (!(print_lines | print_words | print_chars | print_bytes | print_linelength))
-        print_lines = print_words = print_bytes = 0;
-    if (print_linelength)
-        for (int i = 0; i <= (0 ? 0 ? 0); i++)
-        {};
-    if (print_words)
-        for (int i = 0; i <= (0 ? 0 ? 0); i++)
-        {};
-    bool read_tokens = 0;
+    setvbuf;
+    bool;
     argv_iterator* ai;
     if (files_from)
     {
-        _IO_FILE* stream;
         if (optind < argc)
         {
-            fprintf(stderr, "%s\n", gettext("file operands cannot be combined with --files0-from"));
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quotearg_style);
+            fprintf;
+            usage;
         };
         if (streq(files_from, "-"))
-            stream = stdin;
         else
         {
-            stream = fopen(files_from, "r");
+            if (stream == NULL)
+                error;
         };
         stat st;
-        if (fstat(fileno(stream), @st) == 0 & ((((st.st_mode)) ? 0) ? (0100000)) & st.st_size <= MIN(10 * 1024 * 1024, physmem_available() / 2))
+        if (fstat(fileno, @st) == 0 & S_ISREG(st.) & st. <= MIN(10 * 1024 * 1024, physmem_available() / 2))
         {
-            read_tokens = 0;
-            readtokens0_init(@?);
-            files = ?.;
+            readtokens0_init(@tok);
+            if (!readtokens0 | fclose != 0)
+                error;
+            files = tok.;
             ai = argv_iter_init_argv(files);
         }
         else
         {
-            files = ((void*)0);
-            ai = argv_iter_init_stream(stream);
+            ai = argv_iter_init_stream;
         };
     }
     else
     {
-        byte*[1] stdin_only = {((void*)0)};
-        files = (optind < argc ? argv + optind : stdin_only);
+        byte** stdin_only;
         ai = argv_iter_init_argv(files);
     };
     if (!ai)
         xalloc_die();
+    fstatus = get_input_fstatus;
     if (total_mode == total_only)
         number_width = 1;
     else
-    bool ok = 0;
+        number_width = compute_number_width;
+    bool;
     argv_iter_err ai_err;
     byte* file_name;
-    for (int i = 0; (file_name = argv_iter(ai, @?)); i++)
+    for (int i = 0; (file_name = argv_iter(ai, @ai_err)); i++)
     {
-        bool skip_file = 0;
+        bool;
         if (files_from & streq(files_from, "-") & streq(file_name, "-"))
         {
-            skip_file = 0;
+            error(0, 0, gettext("when reading file names from standard input, "), quotearg_style);
         };
         if (!file_name[0])
         {
-            if (files_from == ((void*)0))
+            if (files_from == NULL)
                 error(0, 0, "%s", gettext("invalid zero-length file name"));
             else
             {
+                error(0, 0, "%s:%zu: %s", quotearg_n_style_colon, argv_iter_n_args(ai), gettext("invalid zero-length file name"));
             };
-            skip_file = 0;
         };
-        if (skip_file)
-            ok = 0;
-        else
-        if (?)
+        if (! nfiles)
             fstatus[0].failed = 1;
     };
-    switch (?)
+    switch (ai_err)
     {
-        goto _switch_end_139188829078224;
-        ok = 0;
-        goto _switch_end_139188829078224;
+        error;
         xalloc_die();
         default
         {
-            unreachable();
         };
     };
-    label _switch_end_139188829078224:
-    if (ok & !files_from & argv_iter_n_args(ai) == 0)
-        ok `&= wc_file(((void*)0), @fstatus[0]);
     if (read_tokens)
-        readtokens0_free(@?);
+        readtokens0_free(@tok);
     if (total_mode != total_never & (total_mode != total_auto | 1 < argv_iter_n_args(ai)))
     {
         if (total_lines_overflow)
         {
-            total_lines = (0);
-            error(0, 0, gettext("total lines"));
-            ok = 0;
+            error;
         };
         if (total_words_overflow)
         {
-            total_words = (0);
-            error(0, 0, gettext("total words"));
-            ok = 0;
+            error;
         };
         if (total_chars_overflow)
         {
-            total_chars = (0);
-            error(0, 0, gettext("total characters"));
-            ok = 0;
+            error;
         };
         if (total_bytes_overflow)
         {
-            total_bytes = (0);
-            error(0, 0, gettext("total bytes"));
-            ok = 0;
+            error;
         };
-        write_counts(total_lines, total_words, total_chars, total_bytes, max_line_length, total_mode != total_only ? gettext("total") : ((void*)0));
+        write_counts;
     };
     argv_iter_free(ai);
     free(fstatus);
-    if (have_read_stdin & close(0) != 0)
-        error(0, (?__errno_location()), "-");
-    return ok ? 0 : 0;
+    if (have_read_stdin & close != 0)
+        error;
 };

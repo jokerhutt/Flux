@@ -30,39 +30,36 @@ macro AUTHORS
 };
 
 byte[113] short_options = "0::1::2::3::4::5::6::7::8::9::";
-option[6] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Send signals to processes, or list signals.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("kill", gettext("\
-  -s, --signal=SIGNAL, -SIGNAL\n\
-         specify the name or number of the signal to be sent\n\
+        oputs_("kill", gettext("\
+  -s, --signal=SIGNAL, -SIGNAL\n\
+         specify the name or number of the signal to be sent\n\
 "));
-        oputs_("kill", gettext("\
-  -l, --list\n\
-         list signal names, or convert signal names to/from numbers\n\
+        oputs_("kill", gettext("\
+  -l, --list\n\
+         list signal names, or convert signal names to/from numbers\n\
 "));
-        oputs_("kill", gettext("\
-  -t, --table\n\
-         print a table of signal information\n\
+        oputs_("kill", gettext("\
+  -t, --table\n\
+         print a table of signal information\n\
 "));
         oputs_("kill", gettext("      --help\n         display this help and exit\n"));
         oputs_("kill", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\n\
-SIGNAL may be a signal name like 'HUP', or a signal number like '1',\n\
-or the exit status of a process terminated by a signal.\n\
-PID is an integer; if negative it identifies a process group.\n\
-"), stdout);
+        fputs;
         printf(gettext("\n"), "kill");
         emit_ancillary_info("kill");
     };
@@ -77,9 +74,9 @@ cdecl print_table_row(int num_width, int signum, int name_width, byte* signame) 
 
 cdecl list_signals(int table, byte** argv) -> int
 {
-    int status = 0;
+    int status;
     byte signame;
-    if (?)
+    if (table)
     {
         int name_width = 0;
         int num_width = 1;
@@ -88,12 +85,11 @@ cdecl list_signals(int table, byte** argv) -> int
             {
                 int signum = operand2sig(*argv);
                 if (signum < 0)
-                    status = 0;
                 else
                 {
-                    if (sig2str(signum, ?) != 0)
-                        snprintf(?, (sizeof signame / 8), "SIG%d", signum);
-                    print_table_row(num_width, signum, name_width, ?);
+                    if (sig2str(signum, signame) != 0)
+                        snprintf(signame, (sizeof signame / 8), "SIG%d", signum);
+                    print_table_row(num_width, signum, name_width, signame);
                 };
             }
         else
@@ -105,11 +101,10 @@ cdecl list_signals(int table, byte** argv) -> int
             {
                 int signum = operand2sig(*argv);
                 if (signum < 0)
-                    status = 0;
                 elif (c_isdigit(?*argv))
                 {
-                    if (sig2str(signum, ?) == 0)
-                        puts(?);
+                    if (sig2str(signum, signame) == 0)
+                        puts(signame);
                     else
                         printf("%d\n", signum);
                 };
@@ -123,25 +118,21 @@ cdecl list_signals(int table, byte** argv) -> int
 
 cdecl send_signals(int signum, byte** argv) -> int
 {
-    int status = 0;
+    int status;
     byte* arg = *argv;
     do
     {
         byte* endp;
-        long n = ((?__errno_location()) ? 0 ? strtoimax(arg, @endp, 10));
-        int pid;
-        if ((?__errno_location()) ? 0 ? __builtin_add_overflow((n), (0), (@pid)) ? arg == endp ? *endp)
+        if (errno == ERANGE || ckd_add ( & pid , n , 0 ) || arg == endp || * endp)
         {
             error(0, 0, gettext("%s: invalid process id"), quote(arg));
-            status = 0;
         }
-        elif (kill(pid, signum) != 0)
+        elif (kill != 0)
         {
-            if ((?__errno_location()) ? 0)
-                error(0, (?__errno_location()), "%d", signum);
+            if (errno == EINVAL)
+                error;
             else
-                error(0, (?__errno_location()), "%s", quote(arg));
-            status = 0;
+                error;
         };
     }
     while ((arg = *++argv));
@@ -155,185 +146,66 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     int signum = -1;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, short_options, long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
         switch (optc)
         {
             case ('0')
             {
-                case ('1')
-                {
-                    case ('2')
-                    {
-                        case ('3')
-                        {
-                            case ('4')
-                            {
-                                case ('5')
-                                {
-                                    case ('6')
-                                    {
-                                        case ('7')
-                                        {
-                                            case ('8')
-                                            {
-                                                case ('9')
-                                                {
-                                                    if (optind != 2)
-                                                    {
-                                                        optind--;
-                                                        goto no_more_options;
-                                                    };
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
             case ('A')
             {
-                case ('B')
+                if (optarg != argv [ optind - 1 ] + 2)
                 {
-                    case ('C')
-                    {
-                        case ('D')
-                        {
-                            case ('E')
-                            {
-                                case ('F')
-                                {
-                                    case ('G')
-                                    {
-                                        case ('H')
-                                        {
-                                            case ('I')
-                                            {
-                                                case ('J')
-                                                {
-                                                    case ('K')
-                                                    {
-                                                        case ('M')
-                                                        {
-                                                            case ('N')
-                                                            {
-                                                                case ('O')
-                                                                {
-                                                                    case ('P')
-                                                                    {
-                                                                        case ('Q')
-                                                                        {
-                                                                            case ('R')
-                                                                            {
-                                                                                case ('S')
-                                                                                {
-                                                                                    case ('T')
-                                                                                    {
-                                                                                        case ('U')
-                                                                                        {
-                                                                                            case ('V')
-                                                                                            {
-                                                                                                case ('W')
-                                                                                                {
-                                                                                                    case ('X')
-                                                                                                    {
-                                                                                                        case ('Y')
-                                                                                                        {
-                                                                                                            case ('Z')
-                                                                                                            {
-                                                                                                                if (!optarg)
-                                                                                                                    optarg = argv[optind - 1] + strlen(argv[optind - 1]);
-                                                                                                            }
-                                                                                                        }
-                                                                                                    }
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                    error(0, 0, gettext("invalid option -- %c"), optc);
+                    usage;
+                };
             }
-            if (optarg != argv[optind - 1] + 2)
-            {
-                error(0, 0, gettext("invalid option -- %c"), optc);
-                usage(0);
-            };
-            optarg--;
             case ('n')
             {
-                case ('s')
-                {
-                    if (0 <= signum)
-                    {
-                        error(0, 0, gettext("%s: multiple signals specified"), quote(optarg));
-                        usage(0);
-                    };
-                }
+                signum = operand2sig;
+                if (signum < 0)
+                    usage;
+                break switch;
             }
-            signum = operand2sig(optarg);
-            if (signum < 0)
-                usage(0);
-            goto _switch_end_139188839976528;
             case ('L')
             {
-                case ('t')
-                {
-                }
             }
             case ('l')
             {
-                if (?)
+                if (list)
                 {
                     error(0, 0, gettext("multiple -l or -t options specified"));
-                    usage(0);
+                    usage;
                 };
+                break switch;
             }
-            goto _switch_end_139188839976528;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188839976528;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188839976528;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188839976528:
     label no_more_options:
     if (signum < 0)
-        signum = 0;
-    elif (?)
+    elif (list)
     {
         error(0, 0, gettext("cannot combine signal with -l or -t"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (! list && argc <= optind)
     {
         error(0, 0, gettext("no process ID specified"));
-        usage(0);
+        usage;
     };
 };

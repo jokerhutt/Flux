@@ -26,38 +26,37 @@
 uint HAVE_STRUCT_STAT_ST_BLOCKS = 0;
 struct scan_inference
 {
-    long ext_start;
-    long hole_start;
+    int ext_start;
+    int hole_start;
 };
 
-cdecl punch_hole(int fd, long offset, long length) -> int
+cdecl punch_hole(int fd, int offset, int length) -> int
 {
     int ret = 0;
     return ret;
 };
 
-cdecl create_hole(int fd, byte* name, long size) -> long
+cdecl create_hole(int fd, byte* name, int size) -> int
 {
-    long file_end = lseek(fd, size, 0);
     if (file_end < 0)
     {
+        error;
         return -1;
     };
-    if (punch_hole(fd, file_end - size, size) < 0)
+    if (punch_hole < 0)
     {
+        error;
         return -1;
     };
-    return file_end;
 };
 
-cdecl is_CLONENOTSUP(int err) -> bool
+cdecl is_CLONENOTSUP(int err) -> int
 {
-    return err == 0 | err == 0 | ?(err) | err == 0 | err == 0 | err == 0 | err == 0 | err == 0 | err == 0;
 };
 
-cdecl sparse_copy(int src_fd, int dest_fd, byte** abuf, int buf_size, bool allow_reflink, byte* src_name, byte* dst_name, long max_n_read, long* hole_size, copy_debug* debug) -> long
+cdecl sparse_copy(int src_fd, int dest_fd, byte** abuf, int buf_size, int allow_reflink, byte* src_name, byte* dst_name, int max_n_read, int* hole_size, copy_debug* debug) -> int
 {
-    long total_n_read = 0;
+    int total_n_read = 0;
     if (debug.sparse_detection == COPY_DEBUG_UNKNOWN)
         debug.sparse_detection = hole_size ? COPY_DEBUG_YES : COPY_DEBUG_NO;
     elif (hole_size & debug.sparse_detection == COPY_DEBUG_EXTERNAL)
@@ -65,8 +64,6 @@ cdecl sparse_copy(int src_fd, int dest_fd, byte** abuf, int buf_size, bool allow
     if (!hole_size & allow_reflink)
         while (0 < max_n_read)
         {
-            long copy_max = MIN(TYPE_MAXIMUM(?), (0)) >> 30 << 30;
-            long n_copied = copy_file_range(src_fd, ((void*)0), dest_fd, ((void*)0), MIN(max_n_read, copy_max), 0);
             if (n_copied == 0)
             {
                 if (total_n_read == 0)
@@ -76,96 +73,87 @@ cdecl sparse_copy(int src_fd, int dest_fd, byte** abuf, int buf_size, bool allow
             };
             if (n_copied < 0)
             {
-                if ((?__errno_location()) ? 0)
+                if (errno == EFBIG)
                     break;
                 debug.offload = COPY_DEBUG_UNSUPPORTED;
-                if (total_n_read == 0 & is_CLONENOTSUP((?__errno_location())))
+                if (total_n_read == 0 & is_CLONENOTSUP)
                     break;
-                if (total_n_read == 0 & (?__errno_location()) ? 0)
+                if (total_n_read == 0 && errno == ENOENT)
                     break;
-                if ((?__errno_location()) ? 0)
-                    n_copied = 0;
+                if (errno == EINTR)
                 else
                 {
+                    error;
                     return -1;
                 };
             };
             debug.offload = COPY_DEBUG_YES;
-            max_n_read -= n_copied;
-            total_n_read += n_copied;
         }
     else
         debug.offload = COPY_DEBUG_AVOIDED;
-    long psize = hole_size ? *hole_size : 0;
-    bool make_hole = ?!psize;
+    bool;
     while (0 < max_n_read)
     {
         if (!*abuf)
-            *abuf = xalignalloc(getpagesize(), ?);
+            *abuf = xalignalloc(getpagesize(), buf_size);
         byte* buf = *abuf;
-        long n_read = read(src_fd, buf, MIN(max_n_read, ?));
         if (n_read < 0)
         {
-            if ((?__errno_location()) ? 0)
+            if (errno == EINTR)
                 continue;
+            error;
             return -1;
         };
         if (n_read == 0)
             break;
-        max_n_read -= n_read;
-        total_n_read += n_read;
         byte* cbuf = buf;
         byte* pbuf = buf;
         while (n_read)
         {
-            bool prev_hole = make_hole;
-            bool transition = (make_hole != prev_hole) & psize;
-            bool last_chunk;
-            if (transition | last_chunk)
+            bool;
+            bool;
+            bool;
+            if (transition || last_chunk)
             {
-                if (!transition)
+                if (! transition)
                 elif (prev_hole)
                 {
-                    if (create_hole(dest_fd, dst_name, psize) < 0)
-                        return 0;
                     pbuf = cbuf;
                 };
-                if (!prev_hole | (transition & last_chunk))
+                if (! prev_hole || ( transition && last_chunk ))
                 {
-                    if (full_write(dest_fd, pbuf, psize) != psize)
+                    if (full_write ( dest_fd , pbuf , psize ) != psize)
                     {
+                        error;
                         return -1;
                     };
                 };
             }
             else
             {
-                if (?)
+                if (ckd_add)
                 {
+                    error(0, 0, gettext("overflow reading %s"), quotearg_style);
                     return -1;
                 };
             };
         };
     };
-    if (hole_size)
-        *hole_size = make_hole ? psize : 0;
     return total_n_read;
 };
 
-cdecl write_zeros(int fd, long n_bytes, byte** abuf, int buf_size) -> bool
+cdecl write_zeros(int fd, int n_bytes, byte** abuf, int buf_size) -> int
 {
-    byte* zeros = ((void*)0);
+    byte* zeros;
     while (n_bytes)
     {
         if (!zeros)
         {
             if (!*abuf)
-                *abuf = xalignalloc(getpagesize(), ?);
+                *abuf = xalignalloc(getpagesize(), buf_size);
+            zeros = memset;
         };
-        if (?)
-            return 0;
     };
-    return 0;
 };
 
 enum scantype
@@ -176,45 +164,44 @@ enum scantype
     LSEEK_SCANTYPE
 };
 
-cdecl infer_scantype(int fd, stat* sb, long pos, scan_inference* scan_inference) -> scantype
+cdecl infer_scantype(int fd, stat* sb, int pos, scan_inference* scan_inference) -> scantype
 {
-    if (?)
+    if (! ( HAVE_STRUCT_STAT_ST_BLOCKS && S_ISREG ( sb -> st_mode ) && STP_NBLOCKS ( sb ) < sb -> st_size / ST_NBLOCKSIZE ))
         return PLAIN_SCANTYPE;
     return ZERO_SCANTYPE;
 };
 
-cdecl copy_file_data(int ifd, stat* ist, long ipos, byte* iname, int ofd, stat* ost, long opos, byte* oname, long ibytes, cp_options* x, copy_debug* debug) -> long
+cdecl copy_file_data(int ifd, stat* ist, int ipos, byte* iname, int ofd, stat* ost, int opos, byte* oname, int ibytes, cp_options* x, copy_debug* debug) -> int
 {
     scan_inference scan_inference;
     scantype scantype = infer_scantype(ifd, ist, ipos, @scan_inference);
     if (scantype == ERROR_SCANTYPE)
     {
+        error;
         return -1;
     };
-    bool make_holes = (((((ost.st_mode)) ? 0) ? (0100000)) ? (x.sparse_mode == SPARSE_ALWAYS | (x.sparse_mode == SPARSE_AUTO & scantype != PLAIN_SCANTYPE)));
-    if (!make_holes)
+    bool;
+    if (ipos == 0 && ibytes == COUNT_MAX && ( x -> reflink_mode != REFLINK_AUTO || x -> sparse_mode != SPARSE_AUTO ))
+        fdadvise;
+    if (! make_holes)
     {
     };
-    byte* buf = ((void*)0);
-    long result;
-    long hole_size = 0;
+    byte* buf;
     if (scantype == LSEEK_SCANTYPE)
     {
         unreachable();
     }
     else
-    if (0 <= result & 0 < hole_size)
+    if (0 <= result && 0 < hole_size)
     {
-        long oend;
-        if (?)
+        if (ckd_add ( & oend , opos , result ) ? ( errno = EOVERFLOW , true ) : make_holes ? ftruncate ( ofd , oend ) < 0 : ! write_zeros ( ofd , hole_size , & buf , buf_size ))
         {
-            result = -1;
+            error;
         }
-        elif (make_holes & punch_hole(ofd, oend - hole_size, hole_size) < 0)
+        elif (make_holes && punch_hole ( ofd , oend - hole_size , hole_size ) < 0)
         {
-            result = -1;
+            error;
         };
     };
     alignfree(buf);
-    return result;
 };

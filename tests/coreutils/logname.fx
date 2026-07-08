@@ -27,17 +27,16 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print the user's login name.\n\
-\n\
-"), stdout);
+        printf;
+        fputs;
         oputs_("logname", gettext("      --help\n         display this help and exit\n"));
         oputs_("logname", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("logname");
@@ -48,14 +47,16 @@ Print the user's login name.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    if (optind < argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
     byte* cp = getlogin();
     if (!cp)
-        error(0, 0, gettext("no login name"));
+        error;
     puts(cp);
-    return 0;
 };

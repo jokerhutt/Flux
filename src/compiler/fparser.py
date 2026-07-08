@@ -5980,6 +5980,9 @@ class FluxParser:
         """
         tok = self.current_token
         self.consume(TokenType.BREAK)
+        if self.expect(TokenType.SWITCH):
+            self.consume(TokenType.SEMICOLON)
+            return BreakSwitchStatement().set_location(tok.line, tok.column)
         self.consume(TokenType.SEMICOLON)
         return BreakStatement().set_location(tok.line, tok.column)
     

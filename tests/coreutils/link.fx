@@ -37,15 +37,16 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("Call the link function to create a link named FILE2\
- to an existing FILE1.\n\n"), stdout);
+        printf;
+        fputs;
         oputs_("link", gettext("      --help\n         display this help and exit\n"));
         oputs_("link", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("link");
@@ -56,17 +57,22 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    if (argc < optind + 2)
     {
-        if (?)
+        if (argc < optind + 1)
             error(0, 0, gettext("missing operand"));
         else
-        usage(0);
+            error(0, 0, gettext("missing operand after %s"), quote);
+        usage;
     };
-    if (?)
+    if (optind + 2 < argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    return 0;
+    if (link != 0)
+        error;
 };

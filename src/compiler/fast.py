@@ -805,7 +805,10 @@ class BreakStatement(Statement):
     pass
 
 @dataclass
-class ContinueStatement(Statement):
+class BreakSwitchStatement(Statement):
+    pass
+
+@dataclass
     pass
 
 @dataclass
@@ -1372,7 +1375,7 @@ class ExternBlock(Statement):
     Or single declaration:
         extern def function_name(params) -> return_type;
     """
-    declarations: List  # List of FunctionDef prototypes or VariableDeclaration (extern vars)
+    declarations: List['FunctionDef']  # List of function prototypes
 
 
 class ExportBlock(ASTNode):

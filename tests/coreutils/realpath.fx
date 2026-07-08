@@ -20,7 +20,7 @@
 ///
 
 ///
- Written by PÃ¡draig Brady.
+ Written by Pádraig Brady.
 ///
 
 byte* PROGRAM_NAME = "realpath";
@@ -29,58 +29,59 @@ macro AUTHORS
     proper_name_lite ( "Padraig Brady" , "P\303\241draig Brady" )
 };
 
-uint RELATIVE_TO_OPTION = 128;
-uint RELATIVE_BASE_OPTION = 129;
+uint RELATIVE_TO_OPTION = 0;
+uint RELATIVE_BASE_OPTION = 1;
 
 extern int verbose;
 extern int logical;
 extern int use_nuls;
 extern byte* can_relative_to;
 extern byte* can_relative_base;
-option[14] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print the resolved absolute file name.\n\
-"), stdout);
-        oputs_("realpath", gettext("\
-  -E, --canonicalize           all but the last component must exist (default)\
-\n\
+        printf;
+        fputs;
+        oputs_("realpath", gettext("\
+  -E, --canonicalize           all but the last component must exist (default)\
+\n\
 "));
-        oputs_("realpath", gettext("\
-  -e, --canonicalize-existing  all components of the path must exist\n\
+        oputs_("realpath", gettext("\
+  -e, --canonicalize-existing  all components of the path must exist\n\
 "));
-        oputs_("realpath", gettext("\
-  -m, --canonicalize-missing   no path components need exist or be a directory\
-\n\
+        oputs_("realpath", gettext("\
+  -m, --canonicalize-missing   no path components need exist or be a directory\
+\n\
 "));
-        oputs_("realpath", gettext("\
-  -L, --logical                resolve '..' components before symlinks\n\
+        oputs_("realpath", gettext("\
+  -L, --logical                resolve '..' components before symlinks\n\
 "));
-        oputs_("realpath", gettext("\
-  -P, --physical               resolve symlinks as encountered (default)\n\
+        oputs_("realpath", gettext("\
+  -P, --physical               resolve symlinks as encountered (default)\n\
 "));
-        oputs_("realpath", gettext("\
-  -q, --quiet                  suppress most error messages\n\
+        oputs_("realpath", gettext("\
+  -q, --quiet                  suppress most error messages\n\
 "));
-        oputs_("realpath", gettext("\
-      --relative-to=DIR        print the resolved path relative to DIR\n\
+        oputs_("realpath", gettext("\
+      --relative-to=DIR        print the resolved path relative to DIR\n\
 "));
-        oputs_("realpath", gettext("\
-      --relative-base=DIR      print absolute paths unless paths below DIR\n\
+        oputs_("realpath", gettext("\
+      --relative-base=DIR      print absolute paths unless paths below DIR\n\
 "));
-        oputs_("realpath", gettext("\
-  -s, --strip, --no-symlinks   don't expand symlinks\n\
+        oputs_("realpath", gettext("\
+  -s, --strip, --no-symlinks   don't expand symlinks\n\
 "));
-        oputs_("realpath", gettext("\
-  -z, --zero                   end each output line with NUL, not newline\n\
+        oputs_("realpath", gettext("\
+  -z, --zero                   end each output line with NUL, not newline\n\
 "));
         oputs_("realpath", gettext("      --help\n         display this help and exit\n"));
         oputs_("realpath", gettext("      --version\n         output version information and exit\n"));
@@ -92,7 +93,7 @@ Print the resolved absolute file name.\n\
 cdecl realpath_canon(byte* fname, int can_mode) -> byte*
 {
     byte* can_fname = canonicalize_filename_mode(fname, can_mode);
-    if (? & can_fname)
+    if (logical & can_fname)
     {
         byte* can_fname2 = canonicalize_filename_mode(can_fname, can_mode);
         free(can_fname);
@@ -105,7 +106,9 @@ extern int bool;
 cdecl isdir(byte* path) -> int
 {
     stat sb;
-    return ((((sb.st_mode)) ? 0) ? (0040000));
+    if (stat(path, @sb) != 0)
+        error;
+    return S_ISDIR(sb.);
 };
 
 cdecl process_path(byte* fname, int can_mode) -> int
@@ -113,12 +116,14 @@ cdecl process_path(byte* fname, int can_mode) -> int
     byte* can_fname = realpath_canon(fname, can_mode);
     if (!can_fname)
     {
+        if (verbose)
+            error;
     };
-    if (!can_relative_to | (can_relative_base & !path_prefix(can_relative_base, can_fname)) | (can_relative_to & !?(can_fname, can_relative_to, ((void*)0), 0)))
-        fputs(can_fname, stdout);
-    putchar(? ? '\0' : '\n');
+    if (!can_relative_to | (can_relative_base & !path_prefix(can_relative_base, can_fname)) | (can_relative_to & !relpath))
+        fputs;
+    putchar(use_nuls ? '\0' : '\n');
     free(can_fname);
-    if (ferror(stdout))
+    if (ferror)
         write_error();
 };
 
@@ -126,80 +131,21 @@ cdecl main(int argc, byte** argv) -> int
 {
     bool;
     int can_mode;
-    byte* relative_to = ((void*)0);
-    byte* relative_base = ((void*)0);
+    byte* relative_to;
+    byte* relative_base;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (?)
+    setlocale;
+    atexit;
+    while (true)
     {
-        int c = getopt_long(argc, argv, "EeLmPqsz", longopts, ((void*)0));
+        int c = getopt_long;
         if (c == -1)
             break;
-        switch (c)
-        {
-            case ('E')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('e')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('m')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('L')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('s')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('P')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('q')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case ('z')
-            {
-            }
-            goto _switch_end_139188839771728;
-            case (RELATIVE_TO_OPTION)
-            {
-                relative_to = optarg;
-            }
-            goto _switch_end_139188839771728;
-            case (RELATIVE_BASE_OPTION)
-            {
-                relative_base = optarg;
-            }
-            goto _switch_end_139188839771728;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188839771728;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188839771728;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188839771728:
     };
     if (optind >= argc)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     if (relative_base & !relative_to)
         relative_to = relative_base;
@@ -207,19 +153,26 @@ cdecl main(int argc, byte** argv) -> int
     if (relative_to)
     {
         can_relative_to = realpath_canon(relative_to, can_mode);
+        if (!can_relative_to)
+            error;
+        if (need_dir && ! isdir ( can_relative_to ))
+            error;
     };
     if (relative_base == relative_to)
         can_relative_base = can_relative_to;
     elif (relative_base)
     {
         byte* base = realpath_canon(relative_base, can_mode);
+        if (!base)
+            error;
+        if (need_dir && ! isdir ( base ))
+            error;
         if (path_prefix(base, can_relative_to))
             can_relative_base = base;
         else
         {
             free(base);
             can_relative_base = can_relative_to;
-            can_relative_to = ((void*)0);
         };
     };
 };

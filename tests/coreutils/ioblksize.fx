@@ -31,12 +31,13 @@ uint IO_BUFSIZE = 262144;
 
 cdecl io_blksize(stat* st) -> int
 {
-    if (?)
+    if (S_ISREG ( st -> st_mode ) && blocksize & ( blocksize - 1 ))
     {
-        int leading_zeros;
-        if (?)
+        int leading_zeros = stdc_leading_zeros_ull;
+        if (IDX_MAX < ULLONG_MAX || leading_zeros)
         {
             ulong power;
         };
     };
+    return MIN;
 };

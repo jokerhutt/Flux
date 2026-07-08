@@ -44,53 +44,61 @@ uint CHECK_ORDER_DISABLED = 2;
 enum (unnamed at tests/coreutils/comm.c:64:8) check_input_order = enum { CHECK_ORDER_DEFAULT , CHECK_ORDER_ENABLED , CHECK_ORDER_DISABLED };
 byte* col_sep = "\t";
 ulong col_sep_len = size_t;
-uint CHECK_ORDER_OPTION = 128;
-uint NOCHECK_ORDER_OPTION = 129;
-uint OUTPUT_DELIMITER_OPTION = 130;
-uint TOTAL_OPTION = 131;
+uint CHECK_ORDER_OPTION = 0;
+uint NOCHECK_ORDER_OPTION = 1;
+uint OUTPUT_DELIMITER_OPTION = 2;
+uint TOTAL_OPTION = 3;
 
-option[8] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        oputs_("comm", gettext("\
-  -1     suppress column 1 (lines unique to FILE1)\n\
+        printf;
+        fputs;
+        fputs;
+        fputs;
+        oputs_("comm", gettext("\
+  -1     suppress column 1 (lines unique to FILE1)\n\
 "));
-        oputs_("comm", gettext("\
-  -2     suppress column 2 (lines unique to FILE2)\n\
+        oputs_("comm", gettext("\
+  -2     suppress column 2 (lines unique to FILE2)\n\
 "));
-        oputs_("comm", gettext("\
-  -3     suppress column 3 (lines that appear in both files)\n\
+        oputs_("comm", gettext("\
+  -3     suppress column 3 (lines that appear in both files)\n\
 "));
-        oputs_("comm", gettext("\
-      --check-order\n\
-         check that the input is correctly sorted,\n\
-         even if all input lines are pairable\n\
+        oputs_("comm", gettext("\
+      --check-order\n\
+         check that the input is correctly sorted,\n\
+         even if all input lines are pairable\n\
 "));
-        oputs_("comm", gettext("\
-      --nocheck-order\n\
-         do not check that the input is correctly sorted\n\
+        oputs_("comm", gettext("\
+      --nocheck-order\n\
+         do not check that the input is correctly sorted\n\
 "));
-        oputs_("comm", gettext("\
-      --output-delimiter=STR\n\
-         separate columns with STR\n\
+        oputs_("comm", gettext("\
+      --output-delimiter=STR\n\
+         separate columns with STR\n\
 "));
-        oputs_("comm", gettext("\
-      --total\n\
-         output a summary\n\
+        oputs_("comm", gettext("\
+      --total\n\
+         output a summary\n\
 "));
-        oputs_("comm", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("comm", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("comm", gettext("      --help\n         display this help and exit\n"));
         oputs_("comm", gettext("      --version\n         output version information and exit\n"));
+        fputs;
+        printf;
         emit_ancillary_info("comm");
     };
     exit(status);
@@ -102,42 +110,48 @@ cdecl writeline(linebuffer* line, int class) -> void
     {
         case (1)
         {
-            if (!?)
+            if (!only_file_1)
                 return void;
+            break switch;
         }
-        goto _switch_end_139188883133520;
         case (2)
         {
-            if (!?)
+            if (!only_file_2)
                 return void;
+            if (only_file_1)
+                fwrite;
+            break switch;
         }
-        goto _switch_end_139188883133520;
         case (3)
         {
-            if (!?)
+            if (!both)
                 return void;
+            if (only_file_1)
+                fwrite;
+            if (only_file_2)
+                fwrite;
+            break switch;
         }
-        goto _switch_end_139188883133520;
     };
-    label _switch_end_139188883133520:
-    if (?)
+    fwrite;
+    if (ferror)
         write_error();
 };
 
 cdecl check_order(linebuffer* prev, linebuffer* current, int whatfile) -> void
 {
-    if (check_input_order != CHECK_ORDER_DISABLED & ((check_input_order == CHECK_ORDER_ENABLED) | ?))
+    if (check_input_order != CHECK_ORDER_DISABLED & ((check_input_order == CHECK_ORDER_ENABLED) | seen_unpairable))
     {
-        if (!?[whatfile - 1])
+        if (!issued_disorder_warning[whatfile - 1])
         {
             int order;
-            if (?)
+            if (hard_LC_COLLATE)
                 order = xmemcoll(prev, prev - 1, current, current - 1);
             else
                 order = memcmp2(prev, prev - 1, current, current - 1);
             if (0 < order)
             {
-                error((check_input_order == CHECK_ORDER_ENABLED ? 0 : 0), 0, gettext("file %d is not in sorted order"), whatfile);
+                error;
             };
         };
     };
@@ -149,17 +163,22 @@ cdecl compare_files(byte** infiles) -> void
     linebuffer*[2] thisline = 2;
     linebuffer*[4][2] all_line = 4;
     int[3][2] alt = 3;
-    ulong[3] total = {0, 0, 0};
     for (int i = 0; i < 2; i++)
     {
         for (int j = 0; j < 4; j++)
         {
-            initbuffer(@?[i][j]);
-            all_line[i][j] = @?[i][j];
+            initbuffer(@lba[i][j]);
+            all_line[i][j] = @lba[i][j];
         };
         alt[i][0] = 0;
         alt[i][1] = 0;
         alt[i][2] = 0;
+        if (! streams [ i ])
+            error;
+        fadvise;
+        thisline[i] = readlinebuffer_delim;
+        if (ferror)
+            error;
     };
     while (thisline[0] | thisline[1])
     {
@@ -171,7 +190,7 @@ cdecl compare_files(byte** infiles) -> void
             order = -1;
         else
         {
-            if (?)
+            if (hard_LC_COLLATE)
                 order = xmemcoll(thisline[0], thisline[0] - 1, thisline[1], thisline[1] - 1);
             else
             {
@@ -183,19 +202,16 @@ cdecl compare_files(byte** infiles) -> void
         };
         if (order == 0)
         {
-            total[2]++;
             writeline(thisline[1], 3);
         }
         else
         {
             if (order <= 0)
             {
-                total[0]++;
                 writeline(thisline[0], 1);
             }
             else
             {
-                total[1]++;
                 writeline(thisline[1], 2);
             };
         };
@@ -203,86 +219,31 @@ cdecl compare_files(byte** infiles) -> void
         {};
     };
     int n_streams;
-    if (?)
+    for (int i = 0; i < n_streams; i++)
+    {};
+    if (total_option)
     {
         if (col_sep_len == 1)
         {
-            printf("%ju%c%ju%c%ju%c%s%c", total[0], *col_sep, total[1], *col_sep, total[2], *col_sep, gettext("total"), delim);
+            printf;
         }
         else
         {
-            printf("%ju%s%ju%s%ju%s%s%c", total[0], col_sep, total[1], col_sep, total[2], col_sep, gettext("total"), delim);
+            printf;
         };
     };
-    if (?[0] | ?[1])
-        error(0, 0, gettext("input is not in sorted order"));
-    exit(0);
+    if (issued_disorder_warning[0] | issued_disorder_warning[1])
+        error;
+    exit;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     int c;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    hard_LC_COLLATE = hard_locale(0);
-    while ((c = getopt_long(argc, argv, "123z", long_options, ((void*)0))) != -1)
-        switch (c)
-        {
-            case ('1')
-            {
-            }
-            goto _switch_end_139188883141584;
-            case ('2')
-            {
-            }
-            goto _switch_end_139188883141584;
-            case ('3')
-            {
-            }
-            goto _switch_end_139188883141584;
-            case ('z')
-            {
-                delim = '\0';
-            }
-            goto _switch_end_139188883141584;
-            case (NOCHECK_ORDER_OPTION)
-            {
-                check_input_order = CHECK_ORDER_DISABLED;
-            }
-            goto _switch_end_139188883141584;
-            case (CHECK_ORDER_OPTION)
-            {
-                check_input_order = CHECK_ORDER_ENABLED;
-            }
-            goto _switch_end_139188883141584;
-            case (OUTPUT_DELIMITER_OPTION)
-            {
-                if (col_sep_len & !streq(col_sep, optarg))
-                    error(0, 0, gettext("multiple output delimiters specified"));
-            }
-            col_sep = optarg;
-            col_sep_len = *optarg ? strlen(optarg) : 1;
-            goto _switch_end_139188883141584;
-            case (TOTAL_OPTION)
-            {
-            }
-            goto _switch_end_139188883141584;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188883141584;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188883141584;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188883141584:
+    setlocale;
+    hard_LC_COLLATE = hard_locale;
+    atexit;
     if (!col_sep_len)
         col_sep_len = 1;
     if (argc - optind < 2)
@@ -291,12 +252,12 @@ cdecl main(int argc, byte** argv) -> int
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        usage(0);
+        usage;
     };
     if (2 < argc - optind)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind + 2]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    compare_files(argv + optind);
+    compare_files;
 };

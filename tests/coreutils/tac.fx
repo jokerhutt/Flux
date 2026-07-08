@@ -59,39 +59,39 @@ ulong match_length = size_t;
 extern byte* G_buffer;
 ulong read_size = size_t;
 ulong G_buffer_size = size_t;
+struct re_pattern_buffer;
 re_pattern_buffer compiled_separator = re_pattern_buffer;
-byte[256] compiled_separator_fastmap = (0 ? 0 ? 0) ? 1;
+extern byte compiled_separator_fastmap;
 struct re_registers;
 re_registers regs = re_registers;
-option[6] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Write each FILE to standard output, last line first.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("tac", gettext("\
-  -b, --before             attach the separator before instead of after\n\
+        oputs_("tac", gettext("\
+  -b, --before             attach the separator before instead of after\n\
 "));
-        oputs_("tac", gettext("\
-  -r, --regex              interpret the separator as a regular expression\n\
+        oputs_("tac", gettext("\
+  -r, --regex              interpret the separator as a regular expression\n\
 "));
-        oputs_("tac", gettext("\
-  -s, --separator=STRING   use STRING as the separator instead of newline\n\
+        oputs_("tac", gettext("\
+  -s, --separator=STRING   use STRING as the separator instead of newline\n\
 "));
         oputs_("tac", gettext("      --help\n         display this help and exit\n"));
         oputs_("tac", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\n\
-Non-seekable input is buffered to $TMPDIR, defaulting to /tmp.\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("tac");
     };
     exit(status);
@@ -105,7 +105,7 @@ cdecl output(byte* start, byte* past_end) -> void
     ulong bytes_available = 8192 - bytes_in_buffer;
     if (!start)
     {
-        if (full_write(0, buffer, bytes_in_buffer) != bytes_in_buffer)
+        if (full_write != bytes_in_buffer)
             write_error();
         bytes_in_buffer = 0;
         return void;
@@ -115,7 +115,7 @@ cdecl output(byte* start, byte* past_end) -> void
         memcpy(buffer + bytes_in_buffer, start, bytes_available);
         bytes_to_add -= bytes_available;
         start += bytes_available;
-        if (full_write(0, buffer, 8192) != 8192)
+        if (full_write != 8192)
             write_error();
         bytes_in_buffer = 0;
         bytes_available = 8192;
@@ -124,11 +124,10 @@ cdecl output(byte* start, byte* past_end) -> void
     bytes_in_buffer += bytes_to_add;
 };
 
-cdecl tac_seekable(int input_fd, byte* file, long file_pos) -> int
+cdecl tac_seekable(int input_fd, byte* file, int file_pos) -> int
 {
     byte* match_start;
     byte* past_end;
-    long saved_record_size;
     bool;
     byte first_char = *separator;
     byte* separator1 = separator + 1;
@@ -137,42 +136,39 @@ cdecl tac_seekable(int input_fd, byte* file, long file_pos) -> int
     if (remainder != 0)
     {
         file_pos -= remainder;
+        if (lseek < 0)
+            error;
     };
-    while ((saved_record_size = read(input_fd, G_buffer, read_size)) == 0 & file_pos != 0)
+    while (( saved_record_size = read ( input_fd , G_buffer , read_size ) ) == 0 && file_pos != 0)
     {
-        long rsize = read_size;
+        if (lseek < 0)
+            error;
         file_pos -= read_size;
     };
     while (saved_record_size == read_size)
     {
-        long nread = read(input_fd, G_buffer, read_size);
         if (nread == 0)
             break;
-        saved_record_size = nread;
         if (saved_record_size < 0)
             break;
-        file_pos += nread;
     };
     if (saved_record_size < 0)
     {
+        error;
     };
-    match_start = past_end = G_buffer + saved_record_size;
     if (sentinel_length)
         match_start -= match_length1;
-    while (?)
+    while (true)
     {
         if (sentinel_length == 0)
         {
             ulong i = match_start - G_buffer;
-            int ri = i;
-            int range = 1 - ri;
-            int ret;
             if (1 < range)
-                error(0, 0, gettext("record too large"));
-            if (range == 1 | ((ret = re_search(@compiled_separator, G_buffer, i, i - 1, range, @regs)) == -1))
+                error;
+            if (range == 1 || ( ( ret = re_search ( & compiled_separator , G_buffer , i , i - 1 , range , & regs ) ) == - 1 ))
                 match_start = G_buffer - 1;
-            elif (ret == -2)
-                error(0, 0, gettext("error in regular expression search"));
+            elif (ret == - 2)
+                error;
             else
             {
                 match_start = G_buffer + regs[0];
@@ -189,7 +185,6 @@ cdecl tac_seekable(int input_fd, byte* file, long file_pos) -> int
             {
                 output(G_buffer, past_end);
             };
-            saved_record_size = past_end - G_buffer;
             if (saved_record_size > read_size)
             {
                 byte* newbuffer;
@@ -210,22 +205,24 @@ cdecl tac_seekable(int input_fd, byte* file, long file_pos) -> int
                 read_size = file_pos;
                 file_pos = 0;
             };
-            memmove(G_buffer + read_size, G_buffer, saved_record_size);
-            past_end = G_buffer + read_size + saved_record_size;
+            if (lseek < 0)
+                error;
+            memmove;
             if (sentinel_length)
                 match_start = G_buffer + read_size;
             else
                 match_start = past_end;
             if (full_read(input_fd, G_buffer, read_size) != read_size)
             {
+                error;
             };
         }
         else
         {
-            if (?)
+            if (separator_ends_record)
             {
                 byte* match_end = match_start + match_length;
-                if (?)
+                if (! first_time || match_end != past_end)
                     output(match_end, past_end);
                 past_end = match_end;
             }
@@ -240,65 +237,61 @@ cdecl tac_seekable(int input_fd, byte* file, long file_pos) -> int
     };
 };
 
-cdecl copy_to_temp(_IO_FILE** g_tmp, byte** g_tempfile, int input_fd, byte* file) -> long
+cdecl copy_to_temp(int** g_tmp, byte** g_tempfile, int input_fd, byte* file) -> int
 {
-    _IO_FILE* fp;
     byte* file_name;
-    ulong bytes_copied = 0;
-    if (!?(@fp, @file_name))
+    if (!temp_stream)
         return -1;
-    while (?)
+    while (true)
     {
-        long bytes_read = read(input_fd, G_buffer, read_size);
         if (bytes_read == 0)
             break;
         if (bytes_read < 0)
         {
+            error;
             return -1;
         };
-        if (fwrite(G_buffer, 1, bytes_read, fp) != bytes_read)
+        if (fwrite ( G_buffer , 1 , bytes_read , fp ) != bytes_read)
         {
+            error;
             return -1;
         };
-        bytes_copied += bytes_read;
     };
-    if (fflush(fp) != 0)
+    if (fflush != 0)
     {
+        error;
         return -1;
     };
-    *g_tmp = fp;
     *g_tempfile = file_name;
-    return bytes_copied;
 };
 
 cdecl tac_nonseekable(int input_fd, byte* file) -> int
 {
-    _IO_FILE* tmp_stream;
     byte* tmp_file;
-    long bytes_copied = copy_to_temp(@tmp_stream, @tmp_file, input_fd, file);
     bool;
 };
 
 cdecl tac_file(byte* filename) -> int
 {
     bool;
-    long file_size;
     int fd;
     bool;
-    if (?)
+    if (is_stdin)
     {
-        fd = 0;
         filename = gettext("standard input");
+        xset_binary_mode;
     }
     else
     {
+        fd = open;
         if (fd < 0)
         {
+            error;
         };
     };
-    file_size = lseek(fd, 0, 0);
-    if (?)
+    if (! is_stdin && close ( fd ) != 0)
     {
+        error;
     };
 };
 
@@ -308,63 +301,60 @@ cdecl main(int argc, byte** argv) -> int
     int optc;
     bool;
     ulong half_buffer_size;
-    byte*[2] default_file_list = {"-", ((void*)0)};
+    byte** default_file_list;
     byte** file;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "brs:", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('b')
             {
+                break switch;
             }
-            goto _switch_end_139188818801232;
             case ('r')
             {
                 sentinel_length = 0;
+                break switch;
             }
-            goto _switch_end_139188818801232;
             case ('s')
             {
-                separator = optarg;
+                break switch;
             }
-            goto _switch_end_139188818801232;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188818801232;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188818801232;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188818801232:
     };
     if (sentinel_length == 0)
     {
         if (*separator == 0)
-            error(0, 0, gettext("separator cannot be empty"));
-        compiled_separator = ((void*)0);
+            error;
         compiled_separator = 0;
         compiled_separator = compiled_separator_fastmap;
-        compiled_separator = ((void*)0);
         error_message = re_compile_pattern(separator, strlen(separator), @compiled_separator);
         if (error_message)
-            error(0, 0, "%s", (error_message));
+            error;
     }
     else
         match_length = sentinel_length = *separator ? strlen(separator) : 1;
     read_size = 8192;
     while (sentinel_length >= read_size / 2)
     {
-        if ((0) ? 2 ? read_size)
+        if (SIZE_MAX / 2 < read_size)
             xalloc_die();
         read_size *= 2;
     };
@@ -382,12 +372,12 @@ cdecl main(int argc, byte** argv) -> int
     {
         ++G_buffer;
     };
-    file = (optind < argc ? (byte**)@argv[optind] : default_file_list);
+    xset_binary_mode;
     {
     };
-    output((byte*)((void*)0), (byte*)((void*)0));
-    if (? & close(0) < 0)
+    output;
+    if (have_read_stdin & close < 0)
     {
-        error(0, (?__errno_location()), "-");
+        error;
     };
 };

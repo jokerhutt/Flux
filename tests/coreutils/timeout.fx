@@ -47,10 +47,16 @@
      I think this could be fixed but I'm not sure the extra
      complication is justified for this scenario.
 
-   Written by PÃ¡draig Brady.
+   Written by Pádraig Brady.
 ///
 
 uint SA_RESTART = 0;
+uint SIGRTMIN = 0;
+macro SIGRTMAX
+{
+    ( SIGRTMIN - 1 )
+};
+
 byte* PROGRAM_NAME = "timeout";
 macro AUTHORS
 {
@@ -58,19 +64,19 @@ macro AUTHORS
 };
 
 extern int timed_out;
-int term_signal = 0;
-int monitored_pid = pid_t;
+extern int term_signal;
+extern int monitored_pid;
 extern double kill_after;
 extern int foreground;
 extern int preserve_status;
 extern int verbose;
 extern byte* command;
-option[8] long_options = option;
+struct option;
+extern int long_options;
 cdecl settimeout(double duration, int warn) -> void
 {
     uint timeint;
-    if ((0 ? 0 ? 0) ? duration)
-        timeint = (0 ? 0 ? 0);
+    if (UINT_MAX <= duration)
     else
     {
         uint duration_floor = duration;
@@ -82,7 +88,7 @@ cdecl settimeout(double duration, int warn) -> void
 cdecl send_sig(int where, int sig) -> int
 {
     if (where == 0)
-        signal(sig, ((def{}*(int) -> void)0));
+        signal;
     return kill(where, sig);
 };
 
@@ -92,7 +98,7 @@ cdecl chld(int sig) -> void
 
 cdecl cleanup(int sig) -> void
 {
-    if (sig == 0)
+    if (sig == SIGALRM)
     {
         timed_out = 1;
         initialize_exit_failure(EXIT_TIMEDOUT);
@@ -102,26 +108,25 @@ cdecl cleanup(int sig) -> void
     {
         if (kill_after)
         {
-            int saved_errno = (?__errno_location());
-            term_signal = 0;
+            int saved_errno;
+            settimeout;
             kill_after = 0;
-            (?__errno_location()) ? saved_errno;
         };
-        if (?)
+        if (verbose)
         {
-            byte signame;
-            if (sig == 0 | sig2str(sig, ?) != 0)
-                snprintf(?, (sizeof signame / 8), "%d", sig);
-            error(0, 0, gettext("sending signal %s to command %s"), ?, quote(command));
+            void* /* untranslated: char[<recovery-expr>(MAX, <recovery-expr>(INT_BUFSIZE_BOUND))] */ signame = MAX;
+            if (sig == 0 | sig2str(sig, signame) != 0)
+                snprintf(signame, (sizeof signame / 8), "%d", sig);
+            error(0, 0, gettext("sending signal %s to command %s"), signame, quote(command));
         };
         send_sig(monitored_pid, sig);
-        if (!?)
+        if (!foreground)
         {
             send_sig(0, sig);
-            if (sig != 0 & sig != 0)
+            if (sig != SIGKILL && sig != SIGCONT)
             {
-                send_sig(monitored_pid, 0);
-                send_sig(0, 0);
+                send_sig;
+                send_sig;
             };
         };
     }
@@ -136,63 +141,48 @@ cdecl cleanup(int sig) -> void
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Start COMMAND, and kill it if still running after DURATION.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("timeout", gettext("\
-  -f, --foreground\n\
-         when not running timeout directly from a shell prompt,\n\
-         allow COMMAND to read from the TTY and get TTY signals;\n\
-         in this mode, children of COMMAND will not be timed out\n\
+        oputs_("timeout", gettext("\
+  -f, --foreground\n\
+         when not running timeout directly from a shell prompt,\n\
+         allow COMMAND to read from the TTY and get TTY signals;\n\
+         in this mode, children of COMMAND will not be timed out\n\
 "));
-        oputs_("timeout", gettext("\
-  -k, --kill-after=DURATION\n\
-         also send a KILL signal if COMMAND is still running\n\
-         this long after the initial signal was sent\n\
+        oputs_("timeout", gettext("\
+  -k, --kill-after=DURATION\n\
+         also send a KILL signal if COMMAND is still running\n\
+         this long after the initial signal was sent\n\
 "));
-        oputs_("timeout", gettext("\
-  -p, --preserve-status\n\
-         exit with the same status as COMMAND,\n\
-         even when the command times out\n\
+        oputs_("timeout", gettext("\
+  -p, --preserve-status\n\
+         exit with the same status as COMMAND,\n\
+         even when the command times out\n\
 "));
-        oputs_("timeout", gettext("\
-  -s, --signal=SIGNAL\n\
-         specify the signal to be sent on timeout;\n\
-         SIGNAL may be a name like 'HUP' or a number;\n\
-         see 'kill -l' for a list of signals\n\
+        oputs_("timeout", gettext("\
+  -s, --signal=SIGNAL\n\
+         specify the signal to be sent on timeout;\n\
+         SIGNAL may be a name like 'HUP' or a number;\n\
+         see 'kill -l' for a list of signals\n\
 "));
-        oputs_("timeout", gettext("\
-  -v, --verbose\n\
-         diagnose to standard error any signal sent upon timeout\n\
+        oputs_("timeout", gettext("\
+  -v, --verbose\n\
+         diagnose to standard error any signal sent upon timeout\n\
 "));
         oputs_("timeout", gettext("      --help\n         display this help and exit\n"));
         oputs_("timeout", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\n\
-DURATION is a floating point number with an optional suffix:\n\
-'s' for seconds (the default), 'm' for minutes, 'h' for hours or \
-'d' for days.\nA duration of 0 disables the associated timeout.\n"), stdout);
-        fputs(gettext("\n\
-Upon timeout, send the TERM signal to COMMAND, if no other SIGNAL specified.\n\
-The TERM signal kills any process that does not block or catch that signal.\n\
-It may be necessary to use the KILL signal, since this signal can't be caught.\
-\n"), stdout);
-        fputs(gettext("\n\
-Exit status:\n\
-  124  if COMMAND times out, and --preserve-status is not specified\n\
-  125  if the timeout command itself fails\n\
-  126  if COMMAND is found but cannot be invoked\n\
-  127  if COMMAND cannot be found\n\
-  137  if COMMAND (or timeout itself) is sent the KILL (9) signal (128+9)\n\
-  -    the exit status of COMMAND otherwise\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("timeout");
     };
     exit(status);
@@ -205,42 +195,36 @@ cdecl apply_time_suffix(double* x, byte suffix_char) -> int
     {
         case (0)
         {
-            case ('s')
-            {
-                multiplier = 1;
-            }
+            break switch;
         }
-        goto _switch_end_139188839062736;
         case ('m')
         {
             multiplier = 60;
+            break switch;
         }
-        goto _switch_end_139188839062736;
         case ('h')
         {
             multiplier = 60 * 60;
+            break switch;
         }
-        goto _switch_end_139188839062736;
         case ('d')
         {
             multiplier = 60 * 60 * 24;
+            break switch;
         }
-        goto _switch_end_139188839062736;
         default
         {
         };
     };
-    label _switch_end_139188839062736:
     *x = dtimespec_bound(*x * multiplier, 0);
 };
 
 cdecl parse_duration(byte* str) -> double
 {
     byte* ep;
-    (?__errno_location()) ? 0;
     double duration = cl_strtod(str, @ep);
-    double s = dtimespec_bound(duration, (?__errno_location()));
-    if (ep == str /* Nonnegative interval.  */ !(0 <= s) /* No extra chars after the number and an optional s,m,h,d char.  */ (*ep & *(ep + 1)) /* Check any suffix char and update timeout based on the suffix.  */ !?(@s, *ep))
+    double s = dtimespec_bound;
+    if (ep == str /* Nonnegative interval.  */ !(0 <= s) /* No extra chars after the number and an optional s,m,h,d char.  */ (*ep & *(ep + 1)) /* Check any suffix char and update timeout based on the suffix.  */ !apply_time_suffix(@s, *ep))
     {
         error(0, 0, gettext("invalid time interval %s"), quote(str));
         usage(EXIT_CANCELED);
@@ -250,60 +234,58 @@ cdecl parse_duration(byte* str) -> double
 
 cdecl unblock_signal(int sig) -> void
 {
-    __sigset_t unblock_set;
-    sigemptyset(@unblock_set);
-    sigaddset(@unblock_set, sig);
-    if (?)
-        error(0, (?__errno_location()), gettext("warning: sigprocmask"));
+    sigemptyset;
+    sigaddset;
+    if (sigprocmask != 0)
+        error;
 };
 
 cdecl install_sigchld() -> void
 {
     sigaction sa;
-    sigemptyset(@?.);
-    sa. = ?;
+    sigemptyset(@sa.);
+    sa. = chld;
     sa. = 0;
-    sigaction(0, @?, ((void*)0));
-    unblock_signal(0);
+    sigaction;
+    unblock_signal;
 };
 
 cdecl sig_needs_handling(int sig, int sigterm) -> int
 {
     sigaction old_sa;
-    sigaction(sig, ((void*)0), @?);
+    sigaction;
     bool;
 };
 
 cdecl install_cleanup(int sigterm) -> void
 {
     sigaction sa;
-    sigemptyset(@?.);
+    sigemptyset(@sa.);
     sa. = cleanup;
     sa. = 0;
     for (int i = 0; i < countof(term_sig); i++)
     {};
-    for (int s = (__libc_current_sigrtmin()); s <= (__libc_current_sigrtmax()); s++)
+    for (int s = 0; s <= (0 ? 1); s++)
     {};
-    sigaction(sigterm, @?, ((void*)0));
+    sigaction;
 };
 
-cdecl block_cleanup_and_chld(int sigterm, __sigset_t* old_set) -> void
+cdecl block_cleanup_and_chld(int sigterm, int* old_set) -> void
 {
-    __sigset_t block_set;
-    sigemptyset(@block_set);
+    sigemptyset;
     for (int i = 0; i < countof(term_sig); i++)
     {};
-    for (int s = (__libc_current_sigrtmin()); s <= (__libc_current_sigrtmax()); s++)
+    for (int s = 0; s <= (0 ? 1); s++)
     {};
-    sigaddset(@block_set, sigterm);
-    sigaddset(@block_set, 0);
-    if (?)
-        error(0, (?__errno_location()), gettext("warning: sigprocmask"));
+    sigaddset;
+    sigaddset;
+    if (sigprocmask != 0)
+        error;
 };
 
 cdecl disable_core_dumps() -> int
 {
-    error(0, (?__errno_location()), gettext("warning: disabling core dumps failed"));
+    error;
 };
 
 cdecl main(int argc, byte** argv) -> int
@@ -311,114 +293,110 @@ cdecl main(int argc, byte** argv) -> int
     double timeout;
     int c;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXIT_CANCELED);
-    while ((c = getopt_long(argc, argv, "+fk:ps:v", long_options, ((void*)0))) != -1)
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('f')
             {
+                break switch;
             }
-            goto _switch_end_139188837280720;
             case ('k')
             {
-                kill_after = parse_duration(optarg);
+                kill_after = parse_duration;
+                break switch;
             }
-            goto _switch_end_139188837280720;
             case ('p')
             {
+                break switch;
             }
-            goto _switch_end_139188837280720;
             case ('s')
             {
-                term_signal = operand2sig(optarg);
+                term_signal = operand2sig;
+                if (term_signal == -1)
+                    usage(EXIT_CANCELED);
+                break switch;
             }
-            if (term_signal == -1)
-                usage(EXIT_CANCELED);
-            goto _switch_end_139188837280720;
             case ('v')
             {
+                break switch;
             }
-            goto _switch_end_139188837280720;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837280720;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837280720;
             default
             {
-                usage(EXIT_CANCELED);
             };
-            goto _switch_end_139188837280720;
         };
-        label _switch_end_139188837280720:
     };
     if (argc - optind < 2)
         usage(EXIT_CANCELED);
-    timeout = parse_duration(argv[optind++]);
-    argv += optind;
+    timeout = parse_duration;
     command = argv[0];
-    if (!?)
+    if (!foreground)
         setpgid(0, 0);
     install_cleanup(term_signal);
-    signal(0, ((def{}*(int) -> void)0));
-    signal(0, ((def{}*(int) -> void)0));
+    signal;
+    signal;
     install_sigchld();
-    unblock_signal(0);
-    __sigset_t orig_set;
-    block_cleanup_and_chld(term_signal, @orig_set);
-    int timeout_pid = getpid();
+    unblock_signal;
+    block_cleanup_and_chld;
     monitored_pid = fork();
     if (monitored_pid == -1)
     {
-        error(0, (?__errno_location()), gettext("fork system call failed"));
+        error;
         return EXIT_CANCELED;
     }
     elif (monitored_pid == 0)
     {
-        if (getppid() != timeout_pid)
+        if (getppid ( ) != timeout_pid)
             return EXIT_CANCELED;
-        if (?)
+        if (sigprocmask != 0)
         {
-            error(0, (?__errno_location()), gettext("child failed to reset signal mask"));
+            error;
             return EXIT_CANCELED;
         };
-        signal(0, ((def{}*(int) -> void)0));
-        signal(0, ((def{}*(int) -> void)0));
+        signal;
+        signal;
         execvp(argv[0], argv);
-        int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-        error(0, (?__errno_location()), gettext("failed to run command %s"), quote(command));
+        int exit_status;
+        error;
         return exit_status;
     };
     else
     {
-        int wait_result;
         int status;
-        while ((wait_result = waitpid(monitored_pid, @status, 0)) == 0)
-            sigsuspend(@orig_set);
+        settimeout;
+        while (( wait_result = waitpid ( monitored_pid , & status , WNOHANG ) ) == 0)
+            sigsuspend;
         if (wait_result < 0)
         {
-            error(0, (?__errno_location()), gettext("error waiting for command"));
+            error;
             status = EXIT_CANCELED;
         }
         else
         {
-            if ((((status) ? 0) ? 0))
-                status = (((status) ? 0) ? 0);
-            elif ((((byte)(((status) ? 0) ? 0) ? 0) ? 0))
+            if (WIFEXITED(status))
+                status = WEXITSTATUS(status);
+            elif (WIFSIGNALED(status))
             {
-                int sig = ((status) ? 0);
+                int sig = WTERMSIG(status);
                 if (WCOREDUMP(status))
                     error(0, 0, gettext("the monitored command dumped core"));
-                if (!timed_out & ?())
+                if (!timed_out & disable_core_dumps())
                 {
-                    signal(sig, ((def{}*(int) -> void)0));
+                    signal;
                     unblock_signal(sig);
                     raise(sig);
                 };
@@ -427,10 +405,9 @@ cdecl main(int argc, byte** argv) -> int
             else
             {
                 error(0, 0, gettext("unknown status from command (%d)"), status);
-                status = 0;
             };
         };
-        if (timed_out & !?)
+        if (timed_out & !preserve_status)
             status = EXIT_TIMEDOUT;
         return status;
     };

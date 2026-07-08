@@ -38,32 +38,40 @@ cdecl userid_compare(void* v_a, void* v_b) -> int
 
 cdecl list_entries_users(int n, int* this) -> void
 {
-    byte** u = xinmalloc(?, (sizeof * u / 8));
-    while (?--)
+    byte** u = xinmalloc(n, (sizeof * u / 8));
+    while (n--)
     {
-        if (IS_USER_PROCESS(?))
+        if (IS_USER_PROCESS(this))
         {
             byte* trimmed_name;
-            trimmed_name = extract_trimmed_name(?);
+            trimmed_name = extract_trimmed_name(this);
         };
         this++;
     };
+    qsort;
     free(u);
 };
 
 cdecl users(byte* filename, int options) -> void
 {
+    if (read_utmp != 0)
+        error;
+    list_entries_users;
+    free;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        printf;
         oputs_("users", gettext("      --help\n         display this help and exit\n"));
         oputs_("users", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("users");
@@ -74,22 +82,24 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    switch (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    switch (argc - optind)
     {
         case (0)
         {
+            users;
+            break switch;
         }
-        goto _switch_end_139188829611216;
         case (1)
         {
+            users;
+            break switch;
         }
-        goto _switch_end_139188829611216;
         default
         {
+            usage;
         };
-        usage(0);
     };
-    label _switch_end_139188829611216:
-    return 0;
 };

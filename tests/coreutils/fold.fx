@@ -30,45 +30,46 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-extern bool break_spaces;
+extern int break_spaces;
 uint COUNT_COLUMNS = 0;
 uint COUNT_BYTES = 1;
 uint COUNT_CHARACTERS = 2;
 
 enum (unnamed at tests/coreutils/fold.c:43:8) counting_mode = enum { COUNT_COLUMNS , COUNT_BYTES , COUNT_CHARACTERS };
-extern bool have_read_stdin;
+extern int have_read_stdin;
 int last_character_width = 0;
 byte[36] shortopts = "bcsw:0::1::2::3::4::5::6::7::8::9::";
-option[7] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Wrap input lines in each FILE, writing to standard output.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("fold", gettext("\
-  -b, --bytes\n\
-         count bytes rather than columns\n\
+        oputs_("fold", gettext("\
+  -b, --bytes\n\
+         count bytes rather than columns\n\
 "));
-        oputs_("fold", gettext("\
-  -c, --characters\n\
-         count characters rather than columns\n\
+        oputs_("fold", gettext("\
+  -c, --characters\n\
+         count characters rather than columns\n\
 "));
-        oputs_("fold", gettext("\
-  -s, --spaces\n\
-         break after blanks, or in words greater than WIDTH\n\
+        oputs_("fold", gettext("\
+  -s, --spaces\n\
+         break after blanks, or in words greater than WIDTH\n\
 "));
-        oputs_("fold", gettext("\
-  -w, --width=WIDTH\n\
-         use WIDTH columns instead of 80\n\
+        oputs_("fold", gettext("\
+  -w, --width=WIDTH\n\
+         use WIDTH columns instead of 80\n\
 "));
         oputs_("fold", gettext("      --help\n         display this help and exit\n"));
         oputs_("fold", gettext("      --version\n         output version information and exit\n"));
@@ -81,15 +82,15 @@ cdecl adjust_column(ulong column, int g) -> ulong
 {
     if (counting_mode != COUNT_BYTES)
     {
-        if (?. == '\b')
+        if (g. == '\b')
         {
             if (column > 0)
                 column -= last_character_width;
         }
-        elif (?. == '\r')
+        elif (g. == '\r')
             column = 0;
         else
-            if (?. == '\t')
+            if (g. == '\t')
                 column += 8 - column % 8;
             else
             {
@@ -97,48 +98,48 @@ cdecl adjust_column(ulong column, int g) -> ulong
                     last_character_width = 1;
                 else
                 {
-                    int width = c32width(?.);
+                    int width = c32width(g.);
                     last_character_width = width < 0 ? 1 : width;
                 };
                 column += last_character_width;
             };
     }
     else
-        column += ?.;
+        column += g.;
     return column;
 };
 
-cdecl write_out(byte* line, ulong line_len, bool newline) -> void
+cdecl write_out(byte* line, ulong line_len, int newline) -> void
 {
-    if (fwrite(line, (sizeof ( char ) / 8), line_len, stdout) != line_len | (newline & putchar('\n') < 0))
+    if (fwrite != line_len | (newline & putchar('\n') < 0))
         write_error();
 };
 
-cdecl fold_file(byte* filename, ulong width) -> bool
+cdecl fold_file(byte* filename, ulong width) -> int
 {
-    _IO_FILE* istream;
     ulong column = 0;
     byte[262144] line_out = IO_BUFSIZE;
     byte[262144] line_in = IO_BUFSIZE;
     int saved_errno;
     if (streq(filename, "-"))
     {
-        istream = stdin;
-        have_read_stdin = 0;
     }
     else
-        istream = fopen(filename, "r");
-    if (istream == ((void*)0))
+    if (istream == NULL)
     {
-        return 0;
+        error;
     };
-    while (?)
+    fadvise;
+    mbbuf_init;
+    while (( g = mbbuf_get_char ( & mbbuf ) ) . ch != MBBUF_EOF)
     {
-        if (?)
+        if (g . ch == '\n')
         {
+            write_out;
             continue;
         };
         label rescan:
+        column = adjust_column;
         if (column > width)
         {
             if (break_spaces)
@@ -148,53 +149,60 @@ cdecl fold_file(byte* filename, ulong width) -> bool
                 byte* logical_lim;
                 for (logical_p < logical_lim; ; )
                 {
-                    if (?)
+                    if (c32issep)
                     {
                     };
                 };
                 if (space_length)
                 {
+                    write_out;
+                    memmove;
                     column = 0;
                     byte* printed_p = line_out;
                     byte* printed_lim;
                     for (printed_p < printed_lim; ; )
                     {
+                        column = adjust_column;
                     };
                     goto rescan;
                 };
             };
-            if (?)
+            if (offset_out == 0)
             {
+                memcpy;
                 continue;
             };
+            write_out;
             goto rescan;
         };
-        if (?)
+        if (sizeof line_out <= offset_out + g . len)
         {
+            write_out;
         };
+        memcpy;
     };
-    saved_errno = (?__errno_location());
-    if (!ferror(istream))
+    if (!ferror)
         saved_errno = 0;
+    if (offset_out)
+        write_out;
     if (streq(filename, "-"))
-        clearerr(istream);
-    elif (fclose(istream) != 0 & !saved_errno)
-        saved_errno = (?__errno_location());
+        clearerr;
+    else
     if (saved_errno)
     {
-        return 0;
+        error(0, saved_errno, "%s", quotearg_n_style_colon);
     };
-    return 0;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     ulong width = 80;
     int optc;
-    bool ok;
+    bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, shortopts, longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         byte[2] optargbuf = 2;
         switch (optc)
@@ -202,86 +210,45 @@ cdecl main(int argc, byte** argv) -> int
             case ('b')
             {
                 counting_mode = COUNT_BYTES;
+                break switch;
             }
-            goto _switch_end_139188837988432;
             case ('c')
             {
                 counting_mode = COUNT_CHARACTERS;
+                break switch;
             }
-            goto _switch_end_139188837988432;
             case ('s')
             {
-                break_spaces = 0;
+                break switch;
             }
-            goto _switch_end_139188837988432;
             case ('0')
             {
-                case ('1')
-                {
-                    case ('2')
-                    {
-                        case ('3')
-                        {
-                            case ('4')
-                            {
-                                case ('5')
-                                {
-                                    case ('6')
-                                    {
-                                        case ('7')
-                                        {
-                                            case ('8')
-                                            {
-                                                case ('9')
-                                                {
-                                                    if (optarg)
-                                                        optarg--;
-                                                    else
-                                                    {
-                                                        optargbuf[0] = optc;
-                                                        optargbuf[1] = '\0';
-                                                        optarg = optargbuf;
-                                                    };
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
             }
             case ('w')
             {
+                width = xnumtoumax;
+                break switch;
             }
-            goto _switch_end_139188837988432;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837988432;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837988432;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188837988432:
     };
     if (argc == optind)
-        ok = fold_file("-", width);
     else
     {
-        ok = 0;
-        for (int i = optind; i < argc; i++)
-        {};
     };
-    if (have_read_stdin & fclose(stdin) == (?0))
-        error(0, (?__errno_location()), "-");
-    return ok ? 0 : 0;
+    if (have_read_stdin && fclose ( stdin ) == EOF)
+        error;
 };

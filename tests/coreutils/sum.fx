@@ -27,120 +27,110 @@
  Written by Kayvan Aghaiepour and David MacKenzie.
 ///
 
-cdecl bsd_sum_stream(_IO_FILE* stream, void* resstream, long* length) -> int
+cdecl bsd_sum_stream(int* stream, void* resstream, int* length) -> int
 {
     int ret = -1;
     int checksum = 0;
-    long total_bytes = 0;
-    byte* buffer = malloc(buffer_length);
-    if (!buffer)
+    if (! buffer)
         return -1;
-    while (?)
+    while (true)
     {
-        while (?)
+        while (true)
         {
-            ulong n;
+            ulong n = fread;
             if (n == 0)
             {
                 if (ferror(stream))
                     goto cleanup_buffer;
                 goto final_process;
             };
-            if (?)
+            if (buffer_length == sum)
                 break;
             if (feof(stream))
                 goto final_process;
         };
-        if (?)
+        if (ckd_add)
         {
-            (?__errno_location()) ? 0;
             goto cleanup_buffer;
         };
     };
     label final_process:
-    if (?)
+    if (ckd_add)
     {
-        (?__errno_location()) ? 0;
         goto cleanup_buffer;
     };
     memcpy(resstream, @checksum, (sizeof checksum / 8));
-    *length = total_bytes;
     ret = 0;
     label cleanup_buffer:
-    free(buffer);
+    free;
     return ret;
 };
 
-cdecl sysv_sum_stream(_IO_FILE* stream, void* resstream, long* length) -> int
+cdecl sysv_sum_stream(int* stream, void* resstream, int* length) -> int
 {
     int ret = -1;
-    long total_bytes = 0;
-    byte* buffer = malloc(buffer_length);
-    if (!buffer)
+    if (! buffer)
         return -1;
     uint s = 0;
-    while (?)
+    while (true)
     {
-        while (?)
+        while (true)
         {
-            ulong n;
+            ulong n = fread;
             if (n == 0)
             {
                 if (ferror(stream))
                     goto cleanup_buffer;
                 goto final_process;
             };
-            if (?)
+            if (buffer_length == sum)
                 break;
             if (feof(stream))
                 goto final_process;
         };
-        if (?)
+        if (total_bytes + sum < total_bytes)
         {
-            (?__errno_location()) ? 0;
             goto cleanup_buffer;
         };
     };
     label final_process:
-    if (?)
+    if (total_bytes + sum < total_bytes)
     {
-        (?__errno_location()) ? 0;
         goto cleanup_buffer;
     };
     int r = (s `& 0xffff) + ((s `& 0xffffffff) >> 16);
     int checksum = (r `& 0xffff) + (r >> 16);
     memcpy(resstream, @checksum, (sizeof checksum / 8));
-    *length = total_bytes;
     ret = 0;
     label cleanup_buffer:
-    free(buffer);
+    free;
     return ret;
 };
 
 cdecl output_bsd(byte* file, int binary_file, void* digest, int raw, int bool) -> void
 {
-    if (?)
+    if (raw)
     {
-        uint out_int = ?(int*)digest;
-        out_int = htobe16(out_int);
-        fwrite(@out_int, 1, 16 / 8, stdout);
+        fwrite;
         return void;
     };
     byte hbuf;
-    if (?)
+    printf("%05d %5s", ?(int*)digest, human_readable);
+    if (args)
         printf(" %s", file);
+    putchar;
 };
 
 cdecl output_sysv(byte* file, int binary_file, void* digest, int raw, int bool) -> void
 {
-    if (?)
+    if (raw)
     {
-        uint out_int = ?(int*)digest;
-        out_int = htobe16(out_int);
-        fwrite(@out_int, 1, 16 / 8, stdout);
+        fwrite;
         return void;
     };
     byte hbuf;
-    if (?)
+    printf("%d %s", ?(int*)digest, human_readable);
+    if (args)
         printf(" %s", file);
+    putchar;
 };

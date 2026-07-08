@@ -29,52 +29,29 @@ uint DEFAULT_ECHO_TO_XPG = 0;
 
 cdecl usage(int status) -> void
 {
-    affirm(status == 0);
-    fputs(gettext("\
-Echo the STRING(s) to standard output.\n\
-\n\
-"), stdout);
-    oputs_("echo", gettext("\
-  -n     do not output the trailing newline\n\
+    affirm;
+    printf;
+    fputs;
+    oputs_("echo", gettext("\
+  -n     do not output the trailing newline\n\
 "));
-    oputs_("echo", gettext(DEFAULT_ECHO_TO_XPG ? "\
-  -e     enable interpretation of backslash escapes (default)\n\
-" : "\
-  -e     enable interpretation of backslash escapes\n\
+    oputs_("echo", gettext(DEFAULT_ECHO_TO_XPG ? "\
+  -e     enable interpretation of backslash escapes (default)\n\
+" : "\
+  -e     enable interpretation of backslash escapes\n\
 "));
-    oputs_("echo", gettext(DEFAULT_ECHO_TO_XPG ? "\
-  -E     disable interpretation of backslash escapes\n\
-" : "\
-  -E     disable interpretation of backslash escapes (default)\n\
+    oputs_("echo", gettext(DEFAULT_ECHO_TO_XPG ? "\
+  -E     disable interpretation of backslash escapes\n\
+" : "\
+  -E     disable interpretation of backslash escapes (default)\n\
 "));
     oputs_("echo", gettext("      --help\n         display this help and exit\n"));
     oputs_("echo", gettext("      --version\n         output version information and exit\n"));
-    fputs(gettext("\
-\n\
-If -e is in effect, the following sequences are recognized:\n\
-\n\
-"), stdout);
-    fputs(gettext("\
-  \\\\      backslash\n\
-  \\a      alert (bell)\n\
-  \\b      backspace\n\
-  \\c      produce no further output\n\
-  \\e      escape\n\
-  \\f      form feed\n\
-  \\n      new line\n\
-  \\r      carriage return\n\
-  \\t      horizontal tab\n\
-  \\v      vertical tab\n\
-"), stdout);
-    fputs(gettext("\
-  \\0NNN   byte with octal value NNN (1 to 3 digits)\n\
-  \\xHH    byte with hexadecimal value HH (1 to 2 digits)\n\
-"), stdout);
+    fputs;
+    fputs;
+    fputs;
     printf(gettext("\n"), "echo");
-    fputs(gettext("\n\
-Consider using the printf(1) command instead,\n\
-as it avoids problems when outputting option-like strings.\n\
-"), stdout);
+    fputs;
     emit_ancillary_info("echo");
     exit(status);
 };
@@ -85,49 +62,24 @@ cdecl hextobin(byte c) -> int
     {
         default
         {
-            return c - '0';
         };
         case ('a')
         {
-            case ('A')
-            {
-                return 10;
-            }
         }
         case ('b')
         {
-            case ('B')
-            {
-                return 11;
-            }
         }
         case ('c')
         {
-            case ('C')
-            {
-                return 12;
-            }
         }
         case ('d')
         {
-            case ('D')
-            {
-                return 13;
-            }
         }
         case ('e')
         {
-            case ('E')
-            {
-                return 14;
-            }
         }
         case ('f')
         {
-            case ('F')
-            {
-                return 15;
-            }
         }
     };
 };
@@ -139,19 +91,20 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    if (allow_options && argc == 2)
     {
         if (streq(argv[1], "--help"))
-            usage(0);
+            usage;
         if (streq(argv[1], "--version"))
         {
-            return 0;
+            version_etc;
         };
     };
     --argc;
     ++argv;
-    if (?)
+    if (allow_options)
         while (argc > 0 & *argv[0] == '-')
         {
             byte* temp = argv[0] + 1;
@@ -165,23 +118,22 @@ cdecl main(int argc, byte** argv) -> int
                 {
                     case ('e')
                     {
+                        break switch;
                     }
-                    goto _switch_end_139188887721168;
                     case ('E')
                     {
+                        break switch;
                     }
-                    goto _switch_end_139188887721168;
                     case ('n')
                     {
+                        break switch;
                     }
-                    goto _switch_end_139188887721168;
                 };
-                label _switch_end_139188887721168:
             argc--;
             argv++;
         };
     label just_echo:
-    if (?)
+    if (do_v9 || posixly_correct)
     {
         while (argc > 0)
         {
@@ -196,47 +148,46 @@ cdecl main(int argc, byte** argv) -> int
                         case ('a')
                         {
                             c = '\a';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('b')
                         {
                             c = '\b';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('c')
                         {
-                            return 0;
                         }
                         case ('e')
                         {
                             c = '\x1B';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('f')
                         {
                             c = '\f';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('n')
                         {
                             c = '\n';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('r')
                         {
                             c = '\r';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('t')
                         {
                             c = '\t';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('v')
                         {
                             c = '\v';
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('x')
                         {
                             {
@@ -252,54 +203,32 @@ cdecl main(int argc, byte** argv) -> int
                                     c = c * 16 + hextobin(ch);
                                 };
                             };
+                            break switch;
                         }
-                        goto _switch_end_139188887676368;
                         case ('0')
                         {
                             c = 0;
+                            if (!('0' <= *s & *s <= '7'))
+                                break switch;
+                            c = *s++;
                         }
-                        if (!('0' <= *s & *s <= '7'))
-                            goto _switch_end_139188887676368;
-                        c = *s++;
                         case ('1')
                         {
-                            case ('2')
-                            {
-                                case ('3')
-                                {
-                                    case ('4')
-                                    {
-                                        case ('5')
-                                        {
-                                            case ('6')
-                                            {
-                                                case ('7')
-                                                {
-                                                    c -= '0';
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            if ('0' <= *s & *s <= '7')
+                                c = c * 8 + (*s++ - '0');
+                            if ('0' <= *s & *s <= '7')
+                                c = c * 8 + (*s++ - '0');
+                            break switch;
                         }
-                        if ('0' <= *s & *s <= '7')
-                            c = c * 8 + (*s++ - '0');
-                        if ('0' <= *s & *s <= '7')
-                            c = c * 8 + (*s++ - '0');
-                        goto _switch_end_139188887676368;
                         case ('\\')
                         {
-                            goto _switch_end_139188887676368;
+                            label not_an_escape:
+                            default
+                            {
+                            };
+                            break switch;
                         }
-                        label not_an_escape:
-                        default
-                        {
-                            putchar('\\');
-                        };
-                        goto _switch_end_139188887676368;
                     };
-                    label _switch_end_139188887676368:
                 };
                 putchar(c);
             };
@@ -313,14 +242,13 @@ cdecl main(int argc, byte** argv) -> int
     {
         while (argc > 0)
         {
-            fputs(argv[0], stdout);
+            fputs;
             argc--;
             argv++;
             if (argc > 0)
                 putchar(' ');
         };
     };
-    if (?)
+    if (display_return)
         putchar('\n');
-    return 0;
 };

@@ -27,13 +27,15 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         oputs_("sleep", gettext("      --help\n         display this help and exit\n"));
         oputs_("sleep", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("sleep");
@@ -48,32 +50,27 @@ cdecl apply_suffix(double* x, byte suffix_char) -> int
     {
         case (0)
         {
-            case ('s')
-            {
-                multiplier = 1;
-            }
+            break switch;
         }
-        goto _switch_end_139188839063888;
         case ('m')
         {
             multiplier = 60;
+            break switch;
         }
-        goto _switch_end_139188839063888;
         case ('h')
         {
             multiplier = 60 * 60;
+            break switch;
         }
-        goto _switch_end_139188839063888;
         case ('d')
         {
             multiplier = 60 * 60 * 24;
+            break switch;
         }
-        goto _switch_end_139188839063888;
         default
         {
         };
     };
-    label _switch_end_139188839063888:
     *x = dtimespec_bound(*x * multiplier, 0);
 };
 
@@ -82,27 +79,27 @@ cdecl main(int argc, byte** argv) -> int
     double seconds = 0.0;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
     if (argc == 1)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     for (int i; i < argc; i++)
     {
         byte* p;
-        (?__errno_location()) ? 0;
         double duration = cl_strtod(argv[i], @p);
-        double s = dtimespec_bound(duration, (?__errno_location()));
-        if (argv[i] == p /* Nonnegative interval.  */ !(0 <= s) /* No extra chars after the number and an optional s,m,h,d char.  */ (*p & *(p + 1)) /* Check any suffix char and update S based on the suffix.  */ !?(@s, *p))
+        double s = dtimespec_bound;
+        if (argv[i] == p /* Nonnegative interval.  */ !(0 <= s) /* No extra chars after the number and an optional s,m,h,d char.  */ (*p & *(p + 1)) /* Check any suffix char and update S based on the suffix.  */ !apply_suffix(@s, *p))
         {
             error(0, 0, gettext("invalid time interval %s"), quote(argv[i]));
         };
         seconds = dtimespec_bound(seconds + s, 0);
     };
-    if (?)
-        usage(0);
+    if (! ok)
+        usage;
     if (xnanosleep(seconds))
-        error(0, (?__errno_location()), gettext("cannot read realtime clock"));
-    return 0;
+        error;
 };

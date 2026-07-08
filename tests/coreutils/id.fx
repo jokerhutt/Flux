@@ -30,7 +30,7 @@ macro AUTHORS
     proper_name ( "Arnold Robbins" ) , proper_name ( "David MacKenzie" )
 };
 
-extern int just_context;
+int just_context = 0;
 extern int opt_zero;
 extern int just_group_list;
 extern int just_group;
@@ -39,67 +39,62 @@ extern int just_user;
 extern int ok;
 extern int multiple_users;
 extern int use_name;
-uint ruid = uid_t;
-uint euid = uid_t;
-uint rgid = gid_t;
-uint egid = gid_t;
-byte* context = ((void*)0);
-cdecl print_user(uint uid) -> void;
+extern int ruid;
+extern int rgid;
+extern byte* context;
+cdecl print_user(int uid) -> void;
 cdecl print_full_info(byte* username) -> void;
 cdecl print_stuff(byte* pw_name) -> void;
-option[10] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print user and group information for each specified USER,\n\
-or (when USER omitted) for the current process.\n\
-\n"), stdout);
-        oputs_("id", gettext("\
-  -a\n\
-         ignore, for compatibility with other versions\n\
+        printf;
+        fputs;
+        oputs_("id", gettext("\
+  -a\n\
+         ignore, for compatibility with other versions\n\
 "));
-        oputs_("id", gettext("\
-  -Z, --context\n\
-         print only the security context of the process\n\
+        oputs_("id", gettext("\
+  -Z, --context\n\
+         print only the security context of the process\n\
 "));
-        oputs_("id", gettext("\
-  -g, --group\n\
-         print only the effective group ID\n\
+        oputs_("id", gettext("\
+  -g, --group\n\
+         print only the effective group ID\n\
 "));
-        oputs_("id", gettext("\
-  -G, --groups\n\
-         print all group IDs\n\
+        oputs_("id", gettext("\
+  -G, --groups\n\
+         print all group IDs\n\
 "));
-        oputs_("id", gettext("\
-  -n, --name\n\
-         print a name instead of a number, for -u, -g, -G\n\
+        oputs_("id", gettext("\
+  -n, --name\n\
+         print a name instead of a number, for -u, -g, -G\n\
 "));
-        oputs_("id", gettext("\
-  -r, --real\n\
-         print the real ID instead of the effective ID, with -u, -g, -G\n\
+        oputs_("id", gettext("\
+  -r, --real\n\
+         print the real ID instead of the effective ID, with -u, -g, -G\n\
 "));
-        oputs_("id", gettext("\
-  -u, --user\n\
-         print only the effective user ID\n\
+        oputs_("id", gettext("\
+  -u, --user\n\
+         print only the effective user ID\n\
 "));
-        oputs_("id", gettext("\
-  -z, --zero\n\
-         delimit entries with NUL characters, not whitespace;\n\
-         not permitted in default format\n\
+        oputs_("id", gettext("\
+  -z, --zero\n\
+         delimit entries with NUL characters, not whitespace;\n\
+         not permitted in default format\n\
 "));
         oputs_("id", gettext("      --help\n         display this help and exit\n"));
         oputs_("id", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Without any OPTION, print some useful set of identified information.\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("id");
     };
     exit(status);
@@ -111,137 +106,100 @@ cdecl main(int argc, byte** argv) -> int
     int selinux_enabled = (is_selinux_enabled() > 0);
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "agnruzGZ", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('a')
             {
-                goto _switch_end_139188837987664;
             }
             case ('Z')
             {
                 if (!selinux_enabled)
-                    error(0, 0, gettext("--context (-Z) works only on an SELinux-enabled kernel"));
+                    error;
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case ('g')
             {
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case ('n')
             {
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case ('r')
             {
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case ('u')
             {
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case ('z')
             {
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case ('G')
             {
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837987664;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837987664;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188837987664:
     };
-    ulong n_ids = argc - optind;
-    if (n_ids & ?)
-        error(0, 0, gettext("cannot print security context when user specified"));
-    if (? + ? + ? + ? > 1)
-        error(0, 0, gettext("cannot print \"only\" of more than one choice"));
+    ulong n_ids;
+    if (n_ids & just_context)
+        error;
+    if (just_user + just_group + just_group_list + just_context > 1)
+        error;
     bool;
-    if (?)
-        error(0, 0, gettext("printing only names or real IDs requires -u, -g, or -G"));
-    if (?)
-        error(0, 0, gettext("option --zero not permitted in default format"));
-    if (?)
+    if (default_format && ( use_real || use_name ))
+        error;
+    if (default_format && opt_zero)
+        error;
+    if (n_ids == 0 && ( just_context || ( default_format && ! getenv ( "POSIXLY_CORRECT" ) ) ))
     {
-        if (?)
-            error(0, 0, gettext("can't get process context"));
+        if (( selinux_enabled && getcon ( & context ) && just_context ) || ( smack_enabled && smack_new_label_from_self ( & context ) < 0 && just_context ))
+            error;
     };
     if (n_ids >= 1)
     {
-        n_ids += optind;
-        for (optind < n_ids; optind++; )
-        {
-            byte* pw_name = ((void*)0);
-            passwd* pwd = ((void*)0);
-            byte* spec = argv[optind];
-            if (*spec)
-            {
-                if (!parse_user_spec(spec, @euid, ((void*)0), @pw_name, ((void*)0)))
-                    pwd = pw_name ? getpwnam(pw_name) : getpwuid(euid);
-            };
-            if (pwd == ((void*)0))
-            {
-                error(0, (?__errno_location()), gettext("%s: no such user"), quote(spec));
-            }
-            else
-            {
-                if (!pw_name)
-                    pw_name = xstrdup(pwd.pw_name);
-                ruid = euid = pwd.pw_uid;
-                rgid = egid = pwd.pw_gid;
-                print_stuff(pw_name);
-                if (ferror(stdout))
-                    write_error();
-            };
-            free(pw_name);
-        };
     }
     else
     {
-        uint NO_UID = -1;
-        uint NO_GID = -1;
-        if (? ? !? : !? & !? & !?)
+        if (just_user ? !use_real : !just_group & !just_group_list & !just_context)
         {
-            (?__errno_location()) ? 0;
-            euid = geteuid();
-            if (euid == NO_UID & (?__errno_location()))
-                error(0, (?__errno_location()), gettext("cannot get effective UID"));
+            if (euid == NO_UID && errno)
+                error;
         };
-        if (? ? ? : !? & (? | !?))
+        if (just_user ? use_real : !just_group & (just_group_list | !just_context))
         {
-            (?__errno_location()) ? 0;
             ruid = getuid();
-            if (ruid == NO_UID & (?__errno_location()))
-                error(0, (?__errno_location()), gettext("cannot get real UID"));
+            if (ruid == NO_UID && errno)
+                error;
         };
-        if (!? & (? | ? | !?))
+        if (!just_user & (just_group | just_group_list | !just_context))
         {
-            (?__errno_location()) ? 0;
-            egid = getegid();
-            if (egid == NO_GID & (?__errno_location()))
-                error(0, (?__errno_location()), gettext("cannot get effective GID"));
-            (?__errno_location()) ? 0;
+            if (egid == NO_GID && errno)
+                error;
             rgid = getgid();
-            if (rgid == NO_GID & (?__errno_location()))
-                error(0, (?__errno_location()), gettext("cannot get real GID"));
+            if (rgid == NO_GID && errno)
+                error;
         };
-        print_stuff(((void*)0));
+        print_stuff;
     };
-    return ? ? 0 : 0;
 };

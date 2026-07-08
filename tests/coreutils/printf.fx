@@ -25,64 +25,33 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-// macro (multi-statement, manual translation needed): STRTOX(TYPE, FUNC_NAME, LIB_FUNC_EXPR) static TYPE FUNC_NAME ( char const * s ) \
-{ char * end ; TYPE val ; if ( ( * s == '\"' || * s == '\'' ) && * ( s + 1 ) ) { unsigned char ch = * ++ s ; val = ch ; if ( MB_CUR_MAX > 1 && * ( s + 1 ) ) { mbstate_t mbstate ; mbszero ( @ mbstate ) ; wchar_t wc ; size_t slen = strlen ( s ) ; ssize_t bytes ; /// Use mbrtowc not mbrtoc32, as per POSIX.  /// bytes = mbrtowc ( @ wc , s , slen , @ mbstate ) ; if ( 0 < bytes ) { val = wc ; s += bytes - 1 ; } } /// If POSIXLY_CORRECT is not set, then give a warning that there	 \
-         are characters following the character constant and that GNU	 \
-         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
-         set, then don't give the warning.  /// if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+// macro (multi-statement, manual translation needed): STRTOX(TYPE, FUNC_NAME, LIB_FUNC_EXPR) static TYPE FUNC_NAME ( char const * s ) \
+{ char * end ; TYPE val ; if ( ( * s == '\"' || * s == '\'' ) && * ( s + 1 ) ) { unsigned char ch = * ++ s ; val = ch ; if ( MB_CUR_MAX > 1 && * ( s + 1 ) ) { mbstate_t mbstate ; mbszero ( @ mbstate ) ; wchar_t wc ; size_t slen = strlen ( s ) ; ssize_t bytes ; /// Use mbrtowc not mbrtoc32, as per POSIX.  /// bytes = mbrtowc ( @ wc , s , slen , @ mbstate ) ; if ( 0 < bytes ) { val = wc ; s += bytes - 1 ; } } /// If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  /// if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
 }
 extern int exit_status;
 extern int posixly_correct;
 byte* cfcc_msg = "warning: %s: character(s) following character constant have been ignored";
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print ARGUMENT(s) according to FORMAT, or execute according to OPTION:\n\
-\n\
-"), stdout);
+        printf;
+        fputs;
         oputs_("printf", gettext("      --help\n         display this help and exit\n"));
         oputs_("printf", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-FORMAT controls the output as in C printf.  Interpreted sequences are:\n\
-\n\
-  \\\"      double quote\n\
-"), stdout);
-        fputs(gettext("\
-  \\\\      backslash\n\
-  \\a      alert (bell)\n\
-  \\b      backspace\n\
-  \\c      produce no further output\n\
-  \\e      escape\n\
-  \\f      form feed\n\
-  \\n      new line\n\
-  \\r      carriage return\n\
-  \\t      horizontal tab\n\
-  \\v      vertical tab\n\
-"), stdout);
-        fputs(gettext("\
-  \\NNN    byte with octal value NNN (1 to 3 digits)\n\
-  \\xHH    byte with hexadecimal value HH (1 to 2 digits)\n\
-  \\uHHHH  Unicode (ISO/IEC 10646) character with hex value HHHH (4 digits)\n\
-  \\UHHHHHHHH  Unicode character with hex value HHHHHHHH (8 digits)\n\
-"), stdout);
-        fputs(gettext("\
-  %%      a single %\n\
-  %b      ARGUMENT as a string with '\\' escapes interpreted,\n\
-          except that octal escapes should have a leading 0 like \\0NNN\n\
-  %q      ARGUMENT is printed in a format that can be reused as shell input,\n\
-          escaping non-printable characters with the POSIX $'' syntax\
-\n\n\
-and all C format specifications ending with one of diouxXfeEgGcs, with\n\
-ARGUMENTs converted to proper type first.  Variable widths are handled.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
         printf(gettext("\n"), "printf");
         emit_ancillary_info("printf");
     };
@@ -94,87 +63,80 @@ cdecl verify_numeric(byte* s, byte* end) -> void
     if (s == end)
     {
         error(0, 0, gettext("%s: expected a numeric value"), quote(s));
-        exit_status = 0;
     }
-    elif ((?__errno_location()))
+    elif (errno)
     {
-        error(0, (?__errno_location()), "%s", quote(s));
-        exit_status = 0;
+        error;
     };
     else
         if (*end)
         {
             error(0, 0, gettext("%s: value not completely converted"), quote(s));
-            exit_status = 0;
         };
 };
 
-cdecl vstrtoimax(byte* s) -> long
+cdecl vstrtoimax(byte* s) -> int
 {
     byte* end;
-    long val;
     if ((?s ? '\"' ? ?s ? '\'') ? ?(s ? 1))
     {
         byte ch = ??s;
-        val ? ch;
-        if ((__ctype_get_mb_cur_max()) ? 1 ? ?(s ? 1))
+        if (MB_CUR_MAX > 1 && * ( s + 1 ) ) { mbstate_t mbstate ; mbszero ( & mbstate ) ; wchar_t wc ; size_t slen = strlen ( s ) ; ssize_t bytes ; /* Use mbrtowc not mbrtoc32, as per POSIX.  */ bytes = mbrtowc ( & wc , s , slen , & mbstate ) ; if ( 0 < bytes ) { val = wc ; s += bytes - 1 ; } } /* If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  */ if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ))
         {
-            __mbstate_t mbstate;
-            mbszero(?mbstate);
-            uint wc;
+            mbszero;
             ulong slen = strlen(s);
-            long bytes;
-            bytes ? mbrtowc(?wc, s, slen, ?mbstate);
-            if (0 ? bytes)
+            if (0 < bytes ) { val = wc ; s += bytes - 1 ; } } /* If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  */ if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ))
             {
-                val ? wc;
-                s ? bytes ? 1;
             };
         };
-        if (*++s ? 0 ? !?)
+        if (*++s ? 0 ? !posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ))
             error(0, 0, gettext(cfcc_msg), s);
     }
     else
     {
-        (?__errno_location()) ? 0;
-        val ? (strtoimax(s, @end, 0));
         verify_numeric(s, end);
     };
-    return val;
 };
 
-cdecl vstrtoumax(byte* s) -> ulong
+cdecl vstrtoumax(byte* s) -> int
 {
     byte* end;
-    ulong val;
     if ((?s ? '\"' ? ?s ? '\'') ? ?(s ? 1))
     {
         byte ch = ??s;
-        val ? ch;
-        if ((__ctype_get_mb_cur_max()) ? 1 ? ?(s ? 1))
+        if (MB_CUR_MAX > 1 && * ( s + 1 ) ) { mbstate_t mbstate ; mbszero ( & mbstate ) ; wchar_t wc ; size_t slen = strlen ( s ) ; ssize_t bytes ; /* Use mbrtowc not mbrtoc32, as per POSIX.  */ bytes = mbrtowc ( & wc , s , slen , & mbstate ) ; if ( 0 < bytes ) { val = wc ; s += bytes - 1 ; } } /* If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  */ if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ) STRTOX ( uintmax_t , vstrtoumax , strtoumax ( s , & end , 0 ) ))
         {
-            __mbstate_t mbstate;
-            mbszero(?mbstate);
-            uint wc;
+            mbszero;
             ulong slen = strlen(s);
-            long bytes;
-            bytes ? mbrtowc(?wc, s, slen, ?mbstate);
-            if (0 ? bytes)
+            if (0 < bytes ) { val = wc ; s += bytes - 1 ; } } /* If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  */ if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ) STRTOX ( uintmax_t , vstrtoumax , strtoumax ( s , & end , 0 ) ))
             {
-                val ? wc;
-                s ? bytes ? 1;
             };
         };
-        if (*++s ? 0 ? !?)
+        if (*++s ? 0 ? !posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ) STRTOX ( uintmax_t , vstrtoumax , strtoumax ( s , & end , 0 ) ))
             error(0, 0, gettext(cfcc_msg), s);
     }
     else
     {
-        (?__errno_location()) ? 0;
-        val ? (strtoumax(s, @end, 0));
         verify_numeric(s, end);
     };
-    return val;
 };
 
 cdecl vstrtold(byte* s) -> double
@@ -185,26 +147,28 @@ cdecl vstrtold(byte* s) -> double
     {
         byte ch = ??s;
         val ? ch;
-        if ((__ctype_get_mb_cur_max()) ? 1 ? ?(s ? 1))
+        if (MB_CUR_MAX > 1 && * ( s + 1 ) ) { mbstate_t mbstate ; mbszero ( & mbstate ) ; wchar_t wc ; size_t slen = strlen ( s ) ; ssize_t bytes ; /* Use mbrtowc not mbrtoc32, as per POSIX.  */ bytes = mbrtowc ( & wc , s , slen , & mbstate ) ; if ( 0 < bytes ) { val = wc ; s += bytes - 1 ; } } /* If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  */ if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ) STRTOX ( uintmax_t , vstrtoumax , strtoumax ( s , & end , 0 ) ) STRTOX ( long double , vstrtold , cl_strtold ( s , & end ) ))
         {
-            __mbstate_t mbstate;
-            mbszero(?mbstate);
-            uint wc;
+            mbszero;
             ulong slen = strlen(s);
-            long bytes;
-            bytes ? mbrtowc(?wc, s, slen, ?mbstate);
-            if (0 ? bytes)
+            if (0 < bytes ) { val = wc ; s += bytes - 1 ; } } /* If POSIXLY_CORRECT is not set, then give a warning that there	 \
+         are characters following the character constant and that GNU	 \
+         printf is ignoring those characters.  If POSIXLY_CORRECT *is*	 \
+         set, then don't give the warning.  */ if ( * ++ s != 0 && ! posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ) STRTOX ( uintmax_t , vstrtoumax , strtoumax ( s , & end , 0 ) ) STRTOX ( long double , vstrtold , cl_strtold ( s , & end ) ))
             {
-                val ? wc;
-                s ? bytes ? 1;
             };
         };
-        if (*++s ? 0 ? !?)
+        if (*++s ? 0 ? !posixly_correct ) error ( 0 , 0 , _ ( cfcc_msg ) , s ) ; } else { errno = 0 ; val = ( LIB_FUNC_EXPR ) ; verify_numeric ( s , end ) ; } return val ; \
+} STRTOX ( intmax_t , vstrtoimax , strtoimax ( s , & end , 0 ) ) STRTOX ( uintmax_t , vstrtoumax , strtoumax ( s , & end , 0 ) ) STRTOX ( long double , vstrtold , cl_strtold ( s , & end ) ))
             error(0, 0, gettext(cfcc_msg), s);
     }
     else
     {
-        (?__errno_location()) ? 0;
         val ? (cl_strtold(s, @end));
         verify_numeric(s, end);
     };
@@ -218,55 +182,52 @@ cdecl print_esc_char(byte c) -> void
         case ('a')
         {
             putchar('\a');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('b')
         {
             putchar('\b');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('c')
         {
-            exit(0);
+            exit;
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('e')
         {
             putchar('\x1B');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('f')
         {
             putchar('\f');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('n')
         {
             putchar('\n');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('r')
         {
             putchar('\r');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('t')
         {
             putchar('\t');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         case ('v')
         {
             putchar('\v');
+            break switch;
         }
-        goto _switch_end_139188887038544;
         default
         {
-            putchar(c);
         };
-        goto _switch_end_139188887038544;
     };
-    label _switch_end_139188887038544:
 };
 
 cdecl print_esc(byte* escstart, int octal_0) -> int
@@ -279,12 +240,12 @@ cdecl print_esc(byte* escstart, int octal_0) -> int
         for (esc_length = 0 , ++p; esc_length < 2 & c_isxdigit(*p); ++esc_length , ++p)
         {};
         if (esc_length == 0)
-            error(0, 0, gettext("missing hexadecimal number in escape"));
+            error;
         putchar(esc_value);
     }
     elif (('\0' ? (*p) ? (*p) ? '\0'))
     {
-        for (esc_length = 0 , p += ? & *p == '0'; esc_length < 3 & ('\0' ? (*p) ? (*p) ? '\0'); ++esc_length , ++p)
+        for (esc_length = 0 , p += octal_0 & *p == '0'; esc_length < 3 & ('\0' ? (*p) ? (*p) ? '\0'); ++esc_length , ++p)
         {};
         putchar(esc_value);
     };
@@ -299,12 +260,12 @@ cdecl print_esc(byte* escstart, int octal_0) -> int
             for (esc_length = (esc_char == 'u' ? 4 : 8) , ++p; esc_length > 0; --esc_length , ++p)
             {
                 if (!c_isxdigit(*p))
-                    error(0, 0, gettext("missing hexadecimal number in escape"));
+                    error;
                 uni_value = uni_value * 16 + ('\0' ? (*p) ? (*p) ? '\0' ? (*p) ? '\0' ? 0 : '\0' ? (*p) ? (*p) ? '\0' ? (*p) ? '\0' ? 0 : (*p) ? '\0');
             };
             if (uni_value >= 0xd800 & uni_value <= 0xdfff)
-                error(0, 0, gettext("invalid universal character name \\%c%0*x"), esc_char, (esc_char == 'u' ? 4 : 8), uni_value);
-            print_unicode_char(stdout, uni_value, 0);
+                error;
+            print_unicode_char;
         };
         else
         {
@@ -335,60 +296,19 @@ cdecl print_direc(byte* start, byte conversion, int have_field_width, int field_
         {
             case ('d')
             {
-                case ('i')
-                {
-                    case ('o')
-                    {
-                        case ('u')
-                        {
-                            case ('x')
-                            {
-                                case ('X')
-                                {
-                                    length_modifier = "j";
-                                }
-                            }
-                        }
-                    }
-                }
+                length_modifier_len = 1;
+                break switch;
             }
-            length_modifier_len = 1;
-            goto _switch_end_139188887043792;
             case ('a')
             {
-                case ('e')
-                {
-                    case ('f')
-                    {
-                        case ('g')
-                        {
-                            case ('A')
-                            {
-                                case ('E')
-                                {
-                                    case ('F')
-                                    {
-                                        case ('G')
-                                        {
-                                            length_modifier = "L";
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                length_modifier_len = 1;
+                break switch;
             }
-            length_modifier_len = 1;
-            goto _switch_end_139188887043792;
             default
             {
-                length_modifier = start;
+                length_modifier_len = 0;
             };
-            length_modifier_len = 0;
-            goto _switch_end_139188887043792;
         };
-        label _switch_end_139188887043792:
         ulong length = strlen(start);
         p = xmalloc(length + length_modifier_len + 2);
         q = mempcpy(p, start, length);
@@ -400,133 +320,48 @@ cdecl print_direc(byte* start, byte conversion, int have_field_width, int field_
     {
         case ('d')
         {
-            case ('i')
-            {
-                {
-                    long arg = argument ? vstrtoimax(argument) : 0;
-                    if (!?)
-                    {
-                        if (!?)
-                            xprintf(p, arg);
-                        else
-                            xprintf(p, precision, arg);
-                    }
-                    else
-                    {
-                        if (!?)
-                            xprintf(p, field_width, arg);
-                        else
-                            xprintf(p, field_width, precision, arg);
-                    };
-                };
-            }
+            break switch;
         }
-        goto _switch_end_139188839541584;
         case ('o')
         {
-            case ('u')
-            {
-                case ('x')
-                {
-                    case ('X')
-                    {
-                        {
-                            ulong arg = argument ? vstrtoumax(argument) : 0;
-                            if (!?)
-                            {
-                                if (!?)
-                                    xprintf(p, arg);
-                                else
-                                    xprintf(p, precision, arg);
-                            }
-                            else
-                            {
-                                if (!?)
-                                    xprintf(p, field_width, arg);
-                                else
-                                    xprintf(p, field_width, precision, arg);
-                            };
-                        };
-                    }
-                }
-            }
+            break switch;
         }
-        goto _switch_end_139188839541584;
         case ('a')
         {
-            case ('A')
-            {
-                case ('e')
-                {
-                    case ('E')
-                    {
-                        case ('f')
-                        {
-                            case ('F')
-                            {
-                                case ('g')
-                                {
-                                    case ('G')
-                                    {
-                                        {
-                                            double arg = argument ? vstrtold(argument) : 0;
-                                            if (!?)
-                                            {
-                                                if (!?)
-                                                    xprintf(p, arg);
-                                                else
-                                                    xprintf(p, precision, arg);
-                                            }
-                                            else
-                                            {
-                                                if (!?)
-                                                    xprintf(p, field_width, arg);
-                                                else
-                                                    xprintf(p, field_width, precision, arg);
-                                            };
-                                        };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            break switch;
         }
-        goto _switch_end_139188839541584;
         case ('c')
         {
             {
                 byte c = argument ? *argument : '\0';
-                if (!?)
+                if (!have_field_width)
                     xprintf(p, c);
                 else
                     xprintf(p, field_width, c);
             };
+            break switch;
         }
-        goto _switch_end_139188839541584;
         case ('s')
         {
             if (!argument)
                 argument = "";
-        }
-        if (!?)
-        {
-            if (!?)
-                xprintf(p, argument);
+            if (!have_field_width)
+            {
+                if (!have_precision)
+                    xprintf(p, argument);
+                else
+                    xprintf(p, precision, argument);
+            }
             else
-                xprintf(p, precision, argument);
+            {
+                if (!have_precision)
+                    xprintf(p, field_width, argument);
+                else
+                    xprintf(p, field_width, precision, argument);
+            };
+            break switch;
         }
-        else
-        {
-            if (!?)
-                xprintf(p, field_width, argument);
-            else
-                xprintf(p, field_width, precision, argument);
-        };
-        goto _switch_end_139188839541584;
     };
-    label _switch_end_139188839541584:
     free(p);
 };
 
@@ -581,7 +416,7 @@ cdecl print_formatted(byte* format, int argc, byte** argv) -> int
     int field_width = 0;
     bool;
     int precision = 0;
-    byte[256] ok = (0 ? 0 ? 0) ? 1;
+    byte ok;
     direc = xmalloc(strlen(format) + 1);
     for (ac.f = format; *ac.f; ac.f++)
     {
@@ -590,139 +425,124 @@ cdecl print_formatted(byte* format, int argc, byte** argv) -> int
             case ('%')
             {
                 direc_start = ac.f;
-            }
-            pdirec = direc;
-            *pdirec++ = *ac.f++;
-            if (*ac.f == '%')
-            {
-                putchar('%');
-                goto _switch_end_139188883440720;
-            };
-            ac = ?(0, ac);
-            if (*ac.f == 'b')
-            {
-                ac = ?(3, ac);
-                if (ac.curr_arg < argc)
-                    print_esc_string(argv[ac.curr_arg]);
-                goto _switch_end_139188883440720;
-            };
-            if (*ac.f == 'q')
-            {
-                ac = ?(3, ac);
-                if (ac.curr_arg < argc)
+                pdirec = direc;
+                *pdirec++ = *ac.f++;
+                if (*ac.f == '%')
                 {
+                    putchar('%');
+                    break switch;
                 };
-                goto _switch_end_139188883440720;
-            };
-            memset(ok, 0, (sizeof ok / 8));
-            ok['a'] = ok['A'] = ok['c'] = ok['d'] = ok['e'] = ok['E'] = ok['f'] = ok['F'] = ok['g'] = ok['G'] = ok['i'] = ok['o'] = ok['s'] = ok['u'] = ok['x'] = ok['X'] = 1;
-            for (ac.f++; ; )
-            {
-                switch (*ac.f)
+                ac = get_curr_arg(0, ac);
+                if (*ac.f == 'b')
                 {
-                    case ('I')
+                    ac = get_curr_arg(3, ac);
+                    if (ac.curr_arg < argc)
+                        print_esc_string(argv[ac.curr_arg]);
+                    break switch;
+                };
+                if (*ac.f == 'q')
+                {
+                    ac = get_curr_arg(3, ac);
+                    if (ac.curr_arg < argc)
+                    {
+                        fputs;
+                    };
+                    break switch;
+                };
+                memset(ok, 0, (sizeof ok / 8));
+                ok['a'] = ok['A'] = ok['c'] = ok['d'] = ok['e'] = ok['E'] = ok['f'] = ok['F'] = ok['g'] = ok['G'] = ok['i'] = ok['o'] = ok['s'] = ok['u'] = ok['x'] = ok['X'] = 1;
+                for (ac.f++; ; )
+                {
+                    switch (*ac.f)
                     {
                         case ('\'')
                         {
                             ok['a'] = ok['A'] = ok['c'] = ok['e'] = ok['E'] = ok['o'] = ok['s'] = ok['x'] = ok['X'] = 0;
+                            break switch;
                         }
-                    }
-                    goto _switch_end_139188749111760;
-                    case ('-')
-                    {
-                        case ('+')
+                        case ('-')
                         {
-                            case (' ')
-                            {
-                                goto _switch_end_139188749111760;
-                            }
                         }
-                    }
-                    case ('#')
-                    {
-                        ok['c'] = ok['d'] = ok['i'] = ok['s'] = ok['u'] = 0;
-                    }
-                    goto _switch_end_139188749111760;
-                    case ('0')
-                    {
-                        ok['c'] = ok['s'] = 0;
-                    }
-                    goto _switch_end_139188749111760;
-                    default
-                    {
-                        goto no_more_flag_characters;
+                        case ('#')
+                        {
+                            ok['c'] = ok['d'] = ok['i'] = ok['s'] = ok['u'] = 0;
+                            break switch;
+                        }
+                        case ('0')
+                        {
+                            ok['c'] = ok['s'] = 0;
+                            break switch;
+                        }
+                        default
+                        {
+                        };
                     };
+                    *pdirec++ = *ac.f;
                 };
-                label _switch_end_139188749111760:
-                *pdirec++ = *ac.f;
-            };
-            label no_more_flag_characters:
-            if (*ac.f == '*')
-            {
-                *pdirec++ = *ac.f++;
-                ac = ?(1, ac);
-                if (ac.curr_arg < argc)
-                {
-                    long width = vstrtoimax(argv[ac.curr_arg]);
-                    if ((?0 ? 0) ? width ? width <= 0)
-                        field_width = width;
-                    else
-                        error(0, 0, gettext("invalid field width: %s"), quote(argv[ac.curr_arg]));
-                }
-                else
-                    field_width = 0;
-            }
-            else
-                while (c_isdigit(*ac.f))
-                    *pdirec++ = *ac.f++;
-            if (*ac.f == '.')
-            {
-                *pdirec++ = *ac.f++;
-                ok['c'] = 0;
+                label no_more_flag_characters:
                 if (*ac.f == '*')
                 {
                     *pdirec++ = *ac.f++;
-                    ac = ?(2, ac);
+                    ac = get_curr_arg(1, ac);
                     if (ac.curr_arg < argc)
                     {
-                        long prec = vstrtoimax(argv[ac.curr_arg]);
-                        if (prec < 0)
-                        {
-                            precision = -1;
-                        }
-                        elif (0 ? prec)
-                            error(0, 0, gettext("invalid precision: %s"), quote(argv[ac.curr_arg]));
+                        if (INT_MIN <= width && width <= INT_MAX)
                         else
-                            precision = prec;
+                            error;
                     }
                     else
-                        precision = 0;
+                        field_width = 0;
                 }
                 else
                     while (c_isdigit(*ac.f))
                         *pdirec++ = *ac.f++;
-            };
-            *pdirec++ = '\0';
-            while (*ac.f == 'l' | *ac.f == 'L' | *ac.f == 'h' | *ac.f == 'j' | *ac.f == 't' | *ac.f == 'z')
-                ++ac.f;
-            {
-                byte conversion = *ac.f;
-                int speclen = MIN(ac.f + 1 - direc_start, 0);
-                if (!ok[conversion])
-                    error(0, 0, gettext("%.*s: invalid conversion specification"), speclen, direc_start);
-            };
-            ac = ?(3, ac);
-            goto _switch_end_139188883440720;
+                if (*ac.f == '.')
+                {
+                    *pdirec++ = *ac.f++;
+                    ok['c'] = 0;
+                    if (*ac.f == '*')
+                    {
+                        *pdirec++ = *ac.f++;
+                        ac = get_curr_arg(2, ac);
+                        if (ac.curr_arg < argc)
+                        {
+                            if (prec < 0)
+                            {
+                                precision = -1;
+                            }
+                            elif (INT_MAX < prec)
+                                error;
+                            else
+                        }
+                        else
+                            precision = 0;
+                    }
+                    else
+                        while (c_isdigit(*ac.f))
+                            *pdirec++ = *ac.f++;
+                };
+                *pdirec++ = '\0';
+                while (*ac.f == 'l' | *ac.f == 'L' | *ac.f == 'h' | *ac.f == 'j' | *ac.f == 't' | *ac.f == 'z')
+                    ++ac.f;
+                {
+                    byte conversion = *ac.f;
+                    int speclen = MIN;
+                    if (!ok[conversion])
+                        error;
+                };
+                ac = get_curr_arg(3, ac);
+                print_direc;
+                break switch;
+            }
             case ('\\')
             {
+                ac.f += print_esc;
+                break switch;
             }
-            goto _switch_end_139188883440720;
             default
             {
-                putchar(*ac.f);
             };
         };
-        label _switch_end_139188883440720:
     };
     free(direc);
     return MIN(argc, ac.end_arg + 1);
@@ -733,15 +553,15 @@ cdecl main(int argc, byte** argv) -> int
     byte* format;
     int args_used;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    posixly_correct = (getenv("POSIXLY_CORRECT") != ((void*)0));
+    setlocale;
+    atexit;
     if (argc == 2)
     {
         if (streq(argv[1], "--help"))
-            usage(0);
+            usage;
         if (streq(argv[1], "--version"))
         {
-            return 0;
+            version_etc;
         };
     };
     if (1 < argc & streq(argv[1], "--"))
@@ -752,7 +572,7 @@ cdecl main(int argc, byte** argv) -> int
     if (argc <= 1)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     format = argv[1];
     argc -= 2;

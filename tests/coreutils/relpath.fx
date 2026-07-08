@@ -20,7 +20,7 @@
 ///
 
 ///
- Written by PÃ¡draig Brady.
+ Written by Pádraig Brady.
 ///
 
 cdecl path_common_prefix(byte* path1, byte* path2) -> int
@@ -55,13 +55,14 @@ cdecl buffer_or_output(byte* str, byte** pbuf, ulong* plen) -> int
     }
     else
     {
+        fputs;
     };
 };
 
 cdecl relpath(byte* can_fname, byte* can_reldir, byte* buf, ulong len) -> int
 {
     bool;
-    int common_index = ?(can_reldir, can_fname);
+    int common_index = path_common_prefix(can_reldir, can_fname);
     byte* relto_suffix = can_reldir + common_index;
     byte* fname_suffix = can_fname + common_index;
     if (*relto_suffix == '/')
@@ -80,6 +81,6 @@ cdecl relpath(byte* can_fname, byte* can_reldir, byte* buf, ulong len) -> int
     else
     {
     };
-    if (?)
-        error(0, 0, "%s", gettext("generating relative path"));
+    if (buf_err)
+        error;
 };

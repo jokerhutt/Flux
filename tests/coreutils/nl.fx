@@ -33,7 +33,7 @@ macro AUTHORS
 byte[7] FORMAT_RIGHT_NOLZ = "%*jd%s";
 byte[8] FORMAT_RIGHT_LZ = "%0*jd%s";
 byte[8] FORMAT_LEFT = "%-*jd%s";
-extern byte DEFAULT_SECTION_DELIMITERS;
+byte DEFAULT_SECTION_DELIMITERS = "\\:";
 enum section
 {
     Header,
@@ -46,112 +46,89 @@ byte* body_type = "t";
 byte* header_type = "n";
 byte* footer_type = "n";
 extern byte* current_type;
+struct re_pattern_buffer;
 re_pattern_buffer body_regex = re_pattern_buffer;
 re_pattern_buffer header_regex = re_pattern_buffer;
 re_pattern_buffer footer_regex = re_pattern_buffer;
-byte[256] body_fastmap = (0 ? 0 ? 0) ? 1;
-byte[256] header_fastmap = (0 ? 0 ? 0) ? 1;
-byte[256] footer_fastmap = (0 ? 0 ? 0) ? 1;
+extern byte body_fastmap;
+extern byte header_fastmap;
+extern byte footer_fastmap;
 re_pattern_buffer* current_regex = re_pattern_buffer;
 byte* separator_str = "\t";
-byte* section_del = ?;
+byte* section_del = DEFAULT_SECTION_DELIMITERS;
 ulong section_del_len = size_t;
-byte* header_del = ((void*)0);
+extern byte* header_del;
 ulong header_del_len = size_t;
-byte* body_del = ((void*)0);
+extern byte* body_del;
 ulong body_del_len = size_t;
-byte* footer_del = ((void*)0);
+extern byte* footer_del;
 ulong footer_del_len = size_t;
 struct linebuffer;
 linebuffer line_buf = linebuffer;
-byte* print_no_line_fmt = ((void*)0);
-long starting_line_number = intmax_t;
-long page_incr = intmax_t;
+extern byte* print_no_line_fmt;
+int starting_line_number = 1;
+int page_incr = 1;
 extern int reset_numbers;
-long blank_join = intmax_t;
+int blank_join = 1;
 int lineno_width = 6;
 byte* lineno_format = FORMAT_RIGHT_NOLZ;
-long line_no = intmax_t;
+extern int line_no;
 extern int line_no_overflow;
 extern int have_read_stdin;
-option[14] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Write each FILE to standard output, with line numbers added.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("nl", gettext("\
-  -b, --body-numbering=STYLE      use STYLE for numbering body lines\n\
+        oputs_("nl", gettext("\
+  -b, --body-numbering=STYLE      use STYLE for numbering body lines\n\
 "));
-        oputs_("nl", gettext("\
-  -d, --section-delimiter=CC      use CC for logical page delimiters\n\
+        oputs_("nl", gettext("\
+  -d, --section-delimiter=CC      use CC for logical page delimiters\n\
 "));
-        oputs_("nl", gettext("\
-  -f, --footer-numbering=STYLE    use STYLE for numbering footer lines\n\
+        oputs_("nl", gettext("\
+  -f, --footer-numbering=STYLE    use STYLE for numbering footer lines\n\
 "));
-        oputs_("nl", gettext("\
-  -h, --header-numbering=STYLE    use STYLE for numbering header lines\n\
+        oputs_("nl", gettext("\
+  -h, --header-numbering=STYLE    use STYLE for numbering header lines\n\
 "));
-        oputs_("nl", gettext("\
-  -i, --line-increment=NUMBER     line number increment at each line\n\
+        oputs_("nl", gettext("\
+  -i, --line-increment=NUMBER     line number increment at each line\n\
 "));
-        oputs_("nl", gettext("\
-  -l, --join-blank-lines=NUMBER   group of NUMBER empty lines counted as one\n\
+        oputs_("nl", gettext("\
+  -l, --join-blank-lines=NUMBER   group of NUMBER empty lines counted as one\n\
 "));
-        oputs_("nl", gettext("\
-  -n, --number-format=FORMAT      insert line numbers according to FORMAT\n\
+        oputs_("nl", gettext("\
+  -n, --number-format=FORMAT      insert line numbers according to FORMAT\n\
 "));
-        oputs_("nl", gettext("\
-  -p, --no-renumber               do not reset line numbers for each section\n\
+        oputs_("nl", gettext("\
+  -p, --no-renumber               do not reset line numbers for each section\n\
 "));
-        oputs_("nl", gettext("\
-  -s, --number-separator=STRING   add STRING after (possible) line number\n\
+        oputs_("nl", gettext("\
+  -s, --number-separator=STRING   add STRING after (possible) line number\n\
 "));
-        oputs_("nl", gettext("\
-  -v, --starting-line-number=NUMBER  first line number for each section\n\
+        oputs_("nl", gettext("\
+  -v, --starting-line-number=NUMBER  first line number for each section\n\
 "));
-        oputs_("nl", gettext("\
-  -w, --number-width=NUMBER       use NUMBER columns for line numbers\n\
+        oputs_("nl", gettext("\
+  -w, --number-width=NUMBER       use NUMBER columns for line numbers\n\
 "));
         oputs_("nl", gettext("      --help\n         display this help and exit\n"));
         oputs_("nl", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Default options are: -bt -d'\\:' -fn -hn -i1 -l1 -n'rn' -s<TAB> -v1 -w6\n\
-\n\
-CC are two delimiter characters used to construct logical page delimiters;\n\
-a missing second character implies ':'.  As a GNU extension one can specify\n\
-more than two characters, and also specifying the empty string (-d '')\n\
-disables section matching.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-STYLE is one of:\n\
-\n\
-  a      number all lines\n\
-  t      number only nonempty lines\n\
-  n      number no lines\n\
-  pBRE   number only lines that contain a match for the basic regular\n\
-         expression, BRE\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-FORMAT is one of:\n\
-\n\
-  ln     left justified, no leading zeros\n\
-  rn     right justified, no leading zeros\n\
-  rz     right justified, leading zeros\n\
-\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("nl");
     };
     exit(status);
@@ -161,49 +138,37 @@ cdecl build_type_arg(byte** typep, re_pattern_buffer* regexp, byte* fastmap) -> 
 {
     byte* errmsg;
     bool;
-    switch (*optarg)
+    switch (* optarg)
     {
         case ('a')
         {
-            case ('t')
-            {
-                case ('n')
-                {
-                    *typep = optarg;
-                }
-            }
+            break switch;
         }
-        goto _switch_end_139188820090448;
         case ('p')
         {
-            *typep = optarg++;
+            regexp = 0;
+            regexp = fastmap;
+            errmsg = re_compile_pattern;
+            if (errmsg)
+                error;
+            break switch;
         }
-        regexp = ((void*)0);
-        regexp = 0;
-        regexp = fastmap;
-        regexp = ((void*)0);
-        errmsg = re_compile_pattern(optarg, strlen(optarg), regexp);
-        if (errmsg)
-            error(0, 0, "%s", (errmsg));
-        goto _switch_end_139188820090448;
         default
         {
         };
-        goto _switch_end_139188820090448;
     };
-    label _switch_end_139188820090448:
 };
 
 cdecl print_lineno() -> void
 {
-    if (?)
-        error(0, 0, gettext("line number overflow"));
+    if (line_no_overflow)
+        error;
     printf(lineno_format, lineno_width, line_no, separator_str);
 };
 
 cdecl reset_lineno() -> void
 {
-    if (?)
+    if (reset_numbers)
     {
         line_no = starting_line_number;
     };
@@ -235,7 +200,7 @@ cdecl proc_footer() -> void
 
 cdecl proc_text() -> void
 {
-    long blank_lines = 0;
+    int blank_lines = 0;
     switch (*current_type)
     {
         case ('a')
@@ -248,49 +213,45 @@ cdecl proc_text() -> void
                     blank_lines = 0;
                 }
                 else
-                    fputs(print_no_line_fmt, stdout);
+                    fputs;
             }
             else
                 print_lineno();
+            break switch;
         }
-        goto _switch_end_139188820084816;
         case ('t')
         {
             if (1 < line_buf)
                 print_lineno();
             else
-                fputs(print_no_line_fmt, stdout);
+                fputs;
+            break switch;
         }
-        goto _switch_end_139188820084816;
         case ('n')
         {
-            fputs(print_no_line_fmt, stdout);
+            fputs;
+            break switch;
         }
-        goto _switch_end_139188820084816;
         case ('p')
         {
-            switch (re_search(current_regex, line_buf, line_buf - 1, 0, line_buf - 1, ((void*)0)))
+            switch (re_search)
             {
                 case (-2)
                 {
-                    error(0, (?__errno_location()), gettext("error in regular expression search"));
+                    error;
                 }
                 case (-1)
                 {
-                    fputs(print_no_line_fmt, stdout);
+                    fputs;
+                    break switch;
                 }
-                goto _switch_end_139188820089808;
                 default
                 {
-                    print_lineno();
                 };
-                goto _switch_end_139188820089808;
             };
-            label _switch_end_139188820089808:
         }
     };
-    label _switch_end_139188820084816:
-    fwrite(line_buf, (sizeof ( char ) / 8), line_buf, stdout);
+    fwrite;
 };
 
 cdecl check_section() -> section
@@ -307,7 +268,7 @@ cdecl check_section() -> section
     return Text;
 };
 
-cdecl process_file(_IO_FILE* fp) -> void
+cdecl process_file(int* fp) -> void
 {
     while (readlinebuffer(@line_buf, fp))
     {
@@ -316,55 +277,53 @@ cdecl process_file(_IO_FILE* fp) -> void
             case (Header)
             {
                 proc_header();
+                break switch;
             }
-            goto _switch_end_139188820086096;
             case (Body)
             {
                 proc_body();
+                break switch;
             }
-            goto _switch_end_139188820086096;
             case (Footer)
             {
                 proc_footer();
+                break switch;
             }
-            goto _switch_end_139188820086096;
             case (Text)
             {
                 proc_text();
+                break switch;
             }
-            goto _switch_end_139188820086096;
         };
-        label _switch_end_139188820086096:
-        if (ferror(stdout))
+        if (ferror)
             write_error();
     };
 };
 
 cdecl nl_file(byte* file) -> int
 {
-    _IO_FILE* stream;
     if (streq(file, "-"))
     {
-        stream = stdin;
-        assume(stream);
+        assume;
     }
     else
     {
-        stream = fopen(file, "r");
-        if (stream == ((void*)0))
+        if (stream == NULL)
         {
+            error;
         };
     };
-    process_file(stream);
-    int err = (?__errno_location());
-    if (!ferror(stream))
+    fadvise;
+    process_file;
+    int err;
+    if (!ferror)
         err = 0;
     if (streq(file, "-"))
-        clearerr(stream);
-    elif (fclose(stream) != 0 & !err)
-        err = (?__errno_location());
+        clearerr;
+    else
     if (err)
     {
+        error(0, err, "%s", quotearg_n_style_colon);
     };
 };
 
@@ -374,120 +333,116 @@ cdecl main(int argc, byte** argv) -> int
     ulong len;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((c = getopt_long(argc, argv, "h:b:f:v:i:pl:s:w:n:d:", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('h')
             {
-                if (!?(@header_type, @header_regex, header_fastmap))
+                if (!build_type_arg(@header_type, @header_regex, header_fastmap))
                 {
-                    error(0, 0, gettext("invalid header numbering style: %s"), quote(optarg));
+                    error(0, 0, gettext("invalid header numbering style: %s"), quote);
                 };
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('b')
             {
-                if (!?(@body_type, @body_regex, body_fastmap))
+                if (!build_type_arg(@body_type, @body_regex, body_fastmap))
                 {
-                    error(0, 0, gettext("invalid body numbering style: %s"), quote(optarg));
+                    error(0, 0, gettext("invalid body numbering style: %s"), quote);
                 };
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('f')
             {
-                if (!?(@footer_type, @footer_regex, footer_fastmap))
+                if (!build_type_arg(@footer_type, @footer_regex, footer_fastmap))
                 {
-                    error(0, 0, gettext("invalid footer numbering style: %s"), quote(optarg));
+                    error(0, 0, gettext("invalid footer numbering style: %s"), quote);
                 };
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('v')
             {
-                starting_line_number = xdectoimax(optarg, (?0 ? 0), (0), "", gettext("invalid starting line number"), 0);
+                starting_line_number = xdectoimax;
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('i')
             {
-                page_incr = xdectoimax(optarg, (?0 ? 0), (0), "", gettext("invalid line number increment"), 0);
+                page_incr = xdectoimax;
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('p')
             {
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('l')
             {
+                blank_join = xnumtoimax;
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('s')
             {
-                separator_str = optarg;
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('w')
             {
+                lineno_width = xnumtoimax;
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('n')
             {
-                if (streq(optarg, "ln"))
+                if (streq)
                     lineno_format = FORMAT_LEFT;
-                elif (streq(optarg, "rn"))
+                elif (streq)
                     lineno_format = FORMAT_RIGHT_NOLZ;
                 else
-                    if (streq(optarg, "rz"))
+                    if (streq)
                         lineno_format = FORMAT_RIGHT_LZ;
                     else
                     {
-                        error(0, 0, gettext("invalid line numbering format: %s"), quote(optarg));
+                        error(0, 0, gettext("invalid line numbering format: %s"), quote);
                     };
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case ('d')
             {
-                len = strlen(optarg);
-            }
-            if (1 < (__ctype_get_mb_cur_max()))
-            {
-                byte* p = optarg;
-                byte* lim = p + len;
-                int n_chars = 0;
-                for (p < lim & n_chars < 2; ++n_chars; p += mcel_scan(p, lim))
-                {};
-                if (n_chars == 1)
-                    memcpy(mempcpy(section_del, optarg, len), ":", (sizeof ":" / 8));
+                len = strlen;
+                if (1 < MB_CUR_MAX)
+                {
+                    byte* p;
+                    byte* lim = p + len;
+                    int n_chars = 0;
+                    for (p < lim & n_chars < 2; ++n_chars; p += mcel_scan(p, lim))
+                    {};
+                    if (n_chars == 1)
+                        memcpy(mempcpy, ":", (sizeof ":" / 8));
+                    else
+                }
                 else
-                    section_del = optarg;
+                {
+                };
+                break switch;
             }
-            else
-            {
-                if (len == 1)
-                    *section_del = *optarg;
-                else
-                    section_del = optarg;
-            };
-            goto _switch_end_139188883293904;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188883293904;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188883293904;
             default
             {
             };
-            goto _switch_end_139188883293904;
         };
-        label _switch_end_139188883293904:
     };
-    if (?)
-        usage(0);
+    if (! ok)
+        usage;
     section_del_len = len = strlen(section_del);
     header_del_len = len * 3;
     header_del = xmalloc(header_del_len + 1);
@@ -504,6 +459,6 @@ cdecl main(int argc, byte** argv) -> int
     line_no = starting_line_number;
     current_type = body_type;
     current_regex = @body_regex;
-    if (? & fclose(stdin) == (?0))
-        error(0, (?__errno_location()), "-");
+    if (have_read_stdin && fclose ( stdin ) == EOF)
+        error;
 };

@@ -32,35 +32,38 @@ uint RESERVOIR_MIN_INPUT = 8388608;
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("shuf", gettext("\
-  -e, --echo                treat each ARG as an input line\n\
+        oputs_("shuf", gettext("\
+  -e, --echo                treat each ARG as an input line\n\
 "));
-        oputs_("shuf", gettext("\
-  -i, --input-range=LO-HI   treat each number LO through HI as an input line\n\
+        oputs_("shuf", gettext("\
+  -i, --input-range=LO-HI   treat each number LO through HI as an input line\n\
 "));
-        oputs_("shuf", gettext("\
-  -n, --head-count=COUNT    output at most COUNT lines\n\
+        oputs_("shuf", gettext("\
+  -n, --head-count=COUNT    output at most COUNT lines\n\
 "));
-        oputs_("shuf", gettext("\
-  -o, --output=FILE         write result to FILE instead of standard output\n\
+        oputs_("shuf", gettext("\
+  -o, --output=FILE         write result to FILE instead of standard output\n\
 "));
-        oputs_("shuf", gettext("\
-      --random-source=FILE  get random bytes from FILE\n\
+        oputs_("shuf", gettext("\
+      --random-source=FILE  get random bytes from FILE\n\
 "));
-        oputs_("shuf", gettext("\
-  -r, --repeat              output lines can be repeated\n\
+        oputs_("shuf", gettext("\
+  -r, --repeat              output lines can be repeated\n\
 "));
-        oputs_("shuf", gettext("\
-  -z, --zero-terminated     line delimiter is NUL, not newline\n\
+        oputs_("shuf", gettext("\
+  -z, --zero-terminated     line delimiter is NUL, not newline\n\
 "));
         oputs_("shuf", gettext("      --help\n         display this help and exit\n"));
         oputs_("shuf", gettext("      --version\n         output version information and exit\n"));
@@ -69,9 +72,10 @@ cdecl usage(int status) -> void
     exit(status);
 };
 
-uint RANDOM_SOURCE_OPTION = 128;
+uint RANDOM_SOURCE_OPTION = 0;
 
-option[10] long_opts = option;
+struct option;
+extern int long_opts;
 cdecl input_from_argv(byte** operand, int n_operands, byte eolbyte) -> void
 {
     byte* p;
@@ -96,42 +100,38 @@ cdecl next_line(byte* line, byte eolbyte) -> byte*
     return p + 1;
 };
 
-cdecl input_size() -> long
+cdecl input_size() -> int
 {
-    long file_size;
     stat stat_buf;
-    if (fstat(0, @stat_buf) != 0)
-        return TYPE_MAXIMUM(?);
-    if (?(@stat_buf))
-        file_size = stat_buf.st_size;
+    if (fstat != 0)
+        return TYPE_MAXIMUM;
+    if (usable_st_size(@stat_buf))
     else
-        return TYPE_MAXIMUM(?);
-    long input_offset = lseek(0, 0, 0);
+        return TYPE_MAXIMUM;
     if (input_offset < 0)
-        return TYPE_MAXIMUM(?);
-    file_size -= input_offset;
-    return file_size;
+        return TYPE_MAXIMUM;
 };
 
 cdecl read_input_reservoir_sampling(int* in, byte eolbyte, int k, randint_source* s, linebuffer** out_rsrv) -> int
 {
-    linebuffer* line = ((void*)0);
-    linebuffer* rsrv = ((void*)0);
-    if (line != ((void*)0))
+    linebuffer* line;
+    linebuffer* rsrv;
+    if (line != NULL)
     {
         linebuffer dummy;
-        initbuffer(@?);
+        initbuffer(@dummy);
         do
         {
         }
-        while (?);
-        if (?)
-            error(0, 0, gettext("too many input lines"));
-        freebuffer(@?);
+        while (readlinebuffer_delim ( line , in , eolbyte ) != NULL && n_lines ++);
+        if (! n_lines)
+            error;
+        freebuffer(@dummy);
     };
-    if (ferror(?))
-        error(0, (?__errno_location()), gettext("read error"));
+    if (ferror(in))
+        error;
     *out_rsrv = rsrv;
+    return MIN;
 };
 
 cdecl write_permuted_output_reservoir(ulong n_lines, linebuffer* lines, ulong* permutation) -> int
@@ -139,7 +139,7 @@ cdecl write_permuted_output_reservoir(ulong n_lines, linebuffer* lines, ulong* p
     for (ulong i = 0; i < n_lines; i++)
     {
         linebuffer* p;
-        if (?)
+        if (fwrite != p)
             return -1;
     };
     return 0;
@@ -148,13 +148,13 @@ cdecl write_permuted_output_reservoir(ulong n_lines, linebuffer* lines, ulong* p
 cdecl read_input(int* in, byte eolbyte, byte*** pline) -> ulong
 {
     byte* p;
-    byte* buf = ((void*)0);
+    byte* buf;
     ulong used;
     byte* lim;
     byte** line;
     ulong n_lines;
-    if (!(buf = fread_file(?, 0, @used)))
-        error(0, (?__errno_location()), gettext("read error"));
+    if (!(buf = fread_file(in, 0, @used)))
+        error;
     if (used & buf[used - 1] != eolbyte)
         buf[used++] = eolbyte;
     lim = buf + used;
@@ -174,7 +174,7 @@ cdecl write_permuted_lines(ulong n_lines, byte** line, ulong* permutation) -> in
     {
         byte** p = line + permutation[i];
         ulong len = p[1] - p[0];
-        if (?)
+        if (fwrite != len)
             return -1;
     };
     return 0;
@@ -182,8 +182,8 @@ cdecl write_permuted_lines(ulong n_lines, byte** line, ulong* permutation) -> in
 
 cdecl print_number(ulong number, byte eolbyte) -> int
 {
-    byte buf;
-    byte* p;
+    void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = INT_BUFSIZE_BOUND;
+    byte* p = buf + INT_STRLEN_BOUND;
     *p = eolbyte;
     do
         *--p = '0' + number % 10;
@@ -195,7 +195,7 @@ cdecl write_permuted_numbers(ulong n_lines, ulong lo_input, ulong* permutation, 
     for (ulong i = 0; i < n_lines; i++)
     {
         ulong n = lo_input + permutation[i];
-        if (!?(n, eolbyte))
+        if (!print_number(n, eolbyte))
             return -1;
     };
     return 0;
@@ -203,11 +203,11 @@ cdecl write_permuted_numbers(ulong n_lines, ulong lo_input, ulong* permutation, 
 
 cdecl write_random_numbers(randint_source* s, ulong count, ulong lo_input, ulong hi_input, byte eolbyte) -> int
 {
-    int range;
+    int range = hi_input - lo_input + 1;
     for (ulong i = 0; i < count; i++)
     {
-        ulong j = lo_input + randint_choose(s, ?);
-        if (!?(j, eolbyte))
+        ulong j = lo_input + randint_choose(s, range);
+        if (!print_number(j, eolbyte))
             return -1;
     };
     return 0;
@@ -217,10 +217,10 @@ cdecl write_random_lines(randint_source* s, ulong count, byte** lines, ulong n_l
 {
     for (ulong i = 0; i < count; i++)
     {
-        int j;
-        byte** p = lines + ?;
+        int j = randint_choose(s, n_lines);
+        byte** p = lines + j;
         ulong len = p[1] - p[0];
-        if (?)
+        if (fwrite != len)
             return -1;
     };
     return 0;
@@ -230,165 +230,100 @@ cdecl main(int argc, byte** argv) -> int
 {
     bool;
     bool;
-    ulong lo_input = (0);
+    ulong lo_input;
     ulong hi_input = 0;
-    byte* outfile = ((void*)0);
-    byte* random_source = ((void*)0);
+    byte* outfile;
+    byte* random_source;
     byte eolbyte = '\n';
-    byte** input_lines = ((void*)0);
+    byte** input_lines;
     bool;
     bool;
     int optc;
     int n_operands;
     byte** operand;
     ulong n_lines;
-    byte** line = ((void*)0);
-    linebuffer* reservoir = ((void*)0);
+    byte** line;
+    linebuffer* reservoir;
     randint_source* randint_source;
-    ulong* permutation = ((void*)0);
+    ulong* permutation;
     int i;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "ei:n:o:rz", long_opts, ((void*)0))) != -1)
-        switch (optc)
-        {
-            case ('e')
-            {
-            }
-            goto _switch_end_139188837219408;
-            case ('i')
-            {
-                {
-                    if (?)
-                        error(0, 0, gettext("multiple -i options specified"));
-                    ulong u;
-                    byte* lo_end;
-                    if (?)
-                    {
-                        lo_input = u;
-                        if (lo_input != u)
-                        elif (*lo_end != '-')
-                        else
-                        {
-                            if (?)
-                            {
-                                hi_input = u;
-                            };
-                        };
-                    };
-                    n_lines = hi_input - lo_input + 1;
-                };
-            }
-            goto _switch_end_139188837219408;
-            case ('n')
-            {
-                {
-                    ulong argval;
-                    if (?)
-                    elif (?)
-                        error(0, 0, gettext("invalid line count: %s"), quote(optarg));
-                };
-            }
-            goto _switch_end_139188837219408;
-            case ('o')
-            {
-                if (outfile & !streq(outfile, optarg))
-                    error(0, 0, gettext("multiple output files specified"));
-            }
-            outfile = optarg;
-            goto _switch_end_139188837219408;
-            case (RANDOM_SOURCE_OPTION)
-            {
-                if (random_source & !streq(random_source, optarg))
-                    error(0, 0, gettext("multiple random sources specified"));
-            }
-            random_source = optarg;
-            goto _switch_end_139188837219408;
-            case ('r')
-            {
-            }
-            goto _switch_end_139188837219408;
-            case ('z')
-            {
-                eolbyte = '\0';
-            }
-            goto _switch_end_139188837219408;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188837219408;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188837219408;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188837219408:
-    n_operands = argc - optind;
-    operand = argv + optind;
-    if (?)
+    setlocale;
+    atexit;
+    if (echo && input_range)
     {
         error(0, 0, gettext("cannot combine -e and -i options"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (input_range ? 0 < n_operands : ! echo && 1 < n_operands)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    if (?)
+    if (head_lines == 0)
     {
         n_lines = 0;
-        line = ((void*)0);
     }
-    elif (?)
+    elif (echo)
     {
         input_from_argv(operand, n_operands, eolbyte);
         n_lines = n_operands;
         line = operand;
     };
     else
-        if (?)
+        if (input_range)
         {
-            line = ((void*)0);
         }
         else
         {
-            if (?)
+            if (n_operands == 1 & !(streq(operand[0], "-") | freopen))
+                error;
+            fadvise;
+            if (repeat || head_lines == MIN ( IDX_MAX , SIZE_MAX ) || input_size ( ) <= RESERVOIR_MIN_INPUT)
             {
+                n_lines = read_input;
                 line = input_lines;
             }
             else
             {
-                n_lines = (0);
             };
         };
-    if (?)
+    randint_source = randint_all_new;
+    if (!randint_source)
+        error;
+    if (use_reservoir_sampling)
     {
+        n_lines = read_input_reservoir_sampling;
     };
-    if (?)
-        error(0, (?__errno_location()), gettext("read error"));
-    if (?)
+    if (! ( head_lines == 0 || echo || input_range || fclose ( stdin ) == 0 ))
+        error;
+    if (! repeat)
+        permutation = randperm_new;
+    if (outfile & !freopen)
+        error;
+    if (repeat)
     {
-        if (?)
+        if (head_lines == 0)
             i = 0;
         else
         {
             if (n_lines == 0)
-                error(0, 0, gettext("no lines to repeat"));
+                error;
+            if (input_range)
+                i = write_random_numbers;
+            else
+                i = write_random_lines;
         };
     }
     else
     {
-        if (?)
+        if (use_reservoir_sampling)
             i = write_permuted_output_reservoir(n_lines, reservoir, permutation);
+        elif (input_range)
+            i = write_permuted_numbers;
         else
+            i = write_permuted_lines;
     };
     if (i != 0)
         write_error();
-    return 0;
 };

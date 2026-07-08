@@ -33,19 +33,19 @@ uint POSIX_NOHUP_FAILURE = 127;
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Run COMMAND, ignoring hangup signals.\n\
-\n\
-"), stdout);
+        printf;
+        fputs;
         oputs_("nohup", gettext("      --help\n         display this help and exit\n"));
         oputs_("nohup", gettext("      --version\n         output version information and exit\n"));
+        printf;
         printf(gettext("\n"), "nohup");
         emit_exec_status("nohup");
         emit_ancillary_info("nohup");
@@ -56,10 +56,12 @@ Run COMMAND, ignoring hangup signals.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     int exit_internal_failure = (getenv("POSIXLY_CORRECT") ? POSIX_NOHUP_FAILURE : EXIT_CANCELED);
     initialize_exit_failure(exit_internal_failure);
-    if (?)
+    atexit;
+    parse_gnu_standard_options_only;
+    if (argc <= optind)
     {
         error(0, 0, gettext("missing operand"));
         usage(exit_internal_failure);
@@ -68,53 +70,59 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     bool;
     bool;
-    if (?)
+    if (ignoring_input)
     {
-        if (fd_reopen(0, "/dev/null", 0, 0) < 0)
-            error(exit_internal_failure, (?__errno_location()), gettext("failed to render standard input unusable"));
-        if (?)
+        if (fd_reopen < 0)
+            error;
+        if (! redirecting_stdout && ! redirecting_stderr)
             error(0, 0, gettext("ignoring input"));
     };
-    int out_fd = 0;
-    if (?)
+    int out_fd;
+    if (redirecting_stdout || ( redirecting_stderr && stdout_is_closed ))
     {
-        byte* in_home = ((void*)0);
+        byte* in_home;
         byte* file = "nohup.out";
-        int flags = 0 ? 0 ? 0;
-        uint mode = 0 ? 0;
-        uint umask_value = umask(0);
+        int flags;
         if (out_fd < 0)
         {
-            int saved_errno = (?__errno_location());
+            int saved_errno;
             byte* home = getenv("HOME");
             if (home)
             {
-                in_home = file_name_concat(home, file, ((void*)0));
+                in_home = file_name_concat;
             };
             if (out_fd < 0)
             {
-                int saved_errno2 = (?__errno_location());
+                int saved_errno2;
+                error(0, saved_errno, gettext("failed to open %s"), quotearg_style);
+                if (in_home)
+                    error(0, saved_errno2, gettext("failed to open %s"), quotearg_style);
                 return exit_internal_failure;
             };
             file = in_home;
         };
-        umask(umask_value);
+        umask;
+        error(0, 0, gettext, quotearg_style);
         free(in_home);
     };
-    int saved_stderr_fd = 0;
-    if (?)
+    int saved_stderr_fd;
+    if (redirecting_stderr)
     {
-        if (dup2(out_fd, 0) < 0)
-            error(exit_internal_failure, (?__errno_location()), gettext("failed to redirect standard error"));
-        if (?)
+        saved_stderr_fd = fcntl;
+        if (! redirecting_stdout)
+            error(0, 0, gettext);
+        if (dup2 < 0)
+            error;
+        if (stdout_is_closed)
             close(out_fd);
     };
-    if (ferror(stderr))
+    if (ferror)
         return exit_internal_failure;
-    signal(0, ((def{}*(int) -> void)0));
     byte** cmd;
     execvp(*cmd, cmd);
-    int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-    int saved_errno = (?__errno_location());
+    int exit_status;
+    int saved_errno;
+    if (dup2 ( saved_stderr_fd , STDERR_FILENO ) == STDERR_FILENO)
+        error(0, saved_errno, gettext("failed to run command %s"), quotearg_style);
     return exit_status;
 };

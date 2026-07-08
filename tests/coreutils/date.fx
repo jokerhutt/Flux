@@ -41,273 +41,141 @@ enum Time_spec
     TIME_SPEC_MINUTES
 };
 
-byte*[6] time_spec_string = {"hours", "minutes", "date", "seconds", "ns", ((void*)0)};
+extern byte** time_spec_string;
 Time_spec[5] time_spec = Time_spec;
 cdecl ARGMATCH_VERIFY() -> int;
 byte[25] rfc_email_format = "%a, %d %b %Y %H:%M:%S %z";
-uint DEBUG_DATE_PARSING_OPTION = 128;
-uint RESOLUTION_OPTION = 129;
-uint RFC_3339_OPTION = 130;
+uint DEBUG_DATE_PARSING_OPTION = 0;
+uint RESOLUTION_OPTION = 1;
+uint RFC_3339_OPTION = 2;
 
 byte[14] short_options = "d:f:I::r:Rs:u";
-option[17] long_options = option;
+struct option;
+extern int long_options;
 extern uint parse_datetime_flags;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Display date and time in the given FORMAT.\n\
-With -s, or with MMDDhhmm[[CC]YY][.ss], set the date and time first.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("date", gettext("\
-  -d, --date=STRING\n\
-         display time described by STRING, not 'now'\n\
+        oputs_("date", gettext("\
+  -d, --date=STRING\n\
+         display time described by STRING, not 'now'\n\
 "));
-        oputs_("date", gettext("\
-      --debug\n\
-         annotate the parsed date,\n\
-         and warn about questionable usage to standard error\n\
+        oputs_("date", gettext("\
+      --debug\n\
+         annotate the parsed date,\n\
+         and warn about questionable usage to standard error\n\
 "));
-        oputs_("date", gettext("\
-  -f, --file=DATEFILE\n\
-         like --date; once for each line of DATEFILE;\n\
-         if DATEFILE is -, read names from standard input\n\
+        oputs_("date", gettext("\
+  -f, --file=DATEFILE\n\
+         like --date; once for each line of DATEFILE;\n\
+         if DATEFILE is -, read names from standard input\n\
 "));
-        oputs_("date", gettext("\
-  -I[FMT], --iso-8601[=FMT]\n\
-         output date/time in ISO 8601 format.\n\
-         FMT='date' (default), 'hours', 'minutes', 'seconds', or 'ns'\n\
-         for date and time to the indicated precision.\n\
-         Example: 2006-08-14T02:34:56-06:00\n\
+        oputs_("date", gettext("\
+  -I[FMT], --iso-8601[=FMT]\n\
+         output date/time in ISO 8601 format.\n\
+         FMT='date' (default), 'hours', 'minutes', 'seconds', or 'ns'\n\
+         for date and time to the indicated precision.\n\
+         Example: 2006-08-14T02:34:56-06:00\n\
 "));
-        oputs_("date", gettext("\
-      --resolution\n\
-         output the available resolution of timestamps.\n\
-         Example: 0.000000001\n\
+        oputs_("date", gettext("\
+      --resolution\n\
+         output the available resolution of timestamps.\n\
+         Example: 0.000000001\n\
 "));
-        oputs_("date", gettext("\
-  -R, --rfc-email\n\
-         output date and time in RFC 5322 format.\n\
-         Example: Mon, 14 Aug 2006 02:34:56 +0000\n\
+        oputs_("date", gettext("\
+  -R, --rfc-email\n\
+         output date and time in RFC 5322 format.\n\
+         Example: Mon, 14 Aug 2006 02:34:56 +0000\n\
 "));
-        oputs_("date", gettext("\
-      --rfc-3339=FMT\n\
-         output date/time in RFC 3339 format.\n\
-         FMT='date', 'seconds', or 'ns'\n\
-         for date and time to the indicated precision.\n\
-         Example: 2006-08-14 02:34:56-06:00\n\
+        oputs_("date", gettext("\
+      --rfc-3339=FMT\n\
+         output date/time in RFC 3339 format.\n\
+         FMT='date', 'seconds', or 'ns'\n\
+         for date and time to the indicated precision.\n\
+         Example: 2006-08-14 02:34:56-06:00\n\
 "));
-        oputs_("date", gettext("\
-  -r, --reference=FILE\n\
-         display the last modification time of FILE\n\
+        oputs_("date", gettext("\
+  -r, --reference=FILE\n\
+         display the last modification time of FILE\n\
 "));
-        oputs_("date", gettext("\
-  -s, --set=STRING\n\
-         set time described by STRING\n\
+        oputs_("date", gettext("\
+  -s, --set=STRING\n\
+         set time described by STRING\n\
 "));
-        oputs_("date", gettext("\
-  -u, --utc, --universal\n\
-         print or set Coordinated Universal Time (UTC)\n\
+        oputs_("date", gettext("\
+  -u, --utc, --universal\n\
+         print or set Coordinated Universal Time (UTC)\n\
 "));
         oputs_("date", gettext("      --help\n         display this help and exit\n"));
         oputs_("date", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-All options that specify the date to display are mutually exclusive.\n\
-I.e.: --date, --file, --reference, --resolution.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-FORMAT controls the output.  Interpreted sequences are:\n\
-\n\
-"), stdout);
-        fputs(gettext("\
-FORMAT  Example    Description\n\
-\n\
-"), stdout);
-        fputs(gettext("\
-  %%    %           a literal %\n\
-"), stdout);
-        fputs(gettext("\
-  %n    \\n          a newline\n\
-"), stdout);
-        fputs(gettext("\
-  %t    \\t          a tab\n\
-"), stdout);
-        fputs("\n", stdout);
-        fputs(gettext("\
-  %C    20          century; like %Y, except omit last two digits\n\
-"), stdout);
-        fputs(gettext("\
-  %y    99          year (last two digits; 00..99)\n\
-"), stdout);
-        fputs(gettext("\
-  %Y    1999        year\n\
-"), stdout);
-        fputs(gettext("\
-  %g    99          year of ISO week number (last 2 digits; 00-99); see %G\n\
-"), stdout);
-        fputs(gettext("\
-  %G    1999        year of ISO week number; normally useful only with %V\n\
-"), stdout);
-        fputs("\n", stdout);
-        fputs(gettext("\
-  %a    Sun         locale's abbreviated weekday name\n\
-"), stdout);
-        fputs(gettext("\
-  %A    Sunday      locale's full weekday name\n\
-"), stdout);
-        fputs(gettext("\
-  %b    Mar         locale's abbreviated month name\n\
-"), stdout);
-        fputs(gettext("\
-  %h    Mar         same as %b\n\
-"), stdout);
-        fputs(gettext("\
-  %B    March       locale's full month name\n\
-"), stdout);
-        fputs(gettext("\
-  %m    12          month (01..12)\n\
-"), stdout);
-        fputs(gettext("\
-  %d    31          day of month (01..31)\n\
-"), stdout);
-        fputs(gettext("\
-  %e     1          day of month, space padded; same as %_d\n\
-"), stdout);
-        fputs(gettext("\
-  %D    12/31/99    date (ambiguous); same as %m/%d/%y\n\
-"), stdout);
-        fputs(gettext("\
-  %F    1999-12-31  full date; like %+4Y-%m-%d\n\
-"), stdout);
-        fputs(gettext("\
-  %x    12/31/99    locale's date (can be ambiguous)\n\
-"), stdout);
-        fputs(gettext("\
-  %c    ...         locale's date and time (e.g., Thu Mar  3 23:05 2005)\n\
-"), stdout);
-        fputs("\n", stdout);
-        fputs(gettext("\
-  %H    23          hour (00..23)\n\
-"), stdout);
-        fputs(gettext("\
-  %I    01          hour (01..12)\n\
-"), stdout);
-        fputs(gettext("\
-  %k     8          hour, space padded ( 0..23); same as %_H\n\
-"), stdout);
-        fputs(gettext("\
-  %l     9          hour, space padded ( 1..12); same as %_I\n\
-"), stdout);
-        fputs(gettext("\
-  %M    59          minute (00..59)\n\
-"), stdout);
-        fputs(gettext("\
-  %S    60          second (00..60)\n\
-"), stdout);
-        fputs(gettext("\
-  %N    123456789   nanoseconds (000000000..999999999)\n\
-"), stdout);
-        fputs(gettext("\
-  %s    1970010100  seconds since the Epoch (1970-01-01 00:00 UTC)\n\
-"), stdout);
-        fputs(gettext("\
-  %p    PM          locale's equivalent of AM or PM; blank if not known\n\
-"), stdout);
-        fputs(gettext("\
-  %P    am          like %p, but lower case\n\
-"), stdout);
-        fputs(gettext("\
-  %r    1:11:04 PM  locale's 12-hour clock time\n\
-"), stdout);
-        fputs(gettext("\
-  %R    23:59       24-hour hour and minute; same as %H:%M\n\
-"), stdout);
-        fputs(gettext("\
-  %T    23:59:59    time; same as %H:%M:%S\n\
-"), stdout);
-        fputs(gettext("\
-  %X    23:59:59    locale's time representation\n\
-"), stdout);
-        fputs("\n", stdout);
-        fputs(gettext("\
-  %j    365         day of year (001..366)\n\
-"), stdout);
-        fputs(gettext("\
-  %q    4           quarter of year (1..4)\n\
-"), stdout);
-        fputs(gettext("\
-  %u    7           day of week (1..7); 1 is Monday\n\
-"), stdout);
-        fputs(gettext("\
-  %w    6           day of week (0..6); 0 is Sunday\n\
-"), stdout);
-        fputs(gettext("\
-  %U    52          week of year; Sunday as first day of week (00..53)\n\
-"), stdout);
-        fputs(gettext("\
-  %V    52          ISO week number; Monday as first day of week (01..53)\n\
-"), stdout);
-        fputs(gettext("\
-  %W    52          week of year; Monday as first day of week (00..53)\n\
-"), stdout);
-        fputs("\n", stdout);
-        fputs(gettext("\
-  %z     +0400      +hhmm numeric time zone\n\
-"), stdout);
-        fputs(gettext("\
-  %:z    +04:00     +hh:mm numeric time zone\n\
-"), stdout);
-        fputs(gettext("\
-  %::z   +04:00:00  +hh:mm:ss numeric time zone\n\
-"), stdout);
-        fputs(gettext("\
-  %:::z  +04        numeric time zone to necessary precision; with :\n\
-"), stdout);
-        fputs(gettext("\
-  %Z     EDT        alphabetic time zone abbreviation\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-By default, date pads numeric fields with zeroes.\n\
-"), stdout);
-        fputs(gettext("\
-The following optional flags may follow '%':\n\
-\n\
-  -  (hyphen) do not pad the field\n\
-  _  (underscore) pad with spaces\n\
-  0  (zero) pad with zeros\n\
-  +  pad with zeros, and put '+' before future years with >4 digits\n\
-  ^  use upper case if possible\n\
-  #  use opposite case if possible\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-After any flags comes an optional field width, as a decimal number;\n\
-then an optional modifier, which is either\n\
-E to use the locale's alternate representations if available, or\n\
-O to use the locale's alternate numeric symbols if available.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Examples:\n\
-Convert seconds since the Epoch (1970-01-01 UTC) to a date\n\
-  $ date --date='@2147483647'\n\
-\n\
-Show the time on the west coast of the US (use tzselect(1) to find TZ)\n\
-  $ TZ='America/Los_Angeles' date\n\
-\n\
-Show the local time for 9AM next Friday on the west coast of the US\n\
-  $ date --date='TZ=\"America/Los_Angeles\" 09:00 next Fri'\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("date");
     };
     exit(status);
@@ -323,7 +191,7 @@ cdecl res_width(long res) -> int
 
 cdecl adjust_resolution(byte* format) -> byte*
 {
-    byte* copy = ((void*)0);
+    byte* copy;
     for (byte* f = format; *f; f++)
     {};
     return copy;
@@ -332,7 +200,7 @@ cdecl adjust_resolution(byte* format) -> byte*
 cdecl set_LC_TIME(byte* locale) -> byte*
 {
     byte* all = getenv("LC_ALL");
-    if (all != ((void*)0) & *all != '\0')
+    if (all != NULL && * all != '\0')
     {
         xsetenv("LC_CTYPE", all, 1);
         xsetenv("LC_TIME", all, 1);
@@ -341,21 +209,21 @@ cdecl set_LC_TIME(byte* locale) -> byte*
         unsetenv("LC_ALL");
     };
     byte* value = getenv("LC_TIME");
-    byte* ret = (value == ((void*)0) | *value == '\0' ? ((void*)0) : xstrdup(value));
-    if (locale != ((void*)0))
+    byte* ret;
+    if (locale != NULL)
         xsetenv("LC_TIME", locale, 1);
     else
         unsetenv("LC_TIME");
-    setlocale(0, "");
+    setlocale;
     return ret;
 };
 
 cdecl show_date_helper(byte* format, int use_c_locale, timespec when, int tz) -> int
 {
-    if (?)
+    if (parse_datetime_flags & PARSE_DATETIME_DEBUG)
         error(0, 0, gettext("output format: %s"), quote(format));
     bool;
-    if (?)
+    if (use_c_locale)
     {
         byte* old_locale_category = set_LC_TIME("C");
         byte* new_locale_category = set_LC_TIME(old_locale_category);
@@ -368,172 +236,98 @@ cdecl show_date_helper(byte* format, int use_c_locale, timespec when, int tz) ->
 
 cdecl batch_convert(byte* input_filename, byte* format, int format_in_c_locale, int tz, byte* tzstring) -> int
 {
-    _IO_FILE* in_stream;
     if (streq(input_filename, "-"))
     {
         input_filename = gettext("standard input");
-        in_stream = stdin;
     }
     else
     {
-        in_stream = fopen(input_filename, "r");
+        if (in_stream == NULL)
+            error;
     };
-    byte* line = ((void*)0);
+    byte* line;
     ulong buflen = 0;
     bool;
-    while (?)
+    while (true)
     {
-        long line_length = getline(@line, @buflen, in_stream);
         if (line_length < 0)
         {
+            if (ferror)
+                error;
             break;
         };
         timespec when;
-        if (!parse_datetime2(@when, line, ((void*)0), parse_datetime_flags, ?, tzstring))
+        if (!parse_datetime2)
         {
-            if (line[line_length - 1] == '\n')
-                line[line_length - 1] = '\0';
             error(0, 0, gettext("invalid date %s"), quote(line));
         }
         else
         {
         };
-        if (ferror(stdout))
+        if (ferror)
             write_error();
     };
+    if (fclose ( in_stream ) == EOF)
+        error;
     free(line);
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* datestr = ((void*)0);
-    byte* set_datestr = ((void*)0);
+    byte* datestr;
+    byte* set_datestr;
     bool;
-    byte* format = ((void*)0);
-    bool;
-    bool;
-    byte* batch_file = ((void*)0);
-    byte* reference = ((void*)0);
+    byte* format;
     bool;
     bool;
-    byte* tzstring = ((void*)0);
+    byte* batch_file;
+    byte* reference;
+    bool;
+    bool;
+    byte* tzstring;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, short_options, long_options, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('d')
-            {
-            }
-            datestr = optarg;
-            goto _switch_end_139188887107408;
-            case (DEBUG_DATE_PARSING_OPTION)
-            {
-            }
-            goto _switch_end_139188887107408;
-            case ('f')
-            {
-                batch_file = optarg;
-            }
-            goto _switch_end_139188887107408;
-            case (RESOLUTION_OPTION)
-            {
-            }
-            goto _switch_end_139188887107408;
-            case (RFC_3339_OPTION)
-            {
-                {
-                    byte[32][3] rfc_3339_format = 32;
-                    Time_spec i = XARGMATCH("--rfc-3339", optarg, time_spec_string + 2, time_spec + 2);
-                    format = rfc_3339_format[i];
-                    goto _switch_end_139188887107408;
-                };
-            }
-            case ('I')
-            {
-                {
-                    byte[32][5] iso_8601_format = 32;
-                    Time_spec i = (optarg ? XARGMATCH("--iso-8601", optarg, time_spec_string, time_spec) : TIME_SPEC_DATE);
-                    format = iso_8601_format[i];
-                    goto _switch_end_139188887107408;
-                };
-            }
-            case ('r')
-            {
-                reference = optarg;
-            }
-            goto _switch_end_139188887107408;
-            case ('R')
-            {
-                format = rfc_email_format;
-            }
-            goto _switch_end_139188887107408;
-            case ('s')
-            {
-            }
-            set_datestr = optarg;
-            goto _switch_end_139188887107408;
-            case ('u')
-            {
-                tzstring = "UTC0";
-            }
-            goto _switch_end_139188887107408;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188887107408;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188887107408;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188887107408:
     };
     int option_specified_date;
     if (option_specified_date > 1)
     {
         error(0, 0, gettext("the options to specify dates for printing are mutually exclusive"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (set_date && option_specified_date)
     {
         error(0, 0, gettext("the options to print and set the time may not be used together"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (discarded_datestr && ( parse_datetime_flags & PARSE_DATETIME_DEBUG ))
         error(0, 0, gettext("only using last of multiple -d options"));
-    if (?)
+    if (discarded_set_datestr && ( parse_datetime_flags & PARSE_DATETIME_DEBUG ))
         error(0, 0, gettext("only using last of multiple -s options"));
     if (optind < argc)
     {
         if (optind + 1 < argc)
         {
-            error(0, 0, gettext("extra operand %s"), quote(argv[optind + 1]));
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quote);
+            usage;
         };
-        if (argv[optind][0] == '+')
+        if (argv [ optind ] [ 0 ] == '+')
         {
             if (format)
-                error(0, 0, gettext("multiple output formats specified"));
-            format = argv[optind++] + 1;
+                error;
         }
-        elif (?)
+        elif (set_date || option_specified_date)
         {
-            error(0, 0, gettext("the argument %s lacks a leading '+';\n"), quote(argv[optind]));
-            usage(0);
+            error(0, 0, gettext("the argument %s lacks a leading '+';\n"), quote);
+            usage;
         };
     };
     if (!format)
     {
-        if (?)
+        if (get_resolution)
             format = "%s.%N";
         else
         {
@@ -547,17 +341,16 @@ cdecl main(int argc, byte** argv) -> int
     if (!tzstring)
         tzstring = getenv("TZ");
     bool;
-    if (batch_file != ((void*)0))
+    if (batch_file != NULL)
     else
     {
         bool;
         timespec when;
-        if (?)
+        if (! option_specified_date && ! set_date)
         {
             if (optind < argc)
             {
-                datestr = argv[optind];
-                when.tv_nsec = 0;
+                when. = 0;
             }
             else
             {
@@ -566,12 +359,14 @@ cdecl main(int argc, byte** argv) -> int
         }
         else
         {
-            if (reference != ((void*)0))
+            if (reference != NULL)
             {
                 stat refstats;
-                when;
+                if (stat(reference, @refstats) != 0)
+                    error;
+                when = get_stat_mtime(@refstats);
             }
-            elif (?)
+            elif (get_resolution)
             {
                 long res = gettime_res();
             };
@@ -581,13 +376,13 @@ cdecl main(int argc, byte** argv) -> int
                     datestr = set_datestr;
             };
         };
-        if (?)
-            error(0, 0, gettext("invalid date %s"), quote(datestr));
-        if (?)
+        if (! valid_date)
+            error;
+        if (set_date)
         {
             if (settime(@when) != 0)
             {
-                error(0, (?__errno_location()), gettext("cannot set date"));
+                error;
             };
         };
     };

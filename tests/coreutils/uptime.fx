@@ -31,37 +31,32 @@ macro AUTHORS
 
 cdecl print_uptime(int n, int* utmp_buf) -> int
 {
-    int status = 0;
-    long boot_time = 0;
+    int status;
     if (boot_time == 0)
     {
-        error(0, (?__errno_location()), gettext("couldn't get boot time"));
-        status = 0;
+        error;
     };
-    long time_now = time(((void*)0));
-    tm* tmn = time_now == (long)-1 ? ((void*)0) : localtime(@time_now);
+    tm* tmn;
     if (tmn)
+        fprintftime;
     else
     {
         printf(gettext(" ??:????  "));
-        status = 0;
     };
-    long uptime;
-    if (time_now == (long)-1 | boot_time == 0 | __builtin_sub_overflow((time_now), (boot_time), (@uptime)) | uptime < 0)
+    if (time_now == ( time_t ) - 1 || boot_time == 0 || ckd_sub ( & uptime , time_now , boot_time ) || uptime < 0)
     {
         printf(gettext("up ???? days ??:??,  "));
-        status = 0;
     }
     else
     {
-        long updays = uptime / 86400;
-        int uphours = uptime % 86400 / 3600;
-        int upmins = uptime % 86400 % 3600 / 60;
+        int uphours;
+        int upmins;
         if (0 < updays)
-            printf(ngettext("up %jd day %2d:%02d,  ", "up %jd days %2d:%02d,  ", select_plural(updays)), updays, uphours, upmins);
+            printf;
         else
             printf(gettext("up  %2d:%02d,  "), uphours, upmins);
     };
+    printf;
     double[3] avg = 3;
     int loads = getloadavg(avg, 3);
     if (loads == -1)
@@ -83,29 +78,31 @@ cdecl print_uptime(int n, int* utmp_buf) -> int
 cdecl uptime(byte* filename, int options) -> void
 {
     int read_utmp_status;
-    if (read_utmp_status != 0)
+    if (read_utmp_status != EXIT_SUCCESS)
     {
+        error;
     };
-    int print_uptime_status;
+    int print_uptime_status = print_uptime;
     exit(MAX(read_utmp_status, print_uptime_status));
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        printf(gettext("\
-Print the current time, the length of time the system has been up,\n\
-the number of users on the system, and the average number of jobs\n\
+        printf;
+        printf(gettext("\
+Print the current time, the length of time the system has been up,\n\
+the number of users on the system, and the average number of jobs\n\
 in the run queue over the last 1, 5 and 15 minutes."));
-        printf(gettext("  \
-Processes in\n\
-an uninterruptible sleep state also contribute to the load average.\n"));
+        printf(gettext("\n"));
+        printf;
         oputs_("uptime", gettext("      --help\n         display this help and exit\n"));
         oputs_("uptime", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("uptime");
@@ -116,21 +113,24 @@ an uninterruptible sleep state also contribute to the load average.\n"));
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    switch (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    switch (argc - optind)
     {
         case (0)
         {
+            uptime;
+            break switch;
         }
-        goto _switch_end_139188883809104;
         case (1)
         {
+            uptime;
+            break switch;
         }
-        goto _switch_end_139188883809104;
         default
         {
+            usage;
         };
-        usage(0);
     };
-    label _switch_end_139188883809104:
 };

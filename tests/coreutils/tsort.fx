@@ -60,14 +60,17 @@ item* loop = item;
 ulong n_strings = size_t;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         emit_stdin_note();
+        fputs;
         oputs_("tsort", gettext("      --help\n         display this help and exit\n"));
         oputs_("tsort", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("tsort");
@@ -91,11 +94,11 @@ cdecl search_item(item* root, byte* str) -> item*
     item* s;
     item* t;
     int a;
-    if (root.right == ((void*)0))
+    if (root -> right == NULL)
         return (root.right = new_item(str));
     t = root;
     s = p = root.right;
-    while (?)
+    while (true)
     {
         a = strcmp(str, p.str);
         if (a == 0)
@@ -104,7 +107,7 @@ cdecl search_item(item* root, byte* str) -> item*
             q = p.left;
         else
             q = p.right;
-        if (q == ((void*)0))
+        if (q == NULL)
         {
             q = new_item(str);
             if (a < 0)
@@ -222,7 +225,7 @@ cdecl scan_zeros(item* k) -> int
 {
     if (k.count == 0 & !k)
     {
-        if (head == ((void*)0))
+        if (head == NULL)
             head = k;
         else
             zeros.qlink = k;
@@ -234,7 +237,7 @@ cdecl detect_loop(item* k) -> int
 {
     if (k.count > 0)
     {
-        if (loop == ((void*)0))
+        if (loop == NULL)
             loop = k;
         else
         {
@@ -256,13 +259,11 @@ cdecl detect_loop(item* k) -> int
                                 *p = s.next;
                                 break;
                             };
-                            loop.qlink = ((void*)0);
                             loop = tmp;
                         };
                         while (loop)
                         {
                             item* tmp = loop.qlink;
-                            loop.qlink = ((void*)0);
                             loop = tmp;
                         };
                     }
@@ -281,7 +282,7 @@ cdecl detect_loop(item* k) -> int
 
 cdecl recurse_tree(item* root, void* /* untranslated: int (int *) */ bool) -> int
 {
-    if (root.left == ((void*)0) & root.right == ((void*)0))
+    if (root -> left == NULL && root -> right == NULL)
     else
     {
     };
@@ -289,34 +290,44 @@ cdecl recurse_tree(item* root, void* /* untranslated: int (int *) */ bool) -> in
 
 cdecl walk_tree(item* root, void* /* untranslated: int (int *) */ bool) -> void
 {
+    if (root.right)
+        recurse_tree;
 };
 
 cdecl tsort(byte* file) -> void
 {
     bool;
-    item* j = ((void*)0);
-    item* k = ((void*)0);
+    item* j;
+    item* k;
     bool;
-    item* root = new_item(((void*)0));
-    while (?)
+    item* root = new_item;
+    if (! is_stdin && ! freopen ( file , "r" , stdin ))
+        error;
+    fadvise;
+    init_tokenbuffer;
+    while (true)
     {
-        ulong len;
+        ulong len = readtoken;
         if (len == (ulong)-1)
         {
+            if (ferror)
+                error;
             break;
         };
         affirm(len != 0);
+        k = search_item;
         if (j)
         {
             record_relation(j, k);
-            k = ((void*)0);
         };
         j = k;
     };
-    walk_tree(root, ?);
+    if (k != NULL)
+        error;
+    walk_tree(root, count_items);
     while (n_strings > 0)
     {
-        walk_tree(root, ?);
+        walk_tree(root, scan_zeros);
         while (head)
         {
             successor* p = head.top;
@@ -336,50 +347,53 @@ cdecl tsort(byte* file) -> void
         };
         if (n_strings > 0)
         {
+            error(0, 0, gettext("%s: input contains a loop:"), quotearg_n_style_colon);
             do
-                walk_tree(root, ?);
+                walk_tree(root, detect_loop);
             while (loop);
         };
     };
+    if (fclose != 0)
+        error;
+    exit;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (?)
+    setlocale;
+    atexit;
+    while (true)
     {
-        option[3] long_options = {{"", 0, ((void*)0), GETOPT_HELP_CHAR}, {"", 0, ((void*)0), GETOPT_VERSION_CHAR}, {((void*)0), 0, ((void*)0), 0}};
-        int c = getopt_long(argc, argv, "w", long_options, ((void*)0));
+        int long_options;
+        int c = getopt_long;
         if (c == -1)
             break;
         switch (c)
         {
             case ('w')
             {
-                goto _switch_end_139188819655120;
             }
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188819655120;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188819655120;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188819655120:
     };
     if (1 < argc - optind)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind + 1]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    tsort(optind == argc ? "-" : argv[optind]);
+    tsort;
 };

@@ -32,7 +32,7 @@ macro join
     system_join
 };
 
-// macro (multi-statement, manual translation needed): SWAPLINES(a, b) do { struct line * tmp = a ; a = b ; b = tmp ; \
+// macro (multi-statement, manual translation needed): SWAPLINES(a, b) do { struct line * tmp = a ; a = b ; b = tmp ; \
 } while ( 0 ) ;
 struct outlist
 {
@@ -63,7 +63,7 @@ struct seq
 };
 
 line*[2] prevline = line;
-ulong[2] line_no = uintmax_t;
+int[2] line_no = 2;
 byte*[2] g_names = 2;
 line*[2] spareline = line;
 extern int hard_LC_COLLATE;
@@ -75,94 +75,100 @@ extern byte* empty_filler;
 extern int autoformat;
 extern int autocount_1;
 extern int autocount_2;
-long join_field_1 = ptrdiff_t;
-long join_field_2 = ptrdiff_t;
+int join_field_1 = -1;
+int join_field_2 = -1;
 outlist outlist_head = outlist;
 outlist* outlist_end = outlist;
 extern int tab;
 byte* output_separator = " ";
-extern int output_seplen;
+int output_seplen = 1;
 uint CHECK_ORDER_DEFAULT = 0;
 uint CHECK_ORDER_ENABLED = 1;
 uint CHECK_ORDER_DISABLED = 2;
 
 enum (unnamed at tests/coreutils/join.c:148:8) check_input_order = enum { CHECK_ORDER_DEFAULT , CHECK_ORDER_ENABLED , CHECK_ORDER_DISABLED };
-uint CHECK_ORDER_OPTION = 128;
-uint NOCHECK_ORDER_OPTION = 129;
-uint HEADER_LINE_OPTION = 130;
+uint CHECK_ORDER_OPTION = 0;
+uint NOCHECK_ORDER_OPTION = 1;
+uint HEADER_LINE_OPTION = 2;
 
-option[8] longopts = option;
+struct option;
+extern int longopts;
 line uni_blank = line;
 extern int ignore_case;
 extern int join_header_lines;
 byte eolchar = '\n';
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        oputs_("join", gettext("\
-  -a FILENUM\n\
-         also print unpairable lines from file FILENUM,\n\
-         where FILENUM is 1 or 2, corresponding to FILE1 or FILE2\n\
+        printf;
+        fputs;
+        fputs;
+        oputs_("join", gettext("\
+  -a FILENUM\n\
+         also print unpairable lines from file FILENUM,\n\
+         where FILENUM is 1 or 2, corresponding to FILE1 or FILE2\n\
 "));
-        oputs_("join", gettext("\
-  -e STRING\n\
-         replace missing (empty) input fields with STRING;\n\
-         I.e., missing fields specified with '-12jo' options\n\
+        oputs_("join", gettext("\
+  -e STRING\n\
+         replace missing (empty) input fields with STRING;\n\
+         I.e., missing fields specified with '-12jo' options\n\
 "));
-        oputs_("join", gettext("\
-  -i, --ignore-case\n\
-         ignore differences in case when comparing fields\n\
+        oputs_("join", gettext("\
+  -i, --ignore-case\n\
+         ignore differences in case when comparing fields\n\
 "));
-        oputs_("join", gettext("\
-  -j FIELD\n\
-         equivalent to '-1 FIELD -2 FIELD'\n\
+        oputs_("join", gettext("\
+  -j FIELD\n\
+         equivalent to '-1 FIELD -2 FIELD'\n\
 "));
-        oputs_("join", gettext("\
-  -o FORMAT\n\
-         obey FORMAT while constructing output line\n\
+        oputs_("join", gettext("\
+  -o FORMAT\n\
+         obey FORMAT while constructing output line\n\
 "));
-        oputs_("join", gettext("\
-  -t CHAR\n\
-         use CHAR as input and output field separator\n\
+        oputs_("join", gettext("\
+  -t CHAR\n\
+         use CHAR as input and output field separator\n\
 "));
-        oputs_("join", gettext("\
-  -v FILENUM\n\
-         like -a FILENUM, but suppress joined output lines\n\
+        oputs_("join", gettext("\
+  -v FILENUM\n\
+         like -a FILENUM, but suppress joined output lines\n\
 "));
-        oputs_("join", gettext("\
-  -1 FIELD\n\
-         join on this FIELD of file 1\n\
+        oputs_("join", gettext("\
+  -1 FIELD\n\
+         join on this FIELD of file 1\n\
 "));
-        oputs_("join", gettext("\
-  -2 FIELD\n\
-         join on this FIELD of file 2\n\
+        oputs_("join", gettext("\
+  -2 FIELD\n\
+         join on this FIELD of file 2\n\
 "));
-        oputs_("join", gettext("\
-      --check-order\n\
-         check that the input is correctly sorted, even\n\
-         if all input lines are pairable\n\
+        oputs_("join", gettext("\
+      --check-order\n\
+         check that the input is correctly sorted, even\n\
+         if all input lines are pairable\n\
 "));
-        oputs_("join", gettext("\
-      --nocheck-order\n\
-         do not check that the input is correctly sorted\n\
+        oputs_("join", gettext("\
+      --nocheck-order\n\
+         do not check that the input is correctly sorted\n\
 "));
-        oputs_("join", gettext("\
-      --header\n\
-         treat the first line in each file as field headers,\n\
-         print them without trying to pair them\n\
+        oputs_("join", gettext("\
+      --header\n\
+         treat the first line in each file as field headers,\n\
+         print them without trying to pair them\n\
 "));
-        oputs_("join", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("join", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("join", gettext("      --help\n         display this help and exit\n"));
         oputs_("join", gettext("      --version\n         output version information and exit\n"));
+        fputs;
         emit_ancillary_info("join");
     };
     exit(status);
@@ -173,18 +179,18 @@ cdecl extract_field(line* line, byte* field, int len) -> void
     if (line >= line)
         line.fields = xpalloc(line.fields, @line, 1, -1, (sizeof * line -> fields / 8));
     line.fields[line]. = field;
-    line.fields[line]. = ?;
+    line.fields[line]. = len;
     ++(line);
 };
 
 cdecl eq_tab(int g) -> int
 {
-    return mcel_eq(?, ?);
+    return mcel_eq(g, tab);
 };
 
 cdecl newline_or_blank(int g) -> int
 {
-    return ?. == '\n' | c32issep(?.);
+    return g. == '\n' | c32issep(g.);
 };
 
 cdecl xfields(line* line) -> void
@@ -193,27 +199,28 @@ cdecl xfields(line* line) -> void
     byte* lim = ptr + line. - 1;
     if (ptr == lim)
         return void;
-    if (!?.)
-        while (?)
+    if (!tab.)
+        while ((ptr = skip_buf_matching) < lim)
         {
-            byte* sep;
+            byte* sep = skip_buf_matching;
             extract_field(line, ptr, sep - ptr);
             ptr = sep;
         }
     else
     {
+        if (tab. != '\n')
+            for (byte* sep; (sep = skip_buf_matching) < lim; ptr = sep + mcel_scan(sep, lim))
+            {};
         extract_field(line, ptr, lim - ptr);
     };
 };
 
 cdecl freeline(line* line) -> void
 {
-    if (line == ((void*)0))
+    if (line == NULL)
         return void;
     free(line.fields);
-    line.fields = ((void*)0);
     free(line.);
-    line. = ((void*)0);
 };
 
 cdecl keycmp(line* line1, line* line2, int jf_1, int jf_2) -> int
@@ -221,42 +228,46 @@ cdecl keycmp(line* line1, line* line2, int jf_1, int jf_2) -> int
     byte* beg1;
     byte* beg2;
     int diff;
-    if (? < line1)
+    if (jf_1 < line1)
     {
-        beg1 = line1.fields[?].;
+        beg1 = line1.fields[jf_1].;
     }
     else
     {
-        beg1 = ((void*)0);
     };
-    if (? < line2)
+    if (jf_2 < line2)
     {
-        beg2 = line2.fields[?].;
+        beg2 = line2.fields[jf_2].;
     }
     else
     {
-        beg2 = ((void*)0);
     };
-    if (?)
+    if (len2 == 0)
         return 1;
-    if (?)
+    if (ignore_case)
     {
+        diff = memcasecmp(beg1, beg2, MIN);
     }
     else
     {
+        if (hard_LC_COLLATE)
+            return xmemcoll;
+        diff = memcmp(beg1, beg2, MIN);
     };
     if (diff)
         return diff;
+    return _GL_CMP;
 };
 
 cdecl check_order(line* prev, line* current, int whatfile) -> void
 {
-    if (check_input_order != CHECK_ORDER_DISABLED & ((check_input_order == CHECK_ORDER_ENABLED) | ?))
+    if (check_input_order != CHECK_ORDER_DISABLED & ((check_input_order == CHECK_ORDER_ENABLED) | seen_unpairable))
     {
-        if (!?[whatfile - 1])
+        if (!issued_disorder_warning[whatfile - 1])
         {
-            if (?)
+            if (keycmp > 0)
             {
+                error;
             };
         };
     };
@@ -292,10 +303,10 @@ cdecl get_line(int* fp, line** linep, int which) -> int
         reset_line(line);
     else
         line = init_linep(linep);
-    if (!readlinebuffer_delim(@line, ?, eolchar))
+    if (!readlinebuffer_delim(@line, fp, eolchar))
     {
-        if (ferror(?))
-            error(0, (?__errno_location()), gettext("read error"));
+        if (ferror(fp))
+            error;
         freeline(line);
     };
     ++line_no[which - 1];
@@ -313,7 +324,6 @@ cdecl initseq(seq* seq) -> void
 {
     seq = 0;
     seq = 0;
-    seq.lines = ((void*)0);
 };
 
 cdecl getseq(int* fp, seq* seq, int whichfile) -> int
@@ -322,7 +332,7 @@ cdecl getseq(int* fp, seq* seq, int whichfile) -> int
     {
         seq.lines = xpalloc(seq.lines, @seq, 1, -1, (sizeof * seq -> lines / 8));
     };
-    if (?(?, @seq.lines[seq], whichfile))
+    if (get_line(fp, @seq.lines[seq], whichfile))
     {
         ++seq;
     };
@@ -330,9 +340,9 @@ cdecl getseq(int* fp, seq* seq, int whichfile) -> int
 
 cdecl advance_seq(int* fp, seq* seq, int first, int whichfile) -> int
 {
-    if (?)
+    if (first)
         seq = 0;
-    return ?(?, seq, whichfile);
+    return getseq(fp, seq, whichfile);
 };
 
 cdecl delseq(seq* seq) -> void
@@ -342,10 +352,15 @@ cdecl delseq(seq* seq) -> void
 
 cdecl prfield(int n, line* line) -> void
 {
-    if (? < line)
+    if (n < line)
     {
+        if (len)
+            fwrite;
+        elif (empty_filler)
+            fputs;
     }
-    else
+    elif (empty_filler)
+        fputs;
 };
 
 cdecl prfields(line* line, int join_field, int autocount) -> void
@@ -361,7 +376,7 @@ cdecl prjoin(line* line1, line* line2) -> void
     {
         outlist* o;
         o = outlist;
-        while (?)
+        while (true)
         {
             if (o.file == 0)
             {
@@ -378,9 +393,11 @@ cdecl prjoin(line* line1, line* line2) -> void
             {
                 line = (o.file == 1 ? line1 : line2);
             };
+            prfield;
             o = o.next;
-            if (o == ((void*)0))
+            if (o == NULL)
                 break;
+            fwrite;
         };
         putchar(eolchar);
     }
@@ -394,11 +411,12 @@ cdecl prjoin(line* line1, line* line2) -> void
         {
             line = line1;
         };
-        prfields(line1, join_field_1, ?);
-        prfields(line2, join_field_2, ?);
+        prfield;
+        prfields(line1, join_field_1, autocount_1);
+        prfields(line2, join_field_2, autocount_2);
         putchar(eolchar);
     };
-    if (?)
+    if (ferror)
         write_error();
 };
 
@@ -408,56 +426,62 @@ cdecl system_join(int* fp1, int* fp2) -> void
     seq seq2;
     int diff;
     bool;
+    fadvise;
+    fadvise;
     initseq(@seq1);
-    getseq(?, @seq1, 1);
+    getseq(fp1, @seq1, 1);
     initseq(@seq2);
-    getseq(?, @seq2, 2);
-    if (?)
+    getseq(fp2, @seq2, 2);
+    if (autoformat)
     {
         autocount_1 = seq1 ? seq1.lines[0] : 0;
         autocount_2 = seq2 ? seq2.lines[0] : 0;
     };
-    if (? & (seq1 | seq2))
+    if (join_header_lines & (seq1 | seq2))
     {
         line* hline1 = seq1 ? seq1.lines[0] : @uni_blank;
         line* hline2 = seq2 ? seq2.lines[0] : @uni_blank;
         prjoin(hline1, hline2);
-        prevline[0] = ((void*)0);
-        prevline[1] = ((void*)0);
+        if (seq1)
+            advance_seq;
+        if (seq2)
+            advance_seq;
     };
     while (seq1 & seq2)
     {
-        diff = ?(seq1.lines[0], seq2.lines[0], join_field_1, join_field_2);
+        diff = keycmp(seq1.lines[0], seq2.lines[0], join_field_1, join_field_2);
         if (diff < 0)
         {
-            if (?)
+            if (print_unpairables_1)
                 prjoin(seq1.lines[0], @uni_blank);
+            advance_seq;
             continue;
         };
         if (diff > 0)
         {
-            if (?)
+            if (print_unpairables_2)
                 prjoin(@uni_blank, seq2.lines[0]);
+            advance_seq;
             continue;
         };
         do
-            if (?)
+            if (!advance_seq)
             {
                 ++seq1;
                 break;
             }
-        while (!?(seq1.lines[seq1 - 1], seq2.lines[0], join_field_1, join_field_2));
+        while (!keycmp(seq1.lines[seq1 - 1], seq2.lines[0], join_field_1, join_field_2));
         do
-            if (?)
+            if (!advance_seq)
             {
                 ++seq2;
                 break;
             }
-        while (!?(seq1.lines[0], seq2.lines[seq2 - 1], join_field_1, join_field_2));
-        if (?)
+        while (!keycmp(seq1.lines[0], seq2.lines[seq2 - 1], join_field_1, join_field_2));
+        if (print_pairables)
         {
         };
-        if (?)
+        if (! eof1)
         {
             do
             {
@@ -470,7 +494,7 @@ cdecl system_join(int* fp1, int* fp2) -> void
         }
         else
             seq1 = 0;
-        if (?)
+        if (! eof2)
         {
             do
             {
@@ -484,29 +508,29 @@ cdecl system_join(int* fp1, int* fp2) -> void
         else
             seq2 = 0;
     };
-    line* line = ((void*)0);
+    line* line;
     bool;
-    if (?)
+    if (( print_unpairables_1 || checktail ) && seq1 . count)
     {
-        if (?)
+        if (print_unpairables_1)
             prjoin(seq1.lines[0], @uni_blank);
-        while (?(?, @line, 1))
+        while (get_line(fp1, @line, 1))
         {
-            if (?)
+            if (print_unpairables_1)
                 prjoin(line, @uni_blank);
-            if (?[0] & !?)
+            if (issued_disorder_warning[0] & !print_unpairables_1)
                 break;
         };
     };
-    if (?)
+    if (( print_unpairables_2 || checktail ) && seq2 . count)
     {
-        if (?)
+        if (print_unpairables_2)
             prjoin(@uni_blank, seq2.lines[0]);
-        while (?(?, @line, 2))
+        while (get_line(fp2, @line, 2))
         {
-            if (?)
+            if (print_unpairables_2)
                 prjoin(@uni_blank, line);
-            if (?)
+            if (issued_disorder_warning [ 1 ] && ! print_unpairables_2)
                 break;
         };
     };
@@ -520,23 +544,19 @@ cdecl add_field(int file, int field) -> void
 {
     outlist* o;
     affirm(file == 0 | file == 1 | file == 2);
-    affirm(file != 0 | ? == 0);
+    affirm(file != 0 | field == 0);
     o = xmalloc((sizeof * o / 8));
     o.file = file;
-    o = ?;
-    o.next = ((void*)0);
+    o = field;
     outlist_end.next = o;
     outlist_end = o;
 };
 
 cdecl string_to_join_field(byte* str) -> int
 {
-    long val;
-    if (?)
-        val = (0);
-    elif (?)
-        error(0, 0, gettext("invalid field number: %s"), quote(str));
-    return val - 1;
+    if (s_err == LONGINT_OVERFLOW || ( s_err == LONGINT_OK && PTRDIFF_MAX < val ))
+    elif (s_err != LONGINT_OK || val <= 0)
+        error;
 };
 
 cdecl decode_field_spec(byte* s, int* file_index, int* field_index) -> void
@@ -547,34 +567,27 @@ cdecl decode_field_spec(byte* s, int* file_index, int* field_index) -> void
         {
             if (s[1])
             {
-                error(0, 0, gettext("invalid field specifier: %s"), quote(s));
+                error;
             };
+            *file_index = 0;
+            *field_index = 0;
+            break switch;
         }
-        *file_index = 0;
-        *? = 0;
-        goto _switch_end_139188819616336;
         case ('1')
         {
-            case ('2')
-            {
-                if (s[1] != '.')
-                    error(0, 0, gettext("invalid field specifier: %s"), quote(s));
-            }
+            *file_index = s[0] - '0';
+            *field_index = string_to_join_field(s + 2);
+            break switch;
         }
-        *file_index = s[0] - '0';
-        *? = ?(s + 2);
-        goto _switch_end_139188819616336;
         default
         {
-            error(0, 0, gettext("invalid file number in field spec: %s"), quote(s));
         };
     };
-    label _switch_end_139188819616336:
 };
 
 cdecl comma_or_blank(int g) -> int
 {
-    return ?. == ',' | c32issep(?.);
+    return g. == ',' | c32issep(g.);
 };
 
 cdecl add_field_list(byte* str) -> void
@@ -584,19 +597,22 @@ cdecl add_field_list(byte* str) -> void
     {
         int file_index;
         byte* spec_item = p;
+        p = skip_str_matching;
         if (*p)
         {
             *p = '\0';
         };
+        decode_field_spec;
+        add_field;
     }
     while (*p);
 };
 
-cdecl set_join_field(long* var, int val) -> void
+cdecl set_join_field(int* var, int val) -> void
 {
-    if (0 <= *var & *var != ?)
-        error(0, 0, gettext("incompatible join fields %td, %td"), *var, ?);
-    *var = ?;
+    if (0 <= *var & *var != val)
+        error;
+    *var = val;
 };
 
 enum operand_status
@@ -614,32 +630,32 @@ cdecl add_file_name(byte* name, byte*[2] names, int[2] operand_status, int[2] jo
     {
         bool;
         byte* arg;
-        switch (?)
+        switch (operand_status [ op0 ])
         {
             case (MUST_BE_OPERAND)
             {
+                error(0, 0, gettext("extra operand %s"), quotearg_style);
+                usage;
             }
-            usage(0);
             case (MIGHT_BE_J1_ARG)
             {
                 joption_count[0]--;
+                set_join_field(@join_field_1, string_to_join_field(arg));
+                break switch;
             }
-            set_join_field(@join_field_1, ?(arg));
-            goto _switch_end_139188819331664;
             case (MIGHT_BE_J2_ARG)
             {
                 joption_count[1]--;
+                set_join_field(@join_field_2, string_to_join_field(arg));
+                break switch;
             }
-            set_join_field(@join_field_2, ?(arg));
-            goto _switch_end_139188819331664;
             case (MIGHT_BE_O_ARG)
             {
                 add_field_list(arg);
+                break switch;
             }
-            goto _switch_end_139188819331664;
         };
-        label _switch_end_139188819331664:
-        if (?)
+        if (! op0)
         {
             operand_status[0] = operand_status[1];
             names[0] = names[1];
@@ -662,143 +678,25 @@ cdecl main(int argc, byte** argv) -> int
     int optc;
     int nfiles = 0;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    hard_LC_COLLATE = hard_locale(0);
+    setlocale;
+    hard_LC_COLLATE = hard_locale;
+    atexit;
     atexit(free_spareline);
-    while ((optc = getopt_long(argc, argv, "-a:e:i1:2:j:o:t:v:z", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
         optc_status = MUST_BE_OPERAND;
-        switch (optc)
-        {
-            case ('v')
-            {
-            }
-            case ('a')
-            {
-                {
-                    long val;
-                    if (?)
-                        error(0, 0, gettext("invalid file number: %s"), quote(optarg));
-                };
-            }
-            goto _switch_end_139188819342544;
-            case ('e')
-            {
-                if (empty_filler & !streq(empty_filler, optarg))
-                    error(0, 0, gettext("conflicting empty-field replacement strings"));
-            }
-            empty_filler = optarg;
-            goto _switch_end_139188819342544;
-            case ('i')
-            {
-            }
-            goto _switch_end_139188819342544;
-            case ('1')
-            {
-                set_join_field(@join_field_1, ?(optarg));
-            }
-            goto _switch_end_139188819342544;
-            case ('2')
-            {
-                set_join_field(@join_field_2, ?(optarg));
-            }
-            goto _switch_end_139188819342544;
-            case ('j')
-            {
-                if ((optarg[0] == '1' | optarg[0] == '2') & !optarg[1] & optarg == argv[optind - 1] + 2)
-                {
-                    bool;
-                }
-                else
-                {
-                    set_join_field(@join_field_1, ?(optarg));
-                    set_join_field(@join_field_2, join_field_1);
-                };
-            }
-            goto _switch_end_139188819342544;
-            case ('o')
-            {
-                if (streq(optarg, "auto"))
-                else
-                {
-                    add_field_list(optarg);
-                    optc_status = MIGHT_BE_O_ARG;
-                };
-            }
-            goto _switch_end_139188819342544;
-            case ('t')
-            {
-                {
-                    if (!*optarg)
-                    {
-                    }
-                    elif (streq(optarg, "\\0"))
-                    {
-                        output_separator = "";
-                    };
-                    else
-                    {
-                        if (?)
-                            error(0, 0, gettext("multi-character tab %s"), quote(optarg));
-                        output_separator = optarg;
-                    };
-                    if (?)
-                        error(0, 0, gettext("incompatible tabs"));
-                };
-            }
-            goto _switch_end_139188819342544;
-            case ('z')
-            {
-                eolchar = 0;
-            }
-            goto _switch_end_139188819342544;
-            case (NOCHECK_ORDER_OPTION)
-            {
-                check_input_order = CHECK_ORDER_DISABLED;
-            }
-            goto _switch_end_139188819342544;
-            case (CHECK_ORDER_OPTION)
-            {
-                check_input_order = CHECK_ORDER_ENABLED;
-            }
-            goto _switch_end_139188819342544;
-            case (1)
-            {
-                add_file_name(optarg, g_names, operand_status, joption_count, @nfiles, @prev_optc_status, @optc_status);
-            }
-            goto _switch_end_139188819342544;
-            case (HEADER_LINE_OPTION)
-            {
-            }
-            goto _switch_end_139188819342544;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188819342544;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188819342544;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188819342544:
         prev_optc_status = optc_status;
     };
     prev_optc_status = MUST_BE_OPERAND;
     while (optind < argc)
-        add_file_name(argv[optind++], g_names, operand_status, joption_count, @nfiles, @prev_optc_status, @optc_status);
+        add_file_name;
     if (nfiles != 2)
     {
         if (nfiles == 0)
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        usage(0);
+        usage;
     };
     for (int i = 0; i < 2; i++)
     {};
@@ -806,10 +704,18 @@ cdecl main(int argc, byte** argv) -> int
         join_field_1 = 0;
     if (join_field_2 < 0)
         join_field_2 = 0;
-    if (?)
-        error(0, (?__errno_location()), gettext("both files cannot be standard input"));
-    if (?[0] | ?[1])
-        error(0, 0, gettext("input is not in sorted order"));
+    if (! fp1)
+        error;
+    if (! fp2)
+        error;
+    if (fp1 == fp2)
+        error;
+    system_join;
+    if (fclose != 0)
+        error;
+    if (fclose != 0)
+        error;
+    if (issued_disorder_warning[0] | issued_disorder_warning[1])
+        error;
     else
-        return 0;
 };

@@ -51,7 +51,7 @@ macro OBS
 
 struct Line_ptr
 {
-    int i;
+    ulong i;
     byte* ptr;
 };
 
@@ -63,7 +63,7 @@ struct B_pair
 
 struct Buf
 {
-    int n_bufs;
+    ulong n_bufs;
     obstack obs;
     B_pair* p;
 };
@@ -71,27 +71,29 @@ struct Buf
 cdecl buf_init_from_stdin(Buf* x, byte eol_byte) -> int
 {
     obstack_init((@(x)));
-    while (?)
+    while (true)
     {
         byte* buf = malloc((8));
-        if (?)
+        if (buf == NULL)
         {
             break;
         };
+        if (bytes_read != BUFFER_SIZE && errno != 0)
+            error;
         {
             B_pair bp;
             bp.start = buf;
             obstack_grow((@(x)), @bp, (sizeof ( bp ) / 8));
         };
-        if (?)
+        if (bytes_read < BUFFER_SIZE)
             break;
     };
-    if (?)
+    if (ok)
     {
-        if (?)
+        if (! last_byte_is_eol_byte)
         {
             byte* buf = malloc(1);
-            if (?)
+            if (buf == NULL)
             {
             }
             else
@@ -104,29 +106,32 @@ cdecl buf_init_from_stdin(Buf* x, byte eol_byte) -> int
             };
         };
     };
-    x = obstack_object_size((?(x))) / (sizeof ( x -> p [ 0 ] ) / 8);
+    x.n_bufs = obstack_object_size((?(x))) / (sizeof ( x -> p [ 0 ] ) / 8);
     x.p = (B_pair*)obstack_finish((?(x)));
-    if (x >= 2 & x.p[x - 1]. == x.p[x - 1].)
-        free(x.p[--(x)].);
+    if (x.n_bufs >= 2 & x.p[x.n_bufs - 1].start == x.p[x.n_bufs - 1].one_past_end)
+        free(x.p[--(x.n_bufs)].start);
 };
 
 cdecl buf_free(Buf* x) -> void
 {
+    for (ulong i = 0; i < x.n_bufs; i++)
+    {};
+    obstack_free;
 };
 
 cdecl line_ptr_decrement(Buf* x, Line_ptr* lp) -> Line_ptr
 {
     Line_ptr lp_new;
-    if (lp.ptr > x.p[lp].)
+    if (lp.ptr > x.p[lp.i].start)
     {
-        lp_new = lp;
+        lp_new.i = lp.i;
         lp_new.ptr = lp.ptr - 1;
     }
     else
     {
-        affirm(lp > 0);
-        lp_new = lp - 1;
-        lp_new.ptr = ((x).p[(lp ? 1)].) - 1;
+        affirm(lp.i > 0);
+        lp_new.i = lp.i - 1;
+        lp_new.ptr = ((x).p[(lp.i ? 1)].one_past_end) - 1;
     };
     return lp_new;
 };
@@ -134,48 +139,59 @@ cdecl line_ptr_decrement(Buf* x, Line_ptr* lp) -> Line_ptr
 cdecl line_ptr_increment(Buf* x, Line_ptr* lp) -> Line_ptr
 {
     Line_ptr lp_new;
-    affirm(lp.ptr <= ((x).p[(lp)].) - 1);
-    if (lp.ptr < ((x).p[(lp)].) - 1)
+    affirm(lp.ptr <= ((x).p[(lp.i)].one_past_end) - 1);
+    if (lp.ptr < ((x).p[(lp.i)].one_past_end) - 1)
     {
-        lp_new = lp;
+        lp_new.i = lp.i;
         lp_new.ptr = lp.ptr + 1;
     }
     else
     {
-        affirm(lp < x - 1);
-        lp_new = lp + 1;
-        lp_new.ptr = x.p[lp + 1].;
+        affirm(lp.i < x.n_bufs - 1);
+        lp_new.i = lp.i + 1;
+        lp_new.ptr = x.p[lp.i + 1].start;
     };
     return lp_new;
 };
 
 cdecl find_bol(Buf* x, Line_ptr* last_bol, Line_ptr* new_bol, byte eol_byte) -> int
 {
+    ulong i;
     Line_ptr tmp;
     byte* last_bol_ptr;
     tmp = line_ptr_decrement(x, last_bol);
     last_bol_ptr = tmp.ptr;
-    while (?)
+    i = tmp.i;
+    while (true)
     {
-        byte* nl;
+        byte* nl = memrchr(x.p[i].start, last_bol_ptr, eol_byte);
         if (nl)
         {
             Line_ptr nl_pos;
+            nl_pos.i = i;
             nl_pos.ptr = nl;
             *new_bol = line_ptr_increment(x, @nl_pos);
         };
-        if (?)
+        if (i == 0)
             break;
+        --i;
+        last_bol_ptr = ((x).p[(i)].one_past_end);
     };
     if (last_bol.ptr != x.p[0].start)
     {
-        new_bol = 0;
+        new_bol.i = 0;
         new_bol.ptr = x.p[0].start;
     };
 };
 
 cdecl print_line(int* out_stream, Buf* x, Line_ptr* bol, Line_ptr* bol_next) -> void
 {
+    for (ulong i = bol.i; i <= bol_next.i; i++)
+    {
+        byte* a = (i == bol.i ? bol.ptr : x.p[i].start);
+        byte* b = (i == bol_next.i ? bol_next.ptr : ((x).p[(i)].one_past_end));
+        fwrite(a, 1, b - a, out_stream);
+    };
 };
 
 cdecl tac_mem() -> int
@@ -183,17 +199,18 @@ cdecl tac_mem() -> int
     Buf x;
     Line_ptr bol;
     byte eol_byte = '\n';
-    if (!?(@x, eol_byte))
+    if (!buf_init_from_stdin(@x, eol_byte))
     {
         buf_free(@x);
     };
-    bol = x - 1;
-    bol.ptr = ((@x).p[(bol)].);
-    while (?)
+    bol.i = x.n_bufs - 1;
+    bol.ptr = ((@x).p[(bol.i)].one_past_end);
+    while (true)
     {
         Line_ptr new_bol;
-        if (!?(@x, @bol, @new_bol, eol_byte))
+        if (!find_bol(@x, @bol, @new_bol, eol_byte))
             break;
+        print_line;
         bol = new_bol;
     };
 };

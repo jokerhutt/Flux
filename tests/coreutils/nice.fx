@@ -35,25 +35,28 @@ macro GET_NICENESS()
 };
 
 uint NZERO = 20;
-option[4] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        printf(gettext("\
-Run COMMAND with an adjusted niceness, which affects process scheduling.\n\
-With no COMMAND, print the current niceness.  Niceness values range from\n\
-%d (most favorable to the process) to %d (least favorable to the process).\n\
+        printf;
+        printf(gettext("\
+Run COMMAND with an adjusted niceness, which affects process scheduling.\n\
+With no COMMAND, print the current niceness.  Niceness values range from\n\
+%d (most favorable to the process) to %d (least favorable to the process).\n\
 "), ?20, 20 - 1);
         emit_mandatory_arg_note();
-        oputs_("nice", gettext("\
-  -n, --adjustment=N\n\
-         add integer N to the niceness (default 10)\n\
+        oputs_("nice", gettext("\
+  -n, --adjustment=N\n\
+         add integer N to the niceness (default 10)\n\
 "));
         oputs_("nice", gettext("      --help\n         display this help and exit\n"));
         oputs_("nice", gettext("      --version\n         output version information and exit\n"));
@@ -66,19 +69,19 @@ With no COMMAND, print the current niceness.  Niceness values range from\n\
 
 cdecl perm_related_errno(int err) -> int
 {
-    return err == 0 | err == 0;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     int current_niceness;
     int adjustment = 10;
-    byte* adjustment_given = ((void*)0);
+    byte* adjustment_given;
     bool;
     int i;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXIT_CANCELED);
+    atexit;
     for (i = 1; i < argc; )
     {
         byte* s = argv[i];
@@ -93,37 +96,31 @@ cdecl main(int argc, byte** argv) -> int
             int fake_argc = argc - (i - 1);
             byte** fake_argv = argv + (i - 1);
             fake_argv[0] = argv[0];
-            optind = 0;
-            c = getopt_long(fake_argc, fake_argv, "+n:", longopts, ((void*)0));
-            i += optind - 1;
+            c = getopt_long;
             switch (c)
             {
                 case ('n')
                 {
-                    adjustment_given = optarg;
+                    break switch;
                 }
-                goto _switch_end_139188819497936;
                 case (-1)
                 {
-                    goto _switch_end_139188819497936;
                 }
                 case (GETOPT_HELP_CHAR)
                 {
-                    usage(0);
+                    usage;
+                    break switch;
                 }
-                goto _switch_end_139188819497936;
                 case (GETOPT_VERSION_CHAR)
                 {
+                    version_etc;
+                    exit;
+                    break switch;
                 }
-                exit(0);
-                goto _switch_end_139188819497936;
                 default
                 {
-                    usage(EXIT_CANCELED);
                 };
-                goto _switch_end_139188819497936;
             };
-            label _switch_end_139188819497936:
             if (c == -1)
                 break;
         };
@@ -131,7 +128,7 @@ cdecl main(int argc, byte** argv) -> int
     if (adjustment_given)
     {
         long tmp;
-        if (?)
+        if (LONGINT_OVERFLOW < xstrtol ( adjustment_given , NULL , 10 , & tmp , "" ))
             error(EXIT_CANCELED, 0, gettext("invalid adjustment %s"), quote(adjustment_given));
         adjustment = MAX(MIN_ADJUSTMENT, MIN(tmp, MAX_ADJUSTMENT));
     };
@@ -142,25 +139,22 @@ cdecl main(int argc, byte** argv) -> int
             error(0, 0, gettext("a command must be given with an adjustment"));
             usage(EXIT_CANCELED);
         };
-        (?__errno_location()) ? 0;
-        current_niceness = getpriority(PRIO_PROCESS, 0);
-        if (current_niceness == -1 & (?__errno_location()) ? 0)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("cannot get niceness"));
+        current_niceness = getpriority;
+        if (current_niceness == - 1 && errno != 0)
+            error;
         printf("%d\n", current_niceness);
-        return 0;
     };
-    (?__errno_location()) ? 0;
-    current_niceness = getpriority(PRIO_PROCESS, 0);
-    if (current_niceness == -1 & (?__errno_location()) ? 0)
-        error(EXIT_CANCELED, (?__errno_location()), gettext("cannot get niceness"));
-    if (?)
+    current_niceness = getpriority;
+    if (current_niceness == - 1 && errno != 0)
+        error;
+    if (! ok)
     {
-        error(?((?__errno_location())) ? 0 : EXIT_CANCELED, (?__errno_location()), gettext("cannot set niceness"));
-        if (ferror(stderr))
+        error;
+        if (ferror)
             return EXIT_CANCELED;
     };
     execvp(argv[i], @argv[i]);
-    int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-    error(0, (?__errno_location()), "%s", quote(argv[i]));
+    int exit_status;
+    error;
     return exit_status;
 };

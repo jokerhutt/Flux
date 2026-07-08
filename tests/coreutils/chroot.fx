@@ -44,21 +44,20 @@ macro gid_set(x)
     ( ! gid_unset ( x ) )
 };
 
-cdecl uid_unset(uint uid) -> int
+cdecl uid_unset(int uid) -> int
 {
-    return uid == (uint)-1;
 };
 
-cdecl gid_unset(uint gid) -> int
+cdecl gid_unset(int gid) -> int
 {
-    return gid == (uint)-1;
 };
 
-uint GROUPS = 256;
-uint USERSPEC = 257;
-uint SKIP_CHDIR = 258;
+uint GROUPS = 0;
+uint USERSPEC = 1;
+uint SKIP_CHDIR = 2;
 
-option[6] long_opts = option;
+struct option;
+extern int long_opts;
 cdecl setgroups(ulong size, int gid_t) -> int
 {
     if (size == 0)
@@ -67,7 +66,6 @@ cdecl setgroups(ulong size, int gid_t) -> int
     }
     else
     {
-        (?__errno_location()) ? 0;
         return -1;
     };
 };
@@ -76,42 +74,36 @@ cdecl parse_additional_groups(byte* groups, int** pgids, int* pn_gids, int show_
 {
     byte* buffer = xstrdup(groups);
     int ret = 0;
-    for (byte* tmp = strtok(buffer, ","); tmp; tmp = strtok(((void*)0), ","))
+    for (byte* tmp = strtok(buffer, ","); tmp; tmp = strtok)
     {
         group* g;
-        ulong value;
-        if (?)
+        if (xstrtoumax ( tmp , NULL , 10 , & value , "" ) == LONGINT_OK && value <= MAXGID)
         {
-            while (((?__ctype_b_loc())[(int)((to_uchar(*tmp)))] ? (uint)_ISspace))
+            while (isspace(to_uchar(*tmp)))
                 tmp++;
             if (*tmp != '+')
             {
                 g = getgrnam(tmp);
-                if (g != ((void*)0))
-                    value = g.gr_gid;
             };
-            g = (group*)(long)!((void*)0);
         }
         else
         {
             g = getgrnam(tmp);
-            if (g != ((void*)0))
-                value = g.gr_gid;
         };
-        if (g == ((void*)0))
+        if (g == NULL)
         {
             ret = -1;
-            if (?)
+            if (show_errors)
             {
-                error(0, (?__errno_location()), gettext("invalid group %s"), quote(tmp));
+                error;
                 continue;
             };
             break;
         };
     };
-    if (?)
+    if (ret == 0 && n_gids == 0)
     {
-        if (?)
+        if (show_errors)
             error(0, 0, gettext("invalid group list %s"), quote(groups));
         ret = -1;
     };
@@ -128,31 +120,31 @@ cdecl is_root(byte* dir) -> int
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Run COMMAND with root directory set to NEWROOT.\n\
-\n\
-"), stdout);
-        oputs_("chroot", gettext("\
-      --groups=G_LIST\n\
-         specify supplementary groups as g1,g2,..,gN\n\
+        printf;
+        fputs;
+        oputs_("chroot", gettext("\
+      --groups=G_LIST\n\
+         specify supplementary groups as g1,g2,..,gN\n\
 "));
-        oputs_("chroot", gettext("\
-      --userspec=USER:GROUP\n\
-         specify user and group (ID or name) to use\n\
+        oputs_("chroot", gettext("\
+      --userspec=USER:GROUP\n\
+         specify user and group (ID or name) to use\n\
 "));
+        oprintf_("chroot", gettext("\
+      --skip-chdir\n\
+         do not change working directory to %s\n\
+"), quotearg_style);
         oputs_("chroot", gettext("      --help\n         display this help and exit\n"));
         oputs_("chroot", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
-"), stdout);
+        fputs;
         emit_exec_status("chroot");
         emit_ancillary_info("chroot");
     };
@@ -162,129 +154,275 @@ If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
 cdecl main(int argc, byte** argv) -> int
 {
     int c;
-    byte* userspec = ((void*)0);
-    byte* username = ((void*)0);
-    byte* groups = ((void*)0);
+    byte* userspec;
+    byte* username;
+    byte* groups;
     bool;
-    uint uid = -1;
-    uint gid = -1;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXIT_CANCELED);
-    while ((c = getopt_long(argc, argv, "+", long_opts, ((void*)0))) != -1)
+    atexit;
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case (USERSPEC)
-            {
-                {
-                    userspec = optarg;
-                    goto _switch_end_139188887994448;
-                };
-            }
-            case (GROUPS)
-            {
-                groups = optarg;
-            }
-            goto _switch_end_139188887994448;
-            case (SKIP_CHDIR)
-            {
-            }
-            goto _switch_end_139188887994448;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188887994448;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188887994448;
-            default
-            {
-                usage(EXIT_CANCELED);
-            };
-        };
-        label _switch_end_139188887994448:
     };
     if (argc <= optind)
     {
         error(0, 0, gettext("missing operand"));
         usage(EXIT_CANCELED);
     };
-    byte* newroot = argv[optind];
+    byte* newroot;
     bool;
-    if (?)
+    if (! is_oldroot && skip_chdir)
     {
+        error(0, 0, gettext("option --skip-chdir only permitted if NEWROOT is old %s"), quotearg_style);
         usage(EXIT_CANCELED);
     };
-    if (?)
+    if (! is_oldroot)
     {
         if (userspec)
-            ignore_value(parse_user_spec(userspec, @uid, @gid, ((void*)0), ((void*)0)));
-        if ((??(uid)) & (!groups | ?(gid)))
+            ignore_value(parse_user_spec);
+        if ((?uid_unset ( x ) ) # define gid_set ( x ) ( ! gid_unset ( x ) ) enum { GROUPS = UCHAR_MAX + 1 , USERSPEC , SKIP_CHDIR } ; static struct option const long_opts [ ] = { { "groups" , required_argument , NULL , GROUPS } , { "userspec" , required_argument , NULL , USERSPEC } , { "skip-chdir" , no_argument , NULL , SKIP_CHDIR } , { GETOPT_HELP_OPTION_DECL } , { GETOPT_VERSION_OPTION_DECL } , { NULL , 0 , NULL , 0 } } ; # if ! HAVE_SETGROUPS /* At least Interix lacks supplemental group support.  */ static int setgroups ( size_t size , MAYBE_UNUSED gid_t const * list ) { if ( size == 0 ) { /* Return success when clearing supplemental groups
+         as ! HAVE_SETGROUPS should only be the case on
+         platforms that don't support supplemental groups.  */ return 0 ; } else { errno = ENOTSUP ; return - 1 ; } } # endif /* Determine the group IDs for the specified supplementary GROUPS,
+   which is a comma separated list of supplementary groups (names or numbers).
+   Allocate an array for the parsed IDs and store it in PGIDS,
+   which may be allocated even on parse failure.
+   Update the number of parsed groups in PN_GIDS on success.
+   Upon any failure return nonzero, and issue diagnostic if SHOW_ERRORS is true.
+   Otherwise return zero.  */ static int parse_additional_groups ( char const * groups , GETGROUPS_T * * pgids , idx_t * pn_gids , bool show_errors ) { GETGROUPS_T * gids = NULL ; idx_t n_gids_allocated = 0 ; idx_t n_gids = 0 ; char * buffer = xstrdup ( groups ) ; int ret = 0 ; for ( char const * tmp = strtok ( buffer , "," ) ; tmp ; tmp = strtok ( NULL , "," ) ) { struct group * g ; uintmax_t value ; if ( xstrtoumax ( tmp , NULL , 10 , & value , "" ) == LONGINT_OK && value <= MAXGID ) { while ( isspace ( to_uchar ( * tmp ) ) ) tmp ++ ; if ( * tmp != '+' ) { /* Handle the case where the name is numeric.  */ g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } /* Flag that we've got a group from the number.  */ g = ( struct group * ) ( intptr_t ) ! NULL ; } else { g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } if ( g == NULL ) { ret = - 1 ; if ( show_errors ) { error ( 0 , errno , _ ( "invalid group %s" ) , quote ( tmp ) ) ; continue ; } break ; } if ( n_gids == n_gids_allocated ) gids = xpalloc ( gids , & n_gids_allocated , 1 , - 1 , sizeof * gids ) ; gids [ n_gids ++ ] = value ; } if ( ret == 0 && n_gids == 0 ) { if ( show_errors ) error ( 0 , 0 , _ ( "invalid group list %s" ) , quote ( groups ) ) ; ret = - 1 ; } * pgids = gids ; if ( ret == 0 ) * pn_gids = n_gids ; free ( buffer ) ; return ret ; } /* Return whether the passed path is equivalent to "/".
+   Note we don't compare against get_root_dev_ino() as "/"
+   could be bind mounted to a separate location.  */ static bool is_root ( char const * dir ) { char * resolved = canonicalize_file_name ( dir ) ; bool is_res_root = resolved && streq ( "/" , resolved ) ; free ( resolved ) ; return is_res_root ; } void usage ( int status ) { if ( status != EXIT_SUCCESS ) emit_try_help ( ) ; else { printf ( _ ( "\
+Usage: %s [OPTION]... NEWROOT [COMMAND [ARG]...]\n" ) , program_name ) ; fputs ( _ ( "\
+Run COMMAND with root directory set to NEWROOT.\n\
+\n\
+" ) , stdout ) ; oputs ( _ ( "\
+      --groups=G_LIST\n\
+         specify supplementary groups as g1,g2,..,gN\n\
+" ) ) ; oputs ( _ ( "\
+      --userspec=USER:GROUP\n\
+         specify user and group (ID or name) to use\n\
+" ) ) ; oprintf ( _ ( "\
+      --skip-chdir\n\
+         do not change working directory to %s\n\
+" ) , quoteaf ( "/" ) ) ; oputs ( HELP_OPTION_DESCRIPTION ) ; oputs ( VERSION_OPTION_DESCRIPTION ) ; fputs ( _ ( "\
+\n\
+If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
+" ) , stdout ) ; emit_exec_status ( PROGRAM_NAME ) ; emit_ancillary_info ( PROGRAM_NAME ) ; } exit ( status ) ; } int main ( int argc , char * * argv ) { int c ; /* Input user and groups spec.  */ char * userspec = NULL ; char const * username = NULL ; char const * groups = NULL ; bool skip_chdir = false ; /* Parsed user and group IDs.  */ uid_t uid = - 1 ; gid_t gid = - 1 ; GETGROUPS_T * out_gids = NULL ; idx_t n_gids = 0 ; initialize_main ( & argc , & argv ) ; set_program_name ( argv [ 0 ] ) ; setlocale ( LC_ALL , "" ) ; bindtextdomain ( PACKAGE , LOCALEDIR ) ; textdomain ( PACKAGE ) ; initialize_exit_failure ( EXIT_CANCELED ) ; atexit ( close_stdout ) ; while ( ( c = getopt_long ( argc , argv , "+" , long_opts , NULL ) ) != - 1 ) { switch ( c ) { case USERSPEC : { userspec = optarg ; /* Treat 'user:' just like 'user'
+               as we lookup the primary group by default
+               (and support doing so for UIDs as well as names.  */ idx_t userlen = strlen ( userspec ) ; if ( userlen && userspec [ userlen - 1 ] == ':' ) userspec [ userlen - 1 ] = '\0' ; break ; } case GROUPS : groups = optarg ; break ; case SKIP_CHDIR : skip_chdir = true ; break ; case_GETOPT_HELP_CHAR ; case_GETOPT_VERSION_CHAR ( PROGRAM_NAME , AUTHORS ) ; default : usage ( EXIT_CANCELED ) ; } } if ( argc <= optind ) { error ( 0 , 0 , _ ( "missing operand" ) ) ; usage ( EXIT_CANCELED ) ; } char const * newroot = argv [ optind ] ; bool is_oldroot = is_root ( newroot ) ; if ( ! is_oldroot && skip_chdir ) { error ( 0 , 0 , _ ( "option --skip-chdir only permitted if NEWROOT is old %s" ) , quoteaf ( "/" ) ) ; usage ( EXIT_CANCELED ) ; } if ( ! is_oldroot ) { /* We have to look up users and groups twice.
+        - First, outside the chroot to load potentially necessary passwd/group
+          parsing plugins (e.g. NSS);
+        - Second, inside chroot to redo parsing in case IDs are different.
+          Within chroot lookup is the main justification for having
+          the --user option supported by the chroot command itself.  */ if ( userspec ) ignore_value ( parse_user_spec ( userspec , & uid , & gid , NULL , NULL ) ) ; /* If no gid is supplied or looked up, do so now.
+        Also lookup the username for use with getgroups.  */ if ( uid_set ( uid )) & (!groups | gid_unset))
         {
             passwd* pwd;
-            if ((pwd = getpwuid(uid)))
+            if ((pwd = getpwuid))
             {
-                if (?(gid))
-                    gid = pwd.pw_gid;
-                username = pwd.pw_name;
+                username = pwd;
             };
         };
+        if (groups & *groups)
+            ignore_value(parse_additional_groups);
     };
-    if (?)
-        error(EXIT_CANCELED, (?__errno_location()), gettext("cannot chdir to root directory"));
+    if (chroot(newroot) != 0)
+        error;
+    if (! skip_chdir && chdir ( "/" ))
+        error;
     if (argc == optind + 1)
     {
         byte* shell = getenv("SHELL");
-        if (shell == ((void*)0))
+        if (shell == NULL)
             shell = bad_cast("/bin/sh");
         argv[0] = shell;
         argv[1] = bad_cast("-i");
-        argv[2] = ((void*)0);
     }
     else
     {
-        argv += optind + 1;
     };
     if (userspec)
     {
         bool;
-        byte* err;
+        byte* err = parse_user_spec_warn;
+        if (err)
+            error;
     };
-    if ((??(uid)) & (!groups | ?(gid)))
+    if ((?uid_unset ( x ) ) # define gid_set ( x ) ( ! gid_unset ( x ) ) enum { GROUPS = UCHAR_MAX + 1 , USERSPEC , SKIP_CHDIR } ; static struct option const long_opts [ ] = { { "groups" , required_argument , NULL , GROUPS } , { "userspec" , required_argument , NULL , USERSPEC } , { "skip-chdir" , no_argument , NULL , SKIP_CHDIR } , { GETOPT_HELP_OPTION_DECL } , { GETOPT_VERSION_OPTION_DECL } , { NULL , 0 , NULL , 0 } } ; # if ! HAVE_SETGROUPS /* At least Interix lacks supplemental group support.  */ static int setgroups ( size_t size , MAYBE_UNUSED gid_t const * list ) { if ( size == 0 ) { /* Return success when clearing supplemental groups
+         as ! HAVE_SETGROUPS should only be the case on
+         platforms that don't support supplemental groups.  */ return 0 ; } else { errno = ENOTSUP ; return - 1 ; } } # endif /* Determine the group IDs for the specified supplementary GROUPS,
+   which is a comma separated list of supplementary groups (names or numbers).
+   Allocate an array for the parsed IDs and store it in PGIDS,
+   which may be allocated even on parse failure.
+   Update the number of parsed groups in PN_GIDS on success.
+   Upon any failure return nonzero, and issue diagnostic if SHOW_ERRORS is true.
+   Otherwise return zero.  */ static int parse_additional_groups ( char const * groups , GETGROUPS_T * * pgids , idx_t * pn_gids , bool show_errors ) { GETGROUPS_T * gids = NULL ; idx_t n_gids_allocated = 0 ; idx_t n_gids = 0 ; char * buffer = xstrdup ( groups ) ; int ret = 0 ; for ( char const * tmp = strtok ( buffer , "," ) ; tmp ; tmp = strtok ( NULL , "," ) ) { struct group * g ; uintmax_t value ; if ( xstrtoumax ( tmp , NULL , 10 , & value , "" ) == LONGINT_OK && value <= MAXGID ) { while ( isspace ( to_uchar ( * tmp ) ) ) tmp ++ ; if ( * tmp != '+' ) { /* Handle the case where the name is numeric.  */ g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } /* Flag that we've got a group from the number.  */ g = ( struct group * ) ( intptr_t ) ! NULL ; } else { g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } if ( g == NULL ) { ret = - 1 ; if ( show_errors ) { error ( 0 , errno , _ ( "invalid group %s" ) , quote ( tmp ) ) ; continue ; } break ; } if ( n_gids == n_gids_allocated ) gids = xpalloc ( gids , & n_gids_allocated , 1 , - 1 , sizeof * gids ) ; gids [ n_gids ++ ] = value ; } if ( ret == 0 && n_gids == 0 ) { if ( show_errors ) error ( 0 , 0 , _ ( "invalid group list %s" ) , quote ( groups ) ) ; ret = - 1 ; } * pgids = gids ; if ( ret == 0 ) * pn_gids = n_gids ; free ( buffer ) ; return ret ; } /* Return whether the passed path is equivalent to "/".
+   Note we don't compare against get_root_dev_ino() as "/"
+   could be bind mounted to a separate location.  */ static bool is_root ( char const * dir ) { char * resolved = canonicalize_file_name ( dir ) ; bool is_res_root = resolved && streq ( "/" , resolved ) ; free ( resolved ) ; return is_res_root ; } void usage ( int status ) { if ( status != EXIT_SUCCESS ) emit_try_help ( ) ; else { printf ( _ ( "\
+Usage: %s [OPTION]... NEWROOT [COMMAND [ARG]...]\n" ) , program_name ) ; fputs ( _ ( "\
+Run COMMAND with root directory set to NEWROOT.\n\
+\n\
+" ) , stdout ) ; oputs ( _ ( "\
+      --groups=G_LIST\n\
+         specify supplementary groups as g1,g2,..,gN\n\
+" ) ) ; oputs ( _ ( "\
+      --userspec=USER:GROUP\n\
+         specify user and group (ID or name) to use\n\
+" ) ) ; oprintf ( _ ( "\
+      --skip-chdir\n\
+         do not change working directory to %s\n\
+" ) , quoteaf ( "/" ) ) ; oputs ( HELP_OPTION_DESCRIPTION ) ; oputs ( VERSION_OPTION_DESCRIPTION ) ; fputs ( _ ( "\
+\n\
+If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
+" ) , stdout ) ; emit_exec_status ( PROGRAM_NAME ) ; emit_ancillary_info ( PROGRAM_NAME ) ; } exit ( status ) ; } int main ( int argc , char * * argv ) { int c ; /* Input user and groups spec.  */ char * userspec = NULL ; char const * username = NULL ; char const * groups = NULL ; bool skip_chdir = false ; /* Parsed user and group IDs.  */ uid_t uid = - 1 ; gid_t gid = - 1 ; GETGROUPS_T * out_gids = NULL ; idx_t n_gids = 0 ; initialize_main ( & argc , & argv ) ; set_program_name ( argv [ 0 ] ) ; setlocale ( LC_ALL , "" ) ; bindtextdomain ( PACKAGE , LOCALEDIR ) ; textdomain ( PACKAGE ) ; initialize_exit_failure ( EXIT_CANCELED ) ; atexit ( close_stdout ) ; while ( ( c = getopt_long ( argc , argv , "+" , long_opts , NULL ) ) != - 1 ) { switch ( c ) { case USERSPEC : { userspec = optarg ; /* Treat 'user:' just like 'user'
+               as we lookup the primary group by default
+               (and support doing so for UIDs as well as names.  */ idx_t userlen = strlen ( userspec ) ; if ( userlen && userspec [ userlen - 1 ] == ':' ) userspec [ userlen - 1 ] = '\0' ; break ; } case GROUPS : groups = optarg ; break ; case SKIP_CHDIR : skip_chdir = true ; break ; case_GETOPT_HELP_CHAR ; case_GETOPT_VERSION_CHAR ( PROGRAM_NAME , AUTHORS ) ; default : usage ( EXIT_CANCELED ) ; } } if ( argc <= optind ) { error ( 0 , 0 , _ ( "missing operand" ) ) ; usage ( EXIT_CANCELED ) ; } char const * newroot = argv [ optind ] ; bool is_oldroot = is_root ( newroot ) ; if ( ! is_oldroot && skip_chdir ) { error ( 0 , 0 , _ ( "option --skip-chdir only permitted if NEWROOT is old %s" ) , quoteaf ( "/" ) ) ; usage ( EXIT_CANCELED ) ; } if ( ! is_oldroot ) { /* We have to look up users and groups twice.
+        - First, outside the chroot to load potentially necessary passwd/group
+          parsing plugins (e.g. NSS);
+        - Second, inside chroot to redo parsing in case IDs are different.
+          Within chroot lookup is the main justification for having
+          the --user option supported by the chroot command itself.  */ if ( userspec ) ignore_value ( parse_user_spec ( userspec , & uid , & gid , NULL , NULL ) ) ; /* If no gid is supplied or looked up, do so now.
+        Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } } if ( groups && * groups ) ignore_value ( parse_additional_groups ( groups , & out_gids , & n_gids , false ) ) ; # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & out_gids ) ; if ( 0 < ngroups ) n_gids = ngroups ; } # endif } if ( chroot ( newroot ) != 0 ) error ( EXIT_CANCELED , errno , _ ( "cannot change root directory to %s" ) , quoteaf ( newroot ) ) ; if ( ! skip_chdir && chdir ( "/" ) ) error ( EXIT_CANCELED , errno , _ ( "cannot chdir to root directory" ) ) ; if ( argc == optind + 1 ) { /* No command.  Run an interactive shell.  */ char * shell = getenv ( "SHELL" ) ; if ( shell == NULL ) shell = bad_cast ( "/bin/sh" ) ; argv [ 0 ] = shell ; argv [ 1 ] = bad_cast ( "-i" ) ; argv [ 2 ] = NULL ; } else { /* The following arguments give the command.  */ argv += optind + 1 ; } /* Attempt to set all three: supplementary groups, group ID, user ID.
+     Diagnose any failures.  If any have failed, exit before execvp.  */ if ( userspec ) { bool warn ; char const * err = parse_user_spec_warn ( userspec , & uid , & gid , NULL , NULL , & warn ) ; if ( err ) error ( warn ? 0 : EXIT_CANCELED , 0 , "%s" , ( err ) ) ; } /* If no gid is supplied or looked up, do so now.
+     Also lookup the username for use with getgroups.  */ if ( uid_set ( uid )) & (!groups | gid_unset))
     {
         passwd* pwd;
-        if ((pwd = getpwuid(uid)))
+        if ((pwd = getpwuid))
         {
-            if (?(gid))
-                gid = pwd.pw_gid;
-            username = pwd.pw_name;
+            username = pwd;
         }
-        elif (?(gid))
+        elif (gid_unset)
         {
-            error(EXIT_CANCELED, (?__errno_location()), gettext("no group specified for unknown uid: %ju"), (ulong)uid);
+            error;
         };
     };
     if (groups & *groups)
     {
-        if (?)
+        if (parse_additional_groups != 0)
         {
-            if (?)
+            if (! n_gids)
                 return EXIT_CANCELED;
         }
         else
     };
-    if (?)
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set supplemental groups"));
-    if ((??(gid)) & setgid(gid))
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set group-ID"));
-    if ((??(uid)) & setuid(uid))
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set user-ID"));
+    if (((?uid_unset ( x ) ) # define gid_set ( x ) ( ! gid_unset ( x ) ) enum { GROUPS = UCHAR_MAX + 1 , USERSPEC , SKIP_CHDIR } ; static struct option const long_opts [ ] = { { "groups" , required_argument , NULL , GROUPS } , { "userspec" , required_argument , NULL , USERSPEC } , { "skip-chdir" , no_argument , NULL , SKIP_CHDIR } , { GETOPT_HELP_OPTION_DECL } , { GETOPT_VERSION_OPTION_DECL } , { NULL , 0 , NULL , 0 } } ; # if ! HAVE_SETGROUPS /* At least Interix lacks supplemental group support.  */ static int setgroups ( size_t size , MAYBE_UNUSED gid_t const * list ) { if ( size == 0 ) { /* Return success when clearing supplemental groups
+         as ! HAVE_SETGROUPS should only be the case on
+         platforms that don't support supplemental groups.  */ return 0 ; } else { errno = ENOTSUP ; return - 1 ; } } # endif /* Determine the group IDs for the specified supplementary GROUPS,
+   which is a comma separated list of supplementary groups (names or numbers).
+   Allocate an array for the parsed IDs and store it in PGIDS,
+   which may be allocated even on parse failure.
+   Update the number of parsed groups in PN_GIDS on success.
+   Upon any failure return nonzero, and issue diagnostic if SHOW_ERRORS is true.
+   Otherwise return zero.  */ static int parse_additional_groups ( char const * groups , GETGROUPS_T * * pgids , idx_t * pn_gids , bool show_errors ) { GETGROUPS_T * gids = NULL ; idx_t n_gids_allocated = 0 ; idx_t n_gids = 0 ; char * buffer = xstrdup ( groups ) ; int ret = 0 ; for ( char const * tmp = strtok ( buffer , "," ) ; tmp ; tmp = strtok ( NULL , "," ) ) { struct group * g ; uintmax_t value ; if ( xstrtoumax ( tmp , NULL , 10 , & value , "" ) == LONGINT_OK && value <= MAXGID ) { while ( isspace ( to_uchar ( * tmp ) ) ) tmp ++ ; if ( * tmp != '+' ) { /* Handle the case where the name is numeric.  */ g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } /* Flag that we've got a group from the number.  */ g = ( struct group * ) ( intptr_t ) ! NULL ; } else { g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } if ( g == NULL ) { ret = - 1 ; if ( show_errors ) { error ( 0 , errno , _ ( "invalid group %s" ) , quote ( tmp ) ) ; continue ; } break ; } if ( n_gids == n_gids_allocated ) gids = xpalloc ( gids , & n_gids_allocated , 1 , - 1 , sizeof * gids ) ; gids [ n_gids ++ ] = value ; } if ( ret == 0 && n_gids == 0 ) { if ( show_errors ) error ( 0 , 0 , _ ( "invalid group list %s" ) , quote ( groups ) ) ; ret = - 1 ; } * pgids = gids ; if ( ret == 0 ) * pn_gids = n_gids ; free ( buffer ) ; return ret ; } /* Return whether the passed path is equivalent to "/".
+   Note we don't compare against get_root_dev_ino() as "/"
+   could be bind mounted to a separate location.  */ static bool is_root ( char const * dir ) { char * resolved = canonicalize_file_name ( dir ) ; bool is_res_root = resolved && streq ( "/" , resolved ) ; free ( resolved ) ; return is_res_root ; } void usage ( int status ) { if ( status != EXIT_SUCCESS ) emit_try_help ( ) ; else { printf ( _ ( "\
+Usage: %s [OPTION]... NEWROOT [COMMAND [ARG]...]\n" ) , program_name ) ; fputs ( _ ( "\
+Run COMMAND with root directory set to NEWROOT.\n\
+\n\
+" ) , stdout ) ; oputs ( _ ( "\
+      --groups=G_LIST\n\
+         specify supplementary groups as g1,g2,..,gN\n\
+" ) ) ; oputs ( _ ( "\
+      --userspec=USER:GROUP\n\
+         specify user and group (ID or name) to use\n\
+" ) ) ; oprintf ( _ ( "\
+      --skip-chdir\n\
+         do not change working directory to %s\n\
+" ) , quoteaf ( "/" ) ) ; oputs ( HELP_OPTION_DESCRIPTION ) ; oputs ( VERSION_OPTION_DESCRIPTION ) ; fputs ( _ ( "\
+\n\
+If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
+" ) , stdout ) ; emit_exec_status ( PROGRAM_NAME ) ; emit_ancillary_info ( PROGRAM_NAME ) ; } exit ( status ) ; } int main ( int argc , char * * argv ) { int c ; /* Input user and groups spec.  */ char * userspec = NULL ; char const * username = NULL ; char const * groups = NULL ; bool skip_chdir = false ; /* Parsed user and group IDs.  */ uid_t uid = - 1 ; gid_t gid = - 1 ; GETGROUPS_T * out_gids = NULL ; idx_t n_gids = 0 ; initialize_main ( & argc , & argv ) ; set_program_name ( argv [ 0 ] ) ; setlocale ( LC_ALL , "" ) ; bindtextdomain ( PACKAGE , LOCALEDIR ) ; textdomain ( PACKAGE ) ; initialize_exit_failure ( EXIT_CANCELED ) ; atexit ( close_stdout ) ; while ( ( c = getopt_long ( argc , argv , "+" , long_opts , NULL ) ) != - 1 ) { switch ( c ) { case USERSPEC : { userspec = optarg ; /* Treat 'user:' just like 'user'
+               as we lookup the primary group by default
+               (and support doing so for UIDs as well as names.  */ idx_t userlen = strlen ( userspec ) ; if ( userlen && userspec [ userlen - 1 ] == ':' ) userspec [ userlen - 1 ] = '\0' ; break ; } case GROUPS : groups = optarg ; break ; case SKIP_CHDIR : skip_chdir = true ; break ; case_GETOPT_HELP_CHAR ; case_GETOPT_VERSION_CHAR ( PROGRAM_NAME , AUTHORS ) ; default : usage ( EXIT_CANCELED ) ; } } if ( argc <= optind ) { error ( 0 , 0 , _ ( "missing operand" ) ) ; usage ( EXIT_CANCELED ) ; } char const * newroot = argv [ optind ] ; bool is_oldroot = is_root ( newroot ) ; if ( ! is_oldroot && skip_chdir ) { error ( 0 , 0 , _ ( "option --skip-chdir only permitted if NEWROOT is old %s" ) , quoteaf ( "/" ) ) ; usage ( EXIT_CANCELED ) ; } if ( ! is_oldroot ) { /* We have to look up users and groups twice.
+        - First, outside the chroot to load potentially necessary passwd/group
+          parsing plugins (e.g. NSS);
+        - Second, inside chroot to redo parsing in case IDs are different.
+          Within chroot lookup is the main justification for having
+          the --user option supported by the chroot command itself.  */ if ( userspec ) ignore_value ( parse_user_spec ( userspec , & uid , & gid , NULL , NULL ) ) ; /* If no gid is supplied or looked up, do so now.
+        Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } } if ( groups && * groups ) ignore_value ( parse_additional_groups ( groups , & out_gids , & n_gids , false ) ) ; # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & out_gids ) ; if ( 0 < ngroups ) n_gids = ngroups ; } # endif } if ( chroot ( newroot ) != 0 ) error ( EXIT_CANCELED , errno , _ ( "cannot change root directory to %s" ) , quoteaf ( newroot ) ) ; if ( ! skip_chdir && chdir ( "/" ) ) error ( EXIT_CANCELED , errno , _ ( "cannot chdir to root directory" ) ) ; if ( argc == optind + 1 ) { /* No command.  Run an interactive shell.  */ char * shell = getenv ( "SHELL" ) ; if ( shell == NULL ) shell = bad_cast ( "/bin/sh" ) ; argv [ 0 ] = shell ; argv [ 1 ] = bad_cast ( "-i" ) ; argv [ 2 ] = NULL ; } else { /* The following arguments give the command.  */ argv += optind + 1 ; } /* Attempt to set all three: supplementary groups, group ID, user ID.
+     Diagnose any failures.  If any have failed, exit before execvp.  */ if ( userspec ) { bool warn ; char const * err = parse_user_spec_warn ( userspec , & uid , & gid , NULL , NULL , & warn ) ; if ( err ) error ( warn ? 0 : EXIT_CANCELED , 0 , "%s" , ( err ) ) ; } /* If no gid is supplied or looked up, do so now.
+     Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } else if ( gid_unset ( gid ) ) { error ( EXIT_CANCELED , errno , _ ( "no group specified for unknown uid: %ju" ) , ( uintmax_t ) uid ) ; } } GETGROUPS_T * gids = out_gids ; GETGROUPS_T * in_gids = NULL ; if ( groups && * groups ) { if ( parse_additional_groups ( groups , & in_gids , & n_gids , ! n_gids ) != 0 ) { if ( ! n_gids ) return EXIT_CANCELED ; /* else look-up outside the chroot worked, then go with those.  */ } else gids = in_gids ; } # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & in_gids ) ; if ( ngroups <= 0 ) { if ( ! n_gids ) error ( EXIT_CANCELED , errno , _ ( "failed to get supplemental groups" ) ) ; /* else look-up outside the chroot worked, then go with those.  */ } else { n_gids = ngroups ; gids = in_gids ; } } # endif if ( ( uid_set ( uid )) | groups) & setgroups != 0)
+        error;
+    free;
+    free;
+    if ((?gid_unset ( x ) ) enum { GROUPS = UCHAR_MAX + 1 , USERSPEC , SKIP_CHDIR } ; static struct option const long_opts [ ] = { { "groups" , required_argument , NULL , GROUPS } , { "userspec" , required_argument , NULL , USERSPEC } , { "skip-chdir" , no_argument , NULL , SKIP_CHDIR } , { GETOPT_HELP_OPTION_DECL } , { GETOPT_VERSION_OPTION_DECL } , { NULL , 0 , NULL , 0 } } ; # if ! HAVE_SETGROUPS /* At least Interix lacks supplemental group support.  */ static int setgroups ( size_t size , MAYBE_UNUSED gid_t const * list ) { if ( size == 0 ) { /* Return success when clearing supplemental groups
+         as ! HAVE_SETGROUPS should only be the case on
+         platforms that don't support supplemental groups.  */ return 0 ; } else { errno = ENOTSUP ; return - 1 ; } } # endif /* Determine the group IDs for the specified supplementary GROUPS,
+   which is a comma separated list of supplementary groups (names or numbers).
+   Allocate an array for the parsed IDs and store it in PGIDS,
+   which may be allocated even on parse failure.
+   Update the number of parsed groups in PN_GIDS on success.
+   Upon any failure return nonzero, and issue diagnostic if SHOW_ERRORS is true.
+   Otherwise return zero.  */ static int parse_additional_groups ( char const * groups , GETGROUPS_T * * pgids , idx_t * pn_gids , bool show_errors ) { GETGROUPS_T * gids = NULL ; idx_t n_gids_allocated = 0 ; idx_t n_gids = 0 ; char * buffer = xstrdup ( groups ) ; int ret = 0 ; for ( char const * tmp = strtok ( buffer , "," ) ; tmp ; tmp = strtok ( NULL , "," ) ) { struct group * g ; uintmax_t value ; if ( xstrtoumax ( tmp , NULL , 10 , & value , "" ) == LONGINT_OK && value <= MAXGID ) { while ( isspace ( to_uchar ( * tmp ) ) ) tmp ++ ; if ( * tmp != '+' ) { /* Handle the case where the name is numeric.  */ g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } /* Flag that we've got a group from the number.  */ g = ( struct group * ) ( intptr_t ) ! NULL ; } else { g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } if ( g == NULL ) { ret = - 1 ; if ( show_errors ) { error ( 0 , errno , _ ( "invalid group %s" ) , quote ( tmp ) ) ; continue ; } break ; } if ( n_gids == n_gids_allocated ) gids = xpalloc ( gids , & n_gids_allocated , 1 , - 1 , sizeof * gids ) ; gids [ n_gids ++ ] = value ; } if ( ret == 0 && n_gids == 0 ) { if ( show_errors ) error ( 0 , 0 , _ ( "invalid group list %s" ) , quote ( groups ) ) ; ret = - 1 ; } * pgids = gids ; if ( ret == 0 ) * pn_gids = n_gids ; free ( buffer ) ; return ret ; } /* Return whether the passed path is equivalent to "/".
+   Note we don't compare against get_root_dev_ino() as "/"
+   could be bind mounted to a separate location.  */ static bool is_root ( char const * dir ) { char * resolved = canonicalize_file_name ( dir ) ; bool is_res_root = resolved && streq ( "/" , resolved ) ; free ( resolved ) ; return is_res_root ; } void usage ( int status ) { if ( status != EXIT_SUCCESS ) emit_try_help ( ) ; else { printf ( _ ( "\
+Usage: %s [OPTION]... NEWROOT [COMMAND [ARG]...]\n" ) , program_name ) ; fputs ( _ ( "\
+Run COMMAND with root directory set to NEWROOT.\n\
+\n\
+" ) , stdout ) ; oputs ( _ ( "\
+      --groups=G_LIST\n\
+         specify supplementary groups as g1,g2,..,gN\n\
+" ) ) ; oputs ( _ ( "\
+      --userspec=USER:GROUP\n\
+         specify user and group (ID or name) to use\n\
+" ) ) ; oprintf ( _ ( "\
+      --skip-chdir\n\
+         do not change working directory to %s\n\
+" ) , quoteaf ( "/" ) ) ; oputs ( HELP_OPTION_DESCRIPTION ) ; oputs ( VERSION_OPTION_DESCRIPTION ) ; fputs ( _ ( "\
+\n\
+If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
+" ) , stdout ) ; emit_exec_status ( PROGRAM_NAME ) ; emit_ancillary_info ( PROGRAM_NAME ) ; } exit ( status ) ; } int main ( int argc , char * * argv ) { int c ; /* Input user and groups spec.  */ char * userspec = NULL ; char const * username = NULL ; char const * groups = NULL ; bool skip_chdir = false ; /* Parsed user and group IDs.  */ uid_t uid = - 1 ; gid_t gid = - 1 ; GETGROUPS_T * out_gids = NULL ; idx_t n_gids = 0 ; initialize_main ( & argc , & argv ) ; set_program_name ( argv [ 0 ] ) ; setlocale ( LC_ALL , "" ) ; bindtextdomain ( PACKAGE , LOCALEDIR ) ; textdomain ( PACKAGE ) ; initialize_exit_failure ( EXIT_CANCELED ) ; atexit ( close_stdout ) ; while ( ( c = getopt_long ( argc , argv , "+" , long_opts , NULL ) ) != - 1 ) { switch ( c ) { case USERSPEC : { userspec = optarg ; /* Treat 'user:' just like 'user'
+               as we lookup the primary group by default
+               (and support doing so for UIDs as well as names.  */ idx_t userlen = strlen ( userspec ) ; if ( userlen && userspec [ userlen - 1 ] == ':' ) userspec [ userlen - 1 ] = '\0' ; break ; } case GROUPS : groups = optarg ; break ; case SKIP_CHDIR : skip_chdir = true ; break ; case_GETOPT_HELP_CHAR ; case_GETOPT_VERSION_CHAR ( PROGRAM_NAME , AUTHORS ) ; default : usage ( EXIT_CANCELED ) ; } } if ( argc <= optind ) { error ( 0 , 0 , _ ( "missing operand" ) ) ; usage ( EXIT_CANCELED ) ; } char const * newroot = argv [ optind ] ; bool is_oldroot = is_root ( newroot ) ; if ( ! is_oldroot && skip_chdir ) { error ( 0 , 0 , _ ( "option --skip-chdir only permitted if NEWROOT is old %s" ) , quoteaf ( "/" ) ) ; usage ( EXIT_CANCELED ) ; } if ( ! is_oldroot ) { /* We have to look up users and groups twice.
+        - First, outside the chroot to load potentially necessary passwd/group
+          parsing plugins (e.g. NSS);
+        - Second, inside chroot to redo parsing in case IDs are different.
+          Within chroot lookup is the main justification for having
+          the --user option supported by the chroot command itself.  */ if ( userspec ) ignore_value ( parse_user_spec ( userspec , & uid , & gid , NULL , NULL ) ) ; /* If no gid is supplied or looked up, do so now.
+        Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } } if ( groups && * groups ) ignore_value ( parse_additional_groups ( groups , & out_gids , & n_gids , false ) ) ; # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & out_gids ) ; if ( 0 < ngroups ) n_gids = ngroups ; } # endif } if ( chroot ( newroot ) != 0 ) error ( EXIT_CANCELED , errno , _ ( "cannot change root directory to %s" ) , quoteaf ( newroot ) ) ; if ( ! skip_chdir && chdir ( "/" ) ) error ( EXIT_CANCELED , errno , _ ( "cannot chdir to root directory" ) ) ; if ( argc == optind + 1 ) { /* No command.  Run an interactive shell.  */ char * shell = getenv ( "SHELL" ) ; if ( shell == NULL ) shell = bad_cast ( "/bin/sh" ) ; argv [ 0 ] = shell ; argv [ 1 ] = bad_cast ( "-i" ) ; argv [ 2 ] = NULL ; } else { /* The following arguments give the command.  */ argv += optind + 1 ; } /* Attempt to set all three: supplementary groups, group ID, user ID.
+     Diagnose any failures.  If any have failed, exit before execvp.  */ if ( userspec ) { bool warn ; char const * err = parse_user_spec_warn ( userspec , & uid , & gid , NULL , NULL , & warn ) ; if ( err ) error ( warn ? 0 : EXIT_CANCELED , 0 , "%s" , ( err ) ) ; } /* If no gid is supplied or looked up, do so now.
+     Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } else if ( gid_unset ( gid ) ) { error ( EXIT_CANCELED , errno , _ ( "no group specified for unknown uid: %ju" ) , ( uintmax_t ) uid ) ; } } GETGROUPS_T * gids = out_gids ; GETGROUPS_T * in_gids = NULL ; if ( groups && * groups ) { if ( parse_additional_groups ( groups , & in_gids , & n_gids , ! n_gids ) != 0 ) { if ( ! n_gids ) return EXIT_CANCELED ; /* else look-up outside the chroot worked, then go with those.  */ } else gids = in_gids ; } # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & in_gids ) ; if ( ngroups <= 0 ) { if ( ! n_gids ) error ( EXIT_CANCELED , errno , _ ( "failed to get supplemental groups" ) ) ; /* else look-up outside the chroot worked, then go with those.  */ } else { n_gids = ngroups ; gids = in_gids ; } } # endif if ( ( uid_set ( uid ) || groups ) && setgroups ( n_gids , gids ) != 0 ) error ( EXIT_CANCELED , errno , _ ( "failed to set supplemental groups" ) ) ; free ( in_gids ) ; free ( out_gids ) ; if ( gid_set ( gid )) & setgid)
+        error;
+    if ((?uid_unset ( x ) ) # define gid_set ( x ) ( ! gid_unset ( x ) ) enum { GROUPS = UCHAR_MAX + 1 , USERSPEC , SKIP_CHDIR } ; static struct option const long_opts [ ] = { { "groups" , required_argument , NULL , GROUPS } , { "userspec" , required_argument , NULL , USERSPEC } , { "skip-chdir" , no_argument , NULL , SKIP_CHDIR } , { GETOPT_HELP_OPTION_DECL } , { GETOPT_VERSION_OPTION_DECL } , { NULL , 0 , NULL , 0 } } ; # if ! HAVE_SETGROUPS /* At least Interix lacks supplemental group support.  */ static int setgroups ( size_t size , MAYBE_UNUSED gid_t const * list ) { if ( size == 0 ) { /* Return success when clearing supplemental groups
+         as ! HAVE_SETGROUPS should only be the case on
+         platforms that don't support supplemental groups.  */ return 0 ; } else { errno = ENOTSUP ; return - 1 ; } } # endif /* Determine the group IDs for the specified supplementary GROUPS,
+   which is a comma separated list of supplementary groups (names or numbers).
+   Allocate an array for the parsed IDs and store it in PGIDS,
+   which may be allocated even on parse failure.
+   Update the number of parsed groups in PN_GIDS on success.
+   Upon any failure return nonzero, and issue diagnostic if SHOW_ERRORS is true.
+   Otherwise return zero.  */ static int parse_additional_groups ( char const * groups , GETGROUPS_T * * pgids , idx_t * pn_gids , bool show_errors ) { GETGROUPS_T * gids = NULL ; idx_t n_gids_allocated = 0 ; idx_t n_gids = 0 ; char * buffer = xstrdup ( groups ) ; int ret = 0 ; for ( char const * tmp = strtok ( buffer , "," ) ; tmp ; tmp = strtok ( NULL , "," ) ) { struct group * g ; uintmax_t value ; if ( xstrtoumax ( tmp , NULL , 10 , & value , "" ) == LONGINT_OK && value <= MAXGID ) { while ( isspace ( to_uchar ( * tmp ) ) ) tmp ++ ; if ( * tmp != '+' ) { /* Handle the case where the name is numeric.  */ g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } /* Flag that we've got a group from the number.  */ g = ( struct group * ) ( intptr_t ) ! NULL ; } else { g = getgrnam ( tmp ) ; if ( g != NULL ) value = g -> gr_gid ; } if ( g == NULL ) { ret = - 1 ; if ( show_errors ) { error ( 0 , errno , _ ( "invalid group %s" ) , quote ( tmp ) ) ; continue ; } break ; } if ( n_gids == n_gids_allocated ) gids = xpalloc ( gids , & n_gids_allocated , 1 , - 1 , sizeof * gids ) ; gids [ n_gids ++ ] = value ; } if ( ret == 0 && n_gids == 0 ) { if ( show_errors ) error ( 0 , 0 , _ ( "invalid group list %s" ) , quote ( groups ) ) ; ret = - 1 ; } * pgids = gids ; if ( ret == 0 ) * pn_gids = n_gids ; free ( buffer ) ; return ret ; } /* Return whether the passed path is equivalent to "/".
+   Note we don't compare against get_root_dev_ino() as "/"
+   could be bind mounted to a separate location.  */ static bool is_root ( char const * dir ) { char * resolved = canonicalize_file_name ( dir ) ; bool is_res_root = resolved && streq ( "/" , resolved ) ; free ( resolved ) ; return is_res_root ; } void usage ( int status ) { if ( status != EXIT_SUCCESS ) emit_try_help ( ) ; else { printf ( _ ( "\
+Usage: %s [OPTION]... NEWROOT [COMMAND [ARG]...]\n" ) , program_name ) ; fputs ( _ ( "\
+Run COMMAND with root directory set to NEWROOT.\n\
+\n\
+" ) , stdout ) ; oputs ( _ ( "\
+      --groups=G_LIST\n\
+         specify supplementary groups as g1,g2,..,gN\n\
+" ) ) ; oputs ( _ ( "\
+      --userspec=USER:GROUP\n\
+         specify user and group (ID or name) to use\n\
+" ) ) ; oprintf ( _ ( "\
+      --skip-chdir\n\
+         do not change working directory to %s\n\
+" ) , quoteaf ( "/" ) ) ; oputs ( HELP_OPTION_DESCRIPTION ) ; oputs ( VERSION_OPTION_DESCRIPTION ) ; fputs ( _ ( "\
+\n\
+If no command is given, run '\"$SHELL\" -i' (default: '/bin/sh -i').\n\
+" ) , stdout ) ; emit_exec_status ( PROGRAM_NAME ) ; emit_ancillary_info ( PROGRAM_NAME ) ; } exit ( status ) ; } int main ( int argc , char * * argv ) { int c ; /* Input user and groups spec.  */ char * userspec = NULL ; char const * username = NULL ; char const * groups = NULL ; bool skip_chdir = false ; /* Parsed user and group IDs.  */ uid_t uid = - 1 ; gid_t gid = - 1 ; GETGROUPS_T * out_gids = NULL ; idx_t n_gids = 0 ; initialize_main ( & argc , & argv ) ; set_program_name ( argv [ 0 ] ) ; setlocale ( LC_ALL , "" ) ; bindtextdomain ( PACKAGE , LOCALEDIR ) ; textdomain ( PACKAGE ) ; initialize_exit_failure ( EXIT_CANCELED ) ; atexit ( close_stdout ) ; while ( ( c = getopt_long ( argc , argv , "+" , long_opts , NULL ) ) != - 1 ) { switch ( c ) { case USERSPEC : { userspec = optarg ; /* Treat 'user:' just like 'user'
+               as we lookup the primary group by default
+               (and support doing so for UIDs as well as names.  */ idx_t userlen = strlen ( userspec ) ; if ( userlen && userspec [ userlen - 1 ] == ':' ) userspec [ userlen - 1 ] = '\0' ; break ; } case GROUPS : groups = optarg ; break ; case SKIP_CHDIR : skip_chdir = true ; break ; case_GETOPT_HELP_CHAR ; case_GETOPT_VERSION_CHAR ( PROGRAM_NAME , AUTHORS ) ; default : usage ( EXIT_CANCELED ) ; } } if ( argc <= optind ) { error ( 0 , 0 , _ ( "missing operand" ) ) ; usage ( EXIT_CANCELED ) ; } char const * newroot = argv [ optind ] ; bool is_oldroot = is_root ( newroot ) ; if ( ! is_oldroot && skip_chdir ) { error ( 0 , 0 , _ ( "option --skip-chdir only permitted if NEWROOT is old %s" ) , quoteaf ( "/" ) ) ; usage ( EXIT_CANCELED ) ; } if ( ! is_oldroot ) { /* We have to look up users and groups twice.
+        - First, outside the chroot to load potentially necessary passwd/group
+          parsing plugins (e.g. NSS);
+        - Second, inside chroot to redo parsing in case IDs are different.
+          Within chroot lookup is the main justification for having
+          the --user option supported by the chroot command itself.  */ if ( userspec ) ignore_value ( parse_user_spec ( userspec , & uid , & gid , NULL , NULL ) ) ; /* If no gid is supplied or looked up, do so now.
+        Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } } if ( groups && * groups ) ignore_value ( parse_additional_groups ( groups , & out_gids , & n_gids , false ) ) ; # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & out_gids ) ; if ( 0 < ngroups ) n_gids = ngroups ; } # endif } if ( chroot ( newroot ) != 0 ) error ( EXIT_CANCELED , errno , _ ( "cannot change root directory to %s" ) , quoteaf ( newroot ) ) ; if ( ! skip_chdir && chdir ( "/" ) ) error ( EXIT_CANCELED , errno , _ ( "cannot chdir to root directory" ) ) ; if ( argc == optind + 1 ) { /* No command.  Run an interactive shell.  */ char * shell = getenv ( "SHELL" ) ; if ( shell == NULL ) shell = bad_cast ( "/bin/sh" ) ; argv [ 0 ] = shell ; argv [ 1 ] = bad_cast ( "-i" ) ; argv [ 2 ] = NULL ; } else { /* The following arguments give the command.  */ argv += optind + 1 ; } /* Attempt to set all three: supplementary groups, group ID, user ID.
+     Diagnose any failures.  If any have failed, exit before execvp.  */ if ( userspec ) { bool warn ; char const * err = parse_user_spec_warn ( userspec , & uid , & gid , NULL , NULL , & warn ) ; if ( err ) error ( warn ? 0 : EXIT_CANCELED , 0 , "%s" , ( err ) ) ; } /* If no gid is supplied or looked up, do so now.
+     Also lookup the username for use with getgroups.  */ if ( uid_set ( uid ) && ( ! groups || gid_unset ( gid ) ) ) { const struct passwd * pwd ; if ( ( pwd = getpwuid ( uid ) ) ) { if ( gid_unset ( gid ) ) gid = pwd -> pw_gid ; username = pwd -> pw_name ; } else if ( gid_unset ( gid ) ) { error ( EXIT_CANCELED , errno , _ ( "no group specified for unknown uid: %ju" ) , ( uintmax_t ) uid ) ; } } GETGROUPS_T * gids = out_gids ; GETGROUPS_T * in_gids = NULL ; if ( groups && * groups ) { if ( parse_additional_groups ( groups , & in_gids , & n_gids , ! n_gids ) != 0 ) { if ( ! n_gids ) return EXIT_CANCELED ; /* else look-up outside the chroot worked, then go with those.  */ } else gids = in_gids ; } # if HAVE_SETGROUPS else if ( ! groups && gid_set ( gid ) && username ) { int ngroups = xgetgroups ( username , gid , & in_gids ) ; if ( ngroups <= 0 ) { if ( ! n_gids ) error ( EXIT_CANCELED , errno , _ ( "failed to get supplemental groups" ) ) ; /* else look-up outside the chroot worked, then go with those.  */ } else { n_gids = ngroups ; gids = in_gids ; } } # endif if ( ( uid_set ( uid ) || groups ) && setgroups ( n_gids , gids ) != 0 ) error ( EXIT_CANCELED , errno , _ ( "failed to set supplemental groups" ) ) ; free ( in_gids ) ; free ( out_gids ) ; if ( gid_set ( gid ) && setgid ( gid ) ) error ( EXIT_CANCELED , errno , _ ( "failed to set group-ID" ) ) ; if ( uid_set ( uid )) & setuid)
+        error;
     execvp(argv[0], argv);
-    int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-    error(0, (?__errno_location()), gettext("failed to run command %s"), quote(argv[0]));
+    int exit_status;
+    error;
     return exit_status;
 };

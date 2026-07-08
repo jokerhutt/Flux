@@ -41,25 +41,26 @@ macro OVERFLOW_OK
 };
 
 extern byte* filter_command;
-int filter_pid = pid_t;
+extern int filter_pid;
 extern int* open_pipes;
 extern int open_pipes_alloc;
 extern int n_open_pipes;
-extern bool default_SIGPIPE;
+extern int default_SIGPIPE;
 byte* outbase = "x";
 extern byte* outfile;
 extern byte* outfile_mid;
-bool suffix_auto = 0;
+extern int suffix_auto;
 extern int suffix_length;
 byte* suffix_alphabet = "abcdefghijklmnopqrstuvwxyz";
 extern byte* numeric_suffix_start;
 extern byte* additional_suffix;
 byte* infile = "-";
+struct stat;
 stat in_stat_buf = stat;
 int output_desc = -1;
-extern bool verbose;
-extern bool elide_empty_files;
-extern bool unbuffered;
+extern int verbose;
+extern int elide_empty_files;
+extern int unbuffered;
 int eolchar = -1;
 enum Split_type
 {
@@ -73,44 +74,36 @@ enum Split_type
     type_rr
 };
 
-uint VERBOSE_OPTION = 128;
-uint FILTER_OPTION = 129;
-uint IO_BLKSIZE_OPTION = 130;
-uint ADDITIONAL_SUFFIX_OPTION = 131;
+uint VERBOSE_OPTION = 0;
+uint FILTER_OPTION = 1;
+uint IO_BLKSIZE_OPTION = 2;
+uint ADDITIONAL_SUFFIX_OPTION = 3;
 
-option[17] longopts = option;
-cdecl ignorable(int err) -> bool
+struct option;
+extern int longopts;
+cdecl ignorable(int err) -> int
 {
-    return filter_command & err == 0;
 };
 
-cdecl set_suffix_length(long n_units, Split_type split_type) -> void
+cdecl set_suffix_length(int n_units, Split_type split_type) -> void
 {
     int suffix_length_needed = 0;
-    if (numeric_suffix_start)
-        suffix_auto = 0;
     if (split_type == type_chunk_bytes | split_type == type_chunk_lines | split_type == type_rr)
     {
-        long n_units_end = n_units - 1;
         if (numeric_suffix_start)
         {
-            long n_start;
-            if (?)
+            if (e == LONGINT_OK && n_start < n_units)
             {
-                if (__builtin_add_overflow((n_units_end), (n_start), (@n_units_end)))
-                    n_units_end = (0);
             };
         };
         do
             suffix_length_needed++;
-        while (?);
-        suffix_auto = 0;
+        while (n_units_end /= alphabet_len);
     };
-    if (?)
+    if (suffix_length)
     {
-        if (? < suffix_length_needed)
-            error(0, 0, gettext("the suffix length needs to be at least %d"), suffix_length_needed);
-        suffix_auto = 0;
+        if (suffix_length < suffix_length_needed)
+            error;
         return void;
     }
     else
@@ -119,162 +112,124 @@ cdecl set_suffix_length(long n_units, Split_type split_type) -> void
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Output pieces of FILE to PREFIXaa, PREFIXab, ...;\n\
-default size is 1000 lines, and default PREFIX is 'x'.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oprintf_("split", gettext("\
-  -a, --suffix-length=N\n\
-         generate suffixes of length N (default %d)\n\
+        oprintf_("split", gettext("\
+  -a, --suffix-length=N\n\
+         generate suffixes of length N (default %d)\n\
 "), 2);
-        oputs_("split", gettext("\
-      --additional-suffix=SUFFIX\n\
-         append an additional SUFFIX to file names\n\
+        oputs_("split", gettext("\
+      --additional-suffix=SUFFIX\n\
+         append an additional SUFFIX to file names\n\
 "));
-        oputs_("split", gettext("\
-  -b, --bytes=SIZE\n\
-         put SIZE bytes per output file\n\
+        oputs_("split", gettext("\
+  -b, --bytes=SIZE\n\
+         put SIZE bytes per output file\n\
 "));
-        oputs_("split", gettext("\
-  -C, --line-bytes=SIZE\n\
-         put at most SIZE bytes of records per output file\n\
+        oputs_("split", gettext("\
+  -C, --line-bytes=SIZE\n\
+         put at most SIZE bytes of records per output file\n\
 "));
-        oputs_("split", gettext("\
-  -d\n\
-         use numeric suffixes starting at 0, not alphabetic\n\
+        oputs_("split", gettext("\
+  -d\n\
+         use numeric suffixes starting at 0, not alphabetic\n\
 "));
-        oputs_("split", gettext("\
-      --numeric-suffixes[=FROM]\n\
-         same as -d, but allow setting the start value\n\
+        oputs_("split", gettext("\
+      --numeric-suffixes[=FROM]\n\
+         same as -d, but allow setting the start value\n\
 "));
-        oputs_("split", gettext("\
-  -x\n\
-         use hex suffixes starting at 0, not alphabetic\n\
+        oputs_("split", gettext("\
+  -x\n\
+         use hex suffixes starting at 0, not alphabetic\n\
 "));
-        oputs_("split", gettext("\
-      --hex-suffixes[=FROM]\n\
-         same as -x, but allow setting the start value\n\
+        oputs_("split", gettext("\
+      --hex-suffixes[=FROM]\n\
+         same as -x, but allow setting the start value\n\
 "));
-        oputs_("split", gettext("\
-  -e, --elide-empty-files\n\
-         do not generate empty output files with '-n'\n\
+        oputs_("split", gettext("\
+  -e, --elide-empty-files\n\
+         do not generate empty output files with '-n'\n\
 "));
-        oputs_("split", gettext("\
-      --filter=COMMAND\n\
-         write to shell COMMAND; file name is $FILE\n\
+        oputs_("split", gettext("\
+      --filter=COMMAND\n\
+         write to shell COMMAND; file name is $FILE\n\
 "));
-        oputs_("split", gettext("\
-  -l, --lines=NUMBER\n\
-         put NUMBER lines/records per output file\n\
+        oputs_("split", gettext("\
+  -l, --lines=NUMBER\n\
+         put NUMBER lines/records per output file\n\
 "));
-        oputs_("split", gettext("\
-  -n, --number=CHUNKS\n\
-         generate CHUNKS output files; see explanation below\n\
+        oputs_("split", gettext("\
+  -n, --number=CHUNKS\n\
+         generate CHUNKS output files; see explanation below\n\
 "));
-        oputs_("split", gettext("\
-  -t, --separator=SEP\n\
-         use SEP instead of newline as the record separator;\n\
-         '\\0' (zero) specifies the NUL character\n\
+        oputs_("split", gettext("\
+  -t, --separator=SEP\n\
+         use SEP instead of newline as the record separator;\n\
+         '\\0' (zero) specifies the NUL character\n\
 "));
-        oputs_("split", gettext("\
-  -u, --unbuffered\n\
-         immediately copy input to output with '-n r/...'\n\
+        oputs_("split", gettext("\
+  -u, --unbuffered\n\
+         immediately copy input to output with '-n r/...'\n\
 "));
-        oputs_("split", gettext("\
-      --verbose\n\
-         print a diagnostic just before each output file is opened\n\
+        oputs_("split", gettext("\
+      --verbose\n\
+         print a diagnostic just before each output file is opened\n\
 "));
         oputs_("split", gettext("      --help\n         display this help and exit\n"));
         oputs_("split", gettext("      --version\n         output version information and exit\n"));
         emit_size_note();
-        fputs(gettext("\n\
-CHUNKS may be:\n\
-  N       split into N files based on size of input\n\
-  K/N     output Kth of N to standard output\n\
-  l/N     split into N files without splitting lines/records\n\
-  l/K/N   output Kth of N to standard output without splitting lines/records\n\
-  r/N     like 'l' but use round robin distribution\n\
-  r/K/N   likewise but only output Kth of N to standard output\n\
-"), stdout);
-        fputs(gettext("\n\
--n (except -nr) will buffer to $TMPDIR, defaulting to /tmp,\n\
-if the input size cannot easily be determined.\n\
-"), stdout);
+        fputs;
+        fputs;
         emit_ancillary_info("split");
     };
     exit(status);
 };
 
-cdecl copy_to_tmpfile(int fd, byte* buf, int bufsize) -> long
+cdecl copy_to_tmpfile(int fd, byte* buf, int bufsize) -> int
 {
-    _IO_FILE* tmp;
-    if (!temp_stream(@tmp, ((void*)0)))
+    if (!temp_stream)
         return -1;
-    long copied = 0;
-    long r;
-    while (0 < (r = read(fd, buf, ?)))
+    while (0 < ( r = read ( fd , buf , bufsize ) ))
     {
-        if (fwrite(buf, 1, r, tmp) != r)
+        if (fwrite ( buf , 1 , r , tmp ) != r)
             return -1;
-        if (__builtin_add_overflow((copied), (r), (@copied)))
+        if (ckd_add)
         {
-            (?__errno_location()) ? 0;
             return -1;
         };
     };
-    if (r < 0)
-        return r;
-    r = dup2(fileno(tmp), fd);
-    if (r < 0)
-        return r;
-    if (fclose(tmp) < 0)
+    if (fclose < 0)
         return -1;
-    return copied;
 };
 
-cdecl input_file_size(int fd, stat* st, byte* buf, int bufsize) -> long
+cdecl input_file_size(int fd, stat* st, byte* buf, int bufsize) -> int
 {
-    long size = 0;
     do
     {
-        long n_read = read(fd, buf + size, ? - size);
-        if (n_read <= 0)
-            return n_read < 0 ? n_read : size;
-        size += n_read;
     }
-    while (size < ?);
-    long cur;
-    long end;
-    if ((?(st) & st.st_size < size) | (cur = lseek(fd, 0, 0)) < 0 | cur < size /* E.g., /dev/zero on GNU/Linux.  */ (end = lseek(fd, 0, 0)) < 0)
+    while (size < bufsize);
+    if (( usable_st_size ( st ) && st -> st_size < size ) || ( cur = lseek ( fd , 0 , SEEK_CUR ) ) < 0 || cur < size /* E.g., /dev/zero on GNU/Linux.  */ || ( end = lseek ( fd , 0 , SEEK_END ) ) < 0)
     {
-        byte* tmpbuf = xmalloc(?);
-        end = ?(fd, tmpbuf, ?);
+        byte* tmpbuf = xmalloc(bufsize);
         free(tmpbuf);
-        if (end < 0)
-            return end;
-        cur = 0;
     };
-    if (end == TYPE_MAXIMUM(?) /* E.g., /dev/zero on GNU/Hurd.  */ (cur < end & __builtin_add_overflow((size), (end ? cur), (@size))))
+    if (end == OFF_T_MAX /* E.g., /dev/zero on GNU/Hurd.  */ || ( cur < end && ckd_add ( & size , size , end - cur ) ))
     {
-        (?__errno_location()) ? 0;
         return -1;
     };
     if (cur < end)
     {
-        long r = lseek(fd, cur, 0);
-        if (r < 0)
-            return r;
     };
-    return size;
 };
 
 cdecl next_file_name() -> void
@@ -285,52 +240,50 @@ cdecl next_file_name() -> void
     int addsuf_length;
     if (!outfile)
     {
-        bool overflow;
-        bool widen;
+        bool;
         label new_name:
-        widen = ?!?;
-        if (!widen)
+        if (! widen)
         {
             outbase_length = strlen(outbase);
             addsuf_length = additional_suffix ? strlen(additional_suffix) : 0;
-            overflow = __builtin_add_overflow((? ? ?), (?), (@?));
         }
         else
         {
-            overflow = __builtin_add_overflow((?), (2), (@?));
             suffix_length++;
         };
         if (overflow)
             xalloc_die();
-        if (!widen)
-            memcpy(outfile, outbase, ?);
+        outfile = xirealloc;
+        if (! widen)
+            memcpy(outfile, outbase, outbase_length);
         else
         {
-            outfile[?] = suffix_alphabet[?[0]];
+            outfile[outbase_length] = suffix_alphabet[sufindex[0]];
             outbase_length++;
         };
-        outfile_mid = outfile + ?;
-        memset(outfile_mid, suffix_alphabet[0], ?);
+        outfile_mid = outfile + outbase_length;
+        memset(outfile_mid, suffix_alphabet[0], suffix_length);
         if (additional_suffix)
-            memcpy(outfile_mid + ?, additional_suffix, ?);
-        outfile[?] = 0;
-        free(?);
-        sufindex = xicalloc(?, (sizeof * sufindex / 8));
+            memcpy(outfile_mid + suffix_length, additional_suffix, addsuf_length);
+        outfile[outfile_length] = 0;
+        free(sufindex);
+        sufindex = xicalloc(suffix_length, (sizeof * sufindex / 8));
         if (numeric_suffix_start)
         {
-            affirm(!widen);
+            affirm;
+            memcpy;
         };
     }
     else
     {
-        while (?)
+        while (i -- != 0)
         {
-            if (?)
+            if (suffix_auto && i == 0 && ! suffix_alphabet [ sufindex [ 0 ] + 1 ])
                 goto new_name;
-            if (?)
+            if (outfile_mid [ i ])
                 return void;
         };
-        error(0, 0, gettext("output file suffixes exhausted"));
+        error;
     };
 };
 
@@ -338,57 +291,69 @@ cdecl create(byte* name) -> int
 {
     if (!filter_command)
     {
+        if (verbose)
+            fprintf;
         int oflags;
-        int fd = open(name, oflags `| 0, (0 ? 0 ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0)));
-        if (0 <= fd | (?__errno_location()) ? 0)
+        int fd = open;
+        if (0 <= fd || errno != EEXIST)
             return fd;
-        fd = open(name, oflags, (0 ? 0 ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0)));
+        fd = open;
         if (fd < 0)
             return fd;
         stat out_stat_buf;
+        if (fstat(fd, @out_stat_buf) != 0)
+            error;
+        if (psame_inode(@in_stat_buf, @out_stat_buf))
+            error;
+        if (ftruncate(fd, 0) < 0 & (S_ISREG(out_stat_buf.) | S_TYPEISSHM(@out_stat_buf)))
+            error;
         return fd;
     }
     else
     {
         if (setenv("FILE", name, 1) != 0)
-            error(0, (?__errno_location()), gettext("failed to set FILE environment variable"));
+            error;
+        if (verbose)
+            fprintf;
         int result;
         int[2] fd_pair = 2;
-        int child_pid;
-        posix_spawnattr_t attr;
-        posix_spawn_file_actions_t actions;
-        __sigset_t set;
-        sigemptyset(@set);
+        sigemptyset;
         if (default_SIGPIPE)
-            sigaddset(@set, 0);
-        if (?)
-            error(0, result, gettext("posix_spawn initialization failed"));
+            sigaddset;
+        if ((result = posix_spawnattr_init) | (result = posix_spawnattr_setflags) | (result = posix_spawnattr_setsigdefault) | (result = posix_spawn_file_actions_init))
+            error;
         if (pipe(fd_pair) != 0)
-            error(0, (?__errno_location()), gettext("failed to create pipe"));
+            error;
         for (int i = 0; i < n_open_pipes; ++i)
         {};
-        if (result | (result = posix_spawn_file_actions_addclose(@actions, fd_pair[1])) | (fd_pair[0] != 0 & ((result = posix_spawn_file_actions_adddup2(@actions, fd_pair[0], 0)) | (result = posix_spawn_file_actions_addclose(@actions, fd_pair[0])))))
-            error(0, result, gettext("posix_spawn setup failed"));
+        if (result || ( result = posix_spawn_file_actions_addclose ( & actions , fd_pair [ 1 ] ) ) || ( fd_pair [ 0 ] != STDIN_FILENO && ( ( result = posix_spawn_file_actions_adddup2 ( & actions , fd_pair [ 0 ] , STDIN_FILENO ) ) || ( result = posix_spawn_file_actions_addclose ( & actions , fd_pair [ 0 ] ) ) ) ))
+            error;
         byte* shell_prog = getenv("SHELL");
-        if (shell_prog == ((void*)0))
+        if (shell_prog == NULL)
             shell_prog = "/bin/sh";
-        byte*[4] argv = {last_component(shell_prog), "-c", filter_command, ((void*)0)};
+        byte** argv;
+        result = posix_spawn;
         if (result != 0)
-            error(0, (?__errno_location()), gettext("failed to run command: \"%s -c %s\""), shell_prog, filter_command);
-        posix_spawnattr_destroy(@attr);
-        posix_spawn_file_actions_destroy(@actions);
+            error;
+        posix_spawnattr_destroy;
+        posix_spawn_file_actions_destroy;
         if (close(fd_pair[0]) != 0)
-            error(0, (?__errno_location()), gettext("failed to close input pipe"));
-        filter_pid = child_pid;
+            error;
+        if (n_open_pipes == open_pipes_alloc)
+            open_pipes = xpalloc(open_pipes, @open_pipes_alloc, 1, MIN, (sizeof * open_pipes / 8));
         open_pipes[n_open_pipes++] = fd_pair[1];
         return fd_pair[1];
     };
 };
 
-cdecl closeout(_IO_FILE* fp, int fd, int pid, byte* name) -> void
+cdecl closeout(int* fp, int fd, int pid, byte* name) -> void
 {
+    if (fp != NULL && fclose ( fp ) != 0 && ! ignorable ( errno ))
+        error;
     if (fd >= 0)
     {
+        if (fp == NULL && close ( fd ) < 0)
+            error;
         for (int j = 0; j < n_open_pipes; ++j)
         {
             if (open_pipes[j] == fd)
@@ -402,310 +367,271 @@ cdecl closeout(_IO_FILE* fp, int fd, int pid, byte* name) -> void
     {
         int wstatus;
         if (waitpid(pid, @wstatus, 0) < 0)
-            error(0, (?__errno_location()), gettext("waiting for child process"));
-        elif ((((byte)(((wstatus) ? 0) ? 0) ? 0) ? 0))
+            error;
+        elif (WIFSIGNALED(wstatus))
         {
-            int sig = ((wstatus) ? 0);
-            if (sig != 0)
+            int sig = WTERMSIG(wstatus);
+            if (sig != SIGPIPE)
             {
-                byte signame;
-                if (sig2str(sig, ?) != 0)
-                    sprintf(?, "%d", sig);
+                void* /* untranslated: char[<recovery-expr>(MAX, <recovery-expr>(INT_BUFSIZE_BOUND))] */ signame = MAX;
+                if (sig2str(sig, signame) != 0)
+                    sprintf(signame, "%d", sig);
+                error(sig + 128, 0, gettext("with FILE=%s, signal %s from command: %s"), quotearg_n_style_colon, signame, filter_command);
             };
         };
         else
-            if ((((wstatus) ? 0) ? 0))
+            if (WIFEXITED(wstatus))
             {
-                int ex = (((wstatus) ? 0) ? 0);
+                int ex = WEXITSTATUS(wstatus);
+                if (ex != 0)
+                    error(ex, 0, gettext("with FILE=%s, exit %d from command: %s"), quotearg_n_style_colon, ex, filter_command);
             }
             else
             {
-                error(0, 0, gettext("unknown status from command (0x%X)"), wstatus + 0u);
+                error;
             };
     };
 };
 
-cdecl cwrite(bool new_file_flag, byte* bp, int bytes) -> bool
+cdecl cwrite(int new_file_flag, byte* bp, int bytes) -> int
 {
     if (new_file_flag)
     {
-        if (!bp & ? == 0 & elide_empty_files)
-            return 0;
-        closeout(((void*)0), output_desc, filter_pid, outfile);
+        closeout;
         next_file_name();
         output_desc = create(outfile);
+        if (output_desc < 0)
+            error;
     };
-    if (full_write(output_desc, bp, ?) == ?)
-        return 0;
+    if (full_write(output_desc, bp, bytes) == bytes)
     else
     {
-        return 0;
+        if (!ignorable)
+            error;
     };
 };
 
-cdecl bytes_split(long n_bytes, long rem_bytes, byte* buf, int bufsize, long initial_read, long max_files) -> void
+cdecl bytes_split(int n_bytes, int rem_bytes, byte* buf, int bufsize, int initial_read, int max_files) -> void
 {
-    bool new_file_flag = 0;
-    bool filter_ok = 0;
-    long opened = 0;
-    long to_write = n_bytes + (0 < rem_bytes);
-    bool eof = !to_write;
-    while (!eof)
+    bool;
+    bool;
+    bool;
+    while (! eof)
     {
-        long n_read;
         if (0 <= initial_read)
         {
-            n_read = initial_read;
             initial_read = -1;
-            eof = n_read < ?;
         }
         else
         {
-            if (!filter_ok & 0 <= lseek(0, to_write, 0))
+            if (! filter_ok && 0 <= lseek ( STDIN_FILENO , to_write , SEEK_CUR ))
             {
-                to_write = n_bytes + (opened + 1 < rem_bytes);
-                new_file_flag = 0;
             };
-            n_read = read(0, buf, ?);
-            eof = n_read == 0;
+            if (n_read < 0)
+                error;
         };
         byte* bp_out = buf;
-        while (0 < to_write & to_write <= n_read)
+        while (0 < to_write && to_write <= n_read)
         {
-            if (filter_ok | new_file_flag)
-                filter_ok = ?(new_file_flag, bp_out, to_write);
-            opened += new_file_flag;
-            new_file_flag = !max_files | (opened < max_files);
-            if (!filter_ok & !new_file_flag)
+            if (! filter_ok && ! new_file_flag)
             {
-                n_read = 0;
-                eof = 0;
                 break;
             };
-            bp_out += to_write;
-            n_read -= to_write;
-            to_write = n_bytes + (opened < rem_bytes);
         };
         if (0 < n_read)
         {
-            if (filter_ok | new_file_flag)
-                filter_ok = ?(new_file_flag, bp_out, n_read);
-            opened += new_file_flag;
-            new_file_flag = 0;
-            if (!filter_ok & opened == max_files)
+            if (! filter_ok && opened == max_files)
             {
                 break;
             };
-            to_write -= n_read;
         };
     };
-    while (opened++ < max_files)
-        cwrite(0, ((void*)0), 0);
+    while (opened ++ < max_files)
+        cwrite;
 };
 
-cdecl lines_split(long n_lines, byte* buf, int bufsize) -> void
+cdecl lines_split(int n_lines, byte* buf, int bufsize) -> void
 {
-    long n_read;
     byte* bp;
     byte* bp_out;
     byte* eob;
-    bool new_file_flag = 0;
-    long n = 0;
+    bool;
     do
     {
-        n_read = read(0, buf, ?);
+        if (n_read < 0)
+            error;
         bp = bp_out = buf;
-        eob = bp + n_read;
         *eob = eolchar;
-        while (0)
+        while (true)
         {
             bp = rawmemchr(bp, eolchar);
             if (bp == eob)
             {
                 if (eob != bp_out)
                 {
-                    new_file_flag = 0;
+                    cwrite;
                 };
                 break;
             };
             ++bp;
-            if (++n >= n_lines)
+            if (++ n >= n_lines)
             {
-                cwrite(new_file_flag, bp_out, bp - bp_out);
+                cwrite;
                 bp_out = bp;
-                new_file_flag = 0;
-                n = 0;
             };
         };
     }
     while (n_read);
 };
 
-cdecl line_bytes_split(long n_bytes, byte* buf, int bufsize) -> void
+cdecl line_bytes_split(int n_bytes, byte* buf, int bufsize) -> void
 {
-    long n_read;
-    long n_out = 0;
-    byte* hold = ((void*)0);
-    bool split_line = 0;
+    byte* hold;
+    bool;
     do
     {
-        n_read = read(0, buf, ?);
+        if (n_read < 0)
+            error;
         byte* sob = buf;
-        while (?)
+        while (n_left)
         {
-            byte* eoc = ((void*)0);
+            byte* eoc;
             byte* eol;
-            if (?)
+            if (n_bytes - n_out - n_hold <= n_left)
             {
+                eol = memrchr;
             }
             else
-            if (?)
+                eol = memrchr;
+            if (n_hold && ! ( ! eol && n_out ))
             {
+                cwrite;
             };
             if (eol)
             {
-                split_line = 0;
+                cwrite;
             };
-            if (?)
+            if (n_left && ! split_line)
             {
+                cwrite;
             };
-            if (?)
+            if (( eoc && split_rest ) || ( ! eoc && n_left ))
             {
+                if (hold_size - n_hold < n_buf)
+                    hold = xpalloc;
+                memcpy;
             };
             if (eoc)
             {
-                n_out = 0;
-                split_line = 0;
             };
         };
     }
     while (n_read);
+    if (n_hold)
+        cwrite;
     free(hold);
 };
 
-cdecl lines_chunk_split(long k, long n, byte* buf, int bufsize, long initial_read, long file_size) -> void
+cdecl lines_chunk_split(int k, int n, byte* buf, int bufsize, int initial_read, int file_size) -> void
 {
     affirm(n & k <= n);
-    long rem_bytes = file_size % n;
-    long chunk_size = file_size / n;
-    long chunk_no = 1;
-    long chunk_end = chunk_size + (0 < rem_bytes);
-    long n_written = 0;
-    bool new_file_flag = 0;
-    bool chunk_truncated = 0;
+    bool;
+    bool;
     if (k > 1 & 0 < file_size)
     {
-        long start = (k - 1) * chunk_size + MIN(k - 1, rem_bytes) - 1;
         if (start < initial_read)
         {
-            memmove(buf, buf + start, initial_read - start);
-            initial_read -= start;
+            memmove;
         }
         else
         {
+            if (initial_read < start && lseek ( STDIN_FILENO , start - initial_read , SEEK_CUR ) < 0)
+                error;
             initial_read = -1;
         };
-        n_written = start;
-        chunk_no = k - 1;
-        chunk_end = start + 1;
     };
     while (n_written < file_size)
     {
         byte* bp = buf;
         byte* eob;
-        long n_read;
         if (0 <= initial_read)
         {
-            n_read = initial_read;
             initial_read = -1;
         }
         else
         {
-            n_read = read(0, buf, MIN(?, file_size - n_written));
+            if (n_read < 0)
+                error;
         };
         if (n_read == 0)
             break;
-        chunk_truncated = 0;
-        eob = buf + n_read;
         while (bp != eob)
         {
-            bool next = 0;
-            long skip = MIN(n_read, MAX(0, chunk_end - 1 - n_written));
-            byte* bp_out = memchr(bp + skip, eolchar, n_read - skip);
+            bool;
+            byte* bp_out = memchr;
             if (bp_out)
             {
                 bp_out++;
-                next = 0;
             }
             else
                 bp_out = eob;
             if (k == chunk_no)
             {
-                if (?)
+                if (full_write ( STDOUT_FILENO , bp , to_write ) != to_write)
                     write_error();
             }
-            else
-            new_file_flag = next;
-            while (next | chunk_end <= n_written)
+            elif (!k)
+                cwrite;
+            while (next || chunk_end <= n_written)
             {
-                if (!next & bp == eob)
+                if (! next && bp == eob)
                 {
-                    chunk_truncated = 0;
                     break;
                 };
                 if (k == chunk_no)
                     return void;
-                chunk_end += chunk_size + (chunk_no < rem_bytes);
-                chunk_no++;
                 if (chunk_end <= n_written)
                 {
                     if (!k)
-                        cwrite(0, ((void*)0), 0);
+                        cwrite;
                 }
                 else
-                    next = 0;
             };
         };
     };
-    if (chunk_truncated)
-        chunk_no++;
     if (!k)
-        while (chunk_no++ <= n)
-            cwrite(0, ((void*)0), 0);
+        while (chunk_no ++ <= n)
+            cwrite;
 };
 
-cdecl bytes_chunk_extract(long k, long n, byte* buf, int bufsize, long initial_read, long file_size) -> void
+cdecl bytes_chunk_extract(int k, int n, byte* buf, int bufsize, int initial_read, int file_size) -> void
 {
-    long start;
-    long end;
     affirm(0 < k & k <= n);
-    start = (k - 1) * (file_size / n) + MIN(k - 1, file_size % n);
-    end = k == n ? file_size : k * (file_size / n) + MIN(k, file_size % n);
     if (start < initial_read)
     {
-        memmove(buf, buf + start, initial_read - start);
-        initial_read -= start;
+        memmove;
     }
     else
     {
+        if (initial_read < start && lseek ( STDIN_FILENO , start - initial_read , SEEK_CUR ) < 0)
+            error;
         initial_read = -1;
     };
     while (start < end)
     {
-        long n_read;
         if (0 <= initial_read)
         {
-            n_read = initial_read;
             initial_read = -1;
         }
         else
         {
-            n_read = read(0, buf, ?);
+            if (n_read < 0)
+                error;
         };
         if (n_read == 0)
             break;
-        n_read = MIN(n_read, end - start);
-        start += n_read;
+        if (full_write ( STDOUT_FILENO , buf , n_read ) != n_read && ! ignorable ( errno ))
+            error;
     };
 };
 
@@ -713,7 +639,7 @@ struct of_info
 {
     byte* of_name;
     int ofd;
-    _IO_FILE* ofile;
+    int* ofile;
     int opid;
 };
 
@@ -722,102 +648,101 @@ struct of_info
 int OFD_NEW = -1;
 int OFD_APPEND = -2;
 
-cdecl ofile_open(of_info* files, int i_check, int nfiles) -> bool
+cdecl ofile_open(of_info* files, int i_check, int nfiles) -> int
 {
-    bool file_limit = 0;
-    if (files[?]. <= OFD_NEW)
+    bool;
+    if (files[i_check]. <= OFD_NEW)
     {
         int fd;
-        while (0)
+        while (true)
         {
-            if (files[?]. == OFD_NEW)
-                fd = create(files[?].);
+            if (files[i_check]. == OFD_NEW)
+                fd = create(files[i_check].);
             else
             {
+                fd = open;
             };
             if (0 <= fd)
                 break;
-            file_limit = 0;
-            while (?)
+            if (! ( errno == EMFILE || errno == ENFILE ))
+                error;
+            while (files [ i_reopen ] . ofd < 0)
             {
+                if (i_reopen == i_check)
+                    error;
             };
+            if (fclose != 0)
+                error;
         };
-        files[?]. = fd;
-        _IO_FILE* ofile = fdopen(fd, "a");
-        files[?]. = ofile;
-        files[?]. = filter_pid;
+        files[i_check]. = fd;
+        if (! ofile)
+            error;
+        files[i_check]. = filter_pid;
         filter_pid = 0;
     };
-    return file_limit;
 };
 
-cdecl lines_rr(long k, long n, byte* buf, int bufsize, of_info** filesp) -> void
+cdecl lines_rr(int k, int n, byte* buf, int bufsize, of_info** filesp) -> void
 {
-    bool wrapped = 0;
-    bool wrote = 0;
-    bool file_limit;
+    bool;
+    bool;
+    bool;
     of_info* files;
-    long line_no;
     if (k)
-        line_no = 1;
     else
     {
-        if (?)
+        if (IDX_MAX < n)
             xalloc_die();
         files = *filesp = xinmalloc(n, (sizeof * files / 8));
-        file_limit = 0;
     };
-    while (0)
+    while (true)
     {
         byte* bp = buf;
         byte* eob;
-        long n_read = read(0, buf, ?);
         if (n_read < 0)
+            error;
         elif (n_read == 0)
             break;
-        eob = buf + n_read;
         while (bp != eob)
         {
-            bool next = 0;
+            bool;
             byte* bp_out = memchr(bp, eolchar, eob - bp);
             if (bp_out)
             {
                 bp_out++;
-                next = 0;
             }
             else
                 bp_out = eob;
             if (k)
             {
-                if (line_no == k & unbuffered)
+                if (line_no == k && unbuffered)
                 {
-                    if (?)
+                    if (full_write ( STDOUT_FILENO , bp , to_write ) != to_write)
                         write_error();
                 }
-                elif (?)
+                elif (line_no == k && fwrite ( bp , to_write , 1 , stdout ) != 1)
                 {
                     write_error();
                 };
-                if (next)
-                    line_no = (line_no == n) ? 1 : line_no + 1;
             }
             else
             {
                 if (unbuffered)
                 {
+                    if (full_write ( files [ i_file ] . ofd , bp , to_write ) != to_write && ! ignorable ( errno ))
+                        error;
                 }
-                else
-                if (!ignorable((?__errno_location())))
-                    wrote = 0;
+                elif (fwrite != 1 & !ignorable)
+                    error;
                 if (file_limit)
                 {
+                    if (fclose != 0)
+                        error;
                 };
-                if (?)
+                if (next && ++ i_file == n)
                 {
-                    wrapped = 0;
-                    if (!wrote)
+                    if (! wrote)
                         goto no_filters;
-                    wrote = 0;
                 };
             };
             bp = bp_out;
@@ -831,352 +756,132 @@ cdecl lines_rr(long k, long n, byte* buf, int bufsize, of_info** filesp) -> void
 
 cdecl strtoint_die(byte* msgid, byte* arg) -> void
 {
-    error(0, (?__errno_location()) ? 0 ? 0 : (?__errno_location()), "%s: %s", gettext(msgid), quote(arg));
+    error;
 };
 
-cdecl parse_n_units(byte* arg, byte* multipliers, byte* msgid) -> long
+cdecl parse_n_units(byte* arg, byte* multipliers, byte* msgid) -> int
 {
-    long n;
-    if (?)
+    if (LONGINT_OVERFLOW /* Parse ARG for number of bytes or lines.  The number can be followed
+   by MULTIPLIERS, and the resulting value must be positive.
+   If the number cannot be parsed, diagnose with MSG.
+   Return the number parsed, or an INTMAX_MAX on overflow.  */ static intmax_t parse_n_units ( char const * arg , char const * multipliers , char const * msgid ) { intmax_t n ; if ( OVERFLOW_OK < xstrtoimax ( arg , NULL , 10 , & n , multipliers ) || n < 1)
         strtoint_die(msgid, arg);
-    return n;
 };
 
-cdecl parse_chunk(long* k_units, long* n_units, byte* arg) -> void
+cdecl parse_chunk(int* k_units, int* n_units, byte* arg) -> void
 {
     byte* argend;
-    if (?)
+    if (e == LONGINT_INVALID_SUFFIX_CHAR && * argend == '/')
     {
         *k_units = *n_units;
         *n_units = parse_n_units(argend + 1, "", "invalid number of chunks");
         if (!(0 < *k_units & *k_units <= *n_units))
-            error(0, 0, "%s: %s", gettext("invalid chunk number"), quote_mem(arg, argend - arg));
+            error;
     }
-    elif (?)
+    elif (! ( e <= OVERFLOW_OK && 0 < * n_units ))
         strtoint_die("invalid number of chunks", arg);
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     Split_type split_type = type_undef;
-    long k_units = 0;
-    long n_units = 0;
     byte[15] multipliers = "bEGKkMmPQRTYZ0";
     int c;
     int digits_optind = 0;
-    long file_size = TYPE_MAXIMUM(?);
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (0)
+    setlocale;
+    atexit;
+    while (true)
     {
-        int this_optind = optind ? optind : 1;
-        c = getopt_long(argc, argv, "0123456789C:a:b:del:n:t:ux", longopts, ((void*)0));
+        int this_optind;
+        c = getopt_long;
         if (c == -1)
             break;
-        switch (c)
-        {
-            case ('a')
-            {
-            }
-            goto _switch_end_139188829383248;
-            case (ADDITIONAL_SUFFIX_OPTION)
-            {
-                {
-                    int suffix_len = strlen(optarg);
-                    if (last_component(optarg) != optarg | (suffix_len & ISSLASH(optarg[suffix_len - 1])))
-                    {
-                        error(0, 0, gettext("invalid suffix %s, contains directory separator"), quote(optarg));
-                        usage(0);
-                    };
-                };
-            }
-            additional_suffix = optarg;
-            goto _switch_end_139188829383248;
-            case ('b')
-            {
-                if (split_type != type_undef)
-                    do
-                    {
-                        error(0, 0, gettext("cannot split in more than one way"));
-                        usage(0);
-                    }
-                    while (0);
-            }
-            split_type = type_bytes;
-            n_units = parse_n_units(optarg, multipliers, "invalid number of bytes");
-            goto _switch_end_139188829383248;
-            case ('l')
-            {
-                if (split_type != type_undef)
-                    do
-                    {
-                        error(0, 0, gettext("cannot split in more than one way"));
-                        usage(0);
-                    }
-                    while (0);
-            }
-            split_type = type_lines;
-            n_units = parse_n_units(optarg, "", "invalid number of lines");
-            goto _switch_end_139188829383248;
-            case ('C')
-            {
-                if (split_type != type_undef)
-                    do
-                    {
-                        error(0, 0, gettext("cannot split in more than one way"));
-                        usage(0);
-                    }
-                    while (0);
-            }
-            split_type = type_byteslines;
-            n_units = parse_n_units(optarg, multipliers, "invalid number of lines");
-            goto _switch_end_139188829383248;
-            case ('n')
-            {
-                if (split_type != type_undef)
-                    do
-                    {
-                        error(0, 0, gettext("cannot split in more than one way"));
-                        usage(0);
-                    }
-                    while (0);
-            }
-            while (((?__ctype_b_loc())[(int)((to_uchar(*optarg)))] ? (uint)_ISspace))
-                optarg++;
-            if (strncmp(optarg, "", ( / 8) ? 0) ? 0)
-            {
-                split_type = type_rr;
-                optarg += 2;
-            }
-            elif (strncmp(optarg, "", ( / 8) ? 0) ? 0)
-            {
-                split_type = type_chunk_lines;
-                optarg += 2;
-            };
-            else
-                split_type = type_chunk_bytes;
-            parse_chunk(@k_units, @n_units, optarg);
-            goto _switch_end_139188829383248;
-            case ('u')
-            {
-                unbuffered = 0;
-            }
-            goto _switch_end_139188829383248;
-            case ('t')
-            {
-                {
-                    byte neweol = optarg[0];
-                    if (!neweol)
-                        error(0, 0, gettext("empty record separator"));
-                    if (optarg[1])
-                    {
-                        if (streq(optarg, "\\0"))
-                            neweol = '\0';
-                        else
-                        {
-                            error(0, 0, gettext("multi-character separator %s"), quote(optarg));
-                        };
-                    };
-                    if (0 <= eolchar & neweol != eolchar)
-                    {
-                        error(0, 0, gettext("multiple separator characters specified"));
-                    };
-                    eolchar = neweol;
-                };
-            }
-            goto _switch_end_139188829383248;
-            case ('0')
-            {
-                case ('1')
-                {
-                    case ('2')
-                    {
-                        case ('3')
-                        {
-                            case ('4')
-                            {
-                                case ('5')
-                                {
-                                    case ('6')
-                                    {
-                                        case ('7')
-                                        {
-                                            case ('8')
-                                            {
-                                                case ('9')
-                                                {
-                                                    if (split_type == type_undef)
-                                                    {
-                                                        split_type = type_digits;
-                                                        n_units = 0;
-                                                    };
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if (split_type != type_undef & split_type != type_digits)
-                do
-                {
-                    error(0, 0, gettext("cannot split in more than one way"));
-                    usage(0);
-                }
-                while (0);
-            if (digits_optind != 0 & digits_optind != this_optind)
-                n_units = 0;
-            digits_optind = this_optind;
-            if (__builtin_mul_overflow((n_units), (10), (@n_units)) ? __builtin_add_overflow((n_units), (c ? '0'), (@n_units)))
-                n_units = (0);
-            goto _switch_end_139188829383248;
-            case ('d')
-            {
-                case ('x')
-                {
-                    if (c == 'd')
-                        suffix_alphabet = "0123456789";
-                    else
-                        suffix_alphabet = "0123456789abcdef";
-                }
-            }
-            if (optarg)
-            {
-                if (strlen(optarg) != strspn(optarg, suffix_alphabet))
-                {
-                    error(0, 0, (c == 'd') ? gettext("%s: invalid start value for numerical suffix") : gettext("%s: invalid start value for hexadecimal suffix"), quote(optarg));
-                    usage(0);
-                }
-                else
-                {
-                    while (*optarg == '0' & *(optarg + 1) != '\0')
-                        optarg++;
-                    numeric_suffix_start = optarg;
-                };
-            };
-            goto _switch_end_139188829383248;
-            case ('e')
-            {
-                elide_empty_files = 0;
-            }
-            goto _switch_end_139188829383248;
-            case (FILTER_OPTION)
-            {
-                filter_command = optarg;
-            }
-            goto _switch_end_139188829383248;
-            case (IO_BLKSIZE_OPTION)
-            {
-            }
-            goto _switch_end_139188829383248;
-            case (VERBOSE_OPTION)
-            {
-                verbose = 0;
-            }
-            goto _switch_end_139188829383248;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188829383248;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188829383248;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188829383248:
     };
-    if (k_units != 0 & filter_command)
+    if (k_units != 0 && filter_command)
     {
         error(0, 0, gettext("--filter does not process a chunk extracted to "));
-        usage(0);
+        usage;
     };
     if (split_type == type_undef)
     {
         split_type = type_lines;
-        n_units = 1000;
     };
     if (n_units == 0)
     {
         error(0, 0, gettext("invalid number of lines: %s"), quote("0"));
-        usage(0);
+        usage;
     };
     if (eolchar < 0)
         eolchar = '\n';
-    set_suffix_length(n_units, split_type);
-    if (optind < argc)
-        infile = argv[optind++];
-    if (optind < argc)
-        outbase = argv[optind++];
+    set_suffix_length;
     if (optind < argc)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    if (numeric_suffix_start & strlen(numeric_suffix_start) > ?)
+    if (numeric_suffix_start & strlen(numeric_suffix_start) > suffix_length)
     {
         error(0, 0, gettext("numerical suffix start value is too large "));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (!streq(infile, "-") & fd_reopen < 0)
+        error;
+    xset_binary_mode;
+    fdadvise;
+    if (fstat != 0)
+        error;
+    if (in_blk_size == 0)
     {
     };
-    byte* buf;
-    long initial_read = -1;
+    byte* buf = xalignalloc;
     if (split_type == type_chunk_bytes | split_type == type_chunk_lines)
     {
+        if (file_size < 0)
+            error;
     };
-    if (filter_command)
-        default_SIGPIPE = signal(0, ((def{}*(int) -> void)0)) == ((def{}*(int) -> void)0);
     switch (split_type)
     {
         case (type_digits)
         {
-            case (type_lines)
-            {
-            }
+            break switch;
         }
-        goto _switch_end_139188829384016;
         case (type_bytes)
         {
+            bytes_split;
+            break switch;
         }
-        goto _switch_end_139188829384016;
         case (type_byteslines)
         {
+            line_bytes_split;
+            break switch;
         }
-        goto _switch_end_139188829384016;
         case (type_chunk_bytes)
         {
+            if (k_units == 0)
+                bytes_split;
+            else
+                bytes_chunk_extract;
+            break switch;
         }
-        goto _switch_end_139188829384016;
         case (type_chunk_lines)
         {
+            lines_chunk_split;
+            break switch;
         }
-        goto _switch_end_139188829384016;
         case (type_rr)
         {
             {
                 of_info* files;
+                lines_rr;
             };
+            break switch;
         }
-        goto _switch_end_139188829384016;
         case (type_undef)
         {
-            default
-            {
-                affirm(0);
-            };
         }
     };
-    label _switch_end_139188829384016:
-    closeout(((void*)0), output_desc, filter_pid, outfile);
-    return 0;
+    if (close != 0)
+        error;
+    closeout;
 };

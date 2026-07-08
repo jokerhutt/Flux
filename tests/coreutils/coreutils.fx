@@ -32,21 +32,23 @@ macro AUTHORS
     proper_name ( "Alex Deymo" )
 };
 
-option[3] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Execute the PROGRAM_NAME built-in program with the given PARAMETERS.\n\
-\n"), stdout);
+        printf;
+        fputs;
         oputs_("coreutils", gettext("      --help\n         display this help and exit\n"));
         oputs_("coreutils", gettext("      --version\n         output version information and exit\n"));
+        printf;
         emit_ancillary_info("coreutils");
     };
     exit(status);
@@ -73,7 +75,7 @@ cdecl main(int argc, byte** argv) -> int
     ulong nskip = 0;
     if (argc >= 2)
     {
-        byte* arg_name = ((void*)0);
+        byte* arg_name;
         if ((strncmp(argv[1], "--coreutils-prog=", strlen("--coreutils-prog=")) ? 0))
         {
             nskip = 1;
@@ -96,25 +98,26 @@ cdecl main(int argc, byte** argv) -> int
     };
     if (nskip | (prog_name & !str_endswith(prog_name, "coreutils")))
     {
-        fprintf(stderr, gettext("%s: unknown program %s\n"), "coreutils", quote(prog_name));
-        exit(0);
+        fprintf;
+        exit;
     };
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if ((optc = getopt_long(argc, argv, "", long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    if ((optc = getopt_long) != -1)
         switch (optc)
         {
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188838269008;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188838269008;
         };
-        label _switch_end_139188838269008:
-    usage(0);
+    usage;
 };

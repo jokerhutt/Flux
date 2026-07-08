@@ -41,31 +41,31 @@ macro pathconf(file, flag)
 };
 
 cdecl validate_file_name(byte*, int bool, int) -> int;
-uint PORTABILITY_OPTION = 128;
+uint PORTABILITY_OPTION = 0;
 
-option[4] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Diagnose invalid or non-portable file names.\n\
-\n\
-"), stdout);
-        oputs_("pathchk", gettext("\
-  -p     check for most POSIX systems\n\
+        printf;
+        fputs;
+        oputs_("pathchk", gettext("\
+  -p     check for most POSIX systems\n\
 "));
-        oputs_("pathchk", gettext("\
-  -P     check for empty names and leading \"-\"\n\
+        oputs_("pathchk", gettext("\
+  -P     check for empty names and leading \"-\"\n\
 "));
-        oputs_("pathchk", gettext("\
-      --portability\n\
-         check for all POSIX systems (equivalent to -p -P)\n\
+        oputs_("pathchk", gettext("\
+      --portability\n\
+         check for all POSIX systems (equivalent to -p -P)\n\
 "));
         oputs_("pathchk", gettext("      --help\n         display this help and exit\n"));
         oputs_("pathchk", gettext("      --version\n         output version information and exit\n"));
@@ -81,44 +81,15 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     int optc;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "+pP", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case (PORTABILITY_OPTION)
-            {
-            }
-            goto _switch_end_139188819788496;
-            case ('p')
-            {
-            }
-            goto _switch_end_139188819788496;
-            case ('P')
-            {
-            }
-            goto _switch_end_139188819788496;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188819788496;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188819788496;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188819788496:
     };
     if (optind == argc)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
 };
 
@@ -134,9 +105,9 @@ cdecl portable_chars_only(byte* file, ulong filelen) -> int
     byte* invalid = file + validlen;
     if (*invalid)
     {
-        __mbstate_t mbstate;
-        mbszero(@mbstate);
-        ulong charlen = mbrlen(invalid, filelen - validlen, @mbstate);
+        mbszero;
+        ulong charlen = mbrlen;
+        error(0, 0, gettext("non-portable character %s in file name %s"), quotearg_n_style_mem, quotearg_n_style);
     };
 };
 

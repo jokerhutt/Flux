@@ -33,18 +33,29 @@ macro ENC_BLOCKSIZE
     ( 1024 * 3 * 10 )
 };
 
-option[6] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        printf;
         emit_stdin_note();
         emit_mandatory_arg_note();
+        oputs_;
+        oputs_;
+        oputs_;
+        oputs_;
+        oputs_;
+        printf;
+        emit_ancillary_info;
     };
     exit(status);
 };
@@ -75,40 +86,42 @@ cdecl decode_ctx_finalize(base_decode_context* ctx, byte** out, int* outlen) -> 
 {
     if (get_pending_length(ctx) == 0)
     {
-        *? = 0;
+        *outlen = 0;
     };
     byte[8] padbuf = 8;
     bool;
-    if (?)
+    if (auto_padding && ! has_padding ( ctx ))
     {
+        affirm;
     }
     else
     {
     };
 };
 
-cdecl wrap_write(byte* buffer, int len, int wrap_column, int* current_column, _IO_FILE* out) -> void
+cdecl wrap_write(byte* buffer, int len, int wrap_column, int* current_column, int* out) -> void
 {
-    if (? == 0)
+    if (wrap_column == 0)
     {
-        if (fwrite(buffer, 1, ?, stdout) < ?)
+        if (fwrite < len)
             write_error();
     }
     else
 };
 
-cdecl finish_and_exit(_IO_FILE* in, byte* infile) -> void
+cdecl finish_and_exit(int* in, byte* infile) -> void
 {
     if (fclose(in) != 0)
     {
         if (streq(infile, "-"))
-            error(0, (?__errno_location()), gettext("closing standard input"));
+            error;
         else
+            error;
     };
-    exit(0);
+    exit;
 };
 
-cdecl do_encode(_IO_FILE* in, byte* infile, _IO_FILE* out, int wrap_column) -> void
+cdecl do_encode(int* in, byte* infile, int* out, int wrap_column) -> void
 {
     byte* inbuf;
     byte* outbuf;
@@ -119,46 +132,50 @@ cdecl do_encode(_IO_FILE* in, byte* infile, _IO_FILE* out, int wrap_column) -> v
         do
         {
         }
-        while (?);
-        if (?)
+        while (! feof ( in ) && ! ferror ( in ) && sum < ENC_BLOCKSIZE);
+        if (sum > 0)
         {
             {
+                base_encode;
+                wrap_write;
             };
         };
     }
-    while (?);
-    if (?)
+    while (! feof ( in ) && ! ferror ( in ) && sum == ENC_BLOCKSIZE);
+    if (wrap_column && current_column > 0 && fputc ( '\n' , out ) == EOF)
         write_error();
     if (ferror(in))
-        error(0, (?__errno_location()), gettext("read error"));
+        error;
     finish_and_exit(in, infile);
 };
 
-cdecl do_decode(_IO_FILE* in, byte* infile, _IO_FILE* out, int ignore_garbage) -> void
+cdecl do_decode(int* in, byte* infile, int* out, int ignore_garbage) -> void
 {
     byte* inbuf;
     byte* outbuf;
     base_decode_context ctx;
-    base_decode_ctx_init(@?);
+    inbuf = xmalloc(BASE_LENGTH);
+    outbuf = xmalloc;
+    base_decode_ctx_init(@ctx);
     do
     {
         bool;
         do
         {
-            if (?)
+            if (ignore_garbage)
             {
             };
             if (ferror(in))
-                error(0, (?__errno_location()), gettext("read error"));
+                error;
         }
-        while (?);
-        while (?)
+        while (sum < BASE_LENGTH ( DEC_BLOCKSIZE ) && ! feof ( in ));
+        while (sum || feof ( in ))
         {
-            if (?)
+            if (fwrite ( outbuf , 1 , n , out ) < n)
                 write_error();
-            if (?)
-                error(0, 0, gettext("invalid input"));
-            if (?)
+            if (! ok)
+                error;
+            if (sum == 0)
                 break;
         };
     }
@@ -169,64 +186,66 @@ cdecl do_decode(_IO_FILE* in, byte* infile, _IO_FILE* out, int ignore_garbage) -
 cdecl main(int argc, byte** argv) -> int
 {
     int opt;
-    _IO_FILE* input_fh;
     byte* infile;
     bool;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((opt = getopt_long(argc, argv, "diw:", long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((opt = getopt_long) != -1)
         switch (opt)
         {
             case ('d')
             {
+                break switch;
             }
-            goto _switch_end_139188883291856;
             case ('w')
             {
                 {
-                    long w;
-                    if (?)
-                        error(0, 0, "%s: %s", gettext("invalid wrap size"), quote(optarg));
+                    if (LONGINT_OVERFLOW < s_err || w < 0)
+                        error;
                 };
+                break switch;
             }
-            goto _switch_end_139188883291856;
             case ('i')
             {
+                break switch;
             }
-            goto _switch_end_139188883291856;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188883291856;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188883291856;
             default
             {
-                usage(0);
             };
-            goto _switch_end_139188883291856;
         };
-        label _switch_end_139188883291856:
     if (argc - optind > 1)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind + 1]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
     if (optind < argc)
-        infile = argv[optind];
     else
         infile = "-";
     if (streq(infile, "-"))
     {
-        input_fh = stdin;
+        xset_binary_mode;
     }
     else
     {
-        input_fh = fopen(infile, "rb");
+        if (input_fh == NULL)
+            error;
     };
+    fadvise;
+    if (decode)
+        do_decode;
+    else
+        do_encode;
 };

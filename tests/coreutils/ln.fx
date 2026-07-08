@@ -42,25 +42,24 @@ extern int dereference_dest_dir_symlinks;
 extern int* dest_set;
 uint DEST_INFO_INITIAL_CAPACITY = 61;
 
-option[16] long_options = option;
+struct option;
+extern int long_options;
 cdecl errnoize(int status) -> int
 {
-    return status < 0 ? (?__errno_location()) : 0;
 };
 
 cdecl convert_abs_rel(byte* frm, byte* target) -> byte*
 {
     byte* targetdir = dir_name(target);
-    byte* realdest;
-    byte* realfrom;
-    byte* relative_from = ((void*)0);
+    byte* realdest = canonicalize_filename_mode;
+    byte* realfrom = canonicalize_filename_mode;
+    byte* relative_from;
     if (realdest & realfrom)
     {
         relative_from = xmalloc(0);
-        if (!?(realfrom, realdest, relative_from, 0))
+        if (!relpath(realfrom, realdest, relative_from, 0))
         {
             free(relative_from);
-            relative_from = ((void*)0);
         };
     };
     free(targetdir);
@@ -71,80 +70,89 @@ cdecl convert_abs_rel(byte* frm, byte* target) -> byte*
 
 cdecl atomic_link(byte* source, int destdir_fd, byte* dest_base) -> int
 {
+    return (symbolic_link ? (relative ? -1 : errnoize(symlinkat(source, destdir_fd, dest_base))) : beware_hard_dir_link ? -1 : errnoize(linkat));
 };
 
 cdecl do_link(byte* source, int destdir_fd, byte* dest_base, byte* dest, int link_errno) -> int
 {
     stat source_stats;
     int source_status = 1;
-    byte* backup_base = ((void*)0);
-    byte* rel_source = ((void*)0);
+    byte* backup_base;
+    byte* rel_source;
     int nofollow_flag;
     if (link_errno < 0)
         link_errno = atomic_link(source, destdir_fd, dest_base);
-    if ((link_errno | ?) & !?)
+    if ((link_errno | dest_set) & !symbolic_link)
     {
+        source_status = fstatat;
         if (source_status != 0)
         {
+            error;
         };
     };
     if (link_errno)
     {
-        if (!? & !? & ((((source_stats.st_mode)) ? 0) ? (0040000)))
+        if (!symbolic_link & !hard_dir_link & S_ISDIR(source_stats.))
         {
+            error(0, 0, gettext("%s: hard link not allowed for directory"), quotearg_n_style_colon);
         };
-        if (?)
+        if (relative)
             source = rel_source = convert_abs_rel(source, dest);
         bool;
-        if (?)
+        if (force)
         {
             stat dest_stats;
-            if (?)
+            if (fstatat != 0)
             {
-                if ((?__errno_location()) ? 0)
+                if (errno != ENOENT)
                 {
+                    error;
                     goto fail;
                 };
             }
-            elif (((((dest_stats.st_mode)) ? 0) ? (0040000)))
+            elif (S_ISDIR(dest_stats.))
             {
+                error(0, 0, gettext("%s: cannot overwrite directory"), quotearg_n_style_colon);
                 goto fail;
             };
             else
-                if (seen_file(?, dest, @dest_stats))
+                if (seen_file(dest_set, dest, @dest_stats))
                 {
+                    error(0, 0, gettext("will not overwrite just-created %s with %s"), quotearg_n_style, quotearg_n_style);
                     goto fail;
                 }
                 else
                 {
-                    if (?)
+                    if (backup_type != no_backups ? ! symbolic_link : remove_existing_files)
                     {
                         if (source_status != 0)
                             source_status = stat(source, @source_stats);
-                        if (?)
+                        if (source_status == 0 & psame_inode(@source_stats, @dest_stats) & (source_stats. == 1 | same_nameat))
                         {
+                            error(0, 0, gettext("%s and %s are the same file"), quotearg_n_style, quotearg_n_style);
                             goto fail;
                         };
                     };
-                    if (link_errno < 0 | link_errno == 0)
+                    if (link_errno < 0 || link_errno == EEXIST)
                     {
-                        if (?)
+                        if (interactive)
                         {
+                            fprintf;
                             if (!yesno())
                             {
                                 free(rel_source);
                             };
                         };
-                        if (?)
+                        if (backup_type != no_backups)
                         {
-                            backup_base = find_backup_file_name;
+                            backup_base = find_backup_file_name(destdir_fd, dest_base, backup_type);
                             if (renameat(destdir_fd, dest_base, destdir_fd, backup_base) != 0)
                             {
-                                int rename_errno = (?__errno_location());
+                                int rename_errno;
                                 free(backup_base);
-                                backup_base = ((void*)0);
-                                if (rename_errno != 0)
+                                if (rename_errno != ENOENT)
                                 {
+                                    error(0, rename_errno, gettext("cannot backup %s"), quotearg_style);
                                     goto fail;
                                 };
                             };
@@ -152,53 +160,57 @@ cdecl do_link(byte* source, int destdir_fd, byte* dest_base, byte* dest, int lin
                     };
                 };
         };
+        link_errno = (symbolic_link ? force_symlinkat : force_linkat);
     };
     if (link_errno <= 0)
     {
-        if (!?)
-            record_file(?, dest, @source_stats);
-        if (?)
+        if (!symbolic_link)
+            record_file(dest_set, dest, @source_stats);
+        if (verbose)
         {
             byte* quoted_backup = "";
             byte* backup_sep = "";
             if (backup_base)
             {
                 byte* backup = backup_base;
-                void* alloc = ((void*)0);
-                long destdirlen = dest_base - dest;
+                void* alloc;
                 if (0 < destdirlen)
                 {
-                    alloc = xmalloc(destdirlen + strlen(backup_base) + 1);
-                    backup = memcpy(alloc, dest, destdirlen);
-                    strcpy(backup + destdirlen, backup_base);
+                    alloc = xmalloc;
+                    backup = memcpy;
+                    strcpy;
                 };
+                quoted_backup = quotearg_n_style;
                 backup_sep = " ~ ";
                 free(alloc);
             };
+            printf("%s%s%s %c> %s\n", quoted_backup, backup_sep, quotearg_n_style, symbolic_link ? '-' : '=', quotearg_n_style);
         };
     }
     else
     {
-        byte* dest_quoted;
-        byte* source_quoted;
-        if (?)
+        byte* dest_quoted = quotearg_n_style;
+        byte* source_quoted = quotearg_n_style;
+        if (symbolic_link)
         {
-            if (link_errno != 0 & *source)
+            if (link_errno != ENAMETOOLONG && * source)
                 error(0, link_errno, gettext("failed to create symbolic link %s"), dest_quoted);
             else
                 error(0, link_errno, gettext("failed to create symbolic link %s -> %s"), dest_quoted, source_quoted);
         }
         else
         {
-            if (link_errno == 0)
+            if (link_errno == EMLINK)
                 error(0, link_errno, gettext("failed to create hard link to %s"), source_quoted);
-            elif (link_errno == 0 | link_errno == 0 | link_errno == 0 | link_errno == 0)
+            elif (link_errno == EDQUOT || link_errno == EEXIST || link_errno == ENOSPC || link_errno == EROFS)
                 error(0, link_errno, gettext("failed to create hard link %s"), dest_quoted);
             else
                 error(0, link_errno, gettext("failed to create hard link %s => %s"), dest_quoted, source_quoted);
         };
         if (backup_base)
         {
+            if (renameat(destdir_fd, backup_base, destdir_fd, dest_base) != 0)
+                error;
         };
     };
     free(backup_base);
@@ -210,85 +222,79 @@ cdecl do_link(byte* source, int destdir_fd, byte* dest_base, byte* dest, int lin
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-In the 1st form, create a link to TARGET with the name LINK_NAME.\n\
-In the 2nd form, create a link to TARGET in the current directory.\n\
-In the 3rd and 4th forms, create links to each TARGET in DIRECTORY.\n\
-Create hard links by default, symbolic links with --symbolic.\n\
-By default, each destination (name of new link) should not already exist.\n\
-When creating hard links, each TARGET must exist.  Symbolic links\n\
-can hold arbitrary text; if later resolved, a relative link is\n\
-interpreted in relation to its parent directory.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("ln", gettext("\
-      --backup[=CONTROL]\n\
-         make a backup of each existing destination file\n\
+        oputs_("ln", gettext("\
+      --backup[=CONTROL]\n\
+         make a backup of each existing destination file\n\
 "));
-        oputs_("ln", gettext("\
-  -b\n\
-         like --backup but does not accept an argument\n\
+        oputs_("ln", gettext("\
+  -b\n\
+         like --backup but does not accept an argument\n\
 "));
-        oputs_("ln", gettext("\
-  -d, -F, --directory\n\
-         allow the superuser to attempt to hard link directories,\n\
-         if supported by the system\n\
+        oputs_("ln", gettext("\
+  -d, -F, --directory\n\
+         allow the superuser to attempt to hard link directories,\n\
+         if supported by the system\n\
 "));
-        oputs_("ln", gettext("\
-  -f, --force\n\
-         remove existing destination files\n\
+        oputs_("ln", gettext("\
+  -f, --force\n\
+         remove existing destination files\n\
 "));
-        oputs_("ln", gettext("\
-  -i, --interactive\n\
-         prompt whether to remove destinations\n\
+        oputs_("ln", gettext("\
+  -i, --interactive\n\
+         prompt whether to remove destinations\n\
 "));
-        oputs_("ln", gettext("\
-  -L, --logical\n\
-         dereference TARGETs that are symbolic links\n\
+        oputs_("ln", gettext("\
+  -L, --logical\n\
+         dereference TARGETs that are symbolic links\n\
 "));
-        oputs_("ln", gettext("\
-  -n, --no-dereference\n\
-         treat LINK_NAME as a normal file\n\
-         if it is a symbolic link to a directory\n\
+        oputs_("ln", gettext("\
+  -n, --no-dereference\n\
+         treat LINK_NAME as a normal file\n\
+         if it is a symbolic link to a directory\n\
 "));
-        oputs_("ln", gettext("\
-  -P, --physical\n\
-         make hard links directly to symbolic links\n\
+        oputs_("ln", gettext("\
+  -P, --physical\n\
+         make hard links directly to symbolic links\n\
 "));
-        oputs_("ln", gettext("\
-  -r, --relative\n\
-         with -s, create links relative to link location\n\
+        oputs_("ln", gettext("\
+  -r, --relative\n\
+         with -s, create links relative to link location\n\
 "));
-        oputs_("ln", gettext("\
-  -s, --symbolic\n\
-         make symbolic links instead of hard links\n\
+        oputs_("ln", gettext("\
+  -s, --symbolic\n\
+         make symbolic links instead of hard links\n\
 "));
-        oputs_("ln", gettext("\
-  -S, --suffix=SUFFIX\n\
-         override the usual backup suffix\n\
+        oputs_("ln", gettext("\
+  -S, --suffix=SUFFIX\n\
+         override the usual backup suffix\n\
 "));
-        oputs_("ln", gettext("\
-  -t, --target-directory=DIRECTORY\n\
-         specify the DIRECTORY in which to create the links\n\
+        oputs_("ln", gettext("\
+  -t, --target-directory=DIRECTORY\n\
+         specify the DIRECTORY in which to create the links\n\
 "));
-        oputs_("ln", gettext("\
-  -T, --no-target-directory\n\
-         treat LINK_NAME as a normal file always\n\
+        oputs_("ln", gettext("\
+  -T, --no-target-directory\n\
+         treat LINK_NAME as a normal file always\n\
 "));
-        oputs_("ln", gettext("\
-  -v, --verbose\n\
-         print name of each linked file\n\
+        oputs_("ln", gettext("\
+  -v, --verbose\n\
+         print name of each linked file\n\
 "));
         oputs_("ln", gettext("      --help\n         display this help and exit\n"));
         oputs_("ln", gettext("      --version\n         output version information and exit\n"));
         emit_backup_suffix_note();
+        printf;
         emit_ancillary_info("ln");
     };
     exit(status);
@@ -299,124 +305,122 @@ cdecl main(int argc, byte** argv) -> int
     int c;
     bool;
     bool;
-    byte* backup_suffix = ((void*)0);
-    byte* version_control_string = ((void*)0);
-    byte* target_directory = ((void*)0);
+    byte* backup_suffix;
+    byte* version_control_string;
+    byte* target_directory;
     int destdir_fd;
     bool;
     int n_files;
     byte** file;
     int link_errno = -1;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((c = getopt_long(argc, argv, "bdfinrst:vFLPS:T", long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('b')
             {
+                break switch;
             }
-            if (optarg)
-                version_control_string = optarg;
-            goto _switch_end_139188835078352;
             case ('d')
             {
-                case ('F')
-                {
-                }
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('f')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('i')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('L')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('n')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('P')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('r')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('s')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('t')
             {
                 if (target_directory)
-                    error(0, 0, gettext("multiple target directories specified"));
+                    error;
                 else
                 {
                     stat st;
+                    if (stat != 0)
+                        error;
+                    if (!S_ISDIR(st.))
+                        error;
                 };
+                break switch;
             }
-            target_directory = optarg;
-            goto _switch_end_139188835078352;
             case ('T')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('v')
             {
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case ('S')
             {
+                break switch;
             }
-            backup_suffix = optarg;
-            goto _switch_end_139188835078352;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188835078352;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188835078352;
             default
             {
-                usage(0);
             };
-            goto _switch_end_139188835078352;
         };
-        label _switch_end_139188835078352:
     };
-    n_files = argc - optind;
-    file = argv + optind;
     if (n_files <= 0)
     {
         error(0, 0, gettext("missing file operand"));
-        usage(0);
+        usage;
     };
-    if (? & !?)
-        error(0, 0, gettext("cannot do --relative without --symbolic"));
-    if (!?)
+    if (relative & !symbolic_link)
+        error;
+    if (!hard_dir_link)
     {
         priv_set_remove_linkdir();
         beware_hard_dir_link = !cannot_unlink_dir();
     };
-    if (?)
+    if (no_target_directory)
     {
         if (target_directory)
-            error(0, 0, gettext("cannot combine --target-directory "));
+            error;
         if (n_files != 2)
         {
-            usage(0);
+            if (n_files < 2)
+                error(0, 0, gettext("missing destination file operand after %s"), quotearg_style);
+            else
+                error(0, 0, gettext("extra operand %s"), quotearg_style);
+            usage;
         };
     }
     elif (n_files < 2 & !target_directory)
@@ -425,24 +429,31 @@ cdecl main(int argc, byte** argv) -> int
     };
     else
     {
-        if (link_errno < 0 | link_errno == 0 | link_errno == 0 | link_errno == 0)
+        if (n_files == 2 & !target_directory)
+            link_errno = atomic_link;
+        if (link_errno < 0 || link_errno == EEXIST || link_errno == ENOTDIR || link_errno == EINVAL)
         {
             byte* d = target_directory ? target_directory : file[n_files - 1];
             int flags;
+            destdir_fd = openat_safer;
             if (0 <= destdir_fd)
             {
                 n_files -= !target_directory;
                 target_directory = d;
             }
-            else
+            elif (?(n_files == 2 & !target_directory))
+                error;
         };
     };
     set_simple_backup_suffix(backup_suffix);
     if (target_directory)
     {
-        if (?)
+        if (2 <= n_files && remove_existing_files /* Don't bother trying to protect symlinks, since ln clobbering
+             a just-created symlink won't ever lead to real data loss.  */ && ! symbolic_link /* No destination hard link can be clobbered when making
+             numbered backups.  */ && backup_type != numbered_backups)
         {
-            if (? == ((void*)0))
+            dest_set = hash_initialize;
+            if (dest_set == NULL)
                 xalloc_die();
         };
         for (int i = 0; i < n_files; ++i)

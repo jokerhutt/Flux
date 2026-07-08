@@ -18,15 +18,15 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-   Written by TorbjÃ¶rn Granlund, Sweden (tege@sics.se).
+   Written by Torbjörn Granlund, Sweden (tege@sics.se).
    Rewritten to use lib/hash.c by Jim Meyering.
 ///
 
 uint INITIAL_TABLE_SIZE = 103;
 struct Src_to_dest
 {
-    ulong st_ino;
-    ulong st_dev;
+    int st_ino;
+    int st_dev;
     byte* name;
 };
 
@@ -34,7 +34,6 @@ extern int* src_to_dest;
 cdecl src_to_dest_hash(void* x, ulong table_size) -> ulong
 {
     Src_to_dest* p = x;
-    return ( uintmax_t ) { p -> st_ino } % table_size;
 };
 
 cdecl src_to_dest_compare(void* x, void* y) -> int
@@ -51,38 +50,36 @@ cdecl src_to_dest_free(void* x) -> void
     free(x);
 };
 
-cdecl forget_created(ulong ino, ulong dev) -> void
+cdecl forget_created(int ino, int dev) -> void
 {
     Src_to_dest probe;
     Src_to_dest* ent;
-    probe.st_ino = ino;
-    probe.st_dev = dev;
-    probe.name = ((void*)0);
-    ent = hash_remove(?, @probe);
+    probe = ino;
+    probe = dev;
+    ent = hash_remove(src_to_dest, @probe);
     if (ent)
         src_to_dest_free(ent);
 };
 
-cdecl src_to_dest_lookup(ulong ino, ulong dev) -> byte*
+cdecl src_to_dest_lookup(int ino, int dev) -> byte*
 {
     Src_to_dest ent;
     Src_to_dest* e;
-    ent.st_ino = ino;
-    ent.st_dev = dev;
-    e = hash_lookup(?, @ent);
-    return e ? e.name : ((void*)0);
+    ent = ino;
+    ent = dev;
+    e = hash_lookup(src_to_dest, @ent);
 };
 
-cdecl remember_copied(byte* name, ulong ino, ulong dev) -> byte*
+cdecl remember_copied(byte* name, int ino, int dev) -> byte*
 {
     Src_to_dest* ent;
     Src_to_dest* ent_from_table;
     ent = xmalloc((sizeof * ent / 8));
     ent.name = xstrdup(name);
-    ent.st_ino = ino;
-    ent.st_dev = dev;
-    ent_from_table = hash_insert(?, ent);
-    if (ent_from_table == ((void*)0))
+    ent = ino;
+    ent = dev;
+    ent_from_table = hash_insert(src_to_dest, ent);
+    if (ent_from_table == NULL)
     {
         xalloc_die();
     };
@@ -91,12 +88,11 @@ cdecl remember_copied(byte* name, ulong ino, ulong dev) -> byte*
         src_to_dest_free(ent);
         return ent_from_table.name;
     };
-    return ((void*)0);
 };
 
 cdecl hash_init() -> void
 {
-    src_to_dest = hash_initialize(103, ((void*)0), src_to_dest_hash, ?, src_to_dest_free);
-    if (? == ((void*)0))
+    src_to_dest = hash_initialize;
+    if (src_to_dest == NULL)
         xalloc_die();
 };

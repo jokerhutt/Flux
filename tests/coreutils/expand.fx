@@ -46,28 +46,29 @@ macro AUTHORS
 };
 
 byte[34] shortopts = "it:0::1::2::3::4::5::6::7::8::9::";
-option[5] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Convert tabs in each FILE to spaces, writing to standard output.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("expand", gettext("\
-  -i, --initial\n\
-         do not convert tabs after non blanks\n\
+        oputs_("expand", gettext("\
+  -i, --initial\n\
+         do not convert tabs after non blanks\n\
 "));
-        oputs_("expand", gettext("\
-  -t, --tabs=N\n\
-         have tabs N characters apart, not 8\n\
+        oputs_("expand", gettext("\
+  -t, --tabs=N\n\
+         have tabs N characters apart, not 8\n\
 "));
         emit_tab_list_info("expand");
         oputs_("expand", gettext("      --help\n         display this help and exit\n"));
@@ -79,22 +80,24 @@ Convert tabs in each FILE to spaces, writing to standard output.\n\
 
 cdecl expand() -> void
 {
-    _IO_FILE* fp = next_file(((void*)0));
-    if (!fp)
+    if (! fp)
         return void;
     byte[262144] line_in = IO_BUFSIZE;
-    while (0)
+    mbbuf_init;
+    while (true)
     {
-        bool convert = 0;
-        long column = 0;
+        bool;
+        int column = 0;
         do
         {
+            while (( g = mbbuf_get_char ( & mbbuf ) ) . ch == MBBUF_EOF && ( fp = next_file ( fp ) ))
+                mbbuf_init;
             if (convert)
             {
-                if (?)
+                if (g . ch == '\t')
                 {
-                    bool last_tab;
-                    long next_tab_column;
+                    bool;
+                    int next_tab_column = get_next_tab_column;
                     while (++column < next_tab_column)
                         if (putchar(' ') < 0)
                             write_error();
@@ -102,23 +105,24 @@ cdecl expand() -> void
                         write_error();
                     continue;
                 }
-                elif (?)
+                elif (g . ch == '\b')
                 {
                     column -= ?!column;
                 };
                 else
                 {
-                    int width;
-                    if (__builtin_add_overflow((column), (width ? 0 ? 1 : width), (@column)))
-                        error(0, 0, gettext("input line is too long"));
+                    int width = c32width;
+                    if (ckd_add(@column, column, width < 0 ? 1 : width))
+                        error;
                 };
             };
-            if (?)
+            if (g . ch == MBBUF_EOF)
                 return void;
-            if (ferror(stdout))
+            fwrite;
+            if (ferror)
                 write_error();
         }
-        while (?);
+        while (g . ch != '\n');
     };
 };
 
@@ -126,81 +130,43 @@ cdecl main(int argc, byte** argv) -> int
 {
     int c;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    convert_entire_line = 0;
-    while ((c = getopt_long(argc, argv, shortopts, longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('i')
             {
-                convert_entire_line = 0;
+                break switch;
             }
-            goto _switch_end_139188838789968;
             case ('t')
             {
-                parse_tab_stops(optarg);
+                parse_tab_stops;
+                break switch;
             }
-            goto _switch_end_139188838789968;
             case ('0')
             {
-                case ('1')
-                {
-                    case ('2')
-                    {
-                        case ('3')
-                        {
-                            case ('4')
-                            {
-                                case ('5')
-                                {
-                                    case ('6')
-                                    {
-                                        case ('7')
-                                        {
-                                            case ('8')
-                                            {
-                                                case ('9')
-                                                {
-                                                    if (optarg)
-                                                        parse_tab_stops(optarg - 1);
-                                                    else
-                                                    {
-                                                        byte[2] tab_stop = 2;
-                                                        tab_stop[0] = c;
-                                                        tab_stop[1] = '\0';
-                                                        parse_tab_stops(tab_stop);
-                                                    };
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                break switch;
             }
-            goto _switch_end_139188838789968;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188838789968;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188838789968;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188838789968:
     };
     finalize_tab_stops();
-    set_file_list(optind < argc ? @argv[optind] : ((void*)0));
+    set_file_list;
     expand();
     cleanup_file_list_stdin();
     return exit_status;

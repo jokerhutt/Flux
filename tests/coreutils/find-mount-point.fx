@@ -23,18 +23,17 @@ cdecl find_mount_point(byte* file, stat* file_stat) -> byte*
 {
     saved_cwd cwd;
     stat last_stat;
-    byte* mp = ((void*)0);
-    if (save_cwd(@?) != 0)
+    byte* mp;
+    if (save_cwd(@cwd) != 0)
     {
-        error(0, (?__errno_location()), gettext("cannot get current directory"));
-        return ((void*)0);
+        error;
     };
-    if (((((file_stat.st_mode)) ? 0) ? (0040000)))
+    if (S_ISDIR(file_stat))
     {
         last_stat = *file_stat;
         if (chdir(file) < 0)
         {
-            return ((void*)0);
+            error;
         };
     }
     else
@@ -42,27 +41,30 @@ cdecl find_mount_point(byte* file, stat* file_stat) -> byte*
         byte* dir = dir_name(file);
         if (chdir(dir) < 0)
         {
+            error;
             free(dir);
-            return ((void*)0);
         };
         if (stat(".", @last_stat) < 0)
         {
+            error;
             free(dir);
             goto done;
         };
         free(dir);
     };
-    while (?)
+    while (true)
     {
         stat st;
         if (stat("..", @st) < 0)
         {
+            error;
             goto done;
         };
-        if (st.st_dev != last_stat.st_dev | st.st_ino == last_stat.st_ino)
+        if (st. != last_stat. | st. == last_stat.)
             break;
         if (chdir("..") < 0)
         {
+            error;
             goto done;
         };
         last_stat = st;
@@ -70,11 +72,10 @@ cdecl find_mount_point(byte* file, stat* file_stat) -> byte*
     mp = xgetcwd();
     label done:
     {
-        int save_errno = (?__errno_location());
-        if (restore_cwd(@?) != 0)
-            error(0, (?__errno_location()), gettext("failed to return to initial working directory"));
-        free_cwd(@?);
-        (?__errno_location()) ? save_errno;
+        int save_errno;
+        if (restore_cwd(@cwd) != 0)
+            error;
+        free_cwd(@cwd);
     };
     return mp;
 };

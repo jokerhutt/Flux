@@ -42,25 +42,25 @@ uint SMALL_BYTE_THRESHOLD = 3;
 field_range_pair* current_rp = field_range_pair;
 extern byte* field_1_buffer;
 extern int field_1_bufsize;
-extern bool suppress_non_delimited;
-extern bool complement;
+extern int suppress_non_delimited;
+extern int complement;
 extern int delim_mcel;
 extern byte delim_bytes;
 byte line_delim = '\n';
 ulong output_delimiter_length = size_t;
 extern byte* output_delimiter_string;
 extern byte output_delimiter_default;
-extern bool have_read_stdin;
-extern bool no_split;
-extern bool whitespace_delimited;
-extern bool trim_outer_whitespace;
-extern bool space_output_delimiter_default;
+extern int have_read_stdin;
+extern int no_split;
+extern int whitespace_delimited;
+extern int trim_outer_whitespace;
+extern int space_output_delimiter_default;
 enum whitespace_option
 {
     WHITESPACE_OPTION_TRIMMED
 };
 
-byte*[2] whitespace_option_args = {"trimmed", ((void*)0)};
+extern byte** whitespace_option_args;
 whitespace_option[1] whitespace_option_types = whitespace_option;
 cdecl ARGMATCH_VERIFY() -> int;
 uint CUT_MODE_NONE = 0;
@@ -69,122 +69,110 @@ uint CUT_MODE_CHARACTERS = 2;
 uint CUT_MODE_FIELDS = 3;
 
 enum (unnamed at tests/coreutils/cut.c:142:8) cut_mode = enum { CUT_MODE_NONE , CUT_MODE_BYTES , CUT_MODE_CHARACTERS , CUT_MODE_FIELDS };
-uint COMPLEMENT_OPTION = 128;
+uint COMPLEMENT_OPTION = 0;
 
-option[13] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print selected parts of lines from each FILE to standard output.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("cut", gettext("\
-  -b, --bytes=LIST\n\
-         select only these byte positions\n\
+        oputs_("cut", gettext("\
+  -b, --bytes=LIST\n\
+         select only these byte positions\n\
 "));
-        oputs_("cut", gettext("\
-  -c, --characters=LIST\n\
-         select only these character positions\n\
+        oputs_("cut", gettext("\
+  -c, --characters=LIST\n\
+         select only these character positions\n\
 "));
-        oputs_("cut", gettext("\
-      --complement\n\
-         complement the set of selected bytes, characters or fields\n\
+        oputs_("cut", gettext("\
+      --complement\n\
+         complement the set of selected bytes, characters or fields\n\
 "));
-        oputs_("cut", gettext("\
-  -d, --delimiter=DELIM\n\
-         use DELIM instead of TAB for field delimiter\n\
+        oputs_("cut", gettext("\
+  -d, --delimiter=DELIM\n\
+         use DELIM instead of TAB for field delimiter\n\
 "));
-        oputs_("cut", gettext("\
-  -f, --fields=LIST\n\
-         select only these fields;  also print any line that contains\n\
-         no delimiter character, unless the -s option is specified\n\
+        oputs_("cut", gettext("\
+  -f, --fields=LIST\n\
+         select only these fields;  also print any line that contains\n\
+         no delimiter character, unless the -s option is specified\n\
 "));
-        oputs_("cut", gettext("\
-  -F LIST\n\
-         like -f, but also implies -w and -O ' '\n\
+        oputs_("cut", gettext("\
+  -F LIST\n\
+         like -f, but also implies -w and -O ' '\n\
 "));
-        oputs_("cut", gettext("\
-  -n, --no-partial\n\
-         with -b, don't output partial multi-byte characters\n\
+        oputs_("cut", gettext("\
+  -n, --no-partial\n\
+         with -b, don't output partial multi-byte characters\n\
 "));
-        oputs_("cut", gettext("\
-  -O, --output-delimiter=STRING\n\
-         use STRING as the output delimiter;\n\
-         the default is to use the input delimiter\n\
+        oputs_("cut", gettext("\
+  -O, --output-delimiter=STRING\n\
+         use STRING as the output delimiter;\n\
+         the default is to use the input delimiter\n\
 "));
-        oputs_("cut", gettext("\
-  -s, --only-delimited\n\
-         do not print lines not containing delimiters\n\
+        oputs_("cut", gettext("\
+  -s, --only-delimited\n\
+         do not print lines not containing delimiters\n\
 "));
-        oputs_("cut", gettext("\
-  -w, --whitespace-delimited[=trimmed]\n\
-         use a run of blank characters as the field delimiter;\n\
-         with 'trimmed', ignore leading and trailing blanks\n\
+        oputs_("cut", gettext("\
+  -w, --whitespace-delimited[=trimmed]\n\
+         use a run of blank characters as the field delimiter;\n\
+         with 'trimmed', ignore leading and trailing blanks\n\
 "));
-        oputs_("cut", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("cut", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("cut", gettext("      --help\n         display this help and exit\n"));
         oputs_("cut", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Use one, and only one of -b, -c, -f or -F.  Each LIST is made up of one\n\
-range, or many ranges separated by commas.  Selected input is written\n\
-in the same order that it is read, and is written exactly once.\n\
-"), stdout);
-        fputs(gettext("\
-Each range is one of:\n\
-\n\
-  N     N'th byte, character or field, counted from 1\n\
-  N-    from N'th byte, character or field, to end of line\n\
-  N-M   from N'th to M'th (included) byte, character or field\n\
-  -M    from first to M'th (included) byte, character or field\n\
-"), stdout);
+        fputs;
+        fputs;
         emit_ancillary_info("cut");
     };
     exit(status);
 };
 
-cdecl next_item(ulong* item_idx) -> void
+cdecl next_item(int* item_idx) -> void
 {
     (*item_idx)++;
-    if ((*item_idx) > current_rp.hi)
+    if ((*item_idx) > current_rp)
         current_rp++;
 };
 
-cdecl print_kth(ulong k) -> bool
+cdecl print_kth(int k) -> int
 {
-    return current_rp.lo <= k;
+    return current_rp <= k;
 };
 
-cdecl is_range_start_index(ulong k) -> bool
+cdecl is_range_start_index(int k) -> int
 {
-    return k == current_rp.lo;
+    return k == current_rp;
 };
 
-cdecl field_delim_is_line_delim() -> bool
+cdecl field_delim_is_line_delim() -> int
 {
-    return ?. == 1 & ?[0] == line_delim;
+    return delim_mcel. == 1 & delim_bytes[0] == line_delim;
 };
 
-cdecl mcel_isblank(int g) -> bool
+cdecl mcel_isblank(int g) -> int
 {
-    return (?. == 1 & c_isblank(?.)) | (?. > 1 & c32issep(?.));
+    return (g. == 1 & c_isblank(g.)) | (g. > 1 & c32issep(g.));
 };
 
-cdecl bytesearch_field_delim_ok() -> bool
+cdecl bytesearch_field_delim_ok() -> int
 {
-    byte delim_0 = ?[0];
-    return (?. == 1 ? ((__ctype_get_mb_cur_max()) ? 1 ? (?() ? (delim_0 < 0x80 | delim_0 > 0xF4) : delim_0 < 0x30)) : ?() & !?.);
+    byte delim_0 = delim_bytes[0];
 };
 
 enum field_terminator
@@ -204,52 +192,45 @@ enum bytesearch_mode
 struct bytesearch_context
 {
     bytesearch_mode mode;
-    bool blank_delimited;
-    bool at_eof;
+    int blank_delimited;
+    int at_eof;
     byte* line_end;
-    bool line_end_known;
+    int line_end_known;
 };
 
 cdecl bytesearch_context_reset(bytesearch_context* ctx) -> void
 {
     ctx.mode = BYTESEARCH_FIELDS;
-    ctx.line_end = ((void*)0);
-    ctx.line_end_known = 0;
 };
 
 struct mbfield_parser
 {
-    bool whitespace_delimited;
-    bool trim_outer_whitespace;
-    bool at_line_start;
-    bool have_saved;
+    int whitespace_delimited;
+    int trim_outer_whitespace;
+    int at_line_start;
+    int have_saved;
     int saved_g;
 };
 
-cdecl mbbuf_get_saved_char(int* mbbuf, bool* have_saved, int* saved_g) -> int
+cdecl mbbuf_get_saved_char(int* mbbuf, int* have_saved, int* saved_g) -> int
 {
     if (*have_saved)
     {
-        *have_saved = 0;
-        return *?;
+        return *saved_g;
     };
-    return mbbuf_get_char(?);
+    return mbbuf_get_char(mbbuf);
 };
 
-cdecl skip_whitespace_run(int* mbuf, mbfield_parser* parser, bool* have_pending_line, bool have_initial_whitespace) -> field_terminator
+cdecl skip_whitespace_run(int* mbuf, mbfield_parser* parser, int* have_pending_line, int have_initial_whitespace) -> field_terminator
 {
     do
     {
-        if (?)
-            *have_pending_line = 0;
     }
-    while (?);
-    bool trim_start = parser.trim_outer_whitespace & parser.at_line_start;
-    if (?)
+    while (g . ch != MBBUF_EOF && g . ch != line_delim && mcel_isblank ( g ));
+    bool;
+    if (parser -> trim_outer_whitespace && ( g . ch == MBBUF_EOF || g . ch == line_delim ))
     {
     };
-    parser.have_saved = 0;
-    return trim_start & !have_initial_whitespace ? FIELD_DATA : FIELD_DELIMITER;
 };
 
 cdecl write_bytes(byte* buf, ulong n_bytes) -> void
@@ -260,7 +241,7 @@ cdecl write_bytes(byte* buf, ulong n_bytes) -> void
         {};
         return void;
     };
-    if (fwrite(buf, (sizeof ( char ) / 8), n_bytes, stdout) != n_bytes)
+    if (fwrite != n_bytes)
         write_error();
 };
 
@@ -281,7 +262,6 @@ cdecl search_bytes(byte* buf, int c, ulong n_bytes) -> void*
         return (byte*)buf;
     if (1 < n_bytes & to_uchar(buf[1]) == c)
         return (byte*)buf + 1;
-    return 2 < n_bytes ? (byte*)memchr(buf + 2, c, n_bytes - 2) : ((void*)0);
 };
 
 cdecl write_line_delim() -> void
@@ -290,118 +270,92 @@ cdecl write_line_delim() -> void
         write_error();
 };
 
-cdecl reset_item_line(ulong* item_idx, bool* print_delimiter) -> void
+cdecl reset_item_line(int* item_idx, int* print_delimiter) -> void
 {
     write_line_delim();
     *item_idx = 0;
-    *print_delimiter = 0;
     current_rp = frp;
 };
 
-cdecl write_pending_line_delim(ulong item_idx) -> void
+cdecl write_pending_line_delim(int item_idx) -> void
 {
     if (item_idx > 0)
         write_line_delim();
 };
 
-cdecl write_selected_item(bool* print_delimiter, bool range_start, byte* buf, ulong n_bytes) -> void
+cdecl write_selected_item(int* print_delimiter, int range_start, byte* buf, ulong n_bytes) -> void
 {
-    if (output_delimiter_string != ?)
+    if (output_delimiter_string != output_delimiter_default)
     {
         if (*print_delimiter & range_start)
             write_bytes(output_delimiter_string, output_delimiter_length);
-        *print_delimiter = 0;
     };
     write_bytes(buf, n_bytes);
 };
 
 cdecl append_field_1_chunk(byte* buf, int len, int* n_bytes) -> void
 {
-    if (? - *? < ?)
+    if (field_1_bufsize - *n_bytes < len)
     {
-        field_1_buffer = xpalloc(field_1_buffer, @?, ?, -1, (sizeof * field_1_buffer / 8));
+        field_1_buffer = xpalloc(field_1_buffer, @field_1_bufsize, len, -1, (sizeof * field_1_buffer / 8));
     };
-    copy_bytes(field_1_buffer + *?, buf, ?);
-    *? += ?;
+    copy_bytes(field_1_buffer + *n_bytes, buf, len);
+    *n_bytes += len;
 };
 
 cdecl append_field_1_bytes(int* mbbuf, int g, int* n_bytes) -> void
 {
-    append_field_1_chunk(mbbuf_char_offset(?, ?), ?., ?);
+    append_field_1_chunk(mbbuf_char_offset(mbbuf, g), g., n_bytes);
 };
 
-cdecl scan_mb_blank_field(int* mbbuf, mbfield_parser* parser, bool* have_pending_line, bool write_field, int* n_bytes) -> field_terminator
+cdecl scan_mb_blank_field(int* mbbuf, mbfield_parser* parser, int* have_pending_line, int write_field, int* n_bytes) -> field_terminator
 {
-    if (parser.trim_outer_whitespace & parser.at_line_start)
+    if (parser & parser)
     {
-        field_terminator terminator = ?(?, parser, have_pending_line, 0);
+        field_terminator terminator = skip_whitespace_run;
         if (terminator != FIELD_DATA)
             return terminator;
     };
-    parser.at_line_start = 0;
-    while (0)
+    while (true)
     {
-        if (?)
+        if (g . ch == MBBUF_EOF)
             return FIELD_EOF;
-        *have_pending_line = 0;
-        if (?)
+        if (g . ch == line_delim)
             return FIELD_LINE_DELIMITER;
-        if (?)
-            return ?(?, parser, have_pending_line, 0);
+        if (mcel_isblank)
+            return skip_whitespace_run;
+        if (n_bytes)
+            append_field_1_bytes;
+        elif (write_field)
+            write_bytes;
     };
 };
 
-cdecl scan_mb_delim_field(int* mbbuf, bool* have_pending_line, bool write_field, int* n_bytes) -> field_terminator
+cdecl scan_mb_delim_field(int* mbbuf, int* have_pending_line, int write_field, int* n_bytes) -> field_terminator
 {
-    while (0)
+    while (true)
     {
-        if (?)
+        if (g . ch == MBBUF_EOF)
             return FIELD_EOF;
-        *have_pending_line = 0;
-        if (?)
+        if (g . ch == line_delim)
             return FIELD_LINE_DELIMITER;
-        if (?)
+        if (delim_mcel . err ? g . err == delim_mcel . err : mcel_eq ( g , delim_mcel ))
             return FIELD_DELIMITER;
+        if (n_bytes)
+            append_field_1_bytes;
+        elif (write_field)
+            write_bytes;
     };
 };
 
-cdecl scan_mb_field(int* mbbuf, mbfield_parser* parser, bool* have_pending_line, bool write_field, int* n_bytes) -> field_terminator
+cdecl scan_mb_field(int* mbbuf, mbfield_parser* parser, int* have_pending_line, int write_field, int* n_bytes) -> field_terminator
 {
-    return (parser.whitespace_delimited ? ?(?, parser, have_pending_line, write_field, ?) : ?(?, have_pending_line, write_field, ?));
+    return (parser ? scan_mb_blank_field(mbbuf, parser, have_pending_line, write_field, n_bytes) : scan_mb_delim_field(mbbuf, have_pending_line, write_field, n_bytes));
 };
 
 cdecl find_field_delim(byte* buf, ulong len) -> int*
 {
-    if (len < ?.)
-        return ((void*)0);
-    if (?. == 1)
-        return memchr(buf, ?[0], len);
-    byte* p = buf;
-    byte* end = buf + len;
-    byte saved = buf[len];
-    buf[len] = '\0';
-    while (p < end)
-    {
-        byte* nul = memchr(p, '\0', end - p);
-        if (!nul)
-        {
-            byte* match = strstr(p, ?);
-            buf[len] = saved;
-            return (byte*)match;
-        };
-        if (p < nul)
-        {
-            byte* match = strstr(p, ?);
-            if (match)
-            {
-                buf[len] = saved;
-                return (byte*)match;
-            };
-        };
-        p = nul + 1;
-    };
-    buf[len] = saved;
-    return ((void*)0);
+    return memmem(buf, len, delim_bytes, delim_mcel.);
 };
 
 extern int idx_t;
@@ -409,26 +363,24 @@ cdecl find_field_terminator(byte* buf, int len, bytesearch_context* ctx, byte** 
 {
     if (ctx.mode == BYTESEARCH_LINE_ONLY)
     {
-        if (!ctx.line_end_known)
+        if (!ctx)
         {
-            ctx.line_end = memchr(buf, line_delim, ?);
-            ctx.line_end_known = 0;
+            ctx.line_end = memchr(buf, line_delim, len);
         };
         *terminator = ctx.line_end;
         return *terminator ? FIELD_LINE_DELIMITER : FIELD_DATA;
     };
     if (field_delim_is_line_delim())
     {
-        *terminator = memchr(buf, line_delim, ?);
+        *terminator = memchr(buf, line_delim, len);
         return *terminator ? FIELD_DELIMITER : FIELD_DATA;
     };
-    if (!ctx.line_end_known)
+    if (!ctx)
     {
-        ctx.line_end = memchr(buf, line_delim, ?);
-        ctx.line_end_known = 0;
+        ctx.line_end = memchr(buf, line_delim, len);
     };
     idx_t;
-    byte* field_end;
+    byte* field_end = (ctx ? memchr2 : find_field_delim);
     if (field_end)
     {
         *terminator = field_end;
@@ -438,258 +390,247 @@ cdecl find_field_terminator(byte* buf, int len, bytesearch_context* ctx, byte** 
     return ctx.line_end ? FIELD_LINE_DELIMITER : FIELD_DATA;
 };
 
-cdecl maybe_write_line_delim(bool found_any_selected_field, ulong field_idx) -> void
+cdecl maybe_write_line_delim(int found_any_selected_field, int field_idx) -> void
 {
     if (found_any_selected_field | !(suppress_non_delimited & field_idx == 1))
         write_line_delim();
 };
 
-cdecl begin_field_output(ulong field_idx, bool buffer_first_field, bool* found_any_selected_field) -> bool
+cdecl begin_field_output(int field_idx, int buffer_first_field, int* found_any_selected_field) -> int
 {
-    bool write_field = print_kth(field_idx);
-    if (write_field & !(field_idx == 1 & buffer_first_field))
+    bool;
+    if (write_field && ! ( field_idx == 1 && buffer_first_field ))
     {
         if (*found_any_selected_field)
             write_bytes(output_delimiter_string, output_delimiter_length);
-        *found_any_selected_field = 0;
     };
-    return write_field;
 };
 
-cdecl handle_field_1(ulong field_idx, bool buffer_first_field, int* field_1_n_bytes) -> bool
+cdecl handle_field_1(int field_idx, int buffer_first_field, int* field_1_n_bytes) -> int
 {
-    bool field_1_selected = 0;
+    bool;
     if (field_idx == 1 & buffer_first_field)
     {
-        if ((field_1_selected = print_kth(1)))
-            write_bytes(field_1_buffer, *?);
-        *? = 0;
+        if (( field_1_selected = print_kth ( 1 ) ))
+            write_bytes(field_1_buffer, *field_1_n_bytes);
+        *field_1_n_bytes = 0;
     };
-    return field_1_selected;
 };
 
-cdecl handle_field_delimiter(ulong* field_idx, bool buffer_first_field, int* field_1_n_bytes, bool* found_any_selected_field, bool* write_field, bool blank_delimited, bool* skip_blank_run) -> void
+cdecl handle_field_delimiter(int* field_idx, int buffer_first_field, int* field_1_n_bytes, int* found_any_selected_field, int* write_field, int blank_delimited, int* skip_blank_run) -> void
 {
-    if (?(*field_idx, buffer_first_field, ?))
-        *found_any_selected_field = 0;
     next_item(field_idx);
     *write_field = begin_field_output(*field_idx, buffer_first_field, found_any_selected_field);
-    if (blank_delimited)
-        *skip_blank_run = 0;
 };
 
-cdecl field_selection_exhausted(ulong field_idx) -> bool
+cdecl field_selection_exhausted(int field_idx) -> int
 {
-    return !print_kth(field_idx) & current_rp.lo == (0);
 };
 
-cdecl finish_current_line(ulong field_idx, bool buffer_first_field, int* field_1_n_bytes, bool found_any_selected_field, bool line_terminated) -> void
+cdecl finish_current_line(int field_idx, int buffer_first_field, int* field_1_n_bytes, int found_any_selected_field, int line_terminated) -> void
 {
     if (field_idx == 1 & buffer_first_field)
     {
-        if (!suppress_non_delimited & (line_terminated | *? != 0))
+        if (!suppress_non_delimited & (line_terminated | *field_1_n_bytes != 0))
         {
-            write_bytes(field_1_buffer, *?);
+            write_bytes(field_1_buffer, *field_1_n_bytes);
             write_line_delim();
         };
-        *? = 0;
+        *field_1_n_bytes = 0;
     }
     elif (field_idx != 1 | found_any_selected_field)
         maybe_write_line_delim(found_any_selected_field, field_idx);
 };
 
-cdecl sync_byte_selection(ulong byte_idx) -> void
+cdecl sync_byte_selection(int byte_idx) -> void
 {
-    while (current_rp.hi <= byte_idx)
+    while (current_rp <= byte_idx)
         current_rp++;
 };
 
-cdecl reset_field_line(ulong* field_idx, bool* found_any_selected_field, bool* have_pending_line, mbfield_parser* parser) -> void
+cdecl reset_field_line(int* field_idx, int* found_any_selected_field, int* have_pending_line, mbfield_parser* parser) -> void
 {
     *field_idx = 1;
     current_rp = frp;
-    *found_any_selected_field = 0;
-    *have_pending_line = 0;
-    parser.have_saved = 0;
-    parser.at_line_start = 0;
 };
 
-cdecl cut_bytes(_IO_FILE* stream) -> void
+cdecl cut_bytes(int* stream) -> void
 {
     byte[262144] bytes_in = IO_BUFSIZE;
-    ulong byte_idx = 0;
-    bool print_delimiter = 0;
+    bool;
     int fd = fileno(stream);
     current_rp = frp;
-    while (0)
+    while (true)
     {
         idx_t;
-        if (?)
+        if (available <= 0)
         {
-            if (?)
+            if (available < 0)
                 fseterr(stream);
-            write_pending_line_delim(byte_idx);
+            write_pending_line_delim;
             break;
         };
         idx_t;
-        while (?)
+        while (processed < available)
         {
             byte* line;
             idx_t;
-            byte* line_end;
+            byte* line_end = search_bytes;
             byte* end;
             byte* p = line;
             while (0 < end - p)
             {
-                sync_byte_selection(byte_idx);
-                if (byte_idx + 1 < current_rp.lo)
+                sync_byte_selection;
+                if (byte_idx + 1 < current_rp -> lo)
                 {
                     idx_t;
                 }
                 else
                 {
                     idx_t;
+                    write_selected_item;
                 };
             };
             if (line_end)
             {
-                reset_item_line(@byte_idx, @print_delimiter);
+                reset_item_line;
             };
         };
     };
 };
 
-cdecl cut_characters_mode(_IO_FILE* stream, bool byte_mode) -> void
+cdecl cut_characters_mode(int* stream, int byte_mode) -> void
 {
-    ulong idx = 0;
-    bool print_delimiter = 0;
+    bool;
     byte[262144] bytes_in = IO_BUFSIZE;
     current_rp = frp;
-    while (0)
+    mbbuf_init;
+    while (true)
     {
-        if (?)
-            reset_item_line(@idx, @print_delimiter);
-        elif (?)
+        if (g . ch == line_delim)
+            reset_item_line;
+        elif (g . ch == MBBUF_EOF)
         {
-            write_pending_line_delim(idx);
+            write_pending_line_delim;
             break;
         };
         else
             if (byte_mode)
             {
-                bool first_selected_is_range_start = 0;
-                bool seen_selected = 0;
-                bool suffix_selected = 0;
+                bool;
+                bool;
+                bool;
             }
             else
             {
-                next_item(@idx);
+                next_item;
+                if (print_kth)
+                    write_selected_item;
             };
     };
 };
 
-cdecl cut_bytes_no_split(_IO_FILE* stream) -> void
+cdecl cut_bytes_no_split(int* stream) -> void
 {
-    cut_characters_mode(stream, 0);
+    cut_characters_mode;
 };
 
-cdecl cut_characters(_IO_FILE* stream) -> void
+cdecl cut_characters(int* stream) -> void
 {
-    cut_characters_mode(stream, 0);
+    cut_characters_mode;
 };
 
-cdecl cut_fields_mb_any(_IO_FILE* stream, bool whitespace_mode) -> void
+cdecl cut_fields_mb_any(int* stream, int whitespace_mode) -> void
 {
     byte[262144] bytes_in = IO_BUFSIZE;
     mbfield_parser parser;
-    ulong field_idx = 1;
-    bool found_any_selected_field = 0;
-    bool buffer_first_field;
-    bool have_pending_line = 0;
+    bool;
+    bool;
+    bool;
     current_rp = frp;
-    buffer_first_field = (suppress_non_delimited `^^ !print_kth(1));
-    while (0)
+    mbbuf_init;
+    while (true)
     {
-        if (field_idx == 1 & buffer_first_field)
+        if (field_idx == 1 && buffer_first_field)
         {
             idx_t;
-            field_terminator terminator;
-            if (?)
+            field_terminator terminator = scan_mb_field;
+            if (terminator == FIELD_EOF && n_bytes == 0)
                 return void;
             if (terminator != FIELD_DELIMITER)
             {
                 if (!suppress_non_delimited)
                 {
+                    write_bytes;
                     write_line_delim();
                 };
                 if (terminator == FIELD_EOF)
                     break;
-                reset_field_line(@field_idx, @found_any_selected_field, @have_pending_line, @parser);
+                reset_field_line;
                 continue;
             };
             if (print_kth(1))
             {
-                found_any_selected_field = 0;
+                write_bytes;
             };
-            next_item(@field_idx);
+            next_item;
         };
         field_terminator terminator;
-        bool write_field = begin_field_output(field_idx, buffer_first_field, @found_any_selected_field);
+        bool;
+        terminator = scan_mb_field;
         if (terminator == FIELD_DELIMITER)
-            next_item(@field_idx);
+            next_item;
         else
         {
-            if (terminator == FIELD_EOF & !have_pending_line)
+            if (terminator == FIELD_EOF && ! have_pending_line)
                 break;
-            if (found_any_selected_field | !(suppress_non_delimited & field_idx == 1))
+            if (found_any_selected_field || ! ( suppress_non_delimited && field_idx == 1 ))
                 write_line_delim();
             if (terminator == FIELD_EOF)
                 break;
-            reset_field_line(@field_idx, @found_any_selected_field, @have_pending_line, @parser);
+            reset_field_line;
         };
     };
 };
 
-cdecl cut_fields_mb(_IO_FILE* stream) -> void
+cdecl cut_fields_mb(int* stream) -> void
 {
-    cut_fields_mb_any(stream, 0);
+    cut_fields_mb_any;
 };
 
-cdecl cut_fields_bytesearch(_IO_FILE* stream) -> void
+cdecl cut_fields_bytesearch(int* stream) -> void
 {
     byte[262145] bytes_in = IO_BUFSIZE + 1;
-    ulong field_idx = 1;
-    bool found_any_selected_field = 0;
-    bool have_pending_line = 0;
-    bool skip_blank_run = 0;
-    bool pending_line_delim_field = 0;
-    bool write_field;
+    bool;
+    bool;
+    bool;
+    bool;
+    bool;
     idx_t;
     current_rp = frp;
-    bool buffer_first_field = suppress_non_delimited `^^ !print_kth(1);
-    write_field = begin_field_output(field_idx, buffer_first_field, @found_any_selected_field);
-    bytesearch_context search = {blank_delimited};
+    bool;
+    mbbuf_init;
+    bytesearch_context search = {whitespace_delimited};
     bytesearch_context_reset(@search);
-    while (0)
+    while (true)
     {
         idx_t;
-        search.line_end_known = 0;
         if (pending_line_delim_field)
         {
-            pending_line_delim_field = 0;
-            if (?)
+            if (n_avail == 0)
             {
-                if (?)
-                    next_item(@field_idx);
-                maybe_write_line_delim(found_any_selected_field, field_idx);
+                if (handle_field_1)
+                    next_item;
+                maybe_write_line_delim;
                 return void;
             };
+            handle_field_delimiter;
         };
-        if (?)
+        if (n_avail == 0)
             break;
         byte* chunk;
         idx_t;
-        if (?)
+        if (field_idx == 1 && ! whitespace_delimited && ! field_delim_is_line_delim ( ) && ! find_field_delim ( chunk , n_avail ))
         {
             byte* last_line_delim;
             if (last_line_delim)
@@ -697,263 +638,164 @@ cdecl cut_fields_bytesearch(_IO_FILE* stream) -> void
                 idx_t;
                 if (!suppress_non_delimited)
                 {
-                    if (?)
+                    write_bytes;
+                    write_bytes;
+                    if (search . at_eof && chunk [ n - 1 ] != line_delim)
                         write_line_delim();
                 };
-                have_pending_line = 0;
-                if (search.at_eof)
+                mbbuf_advance;
+                if (search)
                     return void;
                 continue;
             };
         };
-        while (?)
+        while (processed < n_avail)
         {
-            byte* terminator = ((void*)0);
+            byte* terminator;
             if (skip_blank_run)
             {
-                if (?)
+                if (processed == n_avail)
                     break;
-                skip_blank_run = 0;
             };
-            if (field_selection_exhausted(field_idx))
+            if (field_selection_exhausted)
             {
                 if (field_delim_is_line_delim())
                 {
-                    maybe_write_line_delim(found_any_selected_field, field_idx);
+                    maybe_write_line_delim;
+                    mbbuf_advance;
                     return void;
                 };
                 search.mode = BYTESEARCH_LINE_ONLY;
-                field_terminator terminator_kind;
+                field_terminator terminator_kind = find_field_terminator;
                 if (terminator_kind == FIELD_LINE_DELIMITER)
                 {
-                    maybe_write_line_delim(found_any_selected_field, field_idx);
+                    maybe_write_line_delim;
                     goto reset_line;
                 };
                 break;
             };
-            field_terminator terminator_kind;
+            field_terminator terminator_kind = find_field_terminator;
             idx_t;
-            if (?)
-                have_pending_line = 0;
+            if (field_idx == 1 && buffer_first_field)
+                append_field_1_chunk;
+            elif (write_field)
+                write_bytes;
             if (terminator_kind == FIELD_DATA)
                 break;
             if (terminator_kind == FIELD_DELIMITER)
             {
-                if (?)
+                if (field_delim_is_line_delim ( ) && processed + 1 == n_avail)
                 {
-                    pending_line_delim_field = 0;
                     break;
                 };
+                handle_field_delimiter;
             }
             else
             {
                 affirm(terminator_kind == FIELD_LINE_DELIMITER);
+                finish_current_line;
                 label reset_line:
-                field_idx = 1;
                 current_rp = frp;
-                found_any_selected_field = 0;
-                have_pending_line = 0;
                 bytesearch_context_reset(@search);
-                write_field = begin_field_output(field_idx, buffer_first_field, @found_any_selected_field);
             };
         };
+        mbbuf_advance;
     };
-    if (!have_pending_line)
+    if (! have_pending_line)
         return void;
+    finish_current_line;
 };
 
-cdecl cut_fields_ws(_IO_FILE* stream) -> void
+cdecl cut_fields_ws(int* stream) -> void
 {
-    if ((__ctype_get_mb_cur_max()) ? 1 ? !trim_outer_whitespace)
+    if (MB_CUR_MAX <= 1 && ! trim_outer_whitespace)
         cut_fields_bytesearch(stream);
     else
-        cut_fields_mb_any(stream, 0);
+        cut_fields_mb_any;
 };
 
-cdecl cut_file(byte* file, def{}*(_IO_FILE*) -> void cut_stream) -> bool
+cdecl cut_file(byte* file, def{}*(int*) -> void cut_stream) -> int
 {
-    _IO_FILE* stream;
     if (streq(file, "-"))
     {
-        have_read_stdin = 0;
-        stream = stdin;
-        assume(stream);
+        assume;
     }
     else
     {
-        stream = fopen(file, "r");
-        if (stream == ((void*)0))
+        if (stream == NULL)
         {
-            return 0;
+            error;
         };
     };
-    cut_stream(stream);
-    int err = (?__errno_location());
-    if (!ferror(stream))
+    fadvise;
+    cut_stream;
+    int err;
+    if (!ferror)
         err = 0;
     if (streq(file, "-"))
-        clearerr(stream);
-    elif (fclose(stream) == (?0))
-        err = (?__errno_location());
+        clearerr;
+    else
     if (err)
     {
-        return 0;
+        error(0, err, "%s", quotearg_n_style_colon);
     };
-    return 0;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     int optc;
-    bool ok;
-    bool delim_specified = 0;
-    bool whitespace_delimited_specified = 0;
-    byte* spec_list_string = ((void*)0);
+    bool;
+    bool;
+    bool;
+    byte* spec_list_string;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "b:c:d:f:F:nO:szw", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('b')
-            {
-                cut_mode = CUT_MODE_BYTES;
-            }
-            case ('c')
-            {
-                if (optc == 'c')
-                    cut_mode = CUT_MODE_CHARACTERS;
-            }
-            case ('f')
-            {
-                case ('F')
-                {
-                    if (optc == 'f' | optc == 'F')
-                        cut_mode = CUT_MODE_FIELDS;
-                }
-            }
-            if (optc == 'F')
-            {
-                whitespace_delimited = 0;
-                space_output_delimiter_default = 0;
-            };
-            if (spec_list_string)
-                do
-                {
-                    error(0, 0, (gettext("only one list may be specified")));
-                    usage(0);
-                }
-                while (0);
-            spec_list_string = optarg;
-            goto _switch_end_139188749286608;
-            case ('d')
-            {
-                {
-                    if (?)
-                        do
-                        {
-                            error(0, 0, (gettext("the delimiter must be a single character")));
-                            usage(0);
-                        }
-                        while (0);
-                    delim_specified = 0;
-                    goto _switch_end_139188749286608;
-                };
-            }
-            case ('w')
-            {
-                whitespace_delimited = 0;
-            }
-            whitespace_delimited_specified = 0;
-            trim_outer_whitespace = (optarg & XARGMATCH("--whitespace-delimited", optarg, whitespace_option_args, whitespace_option_types) == WHITESPACE_OPTION_TRIMMED);
-            goto _switch_end_139188749286608;
-            case ('O')
-            {
-                output_delimiter_length = (optarg[0] == '\0' ? 1 : strlen(optarg));
-            }
-            output_delimiter_string = optarg;
-            goto _switch_end_139188749286608;
-            case ('n')
-            {
-                no_split = 0;
-            }
-            goto _switch_end_139188749286608;
-            case ('s')
-            {
-                suppress_non_delimited = 0;
-            }
-            goto _switch_end_139188749286608;
-            case ('z')
-            {
-                line_delim = '\0';
-            }
-            goto _switch_end_139188749286608;
-            case (COMPLEMENT_OPTION)
-            {
-                complement = 0;
-            }
-            goto _switch_end_139188749286608;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188749286608;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188749286608;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188749286608:
     };
     if (!spec_list_string)
         do
         {
             error(0, 0, (gettext("you must specify a list of bytes, characters, or fields")));
-            usage(0);
+            usage;
         }
         while (0);
     if (cut_mode == CUT_MODE_BYTES | cut_mode == CUT_MODE_CHARACTERS)
     {
-        if (delim_specified | whitespace_delimited)
+        if (delim_specified || whitespace_delimited)
             do
             {
-                error(0, 0, (gettext("an input delimiter makes sense\n\
+                error(0, 0, (gettext("an input delimiter makes sense\n\
 \tonly when operating on fields")));
-                usage(0);
+                usage;
             }
             while (0);
         if (suppress_non_delimited)
             do
             {
-                error(0, 0, (gettext("suppressing non-delimited lines makes sense\n\
+                error(0, 0, (gettext("suppressing non-delimited lines makes sense\n\
 \tonly when operating on fields")));
-                usage(0);
+                usage;
             }
             while (0);
     };
-    if (delim_specified & whitespace_delimited_specified)
+    if (delim_specified && whitespace_delimited_specified)
         do
         {
             error(0, 0, (gettext("-d and -w are mutually exclusive")));
-            usage(0);
+            usage;
         }
         while (0);
-    if (delim_specified & !whitespace_delimited_specified)
-        whitespace_delimited = 0;
     set_fields(spec_list_string, (((cut_mode == CUT_MODE_BYTES | cut_mode == CUT_MODE_CHARACTERS) ? SETFLD_ERRMSG_USE_POS : 0) `| (complement ? SETFLD_COMPLEMENT : 0)));
-    if (!delim_specified)
+    if (! delim_specified)
     {
         delim_bytes[0] = '\t';
         delim_mcel = mcel_ch('\t', 1);
     };
-    if (output_delimiter_string == ((void*)0))
+    if (output_delimiter_string == NULL)
     {
-        output_delimiter_string = ?;
+        output_delimiter_string = output_delimiter_default;
         if (space_output_delimiter_default)
         {
             output_delimiter_default[0] = ' ';
@@ -961,11 +803,11 @@ cdecl main(int argc, byte** argv) -> int
         }
         else
         {
-            copy_bytes(?, ?, ?.);
-            output_delimiter_length = ?.;
+            copy_bytes(output_delimiter_default, delim_bytes, delim_mcel.);
+            output_delimiter_length = delim_mcel.;
         };
     };
-    def{}*(_IO_FILE*) -> void cut_stream = FILE *;
+    def{}*(int*) -> void cut_stream = FILE *;
     switch (cut_mode)
     {
         case (CUT_MODE_NONE)
@@ -974,31 +816,21 @@ cdecl main(int argc, byte** argv) -> int
         }
         case (CUT_MODE_BYTES)
         {
-            cut_stream = (__ctype_get_mb_cur_max()) ? 1 ? !no_split ? cut_bytes : cut_bytes_no_split;
+            break switch;
         }
-        goto _switch_end_139188749288016;
         case (CUT_MODE_CHARACTERS)
         {
-            cut_stream = (__ctype_get_mb_cur_max()) ? 1 ? cut_bytes : cut_characters;
+            break switch;
         }
-        goto _switch_end_139188749288016;
         case (CUT_MODE_FIELDS)
         {
             cut_stream = whitespace_delimited ? cut_fields_ws : bytesearch_field_delim_ok() ? cut_fields_bytesearch : cut_fields_mb;
+            break switch;
         }
-        goto _switch_end_139188749288016;
     };
-    label _switch_end_139188749288016:
     affirm(cut_stream);
-    if (optind == argc)
-        ok = cut_file("-", cut_stream);
-    else
-        for (ok = 0; optind < argc; optind++)
-        {};
-    if (have_read_stdin & fclose(stdin) == (?0))
+    if (have_read_stdin && fclose ( stdin ) == EOF)
     {
-        error(0, (?__errno_location()), "-");
-        ok = 0;
+        error;
     };
-    return ok ? 0 : 0;
 };

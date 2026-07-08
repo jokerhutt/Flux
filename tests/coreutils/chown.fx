@@ -34,90 +34,84 @@ macro AUTHORS
 };
 
 extern byte* reference_file;
-uint DEREFERENCE_OPTION = 128;
-uint FROM_OPTION = 129;
-uint NO_PRESERVE_ROOT = 130;
-uint PRESERVE_ROOT = 131;
-uint REFERENCE_FILE_OPTION = 132;
+uint DEREFERENCE_OPTION = 0;
+uint FROM_OPTION = 1;
+uint NO_PRESERVE_ROOT = 2;
+uint PRESERVE_ROOT = 3;
+uint REFERENCE_FILE_OPTION = 4;
 
-option[14] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         if (chown_mode == CHOWN_CHOWN)
-            fputs(gettext("\
-Change the owner and/or group of each FILE to OWNER and/or GROUP.\n\
-With --reference, change the owner and group of each FILE to those of RFILE.\n\
-\n\
-"), stdout);
+            fputs;
         else
-            fputs(gettext("\
-Change the group of each FILE to GROUP.\n\
-With --reference, change the group of each FILE to that of RFILE.\n\
-\n\
-"), stdout);
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-  -c, --changes\n\
-         like verbose but report only when a change is made\n\
+            fputs;
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+  -c, --changes\n\
+         like verbose but report only when a change is made\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-  -f, --silent, --quiet\n\
-         suppress most error messages\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+  -f, --silent, --quiet\n\
+         suppress most error messages\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-  -v, --verbose\n\
-         output a diagnostic for every file processed\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+  -v, --verbose\n\
+         output a diagnostic for every file processed\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-      --dereference\n\
-         affect the referent of each symbolic link (this is\n\
-         the default), rather than the symbolic link itself\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+      --dereference\n\
+         affect the referent of each symbolic link (this is\n\
+         the default), rather than the symbolic link itself\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-  -h, --no-dereference\n\
-         affect symbolic links instead of any referenced file;\n\
-         useful only on systems that can change the ownership of a symlink\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+  -h, --no-dereference\n\
+         affect symbolic links instead of any referenced file;\n\
+         useful only on systems that can change the ownership of a symlink\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-      --from=CURRENT_OWNER:CURRENT_GROUP\n\
-         change the ownership of each file only if its\n\
-         current owner and/or group match those specified here.\n\
-         Either may be omitted, in which case a match\n\
-         is not required for the omitted attribute\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+      --from=CURRENT_OWNER:CURRENT_GROUP\n\
+         change the ownership of each file only if its\n\
+         current owner and/or group match those specified here.\n\
+         Either may be omitted, in which case a match\n\
+         is not required for the omitted attribute\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-      --no-preserve-root\n\
-         do not treat '/' specially (the default)\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+      --no-preserve-root\n\
+         do not treat '/' specially (the default)\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-      --preserve-root\n\
-         fail to operate recursively on '/'\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+      --preserve-root\n\
+         fail to operate recursively on '/'\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-      --reference=RFILE\n\
-         use RFILE's ownership rather than specifying values.\n\
-         RFILE is always dereferenced if a symbolic link.\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+      --reference=RFILE\n\
+         use RFILE's ownership rather than specifying values.\n\
+         RFILE is always dereferenced if a symbolic link.\n\
 "));
-        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
-  -R, --recursive\n\
-         operate on files and directories recursively\n\
+        oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("\
+  -R, --recursive\n\
+         operate on files and directories recursively\n\
 "));
         emit_symlink_recurse_options_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), "-P");
         oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("      --help\n         display this help and exit\n"));
         oputs_((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"), gettext("      --version\n         output version information and exit\n"));
         if (chown_mode == CHOWN_CHOWN)
-            fputs(gettext("\
-\n\
-Owner is unchanged if missing.  Group is unchanged if missing, but changed\n\
-to login group if implied by a ':' following a symbolic OWNER.\n\
-OWNER and GROUP may be numeric as well as symbolic.\n\
-"), stdout);
+            fputs;
+        if (chown_mode == CHOWN_CHOWN)
+            printf;
+        else
+            printf;
         emit_ancillary_info((chown_mode ? CHOWN_CHOWN ? "chown" : "chgrp"));
     };
     exit(status);
@@ -126,103 +120,23 @@ OWNER and GROUP may be numeric as well as symbolic.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
-    uint required_uid = -1;
-    uint required_gid = -1;
     int bit_flags;
     int dereference = -1;
     Chown_option chopt;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     chopt_init(@chopt);
     int optc;
-    while ((optc = getopt_long(argc, argv, "HLPRcfhv", long_options, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('H')
-            {
-            }
-            goto _switch_end_139188839383504;
-            case ('L')
-            {
-            }
-            goto _switch_end_139188839383504;
-            case ('P')
-            {
-            }
-            goto _switch_end_139188839383504;
-            case ('h')
-            {
-                dereference = 0;
-            }
-            goto _switch_end_139188839383504;
-            case (DEREFERENCE_OPTION)
-            {
-                dereference = 1;
-            }
-            goto _switch_end_139188839383504;
-            case (NO_PRESERVE_ROOT)
-            {
-            }
-            goto _switch_end_139188839383504;
-            case (PRESERVE_ROOT)
-            {
-            }
-            goto _switch_end_139188839383504;
-            case (REFERENCE_FILE_OPTION)
-            {
-                reference_file = optarg;
-            }
-            goto _switch_end_139188839383504;
-            case (FROM_OPTION)
-            {
-                {
-                    bool;
-                    byte* e;
-                    goto _switch_end_139188839383504;
-                };
-            }
-            case ('R')
-            {
-            }
-            goto _switch_end_139188839383504;
-            case ('c')
-            {
-                chopt.verbosity = V_changes_only;
-            }
-            goto _switch_end_139188839383504;
-            case ('f')
-            {
-            }
-            goto _switch_end_139188839383504;
-            case ('v')
-            {
-                chopt.verbosity = V_high;
-            }
-            goto _switch_end_139188839383504;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188839383504;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188839383504;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188839383504:
     };
     if (chopt)
     {
-        if (?)
+        if (bit_flags == FTS_PHYSICAL)
         {
             if (dereference == 1)
-                error(0, 0, gettext("-R --dereference requires either -H or -L"));
+                error;
             dereference = 0;
         };
     }
@@ -230,47 +144,48 @@ cdecl main(int argc, byte** argv) -> int
     {
     };
     chopt = (dereference != 0);
-    if (argc - optind < (reference_file ? 1 : 2))
+    if (argc - optind < ( reference_file ? 1 : 2 ))
     {
         if (argc <= optind)
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        usage(0);
+        usage;
     };
-    uint uid = -1;
-    uint gid = -1;
     if (reference_file)
     {
         stat ref_stats;
+        if (stat(reference_file, @ref_stats))
+            error;
         if (chown_mode == CHOWN_CHOWN)
         {
-            uid = ref_stats.st_uid;
-            chopt.user_name = uid_to_name(ref_stats.st_uid);
+            chopt.user_name = uid_to_name(ref_stats.);
         };
-        gid = ref_stats.st_gid;
-        chopt.group_name = gid_to_name(ref_stats.st_gid);
+        chopt.group_name = gid_to_name(ref_stats.);
     }
     else
     {
-        byte* ug = argv[optind];
+        byte* ug;
         if (chown_mode == CHOWN_CHGRP)
         {
-            ug = xmalloc(1 + strlen(argv[optind]) + 1);
-            stpcpy(stpcpy(ug, ":"), argv[optind]);
+            ug = xmalloc(1 + strlen + 1);
+            stpcpy;
         };
         bool;
-        byte* e;
-        if (ug != argv[optind])
+        byte* e = parse_user_spec_warn;
+        if (ug != argv [ optind ])
             free(ug);
+        if (e)
+            error;
         if (chown_mode == CHOWN_CHOWN & !chopt.user_name & chopt.group_name)
             chopt.user_name = xstrdup("");
-        optind++;
     };
-    if (?)
+    if (chopt . recurse && preserve_root)
     {
         dev_ino dev_ino_buf;
-        chopt.root_dev_ino = get_root_dev_ino(@?);
+        chopt.root_dev_ino = get_root_dev_ino(@dev_ino_buf);
+        if (chopt . root_dev_ino == NULL)
+            error;
     };
     bool;
 };

@@ -30,27 +30,27 @@ macro AUTHORS
     proper_name ( "David MacKenzie" ) , proper_name ( "Jim Meyering" )
 };
 
-option[4] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Output each NAME with its last non-slash component and trailing slashes\n\
-removed; if NAME contains no /'s, output '.' (meaning the current directory).\n\
-\n\
-"), stdout);
-        oputs_("dirname", gettext("\
-  -z, --zero\n\
-         end each output line with NUL, not newline\n\
+        printf;
+        fputs;
+        oputs_("dirname", gettext("\
+  -z, --zero\n\
+         end each output line with NUL, not newline\n\
 "));
         oputs_("dirname", gettext("      --help\n         display this help and exit\n"));
         oputs_("dirname", gettext("      --version\n         output version information and exit\n"));
+        printf;
         emit_ancillary_info("dirname");
     };
     exit(status);
@@ -60,48 +60,38 @@ cdecl main(int argc, byte** argv) -> int
 {
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (?)
+    setlocale;
+    atexit;
+    while (true)
     {
-        int c = getopt_long(argc, argv, "z", longopts, ((void*)0));
+        int c = getopt_long;
         if (c == -1)
             break;
         switch (c)
         {
             case ('z')
             {
+                break switch;
             }
-            goto _switch_end_139188883854928;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188883854928;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188883854928;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188883854928:
     };
     if (argc < optind + 1)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
-    for (optind < argc; optind++; )
-    {
-        byte* result = argv[optind];
-        if (?)
-        {
-            byte dot = '.';
-            result = @dot;
-        };
-    };
-    return 0;
 };

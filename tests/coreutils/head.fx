@@ -70,55 +70,52 @@ enum Copy_fd_status
     COPY_FD_UNEXPECTED_EOF
 };
 
-uint PRESUME_INPUT_PIPE_OPTION = 128;
+uint PRESUME_INPUT_PIPE_OPTION = 0;
 
-option[10] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        printf(gettext("\
-Print the first %d lines of each FILE to standard output.\n\
-With more than one FILE, precede each with a header giving the file name.\n\
+        printf;
+        printf(gettext("\
+Print the first %d lines of each FILE to standard output.\n\
+With more than one FILE, precede each with a header giving the file name.\n\
 "), 10);
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("head", gettext("\
-  -c, --bytes=[-]NUM\n\
-         print the first NUM bytes of each file;\n\
-         with the leading '-', print all but the last NUM bytes of each file\n\
+        oputs_("head", gettext("\
+  -c, --bytes=[-]NUM\n\
+         print the first NUM bytes of each file;\n\
+         with the leading '-', print all but the last NUM bytes of each file\n\
 "));
-        oprintf_("head", gettext("\
-  -n, --lines=[-]NUM\n\
-         print the first NUM lines instead of the first %d;\n\
-         with the leading '-', print all but the last NUM lines of each file\n\
+        oprintf_("head", gettext("\
+  -n, --lines=[-]NUM\n\
+         print the first NUM lines instead of the first %d;\n\
+         with the leading '-', print all but the last NUM lines of each file\n\
 "), 10);
-        oputs_("head", gettext("\
-  -q, --quiet, --silent\n\
-         never print headers giving file names\n\
+        oputs_("head", gettext("\
+  -q, --quiet, --silent\n\
+         never print headers giving file names\n\
 "));
-        oputs_("head", gettext("\
-  -v, --verbose\n\
-         always print headers giving file names\n\
+        oputs_("head", gettext("\
+  -v, --verbose\n\
+         always print headers giving file names\n\
 "));
-        oputs_("head", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("head", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("head", gettext("      --help\n         display this help and exit\n"));
         oputs_("head", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-NUM may have a multiplier suffix:\n\
-b 512, kB 1000, K 1024, MB 1000*1000, M 1024*1024,\n\
-GB 1000*1000*1000, G 1024*1024*1024, and so on for T, P, E, Z, Y, R, Q.\n\
-Binary prefixes can be used, too: KiB=K, MiB=M, and so on.\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("head");
     };
     exit(status);
@@ -126,6 +123,7 @@ Binary prefixes can be used, too: KiB=K, MiB=M, and so on.\n\
 
 cdecl diagnose_read_failure(byte* filename) -> void
 {
+    error;
 };
 
 cdecl diagnose_copy_fd_failure(Copy_fd_status err, byte* filename) -> void
@@ -135,143 +133,131 @@ cdecl diagnose_copy_fd_failure(Copy_fd_status err, byte* filename) -> void
         case (COPY_FD_READ_ERROR)
         {
             diagnose_read_failure(filename);
+            break switch;
         }
-        goto _switch_end_139188838269392;
         case (COPY_FD_UNEXPECTED_EOF)
         {
+            error;
+            break switch;
         }
-        goto _switch_end_139188838269392;
         case (COPY_FD_OK)
         {
-            default
-            {
-            };
         }
     };
-    label _switch_end_139188838269392:
 };
 
 cdecl write_header(byte* filename) -> void
 {
     int first_file;
+    printf("%s==> %s <==\n", (first_file ? "" : "\n"), quotearg_n_style_colon);
 };
 
 cdecl xwrite_stdout(byte* buffer, ulong n_bytes) -> void
 {
-    if (n_bytes > 0 & fwrite(buffer, 1, n_bytes, stdout) < n_bytes)
+    if (n_bytes > 0 & fwrite < n_bytes)
     {
-        clearerr(stdout);
-        fpurge(stdout);
+        clearerr;
+        fpurge;
+        error;
     };
 };
 
-cdecl copy_fd(int src_fd, ulong n_bytes) -> Copy_fd_status
+cdecl copy_fd(int src_fd, int n_bytes) -> Copy_fd_status
 {
-    byte[8192] buf = 0;
+    byte buf;
     while (0 < n_bytes)
     {
-        long n_read;
         if (n_read < 0)
             return COPY_FD_READ_ERROR;
-        n_bytes -= n_read;
-        if (n_read == 0 & n_bytes != 0)
+        if (n_read == 0 && n_bytes != 0)
             return COPY_FD_UNEXPECTED_EOF;
-        xwrite_stdout(buf, n_read);
+        xwrite_stdout;
     };
     return COPY_FD_OK;
 };
 
-cdecl elseek_diagnostic(long offset, int whence, byte* filename) -> void
+cdecl elseek_diagnostic(int offset, int whence, byte* filename) -> void
 {
-    long off = offset;
+    error;
 };
 
-cdecl elseek(int fd, long offset, int whence, byte* filename) -> long
+cdecl elseek(int fd, int offset, int whence, byte* filename) -> int
 {
-    long new_offset = lseek(fd, offset, whence);
     if (new_offset < 0)
         elseek_diagnostic(offset, whence, filename);
-    return new_offset;
 };
 
-cdecl elide_tail_bytes_pipe(byte* filename, int fd, ulong n_elide, long current_pos) -> int
+cdecl elide_tail_bytes_pipe(byte* filename, int fd, int n_elide, int current_pos) -> int
 {
-    ulong desired_pos = current_pos;
     bool;
     if (n_elide <= 1024 ? 1024)
     {
         bool;
         bool;
         byte*[2] b = 2;
+        b[0] = xnmalloc;
     }
     else
     {
         bool;
-        byte** b = ((void*)0);
-        ulong n_bufs = n_elide / 0 + (remainder != 0) + 1;
+        byte** b;
         bool;
-        if (?)
+        if (buffered_enough)
         {
-            if (?)
+            if (rem < n_bytes_left_in_b_i)
             {
+                xwrite_stdout;
             }
             else
             {
+                xwrite_stdout;
+                xwrite_stdout;
             };
         }
-        elif (?)
+        elif (i + 1 == n_bufs)
         {
+            xwrite_stdout;
         };
         label free_mem:
         free(b);
     };
 };
 
-cdecl elide_tail_bytes_file(byte* filename, int fd, ulong n_elide, stat* st, long current_pos) -> int
+cdecl elide_tail_bytes_file(byte* filename, int fd, int n_elide, stat* st, int current_pos) -> int
 {
-    long size = st.st_size;
-    if (current_pos < 0 | size <= STP_BLKSIZE(st))
-        return ?(filename, fd, n_elide, current_pos);
+    if (current_pos < 0 || size <= STP_BLKSIZE ( st ))
+        return elide_tail_bytes_pipe(filename, fd, n_elide, current_pos);
     else
     {
-        long diff = size - current_pos;
-        long bytes_remaining = diff < 0 ? 0 : diff;
-        Copy_fd_status err = copy_fd(fd, bytes_remaining - n_elide);
+        Copy_fd_status err = copy_fd;
         diagnose_copy_fd_failure(err, filename);
     };
 };
 
-cdecl elide_tail_lines_pipe(byte* filename, int fd, ulong n_elide, long current_pos) -> int
+cdecl elide_tail_lines_pipe(byte* filename, int fd, int n_elide, int current_pos) -> int
 {
-    long desired_pos = current_pos;
     linebuffer* first;
     linebuffer* last;
     linebuffer* tmp;
     ulong total_lines = 0;
     bool;
-    long n_read;
     first = last = xmalloc((sizeof ( LBUFFER ) / 8));
     first.nbytes = first.nlines = 0;
-    first.next = ((void*)0);
     tmp = xmalloc((sizeof ( LBUFFER ) / 8));
-    while (?)
+    while (true)
     {
-        n_read = read(fd, tmp.buffer, 0);
         if (n_read <= 0)
             break;
         if (!n_elide)
         {
-            desired_pos += n_read;
-            xwrite_stdout(tmp.buffer, n_read);
+            xwrite_stdout;
             continue;
         };
-        tmp.nbytes = n_read;
         tmp.nlines = 0;
-        tmp.next = ((void*)0);
         {
-            byte* buffer_end = tmp.buffer + n_read;
+            byte* buffer_end;
             *buffer_end = line_end;
-            byte* p = tmp.buffer;
+            byte* p = tmp;
             while ((p = rawmemchr(p, line_end)) < buffer_end)
             {
                 ++p;
@@ -279,9 +265,9 @@ cdecl elide_tail_lines_pipe(byte* filename, int fd, ulong n_elide, long current_
             };
         };
         total_lines += tmp.nlines;
-        if (tmp.nbytes + last.nbytes < 0)
+        if (tmp -> nbytes + last -> nbytes < BUFSIZ)
         {
-            memcpy(@last.buffer[last.nbytes], tmp.buffer, tmp.nbytes);
+            memcpy(@last[last.nbytes], tmp, tmp.nbytes);
             last.nbytes += tmp.nbytes;
             last.nlines += tmp.nlines;
         }
@@ -290,8 +276,7 @@ cdecl elide_tail_lines_pipe(byte* filename, int fd, ulong n_elide, long current_
             last = last.next = tmp;
             if (n_elide < total_lines - first.nlines)
             {
-                desired_pos += first.nbytes;
-                xwrite_stdout(first.buffer, first.nbytes);
+                xwrite_stdout(first, first.nbytes);
                 tmp = first;
                 total_lines -= first.nlines;
                 first = first.next;
@@ -306,30 +291,28 @@ cdecl elide_tail_lines_pipe(byte* filename, int fd, ulong n_elide, long current_
         diagnose_read_failure(filename);
         goto free_lbuffers;
     };
-    if (last.nbytes & last.buffer[last.nbytes - 1] != line_end)
+    if (last.nbytes & last[last.nbytes - 1] != line_end)
     {
         ++last.nlines;
         ++total_lines;
     };
     for (tmp = first; n_elide < total_lines - tmp.nlines; tmp = tmp.next)
     {
-        desired_pos += tmp.nbytes;
-        xwrite_stdout(tmp.buffer, tmp.nbytes);
+        xwrite_stdout(tmp, tmp.nbytes);
         total_lines -= tmp.nlines;
     };
     if (n_elide < total_lines)
     {
         ulong n = total_lines - n_elide;
-        byte* buffer_end = tmp.buffer + tmp.nbytes;
-        byte* p = tmp.buffer;
+        byte* buffer_end = tmp + tmp.nbytes;
+        byte* p = tmp;
         while (n & (p = memchr(p, line_end, buffer_end - p)))
         {
             ++p;
             ++tmp.nlines;
             --n;
         };
-        desired_pos += p - tmp.buffer;
-        xwrite_stdout(tmp.buffer, p - tmp.buffer);
+        xwrite_stdout(tmp, p - tmp);
     };
     label free_lbuffers:
     while (first)
@@ -340,32 +323,26 @@ cdecl elide_tail_lines_pipe(byte* filename, int fd, ulong n_elide, long current_
     };
 };
 
-cdecl elide_tail_lines_seekable(byte* pretty_filename, int fd, ulong n_lines, long start_pos, long size) -> int
+cdecl elide_tail_lines_seekable(byte* pretty_filename, int fd, int n_lines, int start_pos, int size) -> int
 {
-    byte[8192] buffer = 0;
-    long bytes_read;
-    long pos = size;
-    bytes_read = (pos - start_pos) % 0;
-    if (bytes_read == 0)
-        bytes_read = 0;
-    pos -= bytes_read;
-    bytes_read = read(fd, buffer, bytes_read);
+    byte buffer;
     if (bytes_read < 0)
     {
         diagnose_read_failure(pretty_filename);
     };
-    int all_lines;
-    if (n_lines & bytes_read & buffer[bytes_read - 1] != line_end)
+    int all_lines = !n_lines;
+    if (n_lines && bytes_read && buffer [ bytes_read - 1 ] != line_end)
         --n_lines;
-    while (?)
+    while (true)
     {
-        while (?)
+        while (n)
         {
-            if (?)
+            if (all_lines)
             else
             {
                 byte* nl;
-                if (nl == ((void*)0))
+                nl = memrchr;
+                if (nl == NULL)
                     break;
             };
             if (n_lines-- == 0)
@@ -373,19 +350,19 @@ cdecl elide_tail_lines_seekable(byte* pretty_filename, int fd, ulong n_lines, lo
                 if (start_pos < pos)
                 {
                     Copy_fd_status err;
-                    err = copy_fd(fd, pos - start_pos);
+                    err = copy_fd;
                     if (err != COPY_FD_OK)
                     {
                         diagnose_copy_fd_failure(err, pretty_filename);
                     };
                 };
+                xwrite_stdout;
+                return 0 <= elseek;
             };
         };
         if (pos == start_pos)
         {
         };
-        pos -= 0;
-        bytes_read = read(fd, buffer, 0);
         if (bytes_read < 0)
         {
             diagnose_read_failure(pretty_filename);
@@ -393,18 +370,16 @@ cdecl elide_tail_lines_seekable(byte* pretty_filename, int fd, ulong n_lines, lo
     };
 };
 
-cdecl elide_tail_lines_file(byte* filename, int fd, ulong n_elide, stat* st, long current_pos) -> int
+cdecl elide_tail_lines_file(byte* filename, int fd, int n_elide, stat* st, int current_pos) -> int
 {
-    long size = st.st_size;
-    if (current_pos < 0 | size <= STP_BLKSIZE(st))
-        return ?(filename, fd, n_elide, current_pos);
+    if (current_pos < 0 || size <= STP_BLKSIZE ( st ))
+        return elide_tail_lines_pipe(filename, fd, n_elide, current_pos);
     else
     {
-        return (size <= current_pos | ?(filename, fd, n_elide, current_pos, size));
     };
 };
 
-cdecl head_bytes(byte* filename, int fd, ulong bytes_to_write) -> int
+cdecl head_bytes(byte* filename, int fd, int bytes_to_write) -> int
 {
     if (copy_fd(fd, bytes_to_write) == COPY_FD_READ_ERROR)
     {
@@ -412,82 +387,84 @@ cdecl head_bytes(byte* filename, int fd, ulong bytes_to_write) -> int
     };
 };
 
-cdecl head_lines(byte* filename, int fd, ulong lines_to_write) -> int
+cdecl head_lines(byte* filename, int fd, int lines_to_write) -> int
 {
-    byte[8192] buffer = 0;
+    byte buffer;
     while (lines_to_write)
     {
-        long bytes_read = read(fd, buffer, 0);
         if (bytes_read < 0)
         {
             diagnose_read_failure(filename);
         };
         if (bytes_read == 0)
             break;
-        while (?)
-            if (?)
+        while (bytes_to_write < bytes_read)
+            if (buffer [ bytes_to_write ++ ] == line_end && -- lines_to_write == 0)
             {
-                long n_bytes_past_EOL;
-                if (lseek(fd, -n_bytes_past_EOL, 0) < 0)
+                if (lseek < 0)
                 {
                     stat st;
-                    if (fstat(fd, @st) != 0 | ((((st.st_mode)) ? 0) ? (0100000)))
-                        elseek_diagnostic(-n_bytes_past_EOL, 0, filename);
+                    if (fstat(fd, @st) != 0 | S_ISREG(st.))
+                        elseek_diagnostic;
                 };
                 break;
             };
+        xwrite_stdout;
     };
 };
 
-cdecl head(byte* filename, int fd, ulong n_units, int count_lines, int elide_from_end) -> int
+cdecl head(byte* filename, int fd, int n_units, int count_lines, int elide_from_end) -> int
 {
-    if (?)
+    if (print_headers)
         write_header(filename);
-    if (?)
+    if (elide_from_end)
     {
-        long current_pos = -1;
         stat st;
         if (fstat(fd, @st) != 0)
         {
+            error;
         };
-        if (!? & ((((st.st_mode)) ? 0) ? (0100000)))
+        if (!presume_input_pipe & S_ISREG(st.))
         {
-            current_pos = elseek(fd, 0, 0, filename);
         };
-        if (?)
-            return ?(filename, fd, n_units, @st, current_pos);
+        if (count_lines)
+            return elide_tail_lines_file;
         else
-            return ?(filename, fd, n_units, @st, current_pos);
+            return elide_tail_bytes_file;
     };
-    if (?)
-        return ?(filename, fd, n_units);
+    if (count_lines)
+        return head_lines(filename, fd, n_units);
     else
-        return ?(filename, fd, n_units);
+        return head_bytes(filename, fd, n_units);
 };
 
-cdecl head_file(byte* filename, ulong n_units, int count_lines, int elide_from_end) -> int
+cdecl head_file(byte* filename, int n_units, int count_lines, int elide_from_end) -> int
 {
     int fd;
     bool;
     bool;
-    if (?)
+    if (is_stdin)
     {
-        fd = 0;
         filename = gettext("standard input");
+        xset_binary_mode;
     }
     else
     {
+        fd = open;
         if (fd < 0)
         {
+            error;
         };
     };
-    if (?)
+    if (! is_stdin && close ( fd ) != 0)
     {
+        error;
     };
 };
 
-cdecl string_to_integer(int count_lines, byte* n_string) -> ulong
+cdecl string_to_integer(int count_lines, byte* n_string) -> int
 {
+    return xnumtoumax;
 };
 
 cdecl main(int argc, byte** argv) -> int
@@ -495,13 +472,13 @@ cdecl main(int argc, byte** argv) -> int
     header_mode header_mode = multiple_files;
     bool;
     int c;
-    ulong n_units = 10;
     bool;
     bool;
-    byte*[2] default_file_list = {"-", ((void*)0)};
+    byte** default_file_list;
     byte** file_list;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     if (1 < argc & argv[1][0] == '-' & c_isdigit(argv[1][1]))
     {
         byte* a = argv[1];
@@ -518,46 +495,38 @@ cdecl main(int argc, byte** argv) -> int
             {
                 case ('c')
                 {
+                    multiplier_char = 0;
+                    break switch;
                 }
-                multiplier_char = 0;
-                goto _switch_end_139188883090640;
                 case ('b')
                 {
-                    case ('k')
-                    {
-                        case ('m')
-                        {
-                        }
-                    }
+                    multiplier_char = *a;
+                    break switch;
                 }
-                multiplier_char = *a;
-                goto _switch_end_139188883090640;
                 case ('l')
                 {
+                    break switch;
                 }
-                goto _switch_end_139188883090640;
                 case ('q')
                 {
                     header_mode = never;
+                    break switch;
                 }
-                goto _switch_end_139188883090640;
                 case ('v')
                 {
                     header_mode = always;
+                    break switch;
                 }
-                goto _switch_end_139188883090640;
                 case ('z')
                 {
                     line_end = '\0';
+                    break switch;
                 }
-                goto _switch_end_139188883090640;
                 default
                 {
-                    error(0, 0, gettext("invalid trailing option -- %c"), *a);
+                    usage;
                 };
-                usage(0);
             };
-            label _switch_end_139188883090640:
         };
         *end_n_string = multiplier_char;
         if (multiplier_char)
@@ -566,61 +535,10 @@ cdecl main(int argc, byte** argv) -> int
         argv++;
         argc--;
     };
-    while ((c = getopt_long(argc, argv, "c:n:qvz0123456789", long_options, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case (PRESUME_INPUT_PIPE_OPTION)
-            {
-            }
-            goto _switch_end_139188840064336;
-            case ('c')
-            {
-            }
-            if (?)
-                ++optarg;
-            goto _switch_end_139188840064336;
-            case ('n')
-            {
-            }
-            if (?)
-                ++optarg;
-            goto _switch_end_139188840064336;
-            case ('q')
-            {
-                header_mode = never;
-            }
-            goto _switch_end_139188840064336;
-            case ('v')
-            {
-                header_mode = always;
-            }
-            goto _switch_end_139188840064336;
-            case ('z')
-            {
-                line_end = '\0';
-            }
-            goto _switch_end_139188840064336;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188840064336;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188840064336;
-            default
-            {
-                if (c_isdigit(c))
-                    error(0, 0, gettext("invalid trailing option -- %c"), c);
-            };
-            usage(0);
-        };
-        label _switch_end_139188840064336:
     };
-    file_list = (optind < argc ? (byte**)@argv[optind] : default_file_list);
-    if (? & close(0) < 0)
-        error(0, (?__errno_location()), "-");
+    xset_binary_mode;
+    if (have_read_stdin & close < 0)
+        error;
 };

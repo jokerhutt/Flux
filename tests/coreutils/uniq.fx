@@ -51,7 +51,7 @@ enum delimit_method
     DM_SEPARATE
 };
 
-byte*[4] delimit_method_string = {"none", "prepend", "separate", ((void*)0)};
+extern byte** delimit_method_string;
 delimit_method[3] delimit_method_map = delimit_method;
 delimit_method delimit_groups = delimit_method;
 enum grouping_method
@@ -63,70 +63,76 @@ enum grouping_method
     GM_BOTH
 };
 
-byte*[5] grouping_method_string = {"prepend", "append", "separate", "both", ((void*)0)};
+extern byte** grouping_method_string;
 grouping_method[4] grouping_method_map = grouping_method;
 grouping_method grouping = grouping_method;
-uint GROUP_OPTION = 128;
+uint GROUP_OPTION = 0;
 
-option[13] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("uniq", gettext("\
-  -c, --count\n\
-         prefix lines by the number of occurrences\n\
+        oputs_("uniq", gettext("\
+  -c, --count\n\
+         prefix lines by the number of occurrences\n\
 "));
-        oputs_("uniq", gettext("\
-  -d, --repeated\n\
-         only print duplicate lines, one for each group\n\
+        oputs_("uniq", gettext("\
+  -d, --repeated\n\
+         only print duplicate lines, one for each group\n\
 "));
-        oputs_("uniq", gettext("\
-  -D\n\
-         print all duplicate lines\n\
+        oputs_("uniq", gettext("\
+  -D\n\
+         print all duplicate lines\n\
 "));
-        oputs_("uniq", gettext("\
-      --all-repeated[=METHOD]\n\
-         like -D, but allow separating groups with an empty line;\n\
-         METHOD={none(default),prepend,separate}\n\
+        oputs_("uniq", gettext("\
+      --all-repeated[=METHOD]\n\
+         like -D, but allow separating groups with an empty line;\n\
+         METHOD={none(default),prepend,separate}\n\
 "));
-        oputs_("uniq", gettext("\
-  -f, --skip-fields=N\n\
-         avoid comparing the first N fields\n\
+        oputs_("uniq", gettext("\
+  -f, --skip-fields=N\n\
+         avoid comparing the first N fields\n\
 "));
-        oputs_("uniq", gettext("\
-      --group[=METHOD]\n\
-         show all items, separating groups with an empty line;\n\
-         METHOD={separate(default),prepend,append,both}\n\
+        oputs_("uniq", gettext("\
+      --group[=METHOD]\n\
+         show all items, separating groups with an empty line;\n\
+         METHOD={separate(default),prepend,append,both}\n\
 "));
-        oputs_("uniq", gettext("\
-  -i, --ignore-case\n\
-         ignore differences in case when comparing\n\
+        oputs_("uniq", gettext("\
+  -i, --ignore-case\n\
+         ignore differences in case when comparing\n\
 "));
-        oputs_("uniq", gettext("\
-  -s, --skip-chars=N\n\
-         avoid comparing the first N characters\n\
+        oputs_("uniq", gettext("\
+  -s, --skip-chars=N\n\
+         avoid comparing the first N characters\n\
 "));
-        oputs_("uniq", gettext("\
-  -u, --unique\n\
-         only print unique lines\n\
+        oputs_("uniq", gettext("\
+  -u, --unique\n\
+         only print unique lines\n\
 "));
-        oputs_("uniq", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("uniq", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
-        oputs_("uniq", gettext("\
-  -w, --check-chars=N\n\
-         compare no more than N characters in lines\n\
+        oputs_("uniq", gettext("\
+  -w, --check-chars=N\n\
+         compare no more than N characters in lines\n\
 "));
         oputs_("uniq", gettext("      --help\n         display this help and exit\n"));
         oputs_("uniq", gettext("      --version\n         output version information and exit\n"));
+        fputs;
+        fputs;
         emit_ancillary_info("uniq");
     };
     exit(status);
@@ -140,22 +146,22 @@ cdecl strict_posix2() -> int
 
 cdecl size_opt(byte* opt, byte* msgid) -> int
 {
-    long size;
-    if (?)
-        error(0, 0, "%s: %s", opt, gettext(msgid));
+    if (LONGINT_OVERFLOW < xstrtoimax ( opt , NULL , 10 , & size , "" ) || size < 0)
+        error;
+    return MIN;
 };
 
 cdecl newline_or_blank(int g) -> int
 {
-    return ?. == '\n' | c32issep(?.);
+    return g. == '\n' | c32issep(g.);
 };
 
 cdecl find_field(linebuffer* line, int* plen) -> byte*
 {
     byte* lp = line;
     byte* lim = lp + line - 1;
-    if (lim - lp <= ?)
-    elif ((__ctype_get_mb_cur_max()) ? 1)
+    if (lim - lp <= check_chars)
+    elif (MB_CUR_MAX <= 1)
     else
     {
         byte* ep = lp;
@@ -165,34 +171,30 @@ cdecl find_field(linebuffer* line, int* plen) -> byte*
 
 cdecl different(byte* old, byte* new, int oldlen, int newlen) -> int
 {
-    if (?)
-        return ? != ? | memcasecmp(old, new, ?);
+    if (ignore_case)
+        return oldlen != newlen | memcasecmp(old, new, oldlen);
     else
-        return ? != ? | memcmp(old, new, ?);
+        return oldlen != newlen | memcmp(old, new, oldlen);
 };
 
-cdecl writeline(linebuffer* line, int match, long linecount) -> void
+cdecl writeline(linebuffer* line, int match, int linecount) -> void
 {
-    if (?(linecount == 0 ? ? : !? ? ? : ?))
+    if (?(linecount == 0 ? output_unique : !match ? output_first_repeated : output_later_repeated))
         return void;
-    if (?)
+    if (count_occurrences)
     {
-        void* /* untranslated: char[7 + INT_BUFSIZE_BOUND(<recovery-expr>())] */ buf = 7 + INT_BUFSIZE_BOUND(?);
+        void* /* untranslated: char[7 + <recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = 7 + INT_BUFSIZE_BOUND;
         byte* end = buf + (sizeof buf / 8);
         byte* p = end;
         *--p = ' ';
-        long i = linecount + 1;
-        affirm(0 < i);
-        do
-            *--p = '0' + i % 10;
-        while ((i /= 10));
+        affirm;
         while (end - p < 8)
             *--p = ' ';
-        int nbytes;
-        if (?)
+        int nbytes = end - p;
+        if (fwrite != nbytes)
             write_error();
     };
-    if (?)
+    if (fwrite != line)
         write_error();
 };
 
@@ -202,77 +204,82 @@ cdecl check_file(byte* infile, byte* outfile, byte delimiter) -> void
     linebuffer lb2;
     linebuffer* thisline;
     linebuffer* prevline;
-    thisline = @?;
-    prevline = @?;
+    if (!(streq(infile, "-") | freopen))
+        error;
+    if (!(streq(outfile, "-") | freopen))
+        error;
+    fadvise;
+    thisline = @lb1;
+    prevline = @lb2;
     initbuffer(thisline);
     initbuffer(prevline);
-    if (? & ? & !?)
+    if (output_unique & output_first_repeated & !count_occurrences)
     {
-        byte* prevfield = ((void*)0);
+        byte* prevfield;
         bool;
-        while (?)
+        while (!feof & readlinebuffer_delim)
         {
-            byte* thisfield;
+            byte* thisfield = find_field;
             bool;
-            if (?)
+            if (new_group && grouping != GM_NONE && ( grouping == GM_PREPEND || grouping == GM_BOTH || ( first_group_printed && ( grouping == GM_APPEND || grouping == GM_SEPARATE ) ) ))
                 putchar(delimiter);
-            if (?)
+            if (new_group || grouping != GM_NONE)
             {
-                if (?)
+                if (fwrite != thisline)
                     write_error();
                 swap_lines(@prevline, @thisline);
                 prevfield = thisfield;
             };
         };
-        if (?)
+        if (( grouping == GM_BOTH || grouping == GM_APPEND ) && first_group_printed)
             putchar(delimiter);
     }
     else
     {
-        if (?)
+        if (!readlinebuffer_delim)
             goto closefiles;
-        byte* prevfield;
-        long match_count = 0;
+        byte* prevfield = find_field;
         bool;
-        while (?)
+        while (!feof)
         {
-            if (?)
+            if (!readlinebuffer_delim)
             {
-                if (?)
+                if (ferror)
                     goto closefiles;
                 break;
             };
-            byte* thisfield;
+            byte* thisfield = find_field;
             bool;
-            if (match_count == (0))
+            if (match_count == INTMAX_MAX)
             {
-                if (?)
-                    error(0, 0, gettext("too many repeated lines"));
-                match_count--;
+                if (count_occurrences)
+                    error;
             };
             if (delimit_groups != DM_NONE)
             {
-                if (?)
+                if (! match)
                 {
                 }
                 elif (match_count == 1)
                 {
-                    if (?)
+                    if (( delimit_groups == DM_PREPEND ) || ( delimit_groups == DM_SEPARATE && ! first_delimiter ))
                         putchar(delimiter);
                 };
             };
-            if (?)
+            if (! match || output_later_repeated)
             {
+                writeline;
                 swap_lines(@prevline, @thisline);
                 prevfield = thisfield;
-                if (?)
-                    match_count = 0;
             };
         };
+        writeline;
     };
     label closefiles:
-    free(?.);
-    free(?.);
+    if (ferror | fclose != 0)
+        error;
+    free(lb1.);
+    free(lb2.);
 };
 
 enum Skip_field_option_type
@@ -293,159 +300,36 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     file[0] = file[1] = "-";
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while (?)
+    setlocale;
+    atexit;
+    while (true)
     {
-        if (?)
+        if (optc == - 1 || ( posixly_correct && nfiles != 0 ) || ( ( optc = getopt_long ( argc , argv , "-0123456789Dcdf:is:uw:z" , longopts , NULL ) ) == - 1 ))
         {
             if (argc <= optind)
                 break;
             if (nfiles == 2)
             {
-                error(0, 0, gettext("extra operand %s"), quote(argv[optind]));
-                usage(0);
+                error(0, 0, gettext("extra operand %s"), quote);
+                usage;
             };
-            file[nfiles++] = argv[optind++];
         }
         else
-            switch (optc)
-            {
-                case (1)
-                {
-                    {
-                        long size;
-                        if (?)
-                        elif (nfiles == 2)
-                        {
-                            error(0, 0, gettext("extra operand %s"), quote(optarg));
-                            usage(0);
-                        };
-                        else
-                            file[nfiles++] = optarg;
-                    };
-                }
-                goto _switch_end_139188837281488;
-                case ('0')
-                {
-                    case ('1')
-                    {
-                        case ('2')
-                        {
-                            case ('3')
-                            {
-                                case ('4')
-                                {
-                                    case ('5')
-                                    {
-                                        case ('6')
-                                        {
-                                            case ('7')
-                                            {
-                                                case ('8')
-                                                {
-                                                    case ('9')
-                                                    {
-                                                        {
-                                                            if (skip_field_option_type == SFO_NEW)
-                                                                skip_fields = 0;
-                                                            skip_field_option_type = SFO_OBSOLETE;
-                                                        };
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                goto _switch_end_139188837281488;
-                case ('c')
-                {
-                }
-                goto _switch_end_139188837281488;
-                case ('d')
-                {
-                }
-                goto _switch_end_139188837281488;
-                case ('D')
-                {
-                }
-                if (optarg == ((void*)0))
-                    delimit_groups = DM_NONE;
-                else
-                    delimit_groups = XARGMATCH("--all-repeated", optarg, delimit_method_string, delimit_method_map);
-                goto _switch_end_139188837281488;
-                case (GROUP_OPTION)
-                {
-                    if (optarg == ((void*)0))
-                        grouping = GM_SEPARATE;
-                    else
-                        grouping = XARGMATCH("--group", optarg, grouping_method_string, grouping_method_map);
-                }
-                goto _switch_end_139188837281488;
-                case ('f')
-                {
-                    skip_field_option_type = SFO_NEW;
-                }
-                skip_fields = ?(optarg, "invalid number of fields to skip");
-                goto _switch_end_139188837281488;
-                case ('i')
-                {
-                }
-                goto _switch_end_139188837281488;
-                case ('s')
-                {
-                    skip_chars = ?(optarg, "invalid number of bytes to skip");
-                }
-                goto _switch_end_139188837281488;
-                case ('u')
-                {
-                }
-                goto _switch_end_139188837281488;
-                case ('w')
-                {
-                    check_chars = ?(optarg, "invalid number of bytes to compare");
-                }
-                goto _switch_end_139188837281488;
-                case ('z')
-                {
-                    delimiter = '\0';
-                }
-                goto _switch_end_139188837281488;
-                case (GETOPT_HELP_CHAR)
-                {
-                    usage(0);
-                }
-                goto _switch_end_139188837281488;
-                case (GETOPT_VERSION_CHAR)
-                {
-                }
-                exit(0);
-                goto _switch_end_139188837281488;
-                default
-                {
-                    usage(0);
-                };
-            };
-            label _switch_end_139188837281488:
     };
-    if (?)
+    if (grouping != GM_NONE && output_option_used)
     {
         error(0, 0, gettext("--group is mutually exclusive with -c/-d/-D/-u"));
-        usage(0);
+        usage;
     };
-    if (grouping != GM_NONE & ?)
+    if (grouping != GM_NONE & count_occurrences)
     {
         error(0, 0, gettext("grouping and printing repeat counts is meaningless"));
-        usage(0);
+        usage;
     };
-    if (? & ?)
+    if (count_occurrences & output_later_repeated)
     {
         error(0, 0, gettext("printing all duplicated lines and repeat counts is meaningless"));
-        usage(0);
+        usage;
     };
     check_file(file[0], file[1], delimiter);
-    return 0;
 };

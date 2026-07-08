@@ -46,34 +46,35 @@ macro AUTHORS
     proper_name ( "David MacKenzie" )
 };
 
-uint CONVERT_FIRST_ONLY_OPTION = 128;
+uint CONVERT_FIRST_ONLY_OPTION = 0;
 
-option[6] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Convert blanks in each FILE to tabs, writing to standard output.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("unexpand", gettext("\
-  -a, --all\n\
-         convert all blanks, instead of just initial blanks\n\
+        oputs_("unexpand", gettext("\
+  -a, --all\n\
+         convert all blanks, instead of just initial blanks\n\
 "));
-        oputs_("unexpand", gettext("\
-      --first-only\n\
-         convert only leading sequences of blanks (overrides -a)\n\
+        oputs_("unexpand", gettext("\
+      --first-only\n\
+         convert only leading sequences of blanks (overrides -a)\n\
 "));
-        oputs_("unexpand", gettext("\
-  -t, --tabs=N\n\
-         have tabs N characters apart instead of 8 (enables -a)\n\
+        oputs_("unexpand", gettext("\
+  -t, --tabs=N\n\
+         have tabs N characters apart instead of 8 (enables -a)\n\
 "));
         emit_tab_list_info("unexpand");
         oputs_("unexpand", gettext("      --help\n         display this help and exit\n"));
@@ -85,155 +86,100 @@ Convert blanks in each FILE to tabs, writing to standard output.\n\
 
 cdecl unexpand() -> void
 {
-    _IO_FILE* fp = next_file(((void*)0));
     byte* pending_blank;
-    if (!fp)
+    if (! fp)
         return void;
     byte[262144] line_in = IO_BUFSIZE;
-    pending_blank = xinmalloc(?, (__ctype_get_mb_cur_max()));
-    while (0)
+    mbbuf_init;
+    pending_blank = xinmalloc;
+    while (true)
     {
-        bool convert = 0;
-        long column = 0;
-        long next_tab_column = 0;
-        bool one_blank_before_tab_stop = 0;
-        bool prev_blank = 0;
+        bool;
+        int column = 0;
+        int next_tab_column = 0;
+        bool;
+        bool;
         do
         {
+            while (( g = mbbuf_get_char ( & mbbuf ) ) . ch == MBBUF_EOF && ( fp = next_file ( fp ) ))
+                mbbuf_init;
             if (convert)
             {
-                bool blank;
+                bool;
                 if (blank)
                 {
-                    bool last_tab;
-                    if (last_tab)
-                        convert = 0;
+                    bool;
+                    next_tab_column = get_next_tab_column;
                     if (convert)
                     {
-                        if (?)
+                        if (g . ch == '\t')
                         {
                             column = next_tab_column;
-                            if (?)
+                            if (pending)
                                 pending_blank[0] = '\t';
                         }
                         else
                         {
-                            if (!(prev_blank & column >= next_tab_column))
+                            column += c32width;
+                            if (! ( prev_blank && column >= next_tab_column ))
                             {
-                                if (column == next_tab_column)
-                                    one_blank_before_tab_stop = 0;
-                                prev_blank = 0;
+                                memcpy;
                                 continue;
                             };
-                            if (putc('\t', stdout) < 0)
+                            if (putc < 0)
                                 write_error();
                             pending_blank[0] = '\t';
                         };
                     };
                 }
-                elif (?)
+                elif (g . ch == '\b')
                 {
                     column -= ?!column;
                     next_tab_column = column;
                 };
                 else
                 {
-                    int width;
-                    if (__builtin_add_overflow((column), (width ? 0 ? 1 : width), (@column)))
-                        error(0, 0, gettext("input line is too long"));
+                    int width = c32width;
+                    if (ckd_add(@column, column, width < 0 ? 1 : width))
+                        error;
                 };
-                if (?)
+                if (pending)
                 {
-                    if (?)
+                    if (pending > 1 && one_blank_before_tab_stop)
                         pending_blank[0] = '\t';
-                    if (?)
+                    if (fwrite ( pending_blank , 1 , pending , stdout ) != pending)
                         write_error();
-                    one_blank_before_tab_stop = 0;
                 };
-                prev_blank = blank;
-                convert `&= convert_entire_line | blank;
             };
-            if (?)
+            if (g . ch == MBBUF_EOF)
             {
                 free(pending_blank);
                 return void;
             };
-            if (ferror(stdout))
+            fwrite;
+            if (ferror)
                 write_error();
         }
-        while (?);
+        while (g . ch != '\n');
     };
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
-    bool have_tabval = 0;
-    long tabval;
+    bool;
+    int tabval;
     int c;
-    bool convert_first_only = 0;
+    bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((c = getopt_long(argc, argv, ",0123456789at:", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('?')
-            {
-                usage(0);
-            }
-            case ('a')
-            {
-                convert_entire_line = 0;
-            }
-            goto _switch_end_139188887964368;
-            case ('t')
-            {
-                convert_entire_line = 0;
-            }
-            parse_tab_stops(optarg);
-            goto _switch_end_139188887964368;
-            case (CONVERT_FIRST_ONLY_OPTION)
-            {
-                convert_first_only = 0;
-            }
-            goto _switch_end_139188887964368;
-            case (',')
-            {
-                if (have_tabval)
-                    add_tab_stop(tabval);
-            }
-            have_tabval = 0;
-            goto _switch_end_139188887964368;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188887964368;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188887964368;
-            default
-            {
-                if (!have_tabval)
-                {
-                    tabval = 0;
-                    have_tabval = 0;
-                };
-            };
-            if (!(?__builtin_mul_overflow((tabval), (10), (@(tabval))) ? ?__builtin_add_overflow((tabval), (c ? '0'), (@(tabval)))))
-                error(0, 0, gettext("tab stop is too large"));
-            goto _switch_end_139188887964368;
-        };
-        label _switch_end_139188887964368:
     };
-    if (convert_first_only)
-        convert_entire_line = 0;
     if (have_tabval)
         add_tab_stop(tabval);
     finalize_tab_stops();
-    set_file_list((optind < argc) ? @argv[optind] : ((void*)0));
+    set_file_list;
     unexpand();
     cleanup_file_list_stdin();
     return exit_status;

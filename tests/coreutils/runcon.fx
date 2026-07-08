@@ -53,38 +53,36 @@ macro AUTHORS
     proper_name ( "Russell Coker" )
 };
 
-option[8] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Run a program in a different SELinux security context.\n\
-With neither CONTEXT nor COMMAND, print the current security context.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        fputs(gettext("\
-  CONTEXT            Complete security context\n\
-"), stdout);
-        oputs_("runcon", gettext("\
-  -c, --compute      compute process transition context before modifying\n\
+        fputs;
+        oputs_("runcon", gettext("\
+  -c, --compute      compute process transition context before modifying\n\
 "));
-        oputs_("runcon", gettext("\
-  -t, --type=TYPE    type (for same role as parent)\n\
+        oputs_("runcon", gettext("\
+  -t, --type=TYPE    type (for same role as parent)\n\
 "));
-        oputs_("runcon", gettext("\
-  -u, --user=USER    user identity\n\
+        oputs_("runcon", gettext("\
+  -u, --user=USER    user identity\n\
 "));
-        oputs_("runcon", gettext("\
-  -r, --role=ROLE    role\n\
+        oputs_("runcon", gettext("\
+  -r, --role=ROLE    role\n\
 "));
-        oputs_("runcon", gettext("\
-  -l, --range=RANGE  levelrange\n\
+        oputs_("runcon", gettext("\
+  -l, --range=RANGE  levelrange\n\
 "));
         oputs_("runcon", gettext("      --help\n         display this help and exit\n"));
         oputs_("runcon", gettext("      --version\n         output version information and exit\n"));
@@ -96,19 +94,20 @@ With neither CONTEXT nor COMMAND, print the current security context.\n\
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* role = ((void*)0);
-    byte* range = ((void*)0);
-    byte* user = ((void*)0);
-    byte* type = ((void*)0);
-    byte* context = ((void*)0);
-    byte* cur_context = ((void*)0);
-    byte* file_context = ((void*)0);
-    byte* new_context = ((void*)0);
+    byte* role;
+    byte* range;
+    byte* user;
+    byte* type;
+    byte* context;
+    byte* cur_context;
+    byte* file_context;
+    byte* new_context;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXIT_CANCELED);
-    while (?)
+    atexit;
+    while (true)
     {
         int option_index = 0;
         int c = getopt_long(argc, argv, "+r:t:u:l:c", long_options, @option_index);
@@ -120,105 +119,105 @@ cdecl main(int argc, byte** argv) -> int
             {
                 if (role)
                     error(EXIT_CANCELED, 0, gettext("multiple roles"));
+                break switch;
             }
-            role = optarg;
-            goto _switch_end_139188839534416;
             case ('t')
             {
                 if (type)
                     error(EXIT_CANCELED, 0, gettext("multiple types"));
+                break switch;
             }
-            type = optarg;
-            goto _switch_end_139188839534416;
             case ('u')
             {
                 if (user)
                     error(EXIT_CANCELED, 0, gettext("multiple users"));
+                break switch;
             }
-            user = optarg;
-            goto _switch_end_139188839534416;
             case ('l')
             {
                 if (range)
                     error(EXIT_CANCELED, 0, gettext("multiple levelranges"));
+                break switch;
             }
-            range = optarg;
-            goto _switch_end_139188839534416;
             case ('c')
             {
+                break switch;
             }
-            goto _switch_end_139188839534416;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188839534416;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188839534416;
             default
             {
-                usage(EXIT_CANCELED);
             };
-            goto _switch_end_139188839534416;
         };
-        label _switch_end_139188839534416:
     };
     if (argc - optind == 0)
     {
         if (getcon(@cur_context) < 0)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to get current context"));
-        fputs(cur_context, stdout);
-        fputc('\n', stdout);
-        return 0;
+            error;
+        fputs;
+        fputc;
     };
-    if (?)
+    if (! ( user || role || type || range || compute_trans ))
     {
         if (optind >= argc)
         {
             error(0, 0, gettext("you must specify -c, -t, -u, -l, -r, or context"));
             usage(EXIT_CANCELED);
         };
-        context = argv[optind++];
     };
     if (optind >= argc)
     {
         error(0, 0, gettext("no command specified"));
         usage(EXIT_CANCELED);
     };
+    if (is_selinux_enabled() != 1)
+        error;
     if (context)
     {
-        if (?)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to create security context: %s"), quote(context));
+        if (! con)
+            error;
     }
     else
     {
         if (getcon(@cur_context) < 0)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to get current context"));
-        if (?)
+            error;
+        if (compute_trans)
         {
+            if (getfilecon == -1)
+                error;
             if (security_compute_create(cur_context, file_context, string_to_security_class("process"), @new_context) != 0)
-                error(EXIT_CANCELED, (?__errno_location()), gettext("failed to compute a new context"));
+                error;
             freecon(file_context);
             freecon(cur_context);
             cur_context = new_context;
         };
-        if (?)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to create security context: %s"), quote(cur_context));
-        if (?)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set new user: %s"), quote(user));
-        if (?)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set new type: %s"), quote(type));
-        if (?)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set new range: %s"), quote(range));
-        if (?)
-            error(EXIT_CANCELED, (?__errno_location()), gettext("failed to set new role: %s"), quote(role));
+        if (! con)
+            error;
+        if (user & context_user_set)
+            error;
+        if (type & context_type_set)
+            error;
+        if (range & context_range_set)
+            error;
+        if (role & context_role_set)
+            error;
     };
-    if (cur_context != ((void*)0))
+    if (security_check_context(context_str) < 0)
+        error;
+    if (setexeccon(context_str) != 0)
+        error;
+    if (cur_context != NULL)
         freecon(cur_context);
-    int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-    error(0, (?__errno_location()), "%s", quote(argv[optind]));
+    int exit_status;
+    error;
     return exit_status;
 };

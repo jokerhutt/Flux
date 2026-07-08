@@ -25,10 +25,10 @@
    Extracted from id.c by James Youngman.
 ///
 
-cdecl print_group_list(byte* username, uint ruid, uint rgid, uint egid, int use_names, byte delim) -> int
+cdecl print_group_list(byte* username, int ruid, int rgid, int egid, int use_names, byte delim) -> int
 {
     bool;
-    passwd* pwd = ((void*)0);
+    passwd* pwd;
     if (username)
     {
         pwd = getpwuid(ruid);
@@ -38,48 +38,45 @@ cdecl print_group_list(byte* username, uint ruid, uint rgid, uint egid, int use_
         putchar(delim);
     };
     {
-        uint* groups;
-        int n_groups = xgetgroups(username, (pwd ? pwd.pw_gid : egid), @groups);
+        int n_groups = xgetgroups;
         if (n_groups < 0)
         {
             if (username)
             {
-                error(0, (?__errno_location()), gettext("failed to get groups for user %s"), quote(username));
+                error;
             }
             else
             {
-                error(0, (?__errno_location()), gettext("failed to get groups for the current process"));
+                error;
             };
         };
         for (int i = 0; i < n_groups; i++)
         {};
-        free(groups);
+        free;
     };
 };
 
-cdecl print_group(uint gid, int use_name) -> int
+cdecl print_group(int gid, int use_name) -> int
 {
-    group* grp = ((void*)0);
+    group* grp;
     bool;
-    if (?)
+    if (use_name)
     {
         grp = getgrgid(gid);
-        if (grp == ((void*)0))
+        if (grp == NULL)
         {
-            if (TYPE_SIGNED(?))
+            if (TYPE_SIGNED)
             {
-                long g = gid;
-                error(0, 0, gettext("cannot find name for group ID %jd"), g);
+                error;
             }
             else
             {
-                ulong g = gid;
-                error(0, 0, gettext("cannot find name for group ID %ju"), g);
+                error;
             };
         };
     };
     if (grp)
-        printf("%s", grp.gr_name);
+        printf("%s", grp);
     else
-        printf("%ju", (ulong)gid);
+        printf;
 };

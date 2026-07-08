@@ -39,8 +39,7 @@ uint smallsize = 256;
 
 cdecl samedir_template(byte* dstname, byte[256] buf) -> byte*
 {
-    long dstdirlen = last_component(dstname);
-    ulong dsttmpsize = dstdirlen + (sizeof simple_pattern / 8);
+    ulong dsttmpsize;
     byte* dsttmp;
     if (dsttmpsize <= smallsize)
         dsttmp = buf;
@@ -50,7 +49,7 @@ cdecl samedir_template(byte* dstname, byte[256] buf) -> byte*
         if (!dsttmp)
             return dsttmp;
     };
-    strcpy(mempcpy(dsttmp, dstname, dstdirlen), simple_pattern);
+    strcpy(mempcpy, simple_pattern);
     return dsttmp;
 };
 
@@ -70,21 +69,15 @@ cdecl try_link(byte* dest, void* arg) -> int
 
 cdecl force_linkat(int srcdir, byte* srcname, int dstdir, byte* dstname, int flags, int force, int linkat_errno) -> int
 {
-    if (linkat_errno < 0)
-        linkat_errno = (linkat(srcdir, srcname, dstdir, dstname, flags) == 0 ? 0 : (?__errno_location()));
-    if (!? | linkat_errno != 0)
+    if (! force || linkat_errno != EEXIST)
         return linkat_errno;
     byte[256] buf = smallsize;
     byte* dsttmp = samedir_template(dstname, buf);
-    if (!dsttmp)
-        return (?__errno_location());
     link_arg arg = {srcdir, srcname, dstdir, flags};
     int err;
     if (try_tempname_len(dsttmp, 0, @arg, try_link, x_suffix_len) != 0)
-        err = (?__errno_location());
     else
     {
-        err = renameat(dstdir, dsttmp, dstdir, dstname) == 0 ? -1 : (?__errno_location());
         unlinkat(dstdir, dsttmp, 0);
     };
     if (dsttmp != buf)
@@ -106,21 +99,15 @@ cdecl try_symlink(byte* dest, void* arg) -> int
 
 cdecl force_symlinkat(byte* srcname, int dstdir, byte* dstname, int force, int symlinkat_errno) -> int
 {
-    if (symlinkat_errno < 0)
-        symlinkat_errno = symlinkat(srcname, dstdir, dstname) == 0 ? 0 : (?__errno_location());
-    if (!? | symlinkat_errno != 0)
+    if (! force || symlinkat_errno != EEXIST)
         return symlinkat_errno;
     byte[256] buf = smallsize;
     byte* dsttmp = samedir_template(dstname, buf);
-    if (!dsttmp)
-        return (?__errno_location());
     symlink_arg arg = {srcname, dstdir};
     int err;
     if (try_tempname_len(dsttmp, 0, @arg, try_symlink, x_suffix_len) != 0)
-        err = (?__errno_location());
     elif (renameat(dstdir, dsttmp, dstdir, dstname) != 0)
     {
-        err = (?__errno_location());
         unlinkat(dstdir, dsttmp, 0);
     };
     else

@@ -31,11 +31,11 @@ macro AUTHORS
     proper_name ( "Paul Rubin" ) , proper_name ( "David MacKenzie" ) , proper_name ( "Richard M. Stallman" ) , proper_name ( "Jim Meyering" )
 };
 
-uint INTERACTIVE_OPTION = 128;
-uint ONE_FILE_SYSTEM = 129;
-uint NO_PRESERVE_ROOT = 130;
-uint PRESERVE_ROOT = 131;
-uint PRESUME_INPUT_TTY_OPTION = 132;
+uint INTERACTIVE_OPTION = 0;
+uint ONE_FILE_SYSTEM = 1;
+uint NO_PRESERVE_ROOT = 2;
+uint PRESERVE_ROOT = 3;
+uint PRESUME_INPUT_TTY_OPTION = 4;
 
 enum interactive_type
 {
@@ -44,8 +44,9 @@ enum interactive_type
     interactive_always
 };
 
-option[12] long_opts = option;
-byte*[7] interactive_args = {"never", "no", "none", "once", "always", "yes", ((void*)0)};
+struct option;
+extern int long_opts;
+extern byte** interactive_args;
 interactive_type[6] interactive_types = interactive_type;
 cdecl ARGMATCH_VERIFY() -> int;
 cdecl diagnose_leading_hyphen(int argc, byte** argv) -> void
@@ -56,6 +57,7 @@ cdecl diagnose_leading_hyphen(int argc, byte** argv) -> void
         stat st;
         if (arg[0] == '-' & arg[1] & lstat(arg, @st) == 0)
         {
+            fprintf;
             break;
         };
     };
@@ -63,82 +65,69 @@ cdecl diagnose_leading_hyphen(int argc, byte** argv) -> void
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Remove (unlink) the FILE(s).\n\
-\n\
-"), stdout);
-        oputs_("rm", gettext("\
-  -f, --force\n\
-         ignore nonexistent files and arguments, never prompt\n\
+        printf;
+        fputs;
+        oputs_("rm", gettext("\
+  -f, --force\n\
+         ignore nonexistent files and arguments, never prompt\n\
 "));
-        oputs_("rm", gettext("\
-  -i\n\
-         prompt before every removal\n\
+        oputs_("rm", gettext("\
+  -i\n\
+         prompt before every removal\n\
 "));
-        oputs_("rm", gettext("\
-  -I\n\
-         prompt once before removing more than three files,\n\
-         or when removing recursively; less intrusive than -i,\n\
-         while still giving protection against most mistakes\n\
+        oputs_("rm", gettext("\
+  -I\n\
+         prompt once before removing more than three files,\n\
+         or when removing recursively; less intrusive than -i,\n\
+         while still giving protection against most mistakes\n\
 "));
-        oputs_("rm", gettext("\
-      --interactive[=WHEN]\n\
-         prompt according to WHEN: never, once (-I), or always (-i);\n\
-         without WHEN, prompt always\n\
+        oputs_("rm", gettext("\
+      --interactive[=WHEN]\n\
+         prompt according to WHEN: never, once (-I), or always (-i);\n\
+         without WHEN, prompt always\n\
 "));
-        oputs_("rm", gettext("\
-      --one-file-system\n\
-         when removing a hierarchy recursively,\n\
-         skip any directory that is on a file system different\n\
-         from that of the corresponding command line argument\n\
+        oputs_("rm", gettext("\
+      --one-file-system\n\
+         when removing a hierarchy recursively,\n\
+         skip any directory that is on a file system different\n\
+         from that of the corresponding command line argument\n\
 "));
-        oputs_("rm", gettext("\
-      --no-preserve-root\n\
-         do not treat '/' specially\n\
+        oputs_("rm", gettext("\
+      --no-preserve-root\n\
+         do not treat '/' specially\n\
 "));
-        oputs_("rm", gettext("\
-      --preserve-root[=all]\n\
-         do not remove '/' (default);\n\
-         with 'all', reject any command line argument\n\
-         on a separate device from its parent\n\
+        oputs_("rm", gettext("\
+      --preserve-root[=all]\n\
+         do not remove '/' (default);\n\
+         with 'all', reject any command line argument\n\
+         on a separate device from its parent\n\
 "));
-        oputs_("rm", gettext("\
-  -r, -R, --recursive\n\
-         remove directories and their contents recursively\n\
+        oputs_("rm", gettext("\
+  -r, -R, --recursive\n\
+         remove directories and their contents recursively\n\
 "));
-        oputs_("rm", gettext("\
-  -d, --dir\n\
-         remove empty directories\n\
+        oputs_("rm", gettext("\
+  -d, --dir\n\
+         remove empty directories\n\
 "));
-        oputs_("rm", gettext("\
-  -v, --verbose\n\
-         explain what is being done\n\
+        oputs_("rm", gettext("\
+  -v, --verbose\n\
+         explain what is being done\n\
 "));
         oputs_("rm", gettext("      --help\n         display this help and exit\n"));
         oputs_("rm", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-By default, rm does not remove directories.  Use the --recursive (-r or -R)\n\
-option to remove each listed directory, too, along with all of its contents.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Any attempt to remove a file whose last file name component is '.' or '..'\n\
-is rejected with a diagnostic.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-If you use rm to remove a file, it might be possible to recover\n\
-some of its contents, given sufficient expertise and/or time.  For greater\n\
-assurance that the contents are unrecoverable, consider using shred(1).\n\
-"), stdout);
+        fputs;
+        fputs;
+        printf;
+        fputs;
         emit_ancillary_info("rm");
     };
     exit(status);
@@ -147,8 +136,7 @@ assurance that the contents are unrecoverable, consider using shred(1).\n\
 cdecl rm_option_init(rm_options* x) -> void
 {
     x.interactive = RMI_SOMETIMES;
-    x.root_dev_ino = ((void*)0);
-    x = isatty(0);
+    x = isatty;
 };
 
 cdecl main(int argc, byte** argv) -> int
@@ -158,135 +146,34 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     int c;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     rm_option_init(@x);
     priv_set_remove_linkdir();
-    while ((c = getopt_long(argc, argv, "dfirvIR", long_opts, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('d')
-            {
-            }
-            goto _switch_end_139188749118800;
-            case ('f')
-            {
-                x.interactive = RMI_NEVER;
-            }
-            goto _switch_end_139188749118800;
-            case ('i')
-            {
-                x.interactive = RMI_ALWAYS;
-            }
-            goto _switch_end_139188749118800;
-            case ('I')
-            {
-                x.interactive = RMI_SOMETIMES;
-            }
-            goto _switch_end_139188749118800;
-            case ('r')
-            {
-                case ('R')
-                {
-                }
-            }
-            goto _switch_end_139188749118800;
-            case (INTERACTIVE_OPTION)
-            {
-                {
-                    int i;
-                    if (optarg)
-                        i = XARGMATCH("--interactive", optarg, interactive_args, interactive_types);
-                    else
-                        i = interactive_always;
-                    switch (i)
-                    {
-                        case (interactive_never)
-                        {
-                            x.interactive = RMI_NEVER;
-                        }
-                        goto _switch_end_139188749122640;
-                        case (interactive_once)
-                        {
-                            x.interactive = RMI_SOMETIMES;
-                        }
-                        goto _switch_end_139188749122640;
-                        case (interactive_always)
-                        {
-                            x.interactive = RMI_ALWAYS;
-                        }
-                        goto _switch_end_139188749122640;
-                    };
-                    label _switch_end_139188749122640:
-                    goto _switch_end_139188749118800;
-                };
-            }
-            case (ONE_FILE_SYSTEM)
-            {
-            }
-            goto _switch_end_139188749118800;
-            case (NO_PRESERVE_ROOT)
-            {
-                if (!streq(argv[optind - 1], "--no-preserve-root"))
-                    error(0, 0, gettext("you may not abbreviate the --no-preserve-root option"));
-            }
-            goto _switch_end_139188749118800;
-            case (PRESERVE_ROOT)
-            {
-                if (optarg)
-                {
-                };
-            }
-            goto _switch_end_139188749118800;
-            case (PRESUME_INPUT_TTY_OPTION)
-            {
-            }
-            goto _switch_end_139188749118800;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188749118800;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188749118800;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188749118800;
-            default
-            {
-                diagnose_leading_hyphen(argc, argv);
-            };
-            usage(0);
-        };
-        label _switch_end_139188749118800:
     };
     if (argc <= optind)
     {
         if (x)
-            return 0;
         else
         {
             error(0, 0, gettext("missing operand"));
-            usage(0);
+            usage;
         };
     };
-    if (?)
+    if (x . recursive && preserve_root)
     {
         dev_ino dev_ino_buf;
-        x.root_dev_ino = get_root_dev_ino(@?);
+        x.root_dev_ino = get_root_dev_ino(@dev_ino_buf);
+        if (x . root_dev_ino == NULL)
+            error;
     };
-    ulong n_files = argc - optind;
-    byte** file = argv + optind;
-    if (?)
+    byte** file;
+    if (prompt_once && ( x . recursive || 3 < n_files ))
     {
-        if (!yesno())
-            return 0;
+        fprintf;
     };
     RM_status status = rm(file, @x);
     affirm(((status) ? RM_OK ? (status) ? RM_USER_ACCEPTED ? (status) ? RM_USER_DECLINED ? (status) ? RM_ERROR));
-    return status == RM_ERROR ? 0 : 0;
 };

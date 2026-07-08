@@ -20,7 +20,7 @@
 ///
 
 ///
- Written by PÃ¡draig Brady.
+ Written by Pádraig Brady.
 ///
 
 byte* PROGRAM_NAME = "stdbuf";
@@ -39,15 +39,13 @@ struct struct (unnamed at tests/coreutils/stdbuf.c:40:8)
 };
 
 struct (unnamed at tests/coreutils/stdbuf.c:40:8)[3] stdbuf = struct { size_t size ; int optc ; char * optarg ; };
-option[6] longopts = option;
+struct option;
+extern int longopts;
 cdecl parse_size(byte* str, ulong* size) -> int
 {
-    ulong tmp_size;
-    strtol_error e;
-    if (?)
+    strtol_error e = xstrtoumax;
+    if (e == LONGINT_OK)
     {
-        (?__errno_location()) ? 0;
-        *size = tmp_size;
         return 0;
     };
     return -1;
@@ -55,47 +53,32 @@ cdecl parse_size(byte* str, ulong* size) -> int
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Run COMMAND, with modified buffering operations for its standard streams.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("stdbuf", gettext("\
-  -i, --input=MODE   adjust standard input stream buffering\n\
+        oputs_("stdbuf", gettext("\
+  -i, --input=MODE   adjust standard input stream buffering\n\
 "));
-        oputs_("stdbuf", gettext("\
-  -o, --output=MODE  adjust standard output stream buffering\n\
+        oputs_("stdbuf", gettext("\
+  -o, --output=MODE  adjust standard output stream buffering\n\
 "));
-        oputs_("stdbuf", gettext("\
-  -e, --error=MODE   adjust standard error stream buffering\n\
+        oputs_("stdbuf", gettext("\
+  -e, --error=MODE   adjust standard error stream buffering\n\
 "));
         oputs_("stdbuf", gettext("      --help\n         display this help and exit\n"));
         oputs_("stdbuf", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\n\
-If MODE is 'L' the corresponding stream will be line buffered.\n\
-This option is invalid with standard input.\n"), stdout);
-        fputs(gettext("\n\
-If MODE is '0' the corresponding stream will be unbuffered.\n\
-"), stdout);
-        fputs(gettext("\n\
-Otherwise MODE is a number which may be followed by one of the following:\n\
-KB 1000, K 1024, MB 1000*1000, M 1024*1024, and so on for G,T,P,E,Z,Y,R,Q.\n\
-Binary prefixes can be used, too: KiB=K, MiB=M, and so on.\n\
-In this case the corresponding stream will be fully buffered with the buffer\n\
-size set to MODE bytes.\n\
-"), stdout);
-        fputs(gettext("\n\
-NOTE: If COMMAND adjusts the buffering of its standard streams ('tee' does\n\
-for example) then that will override corresponding changes by 'stdbuf'.\n\
-Also some filters (like 'dd' and 'cat' etc.) don't use streams for I/O,\n\
-and are thus unaffected by 'stdbuf' settings.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
         emit_exec_status("stdbuf");
         emit_ancillary_info("stdbuf");
     };
@@ -116,17 +99,6 @@ cdecl set_program_path(byte* arg) -> void
         elif ((path = getenv("PATH")))
         {
             path = xstrdup(path);
-            for (byte* dir = strtok(path, ":"); dir != ((void*)0); dir = strtok(((void*)0), ":"))
-            {
-                byte* candidate = file_name_concat(dir, arg, ((void*)0));
-                if (access(candidate, 0) == 0)
-                {
-                    program_path = dir_name(candidate);
-                    free(candidate);
-                    break;
-                };
-                free(candidate);
-            };
         };
         free(path);
     };
@@ -139,21 +111,17 @@ cdecl optc_to_fileno(int c) -> int
     {
         case ('e')
         {
-            ret = 0;
+            break switch;
         }
-        goto _switch_end_139188887916112;
         case ('i')
         {
-            ret = 0;
+            break switch;
         }
-        goto _switch_end_139188887916112;
         case ('o')
         {
-            ret = 0;
+            break switch;
         }
-        goto _switch_end_139188887916112;
     };
-    label _switch_end_139188887916112:
     return ret;
 };
 
@@ -166,7 +134,7 @@ cdecl set_LD_PRELOAD() -> void
     byte** search_path;
     byte** path = search_path;
     byte* libstdbuf;
-    while (?)
+    while (true)
     {
         stat sb;
         if (!?*path)
@@ -193,7 +161,7 @@ cdecl set_LD_PRELOAD() -> void
     free(libstdbuf);
     ret = putenv(LD_PRELOAD);
     if (ret != 0)
-        error(EXIT_CANCELED, (?__errno_location()), gettext("failed to update the environment with %s"), quote(LD_PRELOAD));
+        error;
 };
 
 cdecl set_libstdbuf_options() -> int
@@ -212,7 +180,7 @@ cdecl set_libstdbuf_options() -> int
             if (ret < 0)
                 xalloc_die();
             if (putenv(var) != 0)
-                error(EXIT_CANCELED, (?__errno_location()), gettext("failed to update the environment with %s"), quote(var));
+                error;
         };
     };
 };
@@ -221,69 +189,60 @@ cdecl main(int argc, byte** argv) -> int
 {
     int c;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXIT_CANCELED);
-    while ((c = getopt_long(argc, argv, "+i:o:e:", longopts, ((void*)0))) != -1)
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         int opt_fileno;
         switch (c)
         {
             case ('e')
             {
-                case ('i')
+                affirm(0 <= opt_fileno & opt_fileno < countof(stdbuf));
+                stdbuf[opt_fileno].optc = c;
+                if (c == 'i' && * optarg == 'L')
                 {
-                    case ('o')
-                    {
-                        opt_fileno = optc_to_fileno(c);
-                    }
-                }
+                    error(0, 0, gettext("line buffering standard input is meaningless"));
+                    usage(EXIT_CANCELED);
+                };
+                if (!streq & parse_size == -1)
+                    error;
+                break switch;
             }
-            affirm(0 <= opt_fileno & opt_fileno < countof(stdbuf));
-            stdbuf[opt_fileno].optc = c;
-            while (c_isspace(*optarg))
-                optarg++;
-            stdbuf[opt_fileno].optarg = optarg;
-            if (c == 'i' & *optarg == 'L')
-            {
-                error(0, 0, gettext("line buffering standard input is meaningless"));
-                usage(EXIT_CANCELED);
-            };
-            if (!streq(optarg, "L") & parse_size(optarg, @stdbuf[opt_fileno].size) == -1)
-                error(EXIT_CANCELED, (?__errno_location()), gettext("invalid mode %s"), quote(optarg));
-            goto _switch_end_139188838156368;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188838156368;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188838156368;
             default
             {
-                usage(EXIT_CANCELED);
             };
         };
-        label _switch_end_139188838156368:
     };
-    argv += optind;
-    argc -= optind;
     if (argc < 1)
     {
         error(0, 0, gettext("missing operand"));
         usage(EXIT_CANCELED);
     };
-    if (!?())
+    if (!set_libstdbuf_options())
     {
         error(0, 0, gettext("you must specify a buffering mode option"));
         usage(EXIT_CANCELED);
     };
+    set_program_path;
+    if (!program_path)
+        program_path = xstrdup;
     set_LD_PRELOAD();
     free(program_path);
     execvp(*argv, argv);
-    int exit_status = (?__errno_location()) ? 0 ? EXIT_ENOENT : EXIT_CANNOT_INVOKE;
-    error(0, (?__errno_location()), gettext("failed to run command %s"), quote(argv[0]));
+    int exit_status;
+    error;
     return exit_status;
 };

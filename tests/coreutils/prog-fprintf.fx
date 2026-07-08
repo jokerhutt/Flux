@@ -19,12 +19,12 @@
    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ///
 
-cdecl prog_fprintf(_IO_FILE* fp, byte* fmt, ...) -> void
+cdecl prog_fprintf(int* fp, byte* fmt, ...) -> void
 {
-    __va_list_tag[1] ap;
+    fputs;
     fputs(": ", fp);
-    __builtin_va_start(ap, fmt);
-    vfprintf(fp, fmt, ap);
-    __builtin_va_end(ap);
+    va_start;
+    vfprintf;
+    va_end;
     fputc('\n', fp);
 };

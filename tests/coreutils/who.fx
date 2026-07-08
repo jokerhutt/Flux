@@ -85,16 +85,17 @@ extern int need_users;
 extern int my_line_only;
 extern byte* time_format;
 extern int time_format_width;
-uint LOOKUP_OPTION = 128;
+uint LOOKUP_OPTION = 0;
 
-option[18] longopts = option;
-cdecl idle_string(long when, long boottime) -> byte*
+struct option;
+extern int longopts;
+cdecl idle_string(int when, int boottime) -> byte*
 {
-    long now = TYPE_MINIMUM(?);
-    if (now == TYPE_MINIMUM(?))
+    int now = TYPE_MINIMUM;
+    if (now == TYPE_MINIMUM)
         time(@now);
     int seconds_idle;
-    if (boottime < when & when <= now & !__builtin_sub_overflow((now), (when), (@seconds_idle)) & seconds_idle < 24 * 60 * 60)
+    if (boottime < when & when <= now & !ckd_sub(@seconds_idle, now, when) & seconds_idle < 24 * 60 * 60)
     {
         if (seconds_idle < 60)
             return "  .  ";
@@ -110,15 +111,15 @@ cdecl idle_string(long when, long boottime) -> byte*
 
 cdecl time_string(int* utmp_ent) -> byte*
 {
-    void* /* untranslated: char[INT_STRLEN_BOUND(<recovery-expr>()) + sizeof "-%m-%d %H:%M"] */ buf = INT_STRLEN_BOUND(?) + (sizeof "-%m-%d %H:%M" / 8);
-    tm* tmp = localtime(@?..);
+    void* /* untranslated: char[<recovery-expr>(INT_STRLEN_BOUND) + sizeof "-%m-%d %H:%M"] */ buf = INT_STRLEN_BOUND + (sizeof "-%m-%d %H:%M" / 8);
+    tm* tmp = localtime(@utmp_ent..);
     if (tmp)
     {
         strftime(buf, (sizeof buf / 8), time_format, tmp);
         return buf;
     }
     else
-        return timetostr(?.., buf);
+        return timetostr(utmp_ent.., buf);
 };
 
 cdecl print_line(byte* user, byte state, byte* line, byte* time_str, byte* idle, byte* pid, byte* comment, byte* exitstr) -> void
@@ -126,23 +127,23 @@ cdecl print_line(byte* user, byte state, byte* line, byte* time_str, byte* idle,
     byte[3] mesg = 3;
     byte* buf;
     byte[8] x_idle = 1 + 6 + 1;
-    void* /* untranslated: char[1 + INT_STRLEN_BOUND(<recovery-expr>()) + 1] */ x_pid = 1 + INT_STRLEN_BOUND(?) + 1;
+    void* /* untranslated: char[1 + <recovery-expr>(INT_STRLEN_BOUND) + 1] */ x_pid = 1 + INT_STRLEN_BOUND + 1;
     byte* x_exitstr;
     mesg[1] = state;
-    if (? & !? & strlen(idle) < (sizeof x_idle / 8) - 1)
+    if (include_idle & !short_output & strlen(idle) < (sizeof x_idle / 8) - 1)
         sprintf(x_idle, " %-6s", idle);
     else
         *x_idle = '\0';
-    if (!? & strlen(pid) < (sizeof x_pid / 8) - 1)
+    if (!short_output & strlen(pid) < (sizeof x_pid / 8) - 1)
         sprintf(x_pid, " %10s", pid);
     else
         *x_pid = '\0';
-    x_exitstr = xmalloc(? ? 1 + MAX(12, strlen(exitstr)) + 1 : 1);
-    if (?)
+    x_exitstr = xmalloc(include_exit ? 1 + MAX(12, strlen(exitstr)) + 1 : 1);
+    if (include_exit)
         sprintf(x_exitstr, " %-12s", exitstr);
     else
         *x_exitstr = '\0';
-    buf = xasprintf("%-8s", user ? user : "   .", ? ? mesg : "", line, time_format_width, time_str, x_idle, x_pid, comment, x_exitstr);
+    buf = xasprintf("%-8s", user ? user : "   .", include_mesg ? mesg : "", line, time_format_width, time_str, x_idle, x_pid, comment, x_exitstr);
     {
         byte* p = buf + strlen(buf);
         while (*--p == ' ')
@@ -155,18 +156,16 @@ cdecl print_line(byte* user, byte state, byte* line, byte* time_str, byte* idle,
 
 cdecl is_tty_writable(stat* pstat) -> int
 {
-    return pstat.st_mode `& (0 ? 0);
 };
 
-cdecl print_user(int* utmp_ent, long boottime) -> void
+cdecl print_user(int* utmp_ent, int boottime) -> void
 {
     stat stats;
-    long last_change;
     byte mesg;
     byte[7] idlestr = 6 + 1;
     byte* pidstr = "";
     byte* hoststr;
-    byte* line = ?.;
+    byte* line = utmp_ent.;
     byte* space = strchr(line, ' ');
     line = space ? space + 1 : line;
     int dirfd;
@@ -176,37 +175,37 @@ cdecl print_user(int* utmp_ent, long boottime) -> void
         int dev_dirfd;
         if (!dev_dirfd)
         {
+            dev_dirfd = open;
         };
         dirfd = dev_dirfd;
     };
-    if (?)
+    if (AT_FDCWD <= dirfd && fstatat ( dirfd , line , & stats , 0 ) == 0)
     {
-        mesg = ?(@stats) ? '+' : '-';
-        last_change = stats.st_atime;
+        mesg = is_tty_writable(@stats) ? '+' : '-';
     }
     else
     {
         mesg = '?';
-        last_change = 0;
     };
     if (last_change)
-        sprintf(idlestr, "%.*s", 6, idle_string(last_change, boottime));
+        sprintf(idlestr, "%.*s", 6, idle_string);
     else
         sprintf(idlestr, "  ?");
-    print_line(?., mesg, ?., ?(?), idlestr, pidstr, hoststr ? hoststr : "", "");
+    print_line(utmp_ent., mesg, utmp_ent., time_string(utmp_ent), idlestr, pidstr, hoststr ? hoststr : "", "");
 };
 
 cdecl print_boottime(int* utmp_ent) -> void
 {
-    print_line("", ' ', gettext("system boot"), ?(?), "", "", "", "");
+    print_line("", ' ', gettext("system boot"), time_string(utmp_ent), "", "", "", "");
 };
 
 cdecl make_id_equals_comment(int* utmp_ent) -> byte*
 {
     byte* id = "??";
     byte* prefix = gettext("id=");
-    byte* comment;
-    byte* p;
+    byte* comment = xmalloc;
+    byte* p = mempcpy;
+    p = mempcpy;
     *p = '\0';
     return comment;
 };
@@ -214,66 +213,67 @@ cdecl make_id_equals_comment(int* utmp_ent) -> byte*
 cdecl print_deadprocs(int* utmp_ent) -> void
 {
     byte* exitstr;
-    byte* comment = ?(?);
+    byte* comment = make_id_equals_comment(utmp_ent);
     byte* pidstr = "";
     if (!exitstr)
-        exitstr = xmalloc(strlen(gettext("term=")) + INT_STRLEN_BOUND(?..) + 1 + strlen(gettext("exit=")) + INT_STRLEN_BOUND(?..) + 1);
-    sprintf(exitstr, "%s%d %s%d", gettext("term="), ?.., gettext("exit="), ?..);
-    print_line("", ' ', ?., ?(?), "", pidstr, comment, exitstr);
+        exitstr = xmalloc(strlen(gettext("term=")) + INT_STRLEN_BOUND(utmp_ent..) + 1 + strlen(gettext("exit=")) + INT_STRLEN_BOUND(utmp_ent..) + 1);
+    sprintf(exitstr, "%s%d %s%d", gettext("term="), utmp_ent.., gettext("exit="), utmp_ent..);
+    print_line("", ' ', utmp_ent., time_string(utmp_ent), "", pidstr, comment, exitstr);
     free(comment);
 };
 
 cdecl print_login(int* utmp_ent) -> void
 {
-    byte* comment = ?(?);
+    byte* comment = make_id_equals_comment(utmp_ent);
     byte* pidstr = "";
-    print_line(gettext("LOGIN"), ' ', ?., ?(?), "", pidstr, comment, "");
+    print_line(gettext("LOGIN"), ' ', utmp_ent., time_string(utmp_ent), "", pidstr, comment, "");
     free(comment);
 };
 
 cdecl print_initspawn(int* utmp_ent) -> void
 {
-    byte* comment = ?(?);
+    byte* comment = make_id_equals_comment(utmp_ent);
     byte* pidstr = "";
-    print_line("", ' ', ?., ?(?), "", pidstr, comment, "");
+    print_line("", ' ', utmp_ent., time_string(utmp_ent), "", pidstr, comment, "");
     free(comment);
 };
 
 cdecl print_clockchange(int* utmp_ent) -> void
 {
-    print_line("", ' ', gettext("clock change"), ?(?), "", "", "", "");
+    print_line("", ' ', gettext("clock change"), time_string(utmp_ent), "", "", "", "");
 };
 
 cdecl print_runlevel(int* utmp_ent) -> void
 {
     byte* runlevline;
     byte* comment;
-    byte last = ?. / 256;
-    byte curr = ?. % 256;
+    byte last = utmp_ent. / 256;
+    byte curr = utmp_ent. % 256;
     if (!runlevline)
         runlevline = xmalloc(strlen(gettext("run-level")) + 3);
     sprintf(runlevline, "%s %c", gettext("run-level"), curr);
     if (!comment)
         comment = xmalloc(strlen(gettext("last=")) + 2);
     sprintf(comment, "%s%c", gettext("last="), (last == 'N') ? 'S' : last);
-    print_line("", ' ', runlevline, ?(?), "", "", c_isprint(last) ? comment : "", "");
+    print_line("", ' ', runlevline, time_string(utmp_ent), "", "", c_isprint(last) ? comment : "", "");
 };
 
 cdecl list_entries_who(int n, int* utmp_buf) -> void
 {
-    while (?--)
+    while (n--)
     {
-        if (IS_USER_PROCESS(?))
+        if (IS_USER_PROCESS(utmp_buf))
         {
             byte* trimmed_name;
-            trimmed_name = extract_trimmed_name(?);
-            if (?)
+            trimmed_name = extract_trimmed_name(utmp_buf);
+            if (entries)
                 putchar(' ');
-            fputs(trimmed_name, stdout);
+            fputs;
             free(trimmed_name);
         };
         utmp_buf++;
     };
+    printf;
 };
 
 cdecl print_heading() -> void
@@ -284,114 +284,117 @@ cdecl print_heading() -> void
 cdecl scan_entries(int n, int* utmp_buf) -> void
 {
     byte* ttyname_b;
-    long boottime = TYPE_MINIMUM(?);
-    if (?)
+    if (include_heading)
         print_heading();
-    if (?)
+    if (my_line_only)
     {
-        ttyname_b = ttyname(0);
+        ttyname_b = ttyname;
         if (!ttyname_b)
             return void;
         if (strncmp(ttyname_b, "", ( / 8) ? 0) ? 0)
             ttyname_b += (sizeof "/dev/" / 8) - 1;
     };
-    while (?--)
+    while (n--)
     {
-        if (!? | str_endswith(?., ttyname_b))
+        if (!my_line_only | str_endswith(utmp_buf., ttyname_b))
         {
-            if (? & IS_USER_PROCESS(?))
-                print_user(?, boottime);
-            elif (?)
-                print_runlevel(?);
+            if (need_users & IS_USER_PROCESS(utmp_buf))
+                print_user;
+            elif (need_runlevel && UT_TYPE_RUN_LVL ( utmp_buf ))
+                print_runlevel(utmp_buf);
             else
-                if (? & UT_TYPE_BOOT_TIME(?))
-                    print_boottime(?);
-                elif (?)
-                    print_clockchange(?);
+                if (need_boottime & UT_TYPE_BOOT_TIME(utmp_buf))
+                    print_boottime(utmp_buf);
+                elif (need_clockchange && UT_TYPE_NEW_TIME ( utmp_buf ))
+                    print_clockchange(utmp_buf);
                 else
-                    if (?)
-                        print_initspawn(?);
-                    elif (? & UT_TYPE_LOGIN_PROCESS(?))
-                        print_login(?);
+                    if (need_initspawn && UT_TYPE_INIT_PROCESS ( utmp_buf ))
+                        print_initspawn(utmp_buf);
+                    elif (need_login & UT_TYPE_LOGIN_PROCESS(utmp_buf))
+                        print_login(utmp_buf);
                     else
-                        if (?)
-                            print_deadprocs(?);
+                        if (need_deadprocs && UT_TYPE_DEAD_PROCESS ( utmp_buf ))
+                            print_deadprocs(utmp_buf);
         };
-        if (UT_TYPE_BOOT_TIME(?))
-            boottime = ?..;
         utmp_buf++;
     };
 };
 
 cdecl who(byte* filename, int options) -> void
 {
+    if (read_utmp != 0)
+        error;
+    if (short_list)
+        list_entries_who;
+    else
+        scan_entries;
+    free;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print information about users who are currently logged in.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-"), stdout);
-        oputs_("who", gettext("\
-  -a, --all         same as -b -d --login -p -r -t -T -u\n\
+        printf;
+        fputs;
+        fputs;
+        oputs_("who", gettext("\
+  -a, --all         same as -b -d --login -p -r -t -T -u\n\
 "));
-        oputs_("who", gettext("\
-  -b, --boot        time of last system boot\n\
+        oputs_("who", gettext("\
+  -b, --boot        time of last system boot\n\
 "));
-        oputs_("who", gettext("\
-  -d, --dead        print dead processes\n\
+        oputs_("who", gettext("\
+  -d, --dead        print dead processes\n\
 "));
-        oputs_("who", gettext("\
-  -H, --heading     print line of column headings\n\
+        oputs_("who", gettext("\
+  -H, --heading     print line of column headings\n\
 "));
-        oputs_("who", gettext("\
-  -l, --login       print system login processes\n\
+        oputs_("who", gettext("\
+  -l, --login       print system login processes\n\
 "));
-        oputs_("who", gettext("\
-      --lookup      attempt to canonicalize hostnames via DNS\n\
+        oputs_("who", gettext("\
+      --lookup      attempt to canonicalize hostnames via DNS\n\
 "));
-        oputs_("who", gettext("\
-  -m                only hostname and user associated with standard input\n\
+        oputs_("who", gettext("\
+  -m                only hostname and user associated with standard input\n\
 "));
-        oputs_("who", gettext("\
-  -p, --process     print active processes spawned by init\n\
+        oputs_("who", gettext("\
+  -p, --process     print active processes spawned by init\n\
 "));
-        oputs_("who", gettext("\
-  -q, --count       all login names and number of users logged on\n\
+        oputs_("who", gettext("\
+  -q, --count       all login names and number of users logged on\n\
 "));
-        oputs_("who", gettext("\
-  -r, --runlevel    print current runlevel\n\
+        oputs_("who", gettext("\
+  -r, --runlevel    print current runlevel\n\
 "));
-        oputs_("who", gettext("\
-  -s, --short       print only name, line, and time (default)\n\
+        oputs_("who", gettext("\
+  -s, --short       print only name, line, and time (default)\n\
 "));
-        oputs_("who", gettext("\
-  -t, --time        print last system clock change\n\
+        oputs_("who", gettext("\
+  -t, --time        print last system clock change\n\
 "));
-        oputs_("who", gettext("\
-  -T, -w, --mesg    add user's message status as +, - or ?\n\
+        oputs_("who", gettext("\
+  -T, -w, --mesg    add user's message status as +, - or ?\n\
 "));
-        oputs_("who", gettext("\
-  -u, --users       list users logged in, including idle time\n\
+        oputs_("who", gettext("\
+  -u, --users       list users logged in, including idle time\n\
 "));
-        oputs_("who", gettext("\
-      --message     same as -T\n\
+        oputs_("who", gettext("\
+      --message     same as -T\n\
 "));
-        oputs_("who", gettext("\
-      --writable    same as -T\n\
+        oputs_("who", gettext("\
+      --writable    same as -T\n\
 "));
         oputs_("who", gettext("      --help\n         display this help and exit\n"));
         oputs_("who", gettext("      --version\n         output version information and exit\n"));
+        printf;
         emit_ancillary_info("who");
     };
     exit(status);
@@ -402,94 +405,18 @@ cdecl main(int argc, byte** argv) -> int
     int optc;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "abdlmpqrstuwHT", longopts, ((void*)0))) != -1)
-    {
-        switch (optc)
-        {
-            case ('a')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('b')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('d')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('H')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('l')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('m')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('p')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('q')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('r')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('s')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('t')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case ('T')
-            {
-                case ('w')
-                {
-                }
-            }
-            goto _switch_end_139188819667536;
-            case ('u')
-            {
-            }
-            goto _switch_end_139188819667536;
-            case (LOOKUP_OPTION)
-            {
-            }
-            goto _switch_end_139188819667536;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188819667536;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188819667536;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188819667536:
-    };
-    if (?)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
     };
-    if (?)
+    if (assumptions)
     {
     };
-    if (hard_locale(0))
+    if (include_exit)
+    {
+    };
+    if (hard_locale)
     {
         time_format = "%Y-%m-%d %H:%M";
         time_format_width = 4 + 1 + 2 + 1 + 2 + 1 + 2 + 1 + 2;
@@ -506,22 +433,16 @@ cdecl main(int argc, byte** argv) -> int
         }
         case (-1)
         {
-            case (0)
-            {
-            }
+            break switch;
         }
-        goto _switch_end_139188819661776;
         case (1)
         {
-            who(argv[optind], 0);
+            who;
+            break switch;
         }
-        goto _switch_end_139188819661776;
         default
         {
-            error(0, 0, gettext("extra operand %s"), quote(argv[optind + 2]));
+            usage;
         };
-        usage(0);
     };
-    label _switch_end_139188819661776:
-    return 0;
 };

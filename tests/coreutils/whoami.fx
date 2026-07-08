@@ -36,18 +36,16 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print the user name associated with the current effective user ID.\n\
-Same as id -un.\n\
-\n\
-"), stdout);
+        printf;
+        fputs;
         oputs_("whoami", gettext("      --help\n         display this help and exit\n"));
         oputs_("whoami", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("whoami");
@@ -57,18 +55,17 @@ Same as id -un.\n\
 
 cdecl main(int argc, byte** argv) -> int
 {
-    uint NO_UID = -1;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    if (optind != argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    (?__errno_location()) ? 0;
-    uint uid = geteuid();
-    passwd* pw = uid == NO_UID & (?__errno_location()) ? ((void*)0) : getpwuid(uid);
+    passwd* pw;
     if (!pw)
-        error(0, (?__errno_location()), gettext("cannot find name for user ID %ju"), (ulong)uid);
-    puts(pw.pw_name);
-    return 0;
+        error;
+    puts(pw);
 };

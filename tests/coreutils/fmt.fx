@@ -125,12 +125,12 @@ struct Word;
 // typedef alias: WORD -> Word
 
 cdecl set_prefix(byte* p) -> void;
-cdecl fmt(_IO_FILE* f, byte*) -> int;
-cdecl get_paragraph(_IO_FILE* f) -> int;
-cdecl get_line(_IO_FILE* f, int c) -> int;
-cdecl get_prefix(_IO_FILE* f) -> int;
-cdecl get_space(_IO_FILE* f, int c) -> int;
-cdecl copy_rest(_IO_FILE* f, int c) -> int;
+cdecl fmt(int* f, byte*) -> int;
+cdecl get_paragraph(int* f) -> int;
+cdecl get_line(int* f, int c) -> int;
+cdecl get_prefix(int* f) -> int;
+cdecl get_space(int* f, int c) -> int;
+cdecl copy_rest(int* f, int c) -> int;
 cdecl same_para(int c) -> int;
 cdecl flush_paragraph() -> void;
 cdecl fmt_paragraph() -> void;
@@ -166,47 +166,46 @@ extern int next_prefix_indent;
 extern int last_line_length;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Reformat each paragraph in the FILE(s), writing to standard output.\n\
-The option -WIDTH is an abbreviated form of --width=DIGITS.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("fmt", gettext("\
-  -c, --crown-margin\n\
-         preserve indentation of first two lines\n\
+        oputs_("fmt", gettext("\
+  -c, --crown-margin\n\
+         preserve indentation of first two lines\n\
 "));
-        oputs_("fmt", gettext("\
-  -p, --prefix=STRING\n\
-         reformat only lines beginning with STRING,\n\
-         reattaching the prefix to reformatted lines\n\
+        oputs_("fmt", gettext("\
+  -p, --prefix=STRING\n\
+         reformat only lines beginning with STRING,\n\
+         reattaching the prefix to reformatted lines\n\
 "));
-        oputs_("fmt", gettext("\
-  -s, --split-only\n\
-         split long lines, but do not refill\n\
+        oputs_("fmt", gettext("\
+  -s, --split-only\n\
+         split long lines, but do not refill\n\
 "));
-        oputs_("fmt", gettext("\
-  -t, --tagged-paragraph\n\
-         indentation of first line different from second\n\
+        oputs_("fmt", gettext("\
+  -t, --tagged-paragraph\n\
+         indentation of first line different from second\n\
 "));
-        oputs_("fmt", gettext("\
-  -u, --uniform-spacing\n\
-         one space between words, two after sentences\n\
+        oputs_("fmt", gettext("\
+  -u, --uniform-spacing\n\
+         one space between words, two after sentences\n\
 "));
-        oputs_("fmt", gettext("\
-  -w, --width=WIDTH\n\
-         maximum line width (default of 75 columns)\n\
+        oputs_("fmt", gettext("\
+  -w, --width=WIDTH\n\
+         maximum line width (default of 75 columns)\n\
 "));
-        oputs_("fmt", gettext("\
-  -g, --goal=WIDTH\n\
-         goal width (default of 93% of width)\n\
+        oputs_("fmt", gettext("\
+  -g, --goal=WIDTH\n\
+         goal width (default of 93% of width)\n\
 "));
         oputs_("fmt", gettext("      --help\n         display this help and exit\n"));
         oputs_("fmt", gettext("      --version\n         output version information and exit\n"));
@@ -215,15 +214,17 @@ The option -WIDTH is an abbreviated form of --width=DIGITS.\n\
     exit(status);
 };
 
-option[10] long_options = option;
+struct option;
+extern int long_options;
 cdecl main(int argc, byte** argv) -> int
 {
     int optchar;
     bool;
-    byte* max_width_option = ((void*)0);
-    byte* goal_width_option = ((void*)0);
+    byte* max_width_option;
+    byte* goal_width_option;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     if (argc > 1 & argv[1][0] == '-' & c_isdigit(argv[1][1]))
     {
         max_width_option = argv[1] + 1;
@@ -231,66 +232,62 @@ cdecl main(int argc, byte** argv) -> int
         argv++;
         argc--;
     };
-    while ((optchar = getopt_long(argc, argv, "0123456789cstuw:p:g:", long_options, ((void*)0))) != -1)
+    while ((optchar = getopt_long) != -1)
         switch (optchar)
         {
             default
             {
-                if (c_isdigit(optchar))
-                    error(0, 0, gettext("invalid option -- %c; -WIDTH is recognized\
- only when it is the first\noption; use -w N instead"), optchar);
+                usage;
             };
-            usage(0);
             case ('c')
             {
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case ('s')
             {
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case ('t')
             {
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case ('u')
             {
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case ('w')
             {
-                max_width_option = optarg;
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case ('g')
             {
-                goal_width_option = optarg;
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case ('p')
             {
-                set_prefix(optarg);
+                set_prefix;
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188820097616;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188820097616;
         };
-        label _switch_end_139188820097616:
     if (max_width_option)
     {
+        max_width = xnumtoumax;
     };
     if (goal_width_option)
     {
         goal_width = xdectoumax(goal_width_option, 0, max_width, "", gettext("invalid width"), 0);
-        if (max_width_option == ((void*)0))
+        if (max_width_option == NULL)
             max_width = goal_width + 10;
     }
     else
@@ -303,39 +300,23 @@ cdecl main(int argc, byte** argv) -> int
     }
     else
     {
-        for (optind < argc; optind++; )
-        {
-            byte* file = argv[optind];
-            if (streq(file, "-"))
-            {
-            }
-            else
-            {
-                _IO_FILE* in_stream;
-                in_stream = fopen(file, "r");
-                if (in_stream != ((void*)0))
-                else
-                {
-                };
-            };
-        };
     };
-    if (?)
-        error(0, (?__errno_location()), "%s", gettext("closing standard input"));
+    if (have_read_stdin && fclose ( stdin ) != 0)
+        error;
 };
 
 cdecl set_other_indent(int same_paragraph) -> void
 {
-    if (?)
+    if (split)
         other_indent = first_indent;
-    elif (?)
+    elif (crown)
     {
-        other_indent = (? ? in_column : first_indent);
+        other_indent = (same_paragraph ? in_column : first_indent);
     };
     else
-        if (?)
+        if (tagged)
         {
-            if (? & in_column != first_indent)
+            if (same_paragraph & in_column != first_indent)
             {
                 other_indent = in_column;
             }

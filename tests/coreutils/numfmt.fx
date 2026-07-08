@@ -27,21 +27,21 @@ macro AUTHORS
 
 uint EXIT_CONVERSION_WARNINGS = 2;
 
-uint FROM_OPTION = 128;
-uint FROM_UNIT_OPTION = 129;
-uint TO_OPTION = 130;
-uint TO_UNIT_OPTION = 131;
-uint ROUND_OPTION = 132;
-uint SUFFIX_OPTION = 133;
-uint GROUPING_OPTION = 134;
-uint PADDING_OPTION = 135;
-uint FIELD_OPTION = 136;
-uint DEBUG_OPTION = 137;
-uint DEV_DEBUG_OPTION = 138;
-uint HEADER_OPTION = 139;
-uint FORMAT_OPTION = 140;
-uint INVALID_OPTION = 141;
-uint UNIT_SEPARATOR_OPTION = 142;
+uint FROM_OPTION = 0;
+uint FROM_UNIT_OPTION = 1;
+uint TO_OPTION = 2;
+uint TO_UNIT_OPTION = 3;
+uint ROUND_OPTION = 4;
+uint SUFFIX_OPTION = 5;
+uint GROUPING_OPTION = 6;
+uint PADDING_OPTION = 7;
+uint FIELD_OPTION = 8;
+uint DEBUG_OPTION = 9;
+uint DEV_DEBUG_OPTION = 10;
+uint HEADER_OPTION = 11;
+uint FORMAT_OPTION = 12;
+uint INVALID_OPTION = 13;
+uint UNIT_SEPARATOR_OPTION = 14;
 
 enum scale_type
 {
@@ -52,9 +52,9 @@ enum scale_type
     scale_IEC_I
 };
 
-byte*[6] scale_from_args = {"none", "auto", "si", "iec", "iec-i", ((void*)0)};
+extern byte** scale_from_args;
 scale_type[5] scale_from_types = scale_type;
-byte*[5] scale_to_args = {"none", "si", "iec", "iec-i", ((void*)0)};
+extern byte** scale_to_args;
 scale_type[4] scale_to_types = scale_type;
 enum round_type
 {
@@ -65,7 +65,7 @@ enum round_type
     round_nearest
 };
 
-byte*[6] round_args = {"up", "down", "from-zero", "towards-zero", "nearest", ((void*)0)};
+extern byte** round_args;
 round_type[5] round_types = round_type;
 enum inval_type
 {
@@ -75,10 +75,11 @@ enum inval_type
     inval_ignore
 };
 
-byte*[5] inval_args = {"abort", "fail", "warn", "ignore", ((void*)0)};
+extern byte** inval_args;
 inval_type[4] inval_types = inval_type;
-option[20] longopts = option;
-uint MAX_UNSCALED_DIGITS = 18;
+struct option;
+extern int longopts;
+uint MAX_UNSCALED_DIGITS = 0;
 
 uint MAX_ACCEPTABLE_DIGITS = 33;
 
@@ -86,24 +87,24 @@ scale_type scale_from = scale_type;
 scale_type scale_to = scale_type;
 round_type round_style = round_type;
 inval_type inval_style = inval_type;
-byte* suffix = ((void*)0);
-byte* unit_separator = ((void*)0);
-ulong from_unit_size = uintmax_t;
-ulong to_unit_size = uintmax_t;
+extern byte* suffix;
+extern byte* unit_separator;
+int from_unit_size = 1;
+int to_unit_size = 1;
 int grouping = 0;
-byte* padding_buffer = ((void*)0);
-extern int padding_buffer_size;
-long padding_width = intmax_t;
+extern byte* padding_buffer;
+int padding_buffer_size = 0;
+int padding_width = 0;
 int zero_padding_width = 0;
 long user_precision = -1;
-byte* format_str = ((void*)0);
-byte* format_str_prefix = ((void*)0);
-byte* format_str_suffix = ((void*)0);
+extern byte* format_str;
+extern byte* format_str_prefix;
+extern byte* format_str_suffix;
 int conv_exit_code = EXIT_CONVERSION_WARNINGS;
 int auto_padding = 0;
-byte* delimiter = ((void*)0);
+extern byte* delimiter;
 byte line_delim = '\n';
-ulong header = uintmax_t;
+int header = 0;
 extern int debug;
 extern byte* decimal_point;
 extern int decimal_point_length;
@@ -112,7 +113,7 @@ extern int thousands_sep_length;
 extern int dev_debug;
 cdecl newline_or_blank(int g) -> int
 {
-    return ?. == '\n' | c32issep(?.);
+    return g. == '\n' | c32issep(g.);
 };
 
 cdecl default_scale_base(scale_type scale) -> int
@@ -121,23 +122,9 @@ cdecl default_scale_base(scale_type scale) -> int
     {
         case (scale_IEC)
         {
-            case (scale_IEC_I)
-            {
-                return 1024;
-            }
         }
         case (scale_none)
         {
-            case (scale_auto)
-            {
-                case (scale_SI)
-                {
-                    default
-                    {
-                        return 1000;
-                    };
-                }
-            }
         }
     };
 };
@@ -146,7 +133,6 @@ byte[13] zero_and_valid_suffixes = "0KkMGTPEZYRQ";
 byte* valid_suffixes = 1 + zero_and_valid_suffixes;
 cdecl valid_suffix(byte suf) -> int
 {
-    return strchr(valid_suffixes, suf) != ((void*)0);
 };
 
 cdecl suffix_power(byte suf) -> int
@@ -155,10 +141,6 @@ cdecl suffix_power(byte suf) -> int
     {
         case ('k')
         {
-            case ('K')
-            {
-                return 1;
-            }
         }
         case ('M')
         {
@@ -198,7 +180,6 @@ cdecl suffix_power(byte suf) -> int
         }
         default
         {
-            return 0;
         };
     };
 };
@@ -253,12 +234,11 @@ cdecl suffix_power_char(int power) -> byte*
         }
         default
         {
-            return "(error)";
         };
     };
 };
 
-cdecl powerld(double base, long x) -> double
+cdecl powerld(double base, int x) -> double
 {
     double result = base;
     if (x == 0)
@@ -276,7 +256,7 @@ cdecl absld(double val) -> double
 cdecl expld(double val, int base, int* x) -> double
 {
     int power = 0;
-    if (val >= -0.0 & val <= 0.0)
+    if (val >= - LDBL_MAX && val <= LDBL_MAX)
     {
         while (absld(val) >= base)
         {
@@ -289,73 +269,58 @@ cdecl expld(double val, int base, int* x) -> double
     return val;
 };
 
-cdecl simple_round_ceiling(double val) -> long
+cdecl simple_round_ceiling(double val) -> int
 {
-    long intval = val;
-    if (intval < val)
-        intval++;
-    return intval;
 };
 
-cdecl simple_round_floor(double val) -> long
+cdecl simple_round_floor(double val) -> int
 {
     return ?simple_round_ceiling(-val);
 };
 
-cdecl simple_round_from_zero(double val) -> long
+cdecl simple_round_from_zero(double val) -> int
 {
     return val < 0 ? simple_round_floor(val) : simple_round_ceiling(val);
 };
 
-cdecl simple_round_to_zero(double val) -> long
+cdecl simple_round_to_zero(double val) -> int
 {
     return val;
 };
 
-cdecl simple_round_nearest(double val) -> long
+cdecl simple_round_nearest(double val) -> int
 {
     return val < 0 ? val - 0.5 : val + 0.5;
 };
 
 cdecl simple_round(double val, round_type t) -> int
 {
-    long rval;
-    long intmax_mul = val / (0);
-    val -= (double)(0) * intmax_mul;
     switch (t)
     {
         case (round_ceiling)
         {
-            rval = simple_round_ceiling(val);
+            break switch;
         }
-        goto _switch_end_139188883803728;
         case (round_floor)
         {
-            rval = simple_round_floor(val);
+            break switch;
         }
-        goto _switch_end_139188883803728;
         case (round_from_zero)
         {
-            rval = simple_round_from_zero(val);
+            break switch;
         }
-        goto _switch_end_139188883803728;
         case (round_to_zero)
         {
-            rval = simple_round_to_zero(val);
+            break switch;
         }
-        goto _switch_end_139188883803728;
         case (round_nearest)
         {
-            rval = simple_round_nearest(val);
+            break switch;
         }
-        goto _switch_end_139188883803728;
         default
         {
-            return 0;
         };
     };
-    label _switch_end_139188883803728:
-    return (double)(0) * intmax_mul + rval;
 };
 
 enum simple_strtod_error
@@ -396,9 +361,9 @@ cdecl simple_strtod_int(byte* input_str, byte** endptr, double* value, int* nega
         if (thousands_sep_length > 0 & (strncmp(*endptr, thousands_sep, thousands_sep_length) ? 0) & c_isdigit((*endptr)[thousands_sep_length]))
             (*endptr) += thousands_sep_length;
     };
-    if (?)
+    if (! found_digit && ! STREQ_LEN ( * endptr , decimal_point , decimal_point_length ))
         return SSE_INVALID_NUMBER;
-    if (*?)
+    if (*negative)
         val = -val;
     if (value)
         *value = val;
@@ -411,6 +376,7 @@ cdecl simple_strtod_float(byte* input_str, byte** endptr, double* value, ulong* 
     simple_strtod_error e = SSE_OK;
     if (precision)
         *precision = 0;
+    e = simple_strtod_int;
     if (e != SSE_OK & e != SSE_OK_PRECISION_LOSS)
         return e;
     if ((strncmp(*endptr, decimal_point, decimal_point_length) ? 0))
@@ -419,24 +385,21 @@ cdecl simple_strtod_float(byte* input_str, byte** endptr, double* value, ulong* 
         double val_frac = 0;
         bool;
         (*endptr) += decimal_point_length;
-        simple_strtod_error e2;
+        simple_strtod_error e2 = simple_strtod_int;
         if (e2 != SSE_OK & e2 != SSE_OK_PRECISION_LOSS)
             return e2;
         if (e2 == SSE_OK_PRECISION_LOSS)
             e = e2;
-        if (?)
+        if (neg_frac)
             return SSE_INVALID_NUMBER;
-        long exponent = ptr2 - *endptr;
-        val_frac /= powerld(10, exponent);
+        val_frac /= powerld;
         if (value)
         {
-            if (?)
+            if (negative)
                 *value -= val_frac;
             else
                 *value += val_frac;
         };
-        if (precision)
-            *precision = exponent;
         *endptr = ptr2;
     };
     return e;
@@ -449,7 +412,7 @@ cdecl simple_strtod_human(byte* input_str, byte** endptr, double* value, ulong* 
     do
     {
         if (?)
-            fprintf(stderr, "simple_strtod_human:\n  input string: %s\n", quote_n(0, input_str), quote_n(1, decimal_point), MAX_UNSCALED_DIGITS);
+            fprintf;
     }
     while (0);
     simple_strtod_error e = simple_strtod_float(input_str, endptr, value, precision);
@@ -458,7 +421,7 @@ cdecl simple_strtod_human(byte* input_str, byte** endptr, double* value, ulong* 
     do
     {
         if (?)
-            fprintf(stderr, "  parsed numeric value: %Lf\n", *value, (int)*precision);
+            fprintf;
     }
     while (0);
     while (?*endptr)
@@ -472,13 +435,14 @@ cdecl simple_strtod_human(byte* input_str, byte** endptr, double* value, ulong* 
                 (*endptr) += sep_len;
             };
         };
-        if (?)
+        if (! matched_unit_sep)
         {
         };
         if (?*endptr == '\0')
             break;
-        if (!?(?*endptr))
+        if (!valid_suffix(?*endptr))
         {
+            *endptr = skip_str_matching;
             if (?*endptr == '\0')
                 break;
             return SSE_INVALID_SUFFIX;
@@ -494,7 +458,7 @@ cdecl simple_strtod_human(byte* input_str, byte** endptr, double* value, ulong* 
             do
             {
                 if (?)
-                    fprintf(stderr, "  Auto-scaling, found 'i', switching to base %d\n", scale_base);
+                    fprintf;
             }
             while (0);
         }
@@ -506,20 +470,21 @@ cdecl simple_strtod_human(byte* input_str, byte** endptr, double* value, ulong* 
                 return SSE_MISSING_I_SUFFIX;
         };
         *precision = 0;
+        *endptr = skip_str_matching;
         break;
     };
     double multiplier = powerld(scale_base, power);
     do
     {
         if (?)
-            fprintf(stderr, "  suffix power=%d^%d = %Lf\n", scale_base, power, multiplier);
+            fprintf;
     }
     while (0);
     (*value) = (*value) * multiplier;
     do
     {
         if (?)
-            fprintf(stderr, "  returning value: %Lf (%LG)\n", *value, *value);
+            fprintf;
     }
     while (0);
     return e;
@@ -527,43 +492,38 @@ cdecl simple_strtod_human(byte* input_str, byte** endptr, double* value, ulong* 
 
 cdecl simple_strtod_fatal(simple_strtod_error err, byte* input_str) -> void
 {
-    byte* msgid = ((void*)0);
+    byte* msgid;
     switch (err)
     {
         case (SSE_OK_PRECISION_LOSS)
         {
-            case (SSE_OK)
-            {
-                unreachable();
-            }
         }
         case (SSE_OVERFLOW)
         {
             msgid = "value too large to be converted: %s";
+            break switch;
         }
-        goto _switch_end_139188837981008;
         case (SSE_INVALID_NUMBER)
         {
             msgid = "invalid number: %s";
+            break switch;
         }
-        goto _switch_end_139188837981008;
         case (SSE_VALID_BUT_FORBIDDEN_SUFFIX)
         {
             msgid = "rejecting suffix in input: %s (consider using --from)";
+            break switch;
         }
-        goto _switch_end_139188837981008;
         case (SSE_INVALID_SUFFIX)
         {
             msgid = "invalid suffix in input: %s";
+            break switch;
         }
-        goto _switch_end_139188837981008;
         case (SSE_MISSING_I_SUFFIX)
         {
             msgid = "missing 'i' suffix in input: %s (e.g Ki/Mi/Gi)";
+            break switch;
         }
-        goto _switch_end_139188837981008;
     };
-    label _switch_end_139188837981008:
     if (inval_style != inval_ignore)
         error(conv_exit_code, 0, gettext(msgid), quote(input_str));
 };
@@ -580,22 +540,22 @@ cdecl double_to_human(double val, int precision, byte* buf, int buf_size, scale_
     do
     {
         if (?)
-            fprintf(stderr, "double_to_human:\n");
+            fprintf;
     }
     while (0);
     if (scale == scale_none)
     {
         val *= powerld(10, precision);
-        val = ?(val, round);
+        val = simple_round(val, round);
         val /= powerld(10, precision);
         do
         {
             if (?)
-                fprintf(stderr, (group) ? "  no scaling, returning (grouped) value: %'.*Lf\n" : "  no scaling, returning value: %.*Lf\n", precision, val);
+                fprintf;
         }
         while (0);
         strcpy(pfmt, ".*Lf%s");
-        return snprintf(buf, ?, fmt, precision, val, suffix ? suffix : "");
+        return snprintf(buf, buf_size, fmt, precision, val, suffix ? suffix : "");
     };
     double scale_base = default_scale_base(scale);
     int power = 0;
@@ -603,7 +563,7 @@ cdecl double_to_human(double val, int precision, byte* buf, int buf_size, scale_
     do
     {
         if (?)
-            fprintf(stderr, "  scaled value to %Lf * %0.f ^ %d\n", val, scale_base, power);
+            fprintf;
     }
     while (0);
     int power_adjust = 0;
@@ -614,7 +574,7 @@ cdecl double_to_human(double val, int precision, byte* buf, int buf_size, scale_
         power_adjust = 1;
     };
     val *= powerld(10, power_adjust);
-    val = ?(val, round);
+    val = simple_round(val, round);
     val /= powerld(10, power_adjust);
     if (absld(val) >= scale_base)
     {
@@ -625,21 +585,20 @@ cdecl double_to_human(double val, int precision, byte* buf, int buf_size, scale_
     do
     {
         if (?)
-            fprintf(stderr, "  after rounding, value=%Lf * %0.f ^ %d\n", val, scale_base, power);
+            fprintf;
     }
     while (0);
     strcpy(pfmt, ".*Lf%s%s%s%s");
     int prec = user_precision == -1 ? show_decimal_point : user_precision;
-    return snprintf(buf, ?, fmt, prec, val, (power > 0 & unit_separator) ? unit_separator : "", power == 1 & scale == scale_SI ? "k" : suffix_power_char(power), @"i"[!(scale == scale_IEC_I & 0 < power)], suffix ? suffix : "");
+    return snprintf(buf, buf_size, fmt, prec, val, (power > 0 & unit_separator) ? unit_separator : "", power == 1 & scale == scale_SI ? "k" : suffix_power_char(power), @"i"[!(scale == scale_IEC_I & 0 < power)], suffix ? suffix : "");
 };
 
-cdecl unit_to_umax(byte* n_string) -> ulong
+cdecl unit_to_umax(byte* n_string) -> int
 {
     byte* c_string = n_string;
-    byte* t_string = ((void*)0);
+    byte* t_string;
     ulong n_len = strlen(n_string);
-    byte* end = ((void*)0);
-    ulong n;
+    byte* end;
     byte* suffixes = valid_suffixes;
     if (n_len & !c_isdigit(n_string[n_len - 1]))
     {
@@ -656,149 +615,115 @@ cdecl unit_to_umax(byte* n_string) -> ulong
         };
         c_string = t_string;
     };
-    if (?)
+    if (s_err != LONGINT_OK || * end || n == 0)
     {
         free(t_string);
-        error(0, 0, gettext("invalid unit size: %s"), quote(n_string));
+        error;
     };
     free(t_string);
-    return n;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Reformat NUMBER(s), or the numbers from standard input if none are specified.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("numfmt", gettext("\
-      --debug\n\
-         print warnings about invalid input\n\
+        oputs_("numfmt", gettext("\
+      --debug\n\
+         print warnings about invalid input\n\
 "));
-        oputs_("numfmt", gettext("\
-  -d, --delimiter=X\n\
-         use X instead of whitespace for field delimiter\n\
+        oputs_("numfmt", gettext("\
+  -d, --delimiter=X\n\
+         use X instead of whitespace for field delimiter\n\
 "));
-        oputs_("numfmt", gettext("\
-      --field=FIELDS\n\
-         replace the numbers in these input fields (default=1);\n\
-         see FIELDS below for details\n\
+        oputs_("numfmt", gettext("\
+      --field=FIELDS\n\
+         replace the numbers in these input fields (default=1);\n\
+         see FIELDS below for details\n\
 "));
-        oputs_("numfmt", gettext("\
-      --format=FORMAT\n\
-         use printf style floating-point FORMAT;\n\
-         see FORMAT below for details\n\
+        oputs_("numfmt", gettext("\
+      --format=FORMAT\n\
+         use printf style floating-point FORMAT;\n\
+         see FORMAT below for details\n\
 "));
-        oputs_("numfmt", gettext("\
-      --from=UNIT\n\
-         auto-scale input numbers to UNITs; default is 'none';\n\
-         see UNIT below for details\n\
+        oputs_("numfmt", gettext("\
+      --from=UNIT\n\
+         auto-scale input numbers to UNITs; default is 'none';\n\
+         see UNIT below for details\n\
 "));
-        oputs_("numfmt", gettext("\
-      --from-unit=N\n\
-         specify the input unit size (instead of the default 1)\n\
+        oputs_("numfmt", gettext("\
+      --from-unit=N\n\
+         specify the input unit size (instead of the default 1)\n\
 "));
-        oputs_("numfmt", gettext("\
-      --grouping\n\
-         use locale-defined grouping of digits, e.g. 1,000,000.\n\
-         This has no effect in the C/POSIX locale\n\
+        oputs_("numfmt", gettext("\
+      --grouping\n\
+         use locale-defined grouping of digits, e.g. 1,000,000.\n\
+         This has no effect in the C/POSIX locale\n\
 "));
-        oputs_("numfmt", gettext("\
-      --header[=N]\n\
-         print (without converting) the first N header lines;\n\
-         N defaults to 1 if not specified\n\
+        oputs_("numfmt", gettext("\
+      --header[=N]\n\
+         print (without converting) the first N header lines;\n\
+         N defaults to 1 if not specified\n\
 "));
-        oputs_("numfmt", gettext("\
-      --invalid=MODE\n\
-         failure mode for invalid numbers;\n\
-         MODE can be: abort (default), fail, warn, ignore\n\
+        oputs_("numfmt", gettext("\
+      --invalid=MODE\n\
+         failure mode for invalid numbers;\n\
+         MODE can be: abort (default), fail, warn, ignore\n\
 "));
-        oputs_("numfmt", gettext("\
-      --padding=N\n\
-         pad the output to N characters;\n\
-         positive N will right-align, negative N will left-align;\n\
-         padding is ignored if the output is wider than N;\n\
-         the default is to automatically pad if a whitespace is found\n\
+        oputs_("numfmt", gettext("\
+      --padding=N\n\
+         pad the output to N characters;\n\
+         positive N will right-align, negative N will left-align;\n\
+         padding is ignored if the output is wider than N;\n\
+         the default is to automatically pad if a whitespace is found\n\
 "));
-        oputs_("numfmt", gettext("\
-      --round=METHOD\n\
-         use METHOD for rounding when scaling; METHOD can be:\n\
-         up, down, from-zero (default), towards-zero, nearest\n\
+        oputs_("numfmt", gettext("\
+      --round=METHOD\n\
+         use METHOD for rounding when scaling; METHOD can be:\n\
+         up, down, from-zero (default), towards-zero, nearest\n\
 "));
-        oputs_("numfmt", gettext("\
-      --suffix=SUFFIX\n\
-         add SUFFIX to output numbers,\n\
-         and accept an optional SUFFIX in input numbers\n\
+        oputs_("numfmt", gettext("\
+      --suffix=SUFFIX\n\
+         add SUFFIX to output numbers,\n\
+         and accept an optional SUFFIX in input numbers\n\
 "));
-        oputs_("numfmt", gettext("\
-      --unit-separator=SEP\n\
-         insert SEP between number and unit on output,\n\
-         and accept an optional SEP in input numbers\n\
+        oputs_("numfmt", gettext("\
+      --unit-separator=SEP\n\
+         insert SEP between number and unit on output,\n\
+         and accept an optional SEP in input numbers\n\
 "));
-        oputs_("numfmt", gettext("\
-      --to=UNIT\n\
-         auto-scale output numbers to UNITs; see UNIT below\n\
+        oputs_("numfmt", gettext("\
+      --to=UNIT\n\
+         auto-scale output numbers to UNITs; see UNIT below\n\
 "));
-        oputs_("numfmt", gettext("\
-      --to-unit=N\n\
-         the output unit size (instead of the default 1)\n\
+        oputs_("numfmt", gettext("\
+      --to-unit=N\n\
+         the output unit size (instead of the default 1)\n\
 "));
-        oputs_("numfmt", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("numfmt", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("numfmt", gettext("      --help\n         display this help and exit\n"));
         oputs_("numfmt", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-UNIT options:\n"), stdout);
-        fputs(gettext("\
-  none       no auto-scaling is done; suffixes will trigger an error\n\
-"), stdout);
-        fputs(gettext("\
-  auto       accept optional single/two letter suffix:\n\
-               1K = 1000, 1k = 1000,\n\
-               1Ki = 1024,\n\
-               1M = 1000000,\n\
-               1Mi = 1048576,\n"), stdout);
-        fputs(gettext("\
-  si         accept optional single letter suffix:\n\
-               1k = 1000, 1K = 1000,\n\
-               1M = 1000000,\n\
-               ...\n"), stdout);
-        fputs(gettext("\
-  iec        accept optional single letter suffix:\n\
-               1K = 1024, 1k = 1024,\n\
-               1M = 1048576,\n\
-               ...\n"), stdout);
-        fputs(gettext("\
-  iec-i      accept optional two-letter suffix:\n\
-               1Ki = 1024, 1ki = 1024,\n\
-               1Mi = 1048576,\n\
-               ...\n"), stdout);
-        fputs(gettext("\n\
-FIELDS supports cut(1) style field ranges:\n\
-  N    N'th field, counted from 1\n\
-  N-   from N'th field, to end of line\n\
-  N-M  from N'th to M'th field (inclusive)\n\
-  -M   from first to M'th field (inclusive)\n\
-  -    all fields\n\
-Multiple fields/ranges can be separated with commas\n\
-"), stdout);
-        fputs(gettext("\n\
-FORMAT must be suitable for printing one floating-point argument '%f'.\n\
-Optional quote (%'f) will enable --grouping (if supported by current locale).\n\
-Optional width value (%10f) will pad output. Optional zero (%010f) width\n\
-will zero pad the number. Optional negative values (%-10f) will left align.\n\
-Optional precision (%.1f) will override the input determined precision.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        printf;
+        printf;
         emit_ancillary_info("numfmt");
     };
     exit(status);
@@ -809,16 +734,16 @@ cdecl parse_format_string(byte* fmt) -> void
     ulong i;
     ulong prefix_len = 0;
     ulong suffix_pos;
-    byte* endptr = ((void*)0);
+    byte* endptr;
     bool;
     for (i = 0; !(fmt[i] == '%' & fmt[i + 1] != '%'); i += (fmt[i] == '%') + 1)
     {
         if (!fmt[i])
-            error(0, 0, gettext("format %s has no %% directive"), quote(fmt));
+            error;
         prefix_len++;
     };
     i++;
-    while (?)
+    while (true)
     {
         ulong skip = strspn(fmt + i, " ");
         i += skip;
@@ -835,37 +760,33 @@ cdecl parse_format_string(byte* fmt) -> void
             if (!skip)
                 break;
     };
-    long pad = strtoimax(fmt + i, @endptr, 10);
     if (pad != 0)
     {
-        if (?)
+        if (debug && padding_width && ! ( zero_padding && pad > 0 ))
             error(0, 0, gettext("--format padding overriding --padding"));
         if (pad < 0)
-            padding_width = pad;
         else
         {
-            if (?)
-                zero_padding_width = MIN(pad, 0);
+            if (zero_padding)
+                zero_padding_width = MIN;
             else
-                padding_width = pad;
         };
     };
     i = endptr - fmt;
     if (fmt[i] == '\0')
-        error(0, 0, gettext("format %s ends in %%"), quote(fmt));
+        error;
     if (fmt[i] == '.')
     {
         i++;
-        (?__errno_location()) ? 0;
         user_precision = strtol(fmt + i, @endptr, 10);
-        if ((?__errno_location()) ? 0 ? user_precision < 0 ? (0) ? user_precision ? c_isblank(fmt[i]) ? fmt[i] == '+')
+        if (errno == ERANGE || user_precision < 0 || SIZE_MAX < user_precision || c_isblank ( fmt [ i ] ) || fmt [ i ] == '+')
         {
-            error(0, 0, gettext("invalid precision in format %s"), quote(fmt));
+            error;
         };
         i = endptr - fmt;
     };
     if (fmt[i] != 'f')
-        error(0, 0, gettext("invalid format %s,"), quote(fmt));
+        error;
     i++;
     suffix_pos = i;
     for (fmt[i] != '\0'; i += (fmt[i] == '%') + 1; if ( fmt [ i ] == '%' && fmt [ i + 1 ] != '%' ) error ( EXIT_FAILURE , 0 , _ ( "format %s has too many %% directives" ) , quote ( fmt ) ))
@@ -877,14 +798,14 @@ cdecl parse_format_string(byte* fmt) -> void
     do
     {
         if (?)
-            fprintf(stderr, "format String:\n  input: %s\n  grouping: %s\n", quote_n(0, fmt), (grouping) ? "yes" : "no", padding_width, quote_n(1, format_str_prefix ? format_str_prefix : ""), quote_n(2, format_str_suffix ? format_str_suffix : ""));
+            fprintf;
     }
     while (0);
 };
 
 cdecl parse_human_number(byte* str, double* value, ulong* precision) -> simple_strtod_error
 {
-    byte* ptr = ((void*)0);
+    byte* ptr;
     simple_strtod_error e = simple_strtod_human(str, @ptr, value, precision, scale_from);
     if (e != SSE_OK & e != SSE_OK_PRECISION_LOSS)
     {
@@ -900,7 +821,7 @@ cdecl parse_human_number(byte* str, double* value, ulong* precision) -> simple_s
     return e;
 };
 
-cdecl prepare_padded_number(double val, ulong precision, long* padding) -> int
+cdecl prepare_padded_number(double val, ulong precision, int* padding) -> int
 {
     ulong precision_used = user_precision == -1 ? precision : user_precision;
     int x;
@@ -920,54 +841,43 @@ cdecl prepare_padded_number(double val, ulong precision, long* padding) -> int
         if (inval_style != inval_ignore)
             error(conv_exit_code, 0, gettext("value too large to be printed: '%Lg'"), val);
     };
-    while (?)
+    while (true)
     {
-        int numlen = ?(val, precision_used, padding_buffer, ?, scale_to, grouping, round_style);
-        long growth;
-        if (numlen < 0 | __builtin_sub_overflow((numlen), (? ? 1), (@growth)))
-            error(0, 0, gettext("failed to prepare value '%Lf' for printing"), val);
+        int numlen = double_to_human(val, precision_used, padding_buffer, padding_buffer_size, scale_to, grouping, round_style);
+        if (numlen < 0 | ckd_sub)
+            error;
         if (growth <= 0)
             break;
-        padding_buffer = xpalloc(padding_buffer, @?, growth, -1, 1);
+        padding_buffer = xpalloc;
     };
     do
     {
         if (?)
-            fprintf(stderr, "formatting output:\n  value: %Lf\n  humanized: %s\n", val, quote(padding_buffer));
+            fprintf;
     }
     while (0);
-    long pad = 0;
     if (padding_width)
     {
-        int buf_width;
+        int buf_width = mbswidth;
         if (0 <= buf_width)
         {
             if (padding_width < 0)
             {
-                if (padding_width < -buf_width)
-                    pad = padding_width + buf_width;
             }
             else
             {
-                if (buf_width < padding_width)
-                    pad = padding_width - buf_width;
             };
         };
     };
-    *padding = pad;
 };
 
-cdecl print_padded_number(long padding) -> void
+cdecl print_padded_number(int padding) -> void
 {
     if (format_str_prefix)
-        fputs(format_str_prefix, stdout);
-    for (long p = padding; 0 < p; p--)
-    {};
-    fputs(padding_buffer, stdout);
-    for (long p = padding; p < 0; p++)
-    {};
+        fputs;
+    fputs;
     if (format_str_suffix)
-        fputs(format_str_suffix, stdout);
+        fputs;
 };
 
 cdecl process_suffixed_number(byte* text, double* result, ulong* precision, long field) -> int
@@ -982,7 +892,7 @@ cdecl process_suffixed_number(byte* text, double* result, ulong* precision, long
             do
             {
                 if (?)
-                    fprintf(stderr, "trimming suffix %s\n", quote(suffix));
+                    fprintf;
             }
             while (0);
         }
@@ -990,25 +900,26 @@ cdecl process_suffixed_number(byte* text, double* result, ulong* precision, long
             do
             {
                 if (?)
-                    fprintf(stderr, "no valid suffix found\n");
+                    fprintf;
             }
             while (0);
     };
-    byte* p;
+    byte* p = skip_str_matching;
     if (auto_padding)
     {
+        padding_width = text < p | 1 < field ? mbswidth : 0;
         if (padding_width < 0)
             padding_width = strlen(text);
         do
         {
             if (?)
-                fprintf(stderr, "setting Auto-Padding to %jd characters\n", padding_width);
+                fprintf;
         }
         while (0);
     };
     double val = 0;
     simple_strtod_error e = parse_human_number(p, @val, precision);
-    if (e == SSE_OK_PRECISION_LOSS & ?)
+    if (e == SSE_OK_PRECISION_LOSS & debug)
         error(0, 0, gettext("large input value %s: possible precision loss"), quote(p));
     if (from_unit_size != 1 | to_unit_size != 1)
         val = (val * from_unit_size) / to_unit_size;
@@ -1024,9 +935,9 @@ cdecl process_suffixed_number(byte* text, double* result, ulong* precision, long
 cdecl mbsmbchr(byte* s, byte* c) -> int*
 {
     byte uc = *c;
-    if (uc < 0x30 | (__ctype_get_mb_cur_max()) ? 1)
+    if (uc < 0x30 || MB_CUR_MAX == 1)
         return (byte*)strchr(s, uc);
-    elif (?())
+    elif (is_utf8_charset())
         return (byte*)(uc < 0x80 ? strchr(s, uc) : strstr(s, c));
     else
         return *(c + 1) == '\0' ? mbschr(s, uc) : (byte*)mbsstr(s, c);
@@ -1038,51 +949,50 @@ cdecl next_field(byte** line) -> byte*
     byte* field_end = field_start;
     if (delimiter)
     {
-        if (!(field_end = ?(field_start, delimiter)))
+        if (!(field_end = mbsmbchr(field_start, delimiter)))
             field_end = strchr(field_start, '\0');
     }
     else
     {
+        field_end = skip_str_matching;
+        field_end = skip_str_matching;
     };
     *line = field_end;
     return field_start;
 };
 
 extern int bool;
-cdecl process_field(byte* text, ulong field) -> int
+cdecl process_field(byte* text, int field) -> int
 {
     double val = 0;
     ulong precision = 0;
     bool;
     if (include_field(field))
     {
-        long padding;
-        if (?)
-            print_padded_number(padding);
+        if (valid_number)
+            print_padded_number;
         else
-            fputs(text, stdout);
+            fputs;
     }
     else
-        fputs(text, stdout);
+        fputs;
 };
 
 cdecl process_line(byte* line, int newline) -> int
 {
     byte* next;
-    ulong field = 0;
     bool;
-    while (?)
+    while (true)
     {
-        ++field;
         next = next_field(@line);
         if (*line != '\0')
         {
             byte end_field = *line;
             *line = '\0';
-            if (delimiter != ((void*)0))
-                fputs(delimiter, stdout);
+            if (delimiter != NULL)
+                fputs;
             else
-                fputc(' ', stdout);
+                fputc;
             if (delimiter)
                 line += MAX(strlen(delimiter), 1);
             else
@@ -1095,9 +1005,9 @@ cdecl process_line(byte* line, int newline) -> int
             break;
         };
     };
-    if (?)
+    if (newline)
         putchar(line_delim);
-    if (ferror(stdout))
+    if (ferror)
         write_error();
 };
 
@@ -1106,184 +1016,65 @@ cdecl main(int argc, byte** argv) -> int
     int valid_numbers = 1;
     bool;
     set_program_name(argv[0]);
-    decimal_point = nl_langinfo(RADIXCHAR);
-    if (decimal_point == ((void*)0) | strlen(decimal_point) == 0)
+    decimal_point = nl_langinfo;
+    if (decimal_point == NULL || strlen ( decimal_point ) == 0)
         decimal_point = ".";
     decimal_point_length = strlen(decimal_point);
-    thousands_sep = nl_langinfo(THOUSEP);
-    if (thousands_sep == ((void*)0))
+    thousands_sep = nl_langinfo;
+    if (thousands_sep == NULL)
         thousands_sep = "";
     thousands_sep_length = strlen(thousands_sep);
-    while (?)
+    atexit;
+    while (true)
     {
-        int c = getopt_long(argc, argv, "d:z", longopts, ((void*)0));
+        int c = getopt_long;
         if (c == -1)
             break;
-        switch (c)
-        {
-            case (FROM_OPTION)
-            {
-                scale_from = XARGMATCH("--from", optarg, scale_from_args, scale_from_types);
-            }
-            goto _switch_end_139188820307792;
-            case (FROM_UNIT_OPTION)
-            {
-                from_unit_size = unit_to_umax(optarg);
-            }
-            goto _switch_end_139188820307792;
-            case (TO_OPTION)
-            {
-                scale_to = XARGMATCH("--to", optarg, scale_to_args, scale_to_types);
-            }
-            goto _switch_end_139188820307792;
-            case (TO_UNIT_OPTION)
-            {
-                to_unit_size = unit_to_umax(optarg);
-            }
-            goto _switch_end_139188820307792;
-            case (ROUND_OPTION)
-            {
-                round_style = XARGMATCH("--round", optarg, round_args, round_types);
-            }
-            goto _switch_end_139188820307792;
-            case (GROUPING_OPTION)
-            {
-                grouping = 1;
-            }
-            goto _switch_end_139188820307792;
-            case (PADDING_OPTION)
-            {
-                if (?)
-                    error(0, 0, gettext("invalid padding value %s"), quote(optarg));
-            }
-            goto _switch_end_139188820307792;
-            case (FIELD_OPTION)
-            {
-                if (?)
-                    error(0, 0, gettext("multiple field specifications"));
-            }
-            set_fields(optarg, SETFLD_ALLOW_DASH);
-            goto _switch_end_139188820307792;
-            case ('d')
-            {
-                if (optarg[0] != '\0')
-                {
-                    if (?)
-                        error(0, 0, gettext("the delimiter must be a single character"));
-                };
-            }
-            delimiter = optarg;
-            goto _switch_end_139188820307792;
-            case ('z')
-            {
-                line_delim = '\0';
-            }
-            goto _switch_end_139188820307792;
-            case (SUFFIX_OPTION)
-            {
-                suffix = optarg;
-            }
-            goto _switch_end_139188820307792;
-            case (UNIT_SEPARATOR_OPTION)
-            {
-                unit_separator = optarg;
-            }
-            goto _switch_end_139188820307792;
-            case (DEBUG_OPTION)
-            {
-            }
-            goto _switch_end_139188820307792;
-            case (DEV_DEBUG_OPTION)
-            {
-            }
-            goto _switch_end_139188820307792;
-            case (HEADER_OPTION)
-            {
-                if (optarg)
-                {
-                    if (?)
-                        error(0, 0, gettext("invalid header value %s"), quote(optarg));
-                }
-                else
-                {
-                    header = 1;
-                };
-            }
-            goto _switch_end_139188820307792;
-            case (FORMAT_OPTION)
-            {
-                format_str = optarg;
-            }
-            goto _switch_end_139188820307792;
-            case (INVALID_OPTION)
-            {
-                inval_style = XARGMATCH("--invalid", optarg, inval_args, inval_types);
-            }
-            goto _switch_end_139188820307792;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188820307792;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188820307792;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188820307792:
     };
-    if (format_str != ((void*)0) & grouping)
-        error(0, 0, gettext("--grouping cannot be combined with --format"));
-    if (?)
+    if (format_str != NULL && grouping)
+        error;
+    if (debug && ! locale_ok)
         error(0, 0, gettext("failed to set locale"));
-    if (? & scale_from == scale_none & scale_to == scale_none & !grouping & (padding_width == 0) & (format_str == ((void*)0)))
+    if (debug && scale_from == scale_none && scale_to == scale_none && ! grouping && ( padding_width == 0 ) && ( format_str == NULL ))
         error(0, 0, gettext("no conversion option specified"));
-    if (? & unit_separator & delimiter == ((void*)0))
+    if (debug && unit_separator && delimiter == NULL)
         error(0, 0, gettext("field delimiters have higher precedence than unit separators"));
     if (format_str)
         parse_format_string(format_str);
     if (grouping)
     {
         if (scale_to != scale_none)
-            error(0, 0, gettext("grouping cannot be combined with --to"));
-        if (? & thousands_sep_length == 0)
+            error;
+        if (debug & thousands_sep_length == 0)
             error(0, 0, gettext("grouping has no effect in this locale"));
     };
-    auto_padding = (padding_width == 0 & delimiter == ((void*)0));
     if (inval_style != inval_abort)
         conv_exit_code = 0;
     if (argc > optind)
     {
-        if (? & header)
+        if (debug & header)
             error(0, 0, gettext("--header ignored with command-line input"));
     }
     else
     {
-        byte* line = ((void*)0);
+        byte* line;
         ulong line_allocated = 0;
-        long len;
-        while (header-- & getdelim(@line, @line_allocated, line_delim, stdin) > 0)
+        while (header-- & getdelim > 0)
         {
-            if (fputs(line, stdout) == (?0))
+            if (fputs ( line , stdout ) == EOF)
                 write_error();
         };
-        while ((len = getdelim(@line, @line_allocated, line_delim, stdin)) > 0)
+        while (( len = getdelim ( & line , & line_allocated , line_delim , stdin ) ) > 0)
         {
             bool;
-            if (?)
-                line[len - 1] = '\0';
+            valid_numbers `&= process_line;
         };
-        if (ferror(stdin))
-            error(0, (?__errno_location()), gettext("error reading input"));
+        if (ferror)
+            error;
     };
-    if (? & !valid_numbers)
+    if (debug & !valid_numbers)
         error(0, 0, gettext("failed to convert some of the input numbers"));
-    int exit_status = 0;
+    int exit_status;
     if (!valid_numbers & inval_style != inval_warn & inval_style != inval_ignore)
         exit_status = EXIT_CONVERSION_WARNINGS;
     return exit_status;

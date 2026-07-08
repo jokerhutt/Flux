@@ -48,41 +48,46 @@ enum Shell_syntax
     SHELL_SYNTAX_UNKNOWN
 };
 
+struct obstack;
 obstack lsc_obstack = obstack;
-byte*[38] slack_codes = {"NORMAL", "NORM", "FILE", "RESET", "DIR", "LNK", "LINK", "SYMLINK", "ORPHAN", "MISSING", "FIFO", "PIPE", "SOCK", "BLK", "BLOCK", "CHR", "CHAR", "DOOR", "EXEC", "LEFT", "LEFTCODE", "RIGHT", "RIGHTCODE", "END", "ENDCODE", "SUID", "SETUID", "SGID", "SETGID", "STICKY", "OTHER_WRITABLE", "OWR", "STICKY_OTHER_WRITABLE", "OWT", "CAPABILITY", "MULTIHARDLINK", "CLRTOEOL", ((void*)0)};
-byte*[38] ls_codes = {"no", "no", "fi", "rs", "di", "ln", "ln", "ln", "or", "mi", "pi", "pi", "so", "bd", "bd", "cd", "cd", "do", "ex", "lc", "lc", "rc", "rc", "ec", "ec", "su", "su", "sg", "sg", "st", "ow", "ow", "tw", "tw", "ca", "mh", "cl", ((void*)0)};
-cdecl static_assert(void* /* untranslated: int () */ countof) -> int;
+extern byte** slack_codes;
+extern byte** ls_codes;
 extern int print_ls_colors;
-uint PRINT_LS_COLORS_OPTION = 128;
+uint PRINT_LS_COLORS_OPTION = 0;
 
-option[9] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        oputs_("dircolors", gettext("\
-  -b, --sh, --bourne-shell\n\
-         output Bourne shell code to set LS_COLORS\n\
+        printf;
+        fputs;
+        oputs_("dircolors", gettext("\
+  -b, --sh, --bourne-shell\n\
+         output Bourne shell code to set LS_COLORS\n\
 "));
-        oputs_("dircolors", gettext("\
-  -c, --csh, --c-shell\n\
-         output C shell code to set LS_COLORS\n\
+        oputs_("dircolors", gettext("\
+  -c, --csh, --c-shell\n\
+         output C shell code to set LS_COLORS\n\
 "));
-        oputs_("dircolors", gettext("\
-  -p, --print-database\n\
-         output defaults\n\
+        oputs_("dircolors", gettext("\
+  -p, --print-database\n\
+         output defaults\n\
 "));
-        oputs_("dircolors", gettext("\
-      --print-ls-colors\n\
-         output fully escaped colors for display\n\
+        oputs_("dircolors", gettext("\
+      --print-ls-colors\n\
+         output fully escaped colors for display\n\
 "));
         oputs_("dircolors", gettext("      --help\n         display this help and exit\n"));
         oputs_("dircolors", gettext("      --version\n         output version information and exit\n"));
+        fputs;
         emit_ancillary_info("dircolors");
     };
     exit(status);
@@ -92,7 +97,7 @@ cdecl guess_shell_syntax() -> Shell_syntax
 {
     byte* shell;
     shell = getenv("SHELL");
-    if (shell == ((void*)0) | *shell == '\0')
+    if (shell == NULL || * shell == '\0')
         return SHELL_SYNTAX_UNKNOWN;
     shell = last_component(shell);
     if (streq(shell, "csh") | streq(shell, "tcsh"))
@@ -105,8 +110,6 @@ cdecl parse_line(byte* line, byte** keyword, byte** arg) -> void
     byte* p;
     byte* keyword_start;
     byte* arg_start;
-    *keyword = ((void*)0);
-    *arg = ((void*)0);
     for (p = line; c_isspace(*p); ++p)
     {};
     if (*p == '\0' | *p == '#')
@@ -140,64 +143,54 @@ cdecl append_quoted(byte* str) -> void
     bool;
     while (*str != '\0')
     {
-        if (!?)
+        if (!print_ls_colors)
             switch (*str)
             {
                 case ('\'')
                 {
-                    ?/* untranslated expr: StmtExpr */;
+                    obstack_1grow(@lsc_obstack, '\'');
+                    obstack_1grow(@lsc_obstack, '\\');
+                    obstack_1grow(@lsc_obstack, '\'');
+                    break switch;
                 }
-                ?/* untranslated expr: StmtExpr */;
-                ?/* untranslated expr: StmtExpr */;
-                goto _switch_end_139188883294416;
                 case ('\\')
                 {
-                    case ('^')
-                    {
-                    }
+                    break switch;
                 }
-                goto _switch_end_139188883294416;
                 case (':')
                 {
-                    case ('=')
-                    {
-                        if (?)
-                            ?/* untranslated expr: StmtExpr */;
-                    }
                 }
                 default
                 {
                 };
-                goto _switch_end_139188883294416;
             };
-            label _switch_end_139188883294416:
-        ?/* untranslated expr: StmtExpr */;
+        obstack_1grow(@lsc_obstack, *str);
         ++str;
     };
 };
 
 cdecl append_entry(byte prefix, byte* item, byte* arg) -> void
 {
-    if (?)
+    if (print_ls_colors)
     {
         append_quoted("\x1B[");
         append_quoted(arg);
-        ?/* untranslated expr: StmtExpr */;
+        obstack_1grow(@lsc_obstack, 'm');
     };
     if (prefix)
-        ?/* untranslated expr: StmtExpr */;
+        obstack_1grow(@lsc_obstack, prefix);
     append_quoted(item);
-    ?/* untranslated expr: StmtExpr */;
+    obstack_1grow(@lsc_obstack, print_ls_colors ? '\t' : '=');
     append_quoted(arg);
-    if (?)
+    if (print_ls_colors)
         append_quoted("\x1B[0m");
-    ?/* untranslated expr: StmtExpr */;
+    obstack_1grow(@lsc_obstack, print_ls_colors ? '\n' : ':');
 };
 
 cdecl dc_parse_stream(int* fp, byte* filename) -> int
 {
     byte* next_G_line;
-    byte* input_line = ((void*)0);
+    byte* input_line;
     ulong input_line_size = 0;
     byte* line;
     byte* term;
@@ -205,22 +198,23 @@ cdecl dc_parse_stream(int* fp, byte* filename) -> int
     bool;
     enum (unnamed at tests/coreutils/dircolors.c:290:3) state = enum { ST_TERMNO , ST_TERMYES , ST_TERMSURE , ST_GLOBAL };
     term = getenv("TERM");
-    if (term == ((void*)0) | *term == '\0')
+    if (term == NULL || * term == '\0')
         term = "none";
     colorterm = getenv("COLORTERM");
-    if (colorterm == ((void*)0))
+    if (colorterm == NULL)
         colorterm = "";
-    while (?)
+    while (true)
     {
         byte* keywd;
         byte* arg;
         bool;
-        if (?)
+        if (fp)
         {
-            if (getline(@input_line, @input_line_size, ?) <= 0)
+            if (getline(@input_line, @input_line_size, fp) <= 0)
             {
-                if (ferror(?))
+                if (ferror(fp))
                 {
+                    error;
                 };
                 free(input_line);
                 break;
@@ -229,16 +223,17 @@ cdecl dc_parse_stream(int* fp, byte* filename) -> int
         }
         else
         {
-            if (?)
+            if (next_G_line == G_line + sizeof G_line)
                 break;
             line = next_G_line;
             next_G_line += strlen(next_G_line) + 1;
         };
         parse_line(line, @keywd, @arg);
-        if (keywd == ((void*)0))
+        if (keywd == NULL)
             continue;
-        if (arg == ((void*)0))
+        if (arg == NULL)
         {
+            error;
             free(keywd);
             continue;
         };
@@ -269,17 +264,16 @@ cdecl dc_parse_stream(int* fp, byte* filename) -> int
                     else
                     {
                         int i;
-                        for (i = 0; slack_codes[i] != ((void*)0); ++i)
-                        {};
-                        if (slack_codes[i] != ((void*)0))
+                        if (slack_codes [ i ] != NULL)
                             append_entry(0, ls_codes[i], arg);
                         else
                     };
             }
             else
         };
-        if (?)
+        if (unrecognized && ( state == ST_TERMSURE || state == ST_TERMYES ))
         {
+            error;
         };
         free(keywd);
         free(arg);
@@ -289,11 +283,13 @@ cdecl dc_parse_stream(int* fp, byte* filename) -> int
 cdecl dc_parse_file(byte* filename) -> int
 {
     bool;
-    if (?)
+    if (! streq ( filename , "-" ) && freopen ( filename , "r" , stdin ) == NULL)
     {
+        error;
     };
-    if (?)
+    if (fclose != 0)
     {
+        error;
     };
 };
 
@@ -304,64 +300,29 @@ cdecl main(int argc, byte** argv) -> int
     Shell_syntax syntax = SHELL_SYNTAX_UNKNOWN;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "bcp", long_options, ((void*)0))) != -1)
-        switch (optc)
-        {
-            case ('b')
-            {
-                syntax = SHELL_SYNTAX_BOURNE;
-            }
-            goto _switch_end_139188883088720;
-            case ('c')
-            {
-                syntax = SHELL_SYNTAX_C;
-            }
-            goto _switch_end_139188883088720;
-            case ('p')
-            {
-            }
-            goto _switch_end_139188883088720;
-            case (PRINT_LS_COLORS_OPTION)
-            {
-            }
-            goto _switch_end_139188883088720;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188883088720;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188883088720;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188883088720:
-    argc -= optind;
-    argv += optind;
-    if (?)
+    setlocale;
+    atexit;
+    if (( print_database | print_ls_colors ) && syntax != SHELL_SYNTAX_UNKNOWN)
     {
         error(0, 0, gettext("the options to output non shell syntax,\n"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (print_database && print_ls_colors)
     {
         error(0, 0, gettext("options --print-database and --print-ls-colors "));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (( ! print_database ) < argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        if (print_database)
+            fprintf;
+        usage;
     };
-    if (?)
+    if (print_database)
     {
         byte* p;
-        while (?)
+        while (p - G_line < sizeof G_line)
         {
             puts(p);
             p += strlen(p) + 1;
@@ -369,17 +330,17 @@ cdecl main(int argc, byte** argv) -> int
     }
     else
     {
-        if (syntax == SHELL_SYNTAX_UNKNOWN & !?)
+        if (syntax == SHELL_SYNTAX_UNKNOWN & !print_ls_colors)
         {
             syntax = guess_shell_syntax();
             if (syntax == SHELL_SYNTAX_UNKNOWN)
-                error(0, 0, gettext("no SHELL environment variable,"));
+                error;
         };
-        _obstack_begin((@lsc_obstack), 0, 0, (def{}*(long) -> void*)malloc, (def{}*(void*) -> void)free);
-        if (?)
+        obstack_init(@lsc_obstack);
+        if (ok)
         {
-            ulong len = ?/* untranslated expr: StmtExpr */;
-            byte* s = ?/* untranslated expr: StmtExpr */;
+            ulong len = obstack_object_size(@lsc_obstack);
+            byte* s = obstack_finish(@lsc_obstack);
             byte* prefix;
             byte* suffix;
             if (syntax == SHELL_SYNTAX_BOURNE)
@@ -392,6 +353,11 @@ cdecl main(int argc, byte** argv) -> int
                 prefix = "setenv LS_COLORS '";
                 suffix = "'\n";
             };
+            if (!print_ls_colors)
+                fputs;
+            fwrite;
+            if (!print_ls_colors)
+                fputs;
         };
     };
 };

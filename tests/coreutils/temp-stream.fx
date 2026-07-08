@@ -20,30 +20,44 @@
    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 ///
 
-cdecl record_or_unlink_tempfile(byte* fn, int FILE) -> void
+uint DONT_UNLINK_WHILE_OPEN = 1;
+extern byte* file_to_remove;
+extern int* fp_to_close;
+cdecl unlink_tempfile() -> void
 {
-    unlink(fn);
+    fclose(fp_to_close);
+    unlink(file_to_remove);
 };
 
-cdecl temp_stream(_IO_FILE** fp, byte** file_name) -> int
+cdecl record_or_unlink_tempfile(byte* fn, int* fp) -> void
 {
-    byte* tempfile = ((void*)0);
-    _IO_FILE* tmp_fp;
-    if (tempfile == ((void*)0))
+    if (!file_to_remove)
     {
-        byte* tempbuf = ((void*)0);
+        file_to_remove = fn;
+        fp_to_close = fp;
+        atexit(unlink_tempfile);
+    };
+};
+
+cdecl temp_stream(int** fp, byte** file_name) -> int
+{
+    byte* tempfile;
+    int* tmp_fp;
+    if (tempfile == NULL)
+    {
+        byte* tempbuf;
         ulong tempbuf_len = 128;
-        while (?)
+        while (true)
         {
             if (!(tempbuf = realloc(tempbuf, tempbuf_len)))
             {
-                error(0, (?__errno_location()), gettext("failed to make temporary file name"));
+                error;
             };
-            if (?)
+            if (path_search == 0)
                 break;
-            if ((?__errno_location()) ? 0 ? 0 ? 2 ? tempbuf_len)
+            if (errno != EINVAL || PATH_MAX / 2 < tempbuf_len)
             {
-                error(0, (?__errno_location()) ? 0 ? 0 : (?__errno_location()), gettext("failed to make temporary file name"));
+                error;
             };
             tempbuf_len *= 2;
         };
@@ -51,23 +65,26 @@ cdecl temp_stream(_IO_FILE** fp, byte** file_name) -> int
         int fd = mkstemp(tempfile);
         if (fd < 0)
         {
+            error;
             goto Reset;
         };
+        tmp_fp = fdopen;
         if (!tmp_fp)
         {
+            error;
             close(fd);
             unlink(tempfile);
             label Reset:
             free(tempfile);
-            tempfile = ((void*)0);
         };
         record_or_unlink_tempfile(tempfile, tmp_fp);
     }
     else
     {
         clearerr(tmp_fp);
-        if (fseeko(tmp_fp, 0, 0) < 0 | ftruncate(fileno(tmp_fp), 0) < 0)
+        if (fseeko < 0 | ftruncate(fileno(tmp_fp), 0) < 0)
         {
+            error;
         };
     };
     *fp = tmp_fp;

@@ -21,28 +21,12 @@
 
 cdecl wc_lines_avx2(int fd) -> wc_lines
 {
-    long lines = 0;
-    long bytes = 0;
-    void* /* untranslated: __attribute__((__vector_size__(4 * sizeof(long long)))) long long */ endlines = _mm256_set1_epi8('\n');
-    while (0)
+    while (true)
     {
-        void* /* untranslated: __attribute__((__vector_size__(4 * sizeof(long long)))) long long */[8192] avx_buf = IO_BUFSIZE / (sizeof ( __m256i ) / 8);
-        long bytes_read = read(fd, avx_buf, (sizeof avx_buf / 8));
-        if (bytes_read <= 0)
-            return ( struct wc_lines ) { bytes_read == 0 ? 0 : errno , lines , bytes };
-        bytes += bytes_read;
-        void* /* untranslated: __attribute__((__vector_size__(4 * sizeof(long long)))) long long */* datap = avx_buf;
         while (bytes_read >= 32)
         {
-            void* /* untranslated: __attribute__((__vector_size__(4 * sizeof(long long)))) long long */ to_match = _mm256_load_si256(datap);
-            void* /* untranslated: __attribute__((__vector_size__(4 * sizeof(long long)))) long long */ matches = _mm256_cmpeq_epi8(to_match, endlines);
-            int mask = _mm256_movemask_epi8(matches);
-            lines += __builtin_popcount(mask);
-            datap += 1;
-            bytes_read -= 32;
+            int mask = _mm256_movemask_epi8;
         };
-        byte* end = (byte*)datap + bytes_read;
-        for (byte* p = (byte*)datap; p < end; p++)
-        {};
+        byte* end;
     };
 };

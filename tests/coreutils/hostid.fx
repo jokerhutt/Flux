@@ -32,13 +32,15 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         oputs_("hostid", gettext("      --help\n         display this help and exit\n"));
         oputs_("hostid", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("hostid");
@@ -49,12 +51,14 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
-    if (?)
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    if (optind < argc)
     {
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
     uint id = gethostid() `& 0xffffffff;
     printf("%08x\n", id);
-    return 0;
 };

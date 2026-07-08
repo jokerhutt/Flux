@@ -29,35 +29,32 @@ macro AUTHORS
     proper_name ( "Giuseppe Scrivano" )
 };
 
-uint ALL_OPTION = 128;
-uint IGNORE_OPTION = 129;
+uint ALL_OPTION = 0;
+uint IGNORE_OPTION = 1;
 
-option[5] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print the number of processing units available to the current process,\n\
-which may be less than the number of online processors.\n\
-If the 'OMP_NUM_THREADS' or 'OMP_THREAD_LIMIT' environment variables are set,\n\
-then they will determine the minimum and maximum returned value respectively.\n\
-\n\
-"), stdout);
-        oputs_("nproc", gettext("\
-      --all\n\
-         print the number of installed processors,\n\
-         disregarding any OpenMP environment variables, or CPU quotas.\n\
+        printf;
+        fputs;
+        oputs_("nproc", gettext("\
+      --all\n\
+         print the number of installed processors,\n\
+         disregarding any OpenMP environment variables, or CPU quotas.\n\
 "));
-        oputs_("nproc", gettext("\
-      --ignore=N\n\
-         if possible, exclude N processing units.\n\
-         The result is guaranteed to be at least 1.\n\
+        oputs_("nproc", gettext("\
+      --ignore=N\n\
+         if possible, exclude N processing units.\n\
+         The result is guaranteed to be at least 1.\n\
 "));
         oputs_("nproc", gettext("      --help\n         display this help and exit\n"));
         oputs_("nproc", gettext("      --version\n         output version information and exit\n"));
@@ -70,50 +67,24 @@ cdecl main(int argc, byte** argv) -> int
 {
     ulong ignore = 0;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     nproc_query mode;
-    while (?)
+    while (true)
     {
-        int c = getopt_long(argc, argv, "", longopts, ((void*)0));
+        int c = getopt_long;
         if (c == -1)
             break;
-        switch (c)
-        {
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188887550672;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188887550672;
-            case (ALL_OPTION)
-            {
-            }
-            goto _switch_end_139188887550672;
-            case (IGNORE_OPTION)
-            {
-            }
-            goto _switch_end_139188887550672;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188887550672:
     };
     if (argc != optind)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind]));
-        usage(0);
+        error(0, 0, gettext("extra operand %s"), quote);
+        usage;
     };
-    ulong nproc = num_processors(?);
+    ulong nproc = num_processors(mode);
     if (ignore < nproc)
         nproc -= ignore;
     else
         nproc = 1;
     printf("%lu\n", nproc);
-    return 0;
 };

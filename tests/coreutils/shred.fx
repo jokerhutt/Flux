@@ -109,7 +109,6 @@ uint SECTOR_SIZE = 512;
 
 uint SECTOR_MASK = 511;
 
-cdecl static_assert() -> int;
 enum remove_method
 {
     remove_none,
@@ -118,102 +117,79 @@ enum remove_method
     remove_wipesync
 };
 
-byte*[4] remove_args = {"unlink", "wipe", "wipesync", ((void*)0)};
+extern byte** remove_args;
 remove_method[3] remove_methods = remove_method;
 struct Options
 {
     int force;
     ulong n_iterations;
-    long size;
+    int size;
     remove_method remove_file;
     int verbose;
     int exact;
     int zero_fill;
 };
 
-uint RANDOM_SOURCE_OPTION = 128;
+uint RANDOM_SOURCE_OPTION = 0;
 
-option[11] long_opts = option;
+struct option;
+extern int long_opts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Overwrite the specified FILE(s) repeatedly, in order to make it harder\n\
-for even very expensive hardware probing to recover the data.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-If FILE is -, shred standard output.\n\
-"), stdout);
+        printf;
+        fputs;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("shred", gettext("\
-  -f, --force\n\
-         change permissions to allow writing if necessary\n\
+        oputs_("shred", gettext("\
+  -f, --force\n\
+         change permissions to allow writing if necessary\n\
 "));
-        oprintf_("shred", gettext("\
-  -n, --iterations=N\n\
-         overwrite N times instead of the default (%d)\n\
+        oprintf_("shred", gettext("\
+  -n, --iterations=N\n\
+         overwrite N times instead of the default (%d)\n\
 "), DEFAULT_PASSES);
-        oputs_("shred", gettext("\
-      --random-source=FILE\n\
-         get random bytes from FILE\n\
+        oputs_("shred", gettext("\
+      --random-source=FILE\n\
+         get random bytes from FILE\n\
 "));
-        oputs_("shred", gettext("\
-  -s, --size=N\n\
-         shred this many bytes (suffixes like K, M, G accepted)\n\
+        oputs_("shred", gettext("\
+  -s, --size=N\n\
+         shred this many bytes (suffixes like K, M, G accepted)\n\
 "));
-        oputs_("shred", gettext("\
-  -u\n\
-         deallocate and remove file after overwriting\n\
+        oputs_("shred", gettext("\
+  -u\n\
+         deallocate and remove file after overwriting\n\
 "));
-        oputs_("shred", gettext("\
-      --remove[=HOW]\n\
-         like -u but give control on HOW to delete;  See below\n\
+        oputs_("shred", gettext("\
+      --remove[=HOW]\n\
+         like -u but give control on HOW to delete;  See below\n\
 "));
-        oputs_("shred", gettext("\
-  -v, --verbose\n\
-         show details of data and metadata operations performed\n\
+        oputs_("shred", gettext("\
+  -v, --verbose\n\
+         show details of data and metadata operations performed\n\
 "));
-        oputs_("shred", gettext("\
-  -x, --exact\n\
-         do not round file sizes up to the next full block;\n\
-         this is the default for non-regular files\n\
+        oputs_("shred", gettext("\
+  -x, --exact\n\
+         do not round file sizes up to the next full block;\n\
+         this is the default for non-regular files\n\
 "));
-        oputs_("shred", gettext("\
-  -z, --zero\n\
-         add a final overwrite with zeros to hide shredding\n\
+        oputs_("shred", gettext("\
+  -z, --zero\n\
+         add a final overwrite with zeros to hide shredding\n\
 "));
         oputs_("shred", gettext("      --help\n         display this help and exit\n"));
         oputs_("shred", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-FILE will be skipped with a diagnostic message if it is a FIFO, socket, or\n\
-terminal, since its data does not reside on disk.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Delete FILE(s) if --remove (-u) is specified.  The default is not to remove\n\
-the files because it is common to operate on device files like /dev/hda,\n\
-and those files usually should not be removed.\n\
-The optional HOW parameter indicates how to remove a directory entry:\n\
-'unlink' => use a standard unlink call.\n\
-'wipe' => also first obfuscate bytes in the name.\n\
-'wipesync' => also sync each obfuscated byte to the device.\n\
-The default mode is 'wipesync', but note it can be expensive.\n\
-\n\
-"), stdout);
-        fputs(gettext("\
-CAUTION: shred assumes the file system and hardware overwrite data in place.\n\
-Although this is common, many platforms operate otherwise.  Also, backups\n\
-and mirrors may contain unremovable copies that will let a shredded file\n\
-be recovered later.  See the GNU coreutils manual for details.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("shred");
     };
     exit(status);
@@ -257,7 +233,6 @@ cdecl passname(byte* dat, byte[7] name) -> void
 
 cdecl ignorable_sync_errno(int errno_val) -> int
 {
-    return (errno_val == 0 | errno_val == 0 /* HP-UX does this */ errno_val == 0);
 };
 
 cdecl dosync(int fd, byte* qname) -> int
@@ -265,20 +240,16 @@ cdecl dosync(int fd, byte* qname) -> int
     int err;
     if (fdatasync(fd) == 0)
         return 0;
-    err = (?__errno_location());
-    if (!?(err))
+    if (!ignorable_sync_errno(err))
     {
         error(0, err, gettext("%s: fdatasync failed"), qname);
-        (?__errno_location()) ? err;
         return -1;
     };
     if (fsync(fd) == 0)
         return 0;
-    err = (?__errno_location());
-    if (!?(err))
+    if (!ignorable_sync_errno(err))
     {
         error(0, err, gettext("%s: fsync failed"), qname);
-        (?__errno_location()) ? err;
         return -1;
     };
     return 0;
@@ -286,44 +257,36 @@ cdecl dosync(int fd, byte* qname) -> int
 
 cdecl direct_mode(int fd, int enable) -> void
 {
-    if (?)
+    if (O_DIRECT)
     {
-        int fd_flags = fcntl(fd, 0);
+        int fd_flags = fcntl;
         if (0 < fd_flags)
         {
             int new_flags;
             if (new_flags != fd_flags)
-                fcntl(fd, 0, new_flags);
+                fcntl;
         };
     };
 };
 
 cdecl dorewind(int fd, stat* st) -> int
 {
-    if (((((st.st_mode)) ? 0) ? (0020000)))
+    if (S_ISCHR(st))
     {
     };
-    long offset = lseek(fd, 0, 0);
-    if (0 < offset)
-        (?__errno_location()) ? 0;
-    return offset == 0;
 };
 
-cdecl known(long size) -> int
+cdecl known(int size) -> int
 {
     return 0 <= size;
 };
 
-cdecl dopass(int fd, stat* st, byte* qname, long* sizep, int type, randread_source* s, ulong k, ulong n) -> int
+cdecl dopass(int fd, stat* st, byte* qname, int* sizep, int type, randread_source* s, ulong k, ulong n) -> int
 {
-    long size = *sizep;
-    long offset;
     ulong lim;
     ulong soff;
-    long ssize;
     ulong page_size = getpagesize();
-    static_assert((60 ? 1024) % 3 == 0);
-    ulong output_size = ?(type) ? (60 ? 1024) : (64 ? 1024);
+    ulong output_size = periodic_pattern(type) ? (60 ? 1024) : (64 ? 1024);
     byte* pbuf = xalignalloc(page_size, (((output_size ? 2) ? 3) ? 3));
     byte[7] pass_string = 7;
     bool;
@@ -331,107 +294,98 @@ cdecl dopass(int fd, stat* st, byte* qname, long* sizep, int type, randread_sour
     byte previous_offset_buf;
     byte* previous_human_offset;
     bool;
-    if (!?(fd, st))
+    if (! try_without_directio)
+        direct_mode;
+    if (!dorewind(fd, st))
     {
-        error(0, (?__errno_location()), gettext("%s: cannot rewind"), qname);
+        error;
         goto free_pattern_mem;
     };
     if (type >= 0)
     {
-        lim = ?(size) & size < (((output_size ? 2) ? 3) ? 3) ? size : (((output_size ? 2) ? 3) ? 3);
         fillpattern(type, pbuf, lim);
         passname(pbuf, pass_string);
     }
     else
     {
-        passname(((void*)0), pass_string);
+        passname;
     };
     if (n)
     {
         error(0, 0, gettext("%s: pass %lu/%lu (%s)..."), qname, k, n, pass_string);
         previous_human_offset = "";
     };
-    offset = 0;
-    while (?)
+    while (true)
     {
         lim = output_size;
-        if (?(size) & size - offset < output_size)
+        if (known ( size ) && size - offset < output_size)
         {
             if (size < offset)
                 break;
-            lim = size - offset;
             if (!lim)
                 break;
         };
         if (type < 0)
             randread(s, pbuf, lim);
-        for (soff = 0; soff < lim; soff += ssize)
+        for (soff = 0; soff < lim; )
         {
-            ssize = write(fd, pbuf + soff, lim - soff);
             if (ssize <= 0)
             {
-                if (!?(size) & (ssize == 0 | (?__errno_location()) ? 0))
+                if (! known ( size ) && ( ssize == 0 || errno == ENOSPC ))
                 {
-                    if (soff <= TYPE_MAXIMUM(?) ? offset)
-                        *sizep = size = offset + soff;
                     break;
                 }
                 else
                 {
-                    int errnum = (?__errno_location());
-                    if (?)
+                    int errnum;
+                    if (! try_without_directio && errno == EINVAL)
                     {
-                        ssize = 0;
+                        direct_mode;
                         continue;
                     };
-                    ulong error_offset = offset + soff;
-                    error(0, errnum, gettext("%s: error writing at offset %ju"), qname, error_offset);
-                    static_assert((60 ? 1024) % SECTOR_SIZE == 0);
-                    static_assert((64 ? 1024) % SECTOR_SIZE == 0);
-                    if (errnum == 0 & ?(size) & (soff `| SECTOR_MASK) < lim)
+                    error;
+                    if (errnum == EIO && known ( size ) && ( soff | SECTOR_MASK ) < lim)
                     {
                         ulong soff1 = (soff `| SECTOR_MASK) + 1;
-                        if (lseek(fd, offset + soff1, 0) != -1)
+                        if (lseek != -1)
                         {
-                            ssize = soff1 - soff;
                             continue;
                         };
-                        error(0, (?__errno_location()), gettext("%s: lseek failed"), qname);
+                        error;
                     };
                     goto free_pattern_mem;
                 };
             };
         };
-        if (__builtin_add_overflow((offset), (soff), (@offset)))
+        if (ckd_add)
         {
             error(0, 0, gettext("%s: file too large"), qname);
             goto free_pattern_mem;
         };
         bool;
-        if (?)
+        if (n && ( ( done && * previous_human_offset ) || VERBOSE_UPDATE <= xtime_sec ( ( now = gethrxtime ( ) ) - prev ) ))
         {
             byte offset_buf;
             byte size_buf;
             int human_progress_opts;
-            byte* human_offset;
-            if (?)
+            byte* human_offset = human_readable;
+            if (done || ! streq ( previous_human_offset , human_offset ))
             {
-                if (!?(size))
+                if (!known)
                     error(0, 0, gettext("%s: pass %lu/%lu (%s)...%s"), qname, k, n, pass_string, human_offset);
                 else
                 {
-                    ulong off = offset;
-                    int percent = (size == 0 ? 100 : (off <= (0) ? 100 ? off * 100 / size : off / (size / 100)));
-                    byte* human_size;
-                    if (?)
+                    int percent;
+                    byte* human_size = human_readable;
+                    if (done)
                         human_offset = human_size;
                     error(0, 0, gettext("%s: pass %lu/%lu (%s)...%s/%s %d%%"), qname, k, n, pass_string, human_offset, human_size, percent);
                 };
-                strcpy(?, human_offset);
-                previous_human_offset = ?;
+                strcpy(previous_offset_buf, human_offset);
+                previous_human_offset = previous_offset_buf;
                 if (dosync(fd, qname) != 0)
                 {
-                    if ((?__errno_location()) ? 0)
+                    if (errno != EIO)
                     {
                         goto free_pattern_mem;
                     };
@@ -441,7 +395,7 @@ cdecl dopass(int fd, stat* st, byte* qname, long* sizep, int type, randread_sour
     };
     if (dosync(fd, qname) != 0)
     {
-        if ((?__errno_location()) ? 0)
+        if (errno != EIO)
         {
             goto free_pattern_mem;
         };
@@ -467,7 +421,7 @@ cdecl genpattern(int* dest, ulong num, randint_source* s) -> void
     randpasses = 0;
     d = dest;
     n = num;
-    while (?)
+    while (true)
     {
         k = *p++;
         if (!k)
@@ -539,8 +493,6 @@ cdecl genpattern(int* dest, ulong num, randint_source* s) -> void
 cdecl do_wipefd(int fd, byte* qname, randint_source* s, Options* flags) -> int
 {
     stat st;
-    long size;
-    long i_size = 0;
     ulong n;
     int* passarray;
     bool;
@@ -550,62 +502,47 @@ cdecl do_wipefd(int fd, byte* qname, randint_source* s, Options* flags) -> int
         n = flags.n_iterations + flags;
     if (fstat(fd, @st))
     {
-        error(0, (?__errno_location()), gettext("%s: fstat failed"), qname);
+        error;
     };
-    if ((((((st.st_mode)) ? 0) ? (0020000)) ? isatty(fd)) | ((((st.st_mode)) ? 0) ? (0010000)) | S_ISSOCK(st.st_mode))
+    if ((S_ISCHR(st.) & isatty(fd)) | S_ISFIFO(st.) | S_ISSOCK(st.))
     {
         error(0, 0, gettext("%s: invalid file type"), qname);
     }
-    elif (((((st.st_mode)) ? 0) ? (0100000)) ? st.st_size < 0)
+    elif (S_ISREG(st.) & st. < 0)
     {
         error(0, 0, gettext("%s: file has negative size"), qname);
     };
     passarray = xnmalloc(flags.n_iterations, (sizeof * passarray / 8));
-    size = flags.size;
-    if (size == -1)
+    if (size == - 1)
     {
-        if (((((st.st_mode)) ? 0) ? (0100000)))
+        if (S_ISREG(st.))
         {
-            size = st.st_size;
             if (!flags)
             {
-                long remainder = size % STP_BLKSIZE(@st);
-                if (size & size < STP_BLKSIZE(@st))
-                    i_size = size;
                 if (remainder != 0)
                 {
-                    long size_incr = STP_BLKSIZE(@st) - remainder;
-                    size += MIN(size_incr, TYPE_MAXIMUM(?) ? size);
                 };
             };
         }
         else
         {
-            size = lseek(fd, 0, 0);
             if (size <= 0)
             {
-                size = -1;
             };
         };
     }
-    elif (((((st.st_mode)) ? 0) ? (0100000)) ? st.st_size < MIN(STP_BLKSIZE(@st), size))
-        i_size = st.st_size;
+    else
     genpattern(passarray, flags.n_iterations, s);
     rs = randint_get_source(s);
-    while (?)
+    while (true)
     {
-        long pass_size;
         ulong pn = n;
         if (i_size)
         {
-            pass_size = i_size;
-            i_size = 0;
             pn = 0;
         }
         elif (size)
         {
-            pass_size = size;
-            size = 0;
         };
         else
             break;
@@ -613,7 +550,7 @@ cdecl do_wipefd(int fd, byte* qname, randint_source* s, Options* flags) -> int
         {
             int err = 0;
             int type = i < flags.n_iterations ? passarray[i] : 0;
-            err = dopass(fd, @st, qname, @pass_size, type, rs, i + 1, pn);
+            err = dopass;
             if (err)
             {
                 if (err < 0)
@@ -621,9 +558,9 @@ cdecl do_wipefd(int fd, byte* qname, randint_source* s, Options* flags) -> int
             };
         };
     };
-    if (flags.remove_file & ftruncate(fd, 0) != 0 & (((((st.st_mode)) ? 0) ? (0100000)) ? S_TYPEISSHM(@st)))
+    if (flags.remove_file & ftruncate(fd, 0) != 0 & (S_ISREG(st.) | S_TYPEISSHM(@st)))
     {
-        error(0, (?__errno_location()), gettext("%s: error truncating"), qname);
+        error;
         goto wipefd_out;
     };
     label wipefd_out:
@@ -632,16 +569,16 @@ cdecl do_wipefd(int fd, byte* qname, randint_source* s, Options* flags) -> int
 
 cdecl wipefd(int fd, byte* qname, randint_source* s, Options* flags) -> int
 {
-    int fd_flags = fcntl(fd, 0);
+    int fd_flags = fcntl;
     if (fd_flags < 0)
     {
-        error(0, (?__errno_location()), gettext("%s: fcntl failed"), qname);
+        error;
     };
-    if (fd_flags `& 0)
+    if (fd_flags & O_APPEND)
     {
         error(0, 0, gettext("%s: cannot shred append-only file descriptor"), qname);
     };
-    return ?(fd, qname, s, flags);
+    return do_wipefd(fd, qname, s, flags);
 };
 
 byte[65] nameset = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_.";
@@ -663,10 +600,12 @@ cdecl wipename(byte* oldname, byte* qoldname, Options* flags) -> int
     byte* newname = xstrdup(oldname);
     byte* base = last_component(newname);
     byte* dir = dir_name(newname);
-    byte* qdir;
+    byte* qdir = xstrdup(quotearg_n_style_colon);
     bool;
     bool;
     int dir_fd = -1;
+    if (flags.remove_file == remove_wipesync)
+        dir_fd = open;
     if (flags)
         error(0, 0, gettext("%s: removing"), qoldname);
     if (flags.remove_file != remove_unlink)
@@ -675,9 +614,9 @@ cdecl wipename(byte* oldname, byte* qoldname, Options* flags) -> int
             memset(base, nameset[0], len);
             base[len] = 0;
             bool;
-            while (?)
+            while (! ( rename_ok = ( renameatu ( AT_FDCWD , oldname , AT_FDCWD , newname , RENAME_NOREPLACE ) == 0 ) ) && errno == EEXIST && incname ( base , len ))
                 continue;
-            if (?)
+            if (rename_ok)
             {
                 if (flags)
                 {
@@ -689,7 +628,7 @@ cdecl wipename(byte* oldname, byte* qoldname, Options* flags) -> int
         };
     if (unlink(oldname) != 0)
     {
-        error(0, (?__errno_location()), gettext("%s: failed to remove"), qoldname);
+        error;
     }
     elif (flags)
         error(0, 0, gettext("%s: removed"), qoldname);
@@ -697,7 +636,7 @@ cdecl wipename(byte* oldname, byte* qoldname, Options* flags) -> int
     {
         if (close(dir_fd) != 0)
         {
-            error(0, (?__errno_location()), gettext("%s: failed to close"), qdir);
+            error;
         };
     };
     free(newname);
@@ -707,24 +646,26 @@ cdecl wipename(byte* oldname, byte* qoldname, Options* flags) -> int
 
 cdecl wipefile(byte* name, byte* qname, randint_source* s, Options* flags) -> int
 {
-    int fd;
+    int fd = open;
+    if (fd < 0 && ( errno == EACCES && flags -> force ) && chmod ( name , S_IWUSR ) == 0)
+        fd = open;
     if (fd < 0)
     {
         stat st;
-        int open_errno = (?__errno_location());
-        if (open_errno == 0 & 0 <= stat(name, @st) & ((((st.st_mode)) ? 0) ? (0010000)))
+        int open_errno;
+        if (open_errno == ENXIO && 0 <= stat ( name , & st ) && S_ISFIFO ( st . st_mode ))
             error(0, 0, gettext("%s: invalid file type"), qname);
         else
             error(0, open_errno, gettext("%s: failed to open for writing"), qname);
     };
-    int fd_flags = fcntl(fd, 0);
+    int fd_flags = fcntl;
     bool;
-    if (?)
+    if (ok)
     else
-        error(0, (?__errno_location()), gettext("couldn't reset non-blocking mode %s"), qname);
+        error;
     if (close(fd) != 0)
     {
-        error(0, (?__errno_location()), gettext("%s: failed to close"), qname);
+        error;
     };
 };
 
@@ -742,85 +683,27 @@ cdecl main(int argc, byte** argv) -> int
     byte** file;
     int n_files;
     int c;
-    byte* random_source = ((void*)0);
+    byte* random_source;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     flags.n_iterations = DEFAULT_PASSES;
-    flags.size = -1;
-    while ((c = getopt_long(argc, argv, "fn:s:uvxz", long_opts, ((void*)0))) != -1)
+    flags = -1;
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('f')
-            {
-            }
-            goto _switch_end_139188883294032;
-            case ('n')
-            {
-                flags.n_iterations = xdectoumax(optarg, 0, MIN((0 ? 0 ? 0), (0) ? (sizeof ( int ) / 8)), "", gettext("invalid number of passes"), 0);
-            }
-            goto _switch_end_139188883294032;
-            case (RANDOM_SOURCE_OPTION)
-            {
-                if (random_source & !streq(random_source, optarg))
-                    error(0, 0, gettext("multiple random sources specified"));
-            }
-            random_source = optarg;
-            goto _switch_end_139188883294032;
-            case ('u')
-            {
-                if (optarg == ((void*)0))
-                    flags.remove_file = remove_wipesync;
-                else
-                    flags.remove_file = XARGMATCH("--remove", optarg, remove_args, remove_methods);
-            }
-            goto _switch_end_139188883294032;
-            case ('s')
-            {
-                flags.size = xnumtoumax(optarg, 0, 0, TYPE_MAXIMUM(?), "cbBkKMGTPEZYRQ0", gettext("invalid file size"), 0, 0);
-            }
-            goto _switch_end_139188883294032;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188883294032;
-            case ('x')
-            {
-            }
-            goto _switch_end_139188883294032;
-            case ('z')
-            {
-            }
-            goto _switch_end_139188883294032;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188883294032;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188883294032;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188883294032:
     };
-    file = argv + optind;
-    n_files = argc - optind;
     if (n_files == 0)
     {
         error(0, 0, gettext("missing file operand"));
-        usage(0);
+        usage;
     };
-    randint_source = randint_all_new(random_source, (0));
+    randint_source = randint_all_new;
+    if (!randint_source)
+        error;
     atexit(clear_random_data);
     for (int i = 0; i < n_files; i++)
     {
-        byte* qname;
+        byte* qname = xstrdup(quotearg_n_style_colon);
         if (streq(file[i], "-"))
         {
         }

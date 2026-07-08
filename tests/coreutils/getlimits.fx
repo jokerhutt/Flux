@@ -20,7 +20,7 @@
 ///
 
 ///
- Written by PÃ¡draig Brady
+ Written by Pádraig Brady
 ///
 
 byte* PROGRAM_NAME = "getlimits";
@@ -59,6 +59,12 @@ macro OFF64_T_MIN
     TYPE_MINIMUM ( off64_t )
 };
 
+uint SIGRTMIN = 0;
+macro SIGRTMAX
+{
+    ( SIGRTMIN - 1 )
+};
+
 uint SIZE_MIN = 0;
 uint UCHAR_MIN = 0;
 uint UINT_MIN = 0;
@@ -66,26 +72,25 @@ uint ULONG_MIN = 0;
 uint UINTMAX_MIN = 0;
 uint UID_T_MIN = 0;
 uint GID_T_MIN = 0;
-// macro (multi-statement, manual translation needed): PRINT_FLOATTYPE(N, T, FTOASTR, BUFSIZE) static void N ( T x ) \
-{ char buf [ BUFSIZE ] ; FTOASTR ( buf , sizeof buf , FTOASTR_LEFT_JUSTIFY , 0 , x ) ; puts ( buf ) ; \
+// macro (multi-statement, manual translation needed): PRINT_FLOATTYPE(N, T, FTOASTR, BUFSIZE) static void N ( T x ) \
+{ char buf [ BUFSIZE ] ; FTOASTR ( buf , sizeof buf , FTOASTR_LEFT_JUSTIFY , 0 , x ) ; puts ( buf ) ; \
 }
 // macro (multi-statement, manual translation needed): print_int(TYPE) sprintf ( limit + 1 , "%ju" , ( uintmax_t ) { TYPE{_MAX} } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE{_MIN} ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE{_MIN} } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; }
 // macro (multi-statement, manual translation needed): print_float(TYPE) printf ( # TYPE "_MIN=" ) ; print_{TYPE} ( TYPE{_MIN} ) ; printf ( # TYPE "_MAX=" ) ; print_{TYPE} ( TYPE{_MAX} ) ;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Output platform dependent limits in a format useful for shell scripts.\n\
-\n\
-"), stdout);
-        fputs(gettext("      --help\n         display this help and exit\n"), stdout);
-        fputs(gettext("      --version\n         output version information and exit\n"), stdout);
+        printf;
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("getlimits");
     };
     exit(status);
@@ -93,8 +98,8 @@ Output platform dependent limits in a format useful for shell scripts.\n\
 
 cdecl decimal_absval_add_one(byte* buf) -> byte*
 {
-    bool negative = (buf[1] == '-');
-    byte* absnum = buf + 1 + negative;
+    bool;
+    byte* absnum;
     byte* p = absnum + strlen(absnum);
     absnum[-1] = '0';
     while (*--p == '9')
@@ -109,210 +114,218 @@ cdecl decimal_absval_add_one(byte* buf) -> byte*
 cdecl print_FLT(float x) -> void
 {
     byte buf;
-    puts(?);
+    ftoastr;
+    puts(buf ) ; \
+} PRINT_FLOATTYPE ( print_FLT , float , ftoastr , FLT_BUFSIZE_BOUND ));
 };
 
 cdecl print_DBL(double x) -> void
 {
     byte buf;
-    puts(?);
+    dtoastr;
+    puts(buf ) ; \
+} PRINT_FLOATTYPE ( print_FLT , float , ftoastr , FLT_BUFSIZE_BOUND ) PRINT_FLOATTYPE ( print_DBL , double , dtoastr , DBL_BUFSIZE_BOUND ));
 };
 
 cdecl print_LDBL(double x) -> void
 {
     byte buf;
-    puts(?);
+    ldtoastr;
+    puts(buf ) ; \
+} PRINT_FLOATTYPE ( print_FLT , float , ftoastr , FLT_BUFSIZE_BOUND ) PRINT_FLOATTYPE ( print_DBL , double , dtoastr , DBL_BUFSIZE_BOUND ) PRINT_FLOATTYPE ( print_LDBL , long double , ldtoastr , LDBL_BUFSIZE_BOUND ));
 };
 
 cdecl print_errno(void* name, int e) -> int
 {
     byte* err_name = name ? name : strerrorname_np(e);
+    if (err_name)
+        printf("%s=%s\n", err_name, quotearg_style);
     return 0;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
-    void* /* untranslated: char[1 + MAX(INT_BUFSIZE_BOUND(<recovery-expr>()), INT_BUFSIZE_BOUND(<recovery-expr>()))] */ limit = 1 + MAX(INT_BUFSIZE_BOUND(?), INT_BUFSIZE_BOUND(?));
+    void* /* untranslated: char[1 + MAX(<recovery-expr>(INT_BUFSIZE_BOUND), <recovery-expr>(INT_BUFSIZE_BOUND))] */ limit = 1 + MAX(INT_BUFSIZE_BOUND, INT_BUFSIZE_BOUND);
     set_program_name(argv[0]);
-    setlocale(0, "");
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if ((?0 ? 0))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if ((?0 ? 0))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (0)
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if ((?0 ? 0))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if ((?0 ? 0))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (0)
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if ((?0 ? 0))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (0)
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (0)
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (TYPE_MINIMUM(?))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (TYPE_MINIMUM(?))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (0)
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (0)
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (TYPE_MINIMUM(?))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ) ; print_int ( OFF_T ));
-    printf("", limit ? 1);
-    printf("", decimal_absval_add_one(limit));
-    if (TYPE_MINIMUM(?))
-    {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ) ; print_int ( OFF_T ));
-        printf("", limit ? 1);
-        printf("", decimal_absval_add_one(limit));
-    };
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
+    sprintf;
     printf("", limit ? 1);
     printf("", decimal_absval_add_one(limit));
     if (?)
     {
+        sprintf;
         printf("", limit ? 1);
         printf("", decimal_absval_add_one(limit));
     };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ) ; print_int ( OFF_T ) ; print_int ( OFF64_T ) ; print_int ( INTMAX ));
+    sprintf;
     printf("", limit ? 1);
     printf("", decimal_absval_add_one(limit));
-    if ((?0 ? 0))
+    if (?)
     {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ) ; print_int ( OFF_T ) ; print_int ( OFF64_T ) ; print_int ( INTMAX ));
+        sprintf;
         printf("", limit ? 1);
         printf("", decimal_absval_add_one(limit));
     };
-    sprintf(limit ? 1, "%ju", ( uintmax_t ) { TYPE ## _MAX } ) ; printf ( # TYPE "_MAX=%s\n" , limit + 1 ) ; printf ( # TYPE "_OFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; if ( TYPE ## _MIN ) { sprintf ( limit + 1 , "%jd" , ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ) ; print_int ( OFF_T ) ; print_int ( OFF64_T ) ; print_int ( INTMAX ) ; print_int ( UINTMAX ));
+    sprintf;
     printf("", limit ? 1);
     printf("", decimal_absval_add_one(limit));
     if (0)
     {
-        sprintf(limit ? 1, "%jd", ( intmax_t ) { TYPE ## _MIN } ) ; printf ( # TYPE "_MIN=%s\n" , limit + 1 ) ; printf ( # TYPE "_UFLOW=%s\n" , decimal_absval_add_one ( limit ) ) ; } # define print_float ( TYPE ) printf ( # TYPE "_MIN=" ) ; print_ ## TYPE ( TYPE ## _MIN ) ; printf ( # TYPE "_MAX=" ) ; print_ ## TYPE ( TYPE ## _MAX ) ; /* Variable sized ints */ print_int ( CHAR ) ; print_int ( SCHAR ) ; print_int ( UCHAR ) ; print_int ( SHRT ) ; print_int ( INT ) ; print_int ( UINT ) ; print_int ( LONG ) ; print_int ( ULONG ) ; print_int ( SIZE ) ; print_int ( SSIZE ) ; print_int ( TIME_T ) ; print_int ( UID_T ) ; print_int ( GID_T ) ; print_int ( PID_T ) ; print_int ( OFF_T ) ; print_int ( OFF64_T ) ; print_int ( INTMAX ) ; print_int ( UINTMAX ));
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (?)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (?)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (0)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (?)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (0)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (0)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (TYPE_MINIMUM)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (TYPE_MINIMUM)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (0)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (0)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (TYPE_MINIMUM)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (TYPE_MINIMUM)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (TYPE_MINIMUM)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (?)
+    {
+        sprintf;
+        printf("", limit ? 1);
+        printf("", decimal_absval_add_one(limit));
+    };
+    sprintf;
+    printf("", limit ? 1);
+    printf("", decimal_absval_add_one(limit));
+    if (0)
+    {
+        sprintf;
         printf("", limit ? 1);
         printf("", decimal_absval_add_one(limit));
     };
     printf("");
-    print_FLT(0.0);
+    print_FLT;
     printf("");
-    print_FLT(0.0);
+    print_FLT;
     printf("");
-    print_DBL(0.0);
+    print_DBL;
     printf("");
-    print_DBL(0.0);
+    print_DBL;
     printf("");
-    print_LDBL(0.0);
+    print_LDBL;
     printf("");
-    print_LDBL(0.0);
-    printf("SIGRTMIN=%jd\n", ( intmax_t ) { SIGRTMIN });
-    printf("SIGRTMAX=%jd\n", ( intmax_t ) { SIGRTMAX });
-    printf("IO_BUFSIZE=%ju\n", ( uintmax_t ) { IO_BUFSIZE });
-    errno_iterate(print_errno, ((void*)0));
-    print_errno((byte*)"ENOTSUP", 0);
-    print_errno((byte*)"EWOULDBLOCK", 0);
-    print_errno((byte*)"EDEADLOCK", 0);
-    return 0;
+    print_LDBL;
+    printf;
+    printf;
+    printf;
+    errno_iterate;
 };

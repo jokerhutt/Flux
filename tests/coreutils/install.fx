@@ -47,56 +47,51 @@ macro DEFAULT_MODE
 int selinux_enabled = 0;
 extern int use_default_selinux_context;
 extern byte* owner_name;
-uint owner_id = uid_t;
+extern int owner_id;
 extern byte* group_name;
-uint group_id = gid_t;
-uint mode = mode_t;
-uint dir_mode = mode_t;
-uint dir_mode_bits = mode_t;
+extern int group_id;
+extern int mode;
+extern int dir_mode;
+extern int dir_mode_bits;
 extern int copy_only_if_needed;
 extern int strip_files;
 extern int dir_arg;
 byte* strip_program = "strip";
-uint DEBUG_OPTION = 128;
-uint PRESERVE_CONTEXT_OPTION = 129;
-uint STRIP_PROGRAM_OPTION = 130;
+uint DEBUG_OPTION = 0;
+uint PRESERVE_CONTEXT_OPTION = 1;
+uint STRIP_PROGRAM_OPTION = 2;
 
-option[19] long_options = option;
+struct option;
+extern int long_options;
 cdecl have_same_content(int a_fd, int b_fd) -> int
 {
     byte[4096] a_buff = CMP_BLOCK_SIZE;
     byte[4096] b_buff = CMP_BLOCK_SIZE;
-    while (?)
+    while (0 < ( size = full_read ( a_fd , a_buff , sizeof a_buff ) ))
     {
     };
 };
 
-cdecl extra_mode(uint input) -> int
+cdecl extra_mode(int input) -> int
 {
-    uint mask;
-    return ?!(input `& `!mask);
 };
 
 cdecl need_copy(byte* src_name, byte* dest_name, int dest_dirfd, byte* dest_relname, cp_options* x) -> int
 {
     stat src_sb;
     stat dest_sb;
-    if (owner_id == (uint)-1)
+    if (owner_id == ( uid_t ) - 1)
     {
-        (?__errno_location()) ? 0;
-        uint ruid = getuid();
     }
     else
-    if (group_id == (uint)-1)
+    if (group_id == ( uid_t ) - 1)
     {
-        (?__errno_location()) ? 0;
-        uint rgid = getgid();
     }
     else
     if (selinux_enabled & x)
     {
-        byte* file_scontext_raw = ((void*)0);
-        byte* to_scontext_raw = ((void*)0);
+        byte* file_scontext_raw;
+        byte* to_scontext_raw;
         if (getfilecon_raw(dest_name, @to_scontext_raw) == -1)
         {
             freecon(file_scontext_raw);
@@ -105,8 +100,8 @@ cdecl need_copy(byte* src_name, byte* dest_name, int dest_dirfd, byte* dest_reln
         freecon(file_scontext_raw);
         freecon(to_scontext_raw);
     };
-    int src_fd;
-    int dest_fd;
+    int src_fd = open;
+    int dest_fd = openat;
     if (dest_fd < 0)
     {
         close(src_fd);
@@ -123,21 +118,18 @@ cdecl cp_option_init(cp_options* x) -> void
     x.dereference = DEREF_ALWAYS;
     x.interactive = I_UNSPECIFIED;
     x.sparse_mode = SPARSE_AUTO;
-    x.mode = 0 ? 0;
     x.update = UPDATE_ALL;
-    x.set_security_context = ((void*)0);
-    x = ((void*)0);
-    x = ((void*)0);
 };
 
 cdecl get_labeling_handle() -> selabel_handle*
 {
     int initialized;
     selabel_handle* hnd;
-    if (!?)
+    if (!initialized)
     {
+        hnd = selabel_open;
         if (!hnd)
-            error(0, (?__errno_location()), gettext("warning: security labeling handle failed"));
+            error;
     };
     return hnd;
 };
@@ -154,23 +146,31 @@ cdecl setdefaultfilecon(byte* file) -> void
     selabel_handle* hnd = get_labeling_handle();
     if (!hnd)
         return void;
-    byte* scontext_raw = ((void*)0);
-    if (selabel_lookup_raw(hnd, @scontext_raw, file, st.st_mode) != 0)
+    byte* scontext_raw;
+    if (selabel_lookup_raw(hnd, @scontext_raw, file, st.) != 0)
     {
+        if (errno != ENOENT && ! ignorable_ctx_err ( errno ))
+            error;
         return void;
     };
+    if (lsetfilecon_raw ( file , scontext_raw ) < 0 && errno != ENOTSUP)
+        error;
     freecon(scontext_raw);
 };
 
 cdecl announce_mkdir(byte* dir, void* options) -> void
 {
     cp_options* x = options;
+    if (x)
+        prog_fprintf;
 };
 
 cdecl make_ancestor(byte* dir, byte* component, void* options) -> int
 {
     cp_options* x = options;
-    int r = mkdir(component, ((0 ? 0 ? 0) ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0)));
+    if (x.set_security_context & defaultcon < 0 & !ignorable_ctx_err)
+        error;
+    int r = mkdir;
     if (r == 0)
         announce_mkdir(dir, options);
     return r;
@@ -180,8 +180,10 @@ cdecl process_dir(byte* dir, savewd* wd, void* options) -> int
 {
     cp_options* x = options;
     int ret;
-    if (ret == 0 & x.set_security_context)
+    if (ret == EXIT_SUCCESS && x -> set_security_context)
     {
+        if (!restorecon & !ignorable_ctx_err)
+            error;
     };
     return ret;
 };
@@ -195,60 +197,64 @@ enum copy_status
 
 cdecl copy_file(byte* frm, byte* to, int to_dirfd, byte* to_relname, cp_options* x) -> copy_status
 {
-    if (? & !?(frm, to, to_dirfd, to_relname, x))
+    if (copy_only_if_needed & !need_copy(frm, to, to_dirfd, to_relname, x))
         return COPY_SKIPPED;
     bool;
+    return (copy ? COPY_OK : COPY_FAILED);
 };
 
 cdecl change_attributes(byte* name, int dirfd, byte* relname) -> int
 {
     bool;
-    if (?)
+    if (! ( owner_id == ( uid_t ) - 1 && group_id == ( gid_t ) - 1 ) && lchownat ( dirfd , relname , owner_id , group_id ) != 0)
+        error;
+    elif (chmodat(dirfd, relname, mode) != 0)
+        error;
+    else
+    if (use_default_selinux_context)
         setdefaultfilecon(name);
 };
 
 cdecl change_timestamps(stat* src_sb, byte* dest, int dirfd, byte* relname) -> int
 {
-    timespec[2] timespec = 2;
+    int timespec = {get_stat_atime(src_sb), get_stat_mtime(src_sb)};
     if (utimensat(dirfd, relname, timespec, 0))
     {
+        error;
     };
 };
 
 cdecl strip(byte* name) -> int
 {
-    posix_spawnattr_t attr;
-    posix_spawnattr_t* attrp = ((void*)0);
-    if (posix_spawnattr_init(@attr) == 0)
+    if (posix_spawnattr_init == 0)
     {
-        if (?)
-            attrp = @attr;
+        if (posix_spawnattr_setflags == 0)
         else
-            posix_spawnattr_destroy(@attr);
+            posix_spawnattr_destroy;
     };
-    byte* concat_name = ((void*)0);
+    byte* concat_name;
     byte* safe_name = name;
     if (name & *name == '-')
-        safe_name = concat_name = file_name_concat(".", name, ((void*)0));
-    byte*[3] argv = {strip_program, safe_name, ((void*)0)};
-    int pid;
-    int result;
+        safe_name = concat_name = file_name_concat;
+    byte** argv;
+    int result = posix_spawnp;
     bool;
     if (result != 0)
     {
+        error(0, result, streq(strip_program, "strip") ? gettext("cannot run %s") : gettext("cannot run strip program %s"), quotearg_style);
     }
     else
     {
         int status;
-        if (waitpid(pid, @status, 0) < 0)
-            error(0, (?__errno_location()), gettext("waiting for strip"));
-        elif (!(((status) ? 0) ? 0) | (((status) ? 0) ? 0))
+        if (waitpid < 0)
+            error;
+        elif (!WIFEXITED(status) | WEXITSTATUS(status))
             error(0, 0, gettext("strip process terminated abnormally"));
         else
     };
     free(concat_name);
     if (attrp)
-        posix_spawnattr_destroy(attrp);
+        posix_spawnattr_destroy;
 };
 
 cdecl get_ids() -> void
@@ -256,139 +262,131 @@ cdecl get_ids() -> void
     if (owner_name)
     {
         passwd* pw = getpwnam(owner_name);
-        if (pw == ((void*)0))
+        if (pw == NULL)
         {
-            ulong tmp;
+            if (xstrtoumax ( owner_name , NULL , 0 , & tmp , "" ) != LONGINT_OK || ckd_add ( & owner_id , tmp , 0 ))
+                error;
         }
         else
-            owner_id = pw.pw_uid;
+            owner_id = pw;
         ((void)0);
     }
     else
-        owner_id = (uint)-1;
     if (group_name)
     {
         group* gr = getgrnam(group_name);
-        if (gr == ((void*)0))
+        if (gr == NULL)
         {
-            ulong tmp;
+            if (xstrtoumax ( group_name , NULL , 0 , & tmp , "" ) != LONGINT_OK || ckd_add ( & group_id , tmp , 0 ))
+                error;
         }
         else
-            group_id = gr.gr_gid;
+            group_id = gr;
         ((void)0);
     }
     else
-        group_id = (uint)-1;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-\n\
-This install program copies files (often just compiled) into destination\n\
-locations you choose.  If you want to download and install a ready-to-use\n\
-package on a GNU/Linux system, you should instead be using a package manager\n\
-like yum(1) or apt-get(1).\n\
-\n\
-In the first three forms, copy SOURCE to DEST or multiple SOURCE(s) to\n\
-the existing DIRECTORY, while setting permission modes and owner/group.\n\
-In the 4th form, create all components of the given DIRECTORY(ies).\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("install", gettext("\
-      --backup[=CONTROL]\n\
-         make a backup of each existing destination file\n\
+        oputs_("install", gettext("\
+      --backup[=CONTROL]\n\
+         make a backup of each existing destination file\n\
 "));
-        oputs_("install", gettext("\
-  -b\n\
-         like --backup but does not accept an argument\n\
+        oputs_("install", gettext("\
+  -b\n\
+         like --backup but does not accept an argument\n\
 "));
-        oputs_("install", gettext("\
-  -c\n\
-         (ignored)\n\
+        oputs_("install", gettext("\
+  -c\n\
+         (ignored)\n\
 "));
-        oputs_("install", gettext("\
-  -C, --compare\n\
-         compare content of source and destination files,\n\
-         and if no change to content, ownership, and permissions,\n\
-         do not modify the destination at all\n\
+        oputs_("install", gettext("\
+  -C, --compare\n\
+         compare content of source and destination files,\n\
+         and if no change to content, ownership, and permissions,\n\
+         do not modify the destination at all\n\
 "));
-        oputs_("install", gettext("\
-  -d, --directory\n\
-         treat all arguments as directory names;\n\
-         create all components of the specified directories\n\
+        oputs_("install", gettext("\
+  -d, --directory\n\
+         treat all arguments as directory names;\n\
+         create all components of the specified directories\n\
 "));
-        oputs_("install", gettext("\
-  -D\n\
-         create all leading components of DEST except the last,\n\
-         or all components of --target-directory,\n\
-         then copy SOURCE to DEST\n\
+        oputs_("install", gettext("\
+  -D\n\
+         create all leading components of DEST except the last,\n\
+         or all components of --target-directory,\n\
+         then copy SOURCE to DEST\n\
 "));
-        oputs_("install", gettext("\
-      --debug\n\
-         explain how a file is copied.  Implies -v\n\
+        oputs_("install", gettext("\
+      --debug\n\
+         explain how a file is copied.  Implies -v\n\
 "));
-        oputs_("install", gettext("\
-  -g, --group=GROUP\n\
-         set group ownership, instead of process' current group\n\
+        oputs_("install", gettext("\
+  -g, --group=GROUP\n\
+         set group ownership, instead of process' current group\n\
 "));
-        oputs_("install", gettext("\
-  -m, --mode=MODE\n\
-         set permission mode (as in chmod), instead of rwxr-xr-x\n\
+        oputs_("install", gettext("\
+  -m, --mode=MODE\n\
+         set permission mode (as in chmod), instead of rwxr-xr-x\n\
 "));
-        oputs_("install", gettext("\
-  -o, --owner=OWNER\n\
-         set ownership (super-user only)\n\
+        oputs_("install", gettext("\
+  -o, --owner=OWNER\n\
+         set ownership (super-user only)\n\
 "));
-        oputs_("install", gettext("\
-  -p, --preserve-timestamps\n\
-         apply access/modification times of SOURCE files\n\
-         to corresponding destination files\n\
+        oputs_("install", gettext("\
+  -p, --preserve-timestamps\n\
+         apply access/modification times of SOURCE files\n\
+         to corresponding destination files\n\
 "));
-        oputs_("install", gettext("\
-  -s, --strip\n\
-         strip symbol tables\n\
+        oputs_("install", gettext("\
+  -s, --strip\n\
+         strip symbol tables\n\
 "));
-        oputs_("install", gettext("\
-      --strip-program=PROGRAM\n\
-         program used to strip binaries\n\
+        oputs_("install", gettext("\
+      --strip-program=PROGRAM\n\
+         program used to strip binaries\n\
 "));
-        oputs_("install", gettext("\
-  -S, --suffix=SUFFIX\n\
-         override the usual backup suffix\n\
+        oputs_("install", gettext("\
+  -S, --suffix=SUFFIX\n\
+         override the usual backup suffix\n\
 "));
-        oputs_("install", gettext("\
-  -t, --target-directory=DIRECTORY\n\
-         copy all SOURCE arguments into DIRECTORY\n\
+        oputs_("install", gettext("\
+  -t, --target-directory=DIRECTORY\n\
+         copy all SOURCE arguments into DIRECTORY\n\
 "));
-        oputs_("install", gettext("\
-  -T, --no-target-directory\n\
-         treat DEST as a normal file\n\
+        oputs_("install", gettext("\
+  -T, --no-target-directory\n\
+         treat DEST as a normal file\n\
 "));
-        oputs_("install", gettext("\
-  -v, --verbose\n\
-         print the name of each created file or directory\n\
+        oputs_("install", gettext("\
+  -v, --verbose\n\
+         print the name of each created file or directory\n\
 "));
-        oputs_("install", gettext("\
-      --preserve-context\n\
-         preserve SELinux security context\n\
+        oputs_("install", gettext("\
+      --preserve-context\n\
+         preserve SELinux security context\n\
 "));
-        oputs_("install", gettext("\
-  -Z\n\
-         set SELinux security context of destination file\n\
-         and each created directory, to default type\n\
+        oputs_("install", gettext("\
+  -Z\n\
+         set SELinux security context of destination file\n\
+         and each created directory, to default type\n\
 "));
-        oputs_("install", gettext("\
-      --context[=CTX]\n\
-         like -Z, or if CTX is specified then set the\n\
-         SELinux or SMACK security context to CTX\n\
+        oputs_("install", gettext("\
+      --context[=CTX]\n\
+         like -Z, or if CTX is specified then set the\n\
+         SELinux or SMACK security context to CTX\n\
 "));
         oputs_("install", gettext("      --help\n         display this help and exit\n"));
         oputs_("install", gettext("      --version\n         output version information and exit\n"));
@@ -403,40 +401,44 @@ cdecl install_file_in_file(byte* frm, byte* to, int to_dirfd, byte* to_relname, 
     stat from_sb;
     if (x & stat(frm, @from_sb) != 0)
     {
+        error;
     };
     copy_status copy_status = copy_file(frm, to, to_dirfd, to_relname, x);
-    if (copy_status == COPY_OK & ? & !?(to))
+    if (copy_status == COPY_OK & strip_files & !strip(to))
     {
+        if (unlinkat(to_dirfd, to_relname, 0) != 0)
+            error;
     };
-    return ?(to, to_dirfd, to_relname);
+    return change_attributes(to, to_dirfd, to_relname);
 };
 
 cdecl mkancesdirs_safe_wd(byte* frm, byte* to, cp_options* x, int save_always) -> int
 {
     bool;
     savewd wd;
-    savewd_init(@?);
-    if (?)
-        savewd_finish(@?);
-    int status = 0;
-    if (mkancesdirs(to, @?, make_ancestor, x) == -1)
+    savewd_init(@wd);
+    if (! save_working_directory)
+        savewd_finish(@wd);
+    int status;
+    if (mkancesdirs(to, @wd, make_ancestor, x) == -1)
     {
-        status = 0;
+        error;
     };
-    if (?)
+    if (save_working_directory)
     {
-        int restore_result = savewd_restore(@?, status);
-        int restore_errno = (?__errno_location());
-        savewd_finish(@?);
-        if (restore_result < 0 & status == 0)
+        int restore_result = savewd_restore(@wd, status);
+        int restore_errno;
+        savewd_finish(@wd);
+        if (restore_result < 0 && status == EXIT_SUCCESS)
         {
+            error(0, restore_errno, gettext("cannot create directory %s"), quotearg_style);
         };
     };
-    return status == 0;
 };
 
 cdecl install_file_in_file_parents(byte* frm, byte* to, cp_options* x) -> int
 {
+    return (mkancesdirs_safe_wd & install_file_in_file);
 };
 
 cdecl install_file_in_dir(byte* frm, byte* to_dir, cp_options* x, int mkdir_and_install, int* target_dirfd) -> int
@@ -445,16 +447,17 @@ cdecl install_file_in_dir(byte* frm, byte* to_dir, cp_options* x, int mkdir_and_
     byte* to_relname;
     byte* to = file_name_concat(to_dir, from_base, @to_relname);
     bool;
-    if (?)
+    if (! target_dirfd_valid ( * target_dirfd ) && ( ret = mkdir_and_install ) && ( ret = mkancesdirs_safe_wd ( from , to , ( struct cp_options * ) x , true ) ))
     {
-        int fd;
+        int fd = open;
         if (fd < 0)
         {
+            error;
         }
         else
             *target_dirfd = fd;
     };
-    if (?)
+    if (ret)
     {
         int to_dirfd = *target_dirfd;
         if (!target_dirfd_valid(to_dirfd))
@@ -467,177 +470,65 @@ cdecl install_file_in_dir(byte* frm, byte* to_dir, cp_options* x, int mkdir_and_
 
 cdecl main(int argc, byte** argv) -> int
 {
-    byte* specified_mode = ((void*)0);
+    byte* specified_mode;
     bool;
-    byte* backup_suffix = ((void*)0);
-    byte* version_control_string = ((void*)0);
+    byte* backup_suffix;
+    byte* version_control_string;
     bool;
     cp_options x;
-    byte* target_directory = ((void*)0);
+    byte* target_directory;
     bool;
     bool;
-    byte* scontext = ((void*)0);
+    byte* scontext;
     selinux_enabled = (0 < is_selinux_enabled());
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     cp_option_init(@x);
     umask(0);
     int optc;
-    while ((optc = getopt_long(argc, argv, "bcCsDdg:m:o:pt:TvS:Z", long_options, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('b')
-            {
-            }
-            if (optarg)
-                version_control_string = optarg;
-            goto _switch_end_139188883351504;
-            case ('c')
-            {
-                goto _switch_end_139188883351504;
-            }
-            case ('C')
-            {
-            }
-            goto _switch_end_139188883351504;
-            case ('s')
-            {
-            }
-            signal(0, ((def{}*(int) -> void)0));
-            goto _switch_end_139188883351504;
-            case (DEBUG_OPTION)
-            {
-            }
-            goto _switch_end_139188883351504;
-            case (STRIP_PROGRAM_OPTION)
-            {
-                strip_program = xstrdup(optarg);
-            }
-            goto _switch_end_139188883351504;
-            case ('d')
-            {
-            }
-            goto _switch_end_139188883351504;
-            case ('D')
-            {
-            }
-            goto _switch_end_139188883351504;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188883351504;
-            case ('g')
-            {
-                group_name = optarg;
-            }
-            goto _switch_end_139188883351504;
-            case ('m')
-            {
-                specified_mode = optarg;
-            }
-            goto _switch_end_139188883351504;
-            case ('o')
-            {
-                owner_name = optarg;
-            }
-            goto _switch_end_139188883351504;
-            case ('p')
-            {
-            }
-            goto _switch_end_139188883351504;
-            case ('S')
-            {
-            }
-            backup_suffix = optarg;
-            goto _switch_end_139188883351504;
-            case ('t')
-            {
-                if (target_directory)
-                    error(0, 0, gettext("multiple target directories specified"));
-            }
-            target_directory = optarg;
-            goto _switch_end_139188883351504;
-            case ('T')
-            {
-            }
-            goto _switch_end_139188883351504;
-            case (PRESERVE_CONTEXT_OPTION)
-            {
-                if (!selinux_enabled)
-                {
-                    error(0, 0, gettext("WARNING: ignoring --preserve-context; "));
-                    goto _switch_end_139188883351504;
-                };
-            }
-            goto _switch_end_139188883351504;
-            case ('Z')
-            {
-                if (selinux_enabled)
-                {
-                    if (optarg)
-                        scontext = optarg;
-                    else
-                        x.set_security_context = get_labeling_handle();
-                }
-                elif (optarg)
-                {
-                    error(0, 0, gettext("warning: ignoring --context; "));
-                };
-            }
-            goto _switch_end_139188883351504;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188883351504;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188883351504;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188883351504:
     };
-    if (? & ?)
-        error(0, 0, gettext("the strip option may not be used when installing a directory"));
-    if (? & target_directory)
-        error(0, 0, gettext("target directory not allowed when installing a directory"));
+    if (dir_arg & strip_files)
+        error;
+    if (dir_arg & target_directory)
+        error;
     set_simple_backup_suffix(backup_suffix);
     if (x & (x.set_security_context | scontext))
-        error(0, 0, gettext("cannot set target context and preserve it"));
+        error;
     if (scontext & setfscreatecon(scontext) < 0)
-        error(0, (?__errno_location()), gettext("failed to set default file creation context to %s"), quote(scontext));
-    int n_files = argc - optind;
-    byte** file = argv + optind;
-    if (n_files <= !(? | target_directory))
+        error;
+    int n_files;
+    byte** file;
+    if (n_files <= !(dir_arg | target_directory))
     {
         if (n_files <= 0)
             error(0, 0, gettext("missing file operand"));
         else
-        usage(0);
+            error(0, 0, gettext("missing destination file operand after %s"), quotearg_style);
+        usage;
     };
     stat sb;
     int target_dirfd;
-    if (?)
+    if (no_target_directory)
     {
         if (target_directory)
-            error(0, 0, gettext("cannot combine --target-directory (-t) "));
+            error;
         if (2 < n_files)
         {
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quotearg_style);
+            usage;
         };
     }
     elif (target_directory)
     {
         target_dirfd = target_directory_operand(target_directory, @sb);
+        if (! ( target_dirfd_valid ( target_dirfd ) || ( mkdir_and_install && errno == ENOENT ) ))
+            error;
     };
     else
-        if (!?)
+        if (!dir_arg)
         {
             byte* lastfile = file[n_files - 1];
             int fd = target_directory_operand(lastfile, @sb);
@@ -647,41 +538,40 @@ cdecl main(int argc, byte** argv) -> int
                 target_directory = lastfile;
                 n_files--;
             }
-            else
+            elif (2 < n_files)
+                error;
         };
     if (specified_mode)
     {
         mode_change* change = mode_compile(specified_mode);
         if (!change)
-            error(0, 0, gettext("invalid mode %s"), quote(specified_mode));
+            error;
+        mode = mode_adjust;
+        dir_mode = mode_adjust;
         free(change);
     };
-    if (?)
+    if (strip_program_specified && ! strip_files)
         error(0, 0, gettext("WARNING: ignoring --strip-program option as -s option was "));
-    if (? & ?)
+    if (copy_only_if_needed & strip_files)
     {
         error(0, 0, gettext("options --compare (-C) and --strip are mutually "));
-        usage(0);
+        usage;
     };
-    if (? & ?(mode))
+    if (copy_only_if_needed & extra_mode(mode))
         error(0, 0, gettext("the --compare (-C) option is ignored when you"));
     get_ids();
-    int exit_status = 0;
-    if (?)
+    int exit_status;
+    if (dir_arg)
         exit_status = savewd_process_files(n_files, file, process_dir, @x);
     else
     {
         hash_init();
         if (!target_directory)
         {
-            if (?)
-                exit_status = 0;
         }
         else
         {
             dest_info_init(@x);
-            for (int i = 0; i < n_files; i++)
-            {};
         };
     };
     return exit_status;

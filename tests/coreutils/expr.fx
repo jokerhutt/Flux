@@ -41,7 +41,6 @@ macro AUTHORS
     proper_name ( "Mike Parker" ) , proper_name ( "James Youngman" ) , proper_name ( "Paul Eggert" )
 };
 
-cdecl static_assert(int) -> int;
 uint EXPR_INVALID = 2;
 uint EXPR_FAILURE = 3;
 
@@ -69,13 +68,13 @@ cdecl mbs_logical_cspn(byte* s, byte* accept) -> ulong
 {
     if (accept[0] == '\0')
         return 0;
-    if ((__ctype_get_mb_cur_max()) ? 1)
+    if (MB_CUR_MAX > 1)
     {
         ulong idx = 0;
         for (byte* p = s; *p; )
         {
             ++idx;
-            if (?)
+            if (g . len == 1)
             {
                 if (mbschr(accept, *p))
                     return idx;
@@ -83,7 +82,7 @@ cdecl mbs_logical_cspn(byte* s, byte* accept) -> ulong
             else
                 for (byte* a = accept; *a; )
                 {
-                    if (?)
+                    if (mcel_eq)
                         return idx;
                 };
         };
@@ -99,10 +98,10 @@ cdecl mbs_logical_cspn(byte* s, byte* accept) -> ulong
 
 cdecl mbs_logical_substr(byte* s, ulong pos, ulong len) -> byte*
 {
-    ulong mb_cur_max = (__ctype_get_mb_cur_max());
-    ulong vlen;
+    ulong mb_cur_max;
+    ulong vlen = MIN;
     byte* substart = s;
-    if (pos == 0 | len == (0))
+    if (pos == 0 || len == SIZE_MAX)
     {
     }
     elif (mb_cur_max <= 1)
@@ -112,13 +111,14 @@ cdecl mbs_logical_substr(byte* s, ulong pos, ulong len) -> byte*
     else
         for (*s & vlen; ; )
         {
-            if (?)
+            if (pos <= idx)
             {
-                if (?)
+                if (pos == idx)
                     substart = s;
                 vlen--;
             };
         };
+    return ximemdup0;
 };
 
 cdecl mbs_offset_to_chars(byte* s, ulong ofs) -> ulong
@@ -131,72 +131,26 @@ cdecl mbs_offset_to_chars(byte* s, ulong ofs) -> ulong
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
         putchar('\n');
         oputs_("expr", gettext("      --help\n         display this help and exit\n"));
         oputs_("expr", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Print the value of EXPRESSION to standard output.  A blank line below\n\
-separates increasing precedence groups.  EXPRESSION may be:\n\
-\n\
-  ARG1 | ARG2       ARG1 if it is neither null nor 0, otherwise ARG2\n\
-\n\
-  ARG1 & ARG2       ARG1 if neither argument is null or 0, otherwise 0\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-  ARG1 < ARG2       ARG1 is less than ARG2\n\
-  ARG1 <= ARG2      ARG1 is less than or equal to ARG2\n\
-  ARG1 = ARG2       ARG1 is equal to ARG2\n\
-  ARG1 != ARG2      ARG1 is unequal to ARG2\n\
-  ARG1 >= ARG2      ARG1 is greater than or equal to ARG2\n\
-  ARG1 > ARG2       ARG1 is greater than ARG2\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-  ARG1 + ARG2       arithmetic sum of ARG1 and ARG2\n\
-  ARG1 - ARG2       arithmetic difference of ARG1 and ARG2\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-  ARG1 * ARG2       arithmetic product of ARG1 and ARG2\n\
-  ARG1 / ARG2       arithmetic quotient of ARG1 divided by ARG2\n\
-  ARG1 % ARG2       arithmetic remainder of ARG1 divided by ARG2\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-  STRING : REGEXP   anchored pattern match of REGEXP in STRING\n\
-\n\
-  match STRING REGEXP        same as STRING : REGEXP\n\
-  substr STRING POS LENGTH   substring of STRING, POS counted from 1\n\
-  index STRING CHARS         index in STRING where any CHARS is found, or 0\n\
-  length STRING              length of STRING\n\
-"), stdout);
-        fputs(gettext("\
-  + TOKEN                    interpret TOKEN as a string, even if it is a\n\
-                               keyword like 'match' or an operator like '/'\n\
-\n\
-  ( EXPRESSION )             value of EXPRESSION\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Beware that many operators need to be escaped or quoted for shells.\n\
-Comparisons are arithmetic if both ARGs are numbers, else lexicographical.\n\
-Pattern matches return the string matched between \\( and \\) or null; if\n\
-\\( and \\) are not used, they return the number of characters matched or 0.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Exit status is 0 if EXPRESSION is neither null nor 0, 1 if EXPRESSION is null\n\
-or 0, 2 if EXPRESSION is syntactically invalid, and 3 if an error occurred.\n\
-"), stdout);
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
         emit_ancillary_info("expr");
     };
     exit(status);
@@ -205,8 +159,10 @@ or 0, 2 if EXPRESSION is syntactically invalid, and 3 if an error occurred.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(EXPR_FAILURE);
+    atexit;
+    parse_long_options;
     if (1 < argc & streq(argv[1], "--"))
     {
         --argc;
@@ -218,9 +174,11 @@ cdecl main(int argc, byte** argv) -> int
         usage(EXPR_INVALID);
     };
     args = argv + 1;
-    valinfo* v;
+    valinfo* v = eval;
+    if (!nomoreargs())
+        error(EXPR_INVALID, 0, gettext("syntax error: unexpected argument %s"), quotearg_n_style);
     printv(v);
-    return ?(v);
+    return null(v);
 };
 
 cdecl int_value(ulong i) -> valinfo*
@@ -257,23 +215,20 @@ cdecl tostring(valinfo* v) -> void
         case (integer)
         {
             {
-                byte* s = mpz_get_str(((void*)0), 10, v.);
+                byte* s = mpz_get_str;
                 mpz_clear(v.);
                 v. = s;
                 v.type = string;
             };
+            break switch;
         }
-        goto _switch_end_139188887538640;
         case (string)
         {
-            goto _switch_end_139188887538640;
         }
         default
         {
-            unreachable();
         };
     };
-    label _switch_end_139188887538640:
 };
 
 cdecl toarith(valinfo* v) -> int
@@ -288,34 +243,30 @@ cdecl toarith(valinfo* v) -> int
             {
                 byte* s = v.;
                 if (mpz_init_set_str(v., s, 10) != 0)
-                    error(EXPR_FAILURE, 0, "%s", (s));
+                    error;
                 free(s);
                 v.type = integer;
             };
         }
         default
         {
-            unreachable();
         };
     };
 };
 
 cdecl getsize(int i) -> ulong
 {
-    if (mpz_sgn(?) < 0)
-        return (0);
-    if (mpz_fits_ulong_p(?))
+    if (mpz_fits_ulong_p(i))
     {
-        ulong ul = mpz_get_ui(?);
-        if (ul < (0))
+        ulong ul = mpz_get_ui(i);
+        if (ul < SIZE_MAX)
             return ul;
     };
-    return (0) ? 1;
 };
 
 cdecl nextarg(byte* str) -> int
 {
-    if (*args == ((void*)0))
+    if (* args == NULL)
     else
     {
         bool;
@@ -324,6 +275,8 @@ cdecl nextarg(byte* str) -> int
 
 cdecl require_more_args() -> void
 {
+    if (nomoreargs())
+        error(EXPR_INVALID, 0, gettext("syntax error: missing argument after %s"), quotearg_n_style);
 };
 
 cdecl docolon(valinfo* sv, valinfo* pv) -> valinfo*
@@ -332,53 +285,47 @@ cdecl docolon(valinfo* sv, valinfo* pv) -> valinfo*
     tostring(pv);
     re_registers re_regs;
     re_regs. = 0;
-    re_regs. = ((void*)0);
-    re_regs. = ((void*)0);
     re_pattern_buffer re_buffer;
-    byte[256] fastmap = (0 ? 0 ? 0) ? 1;
-    re_buffer = ((void*)0);
-    re_buffer = 0;
-    re_buffer = fastmap;
-    re_buffer = ((void*)0);
+    byte fastmap;
+    re_buffer. = 0;
+    re_buffer. = fastmap;
     byte* errmsg = re_compile_pattern(pv., strlen(pv.), @re_buffer);
     if (errmsg)
         error(EXPR_INVALID, 0, "%s", (errmsg));
-    re_buffer = 0;
+    re_buffer. = 0;
     valinfo* v;
-    int matchlen = re_match(@re_buffer, sv., strlen(sv.), 0, @?);
     if (0 <= matchlen)
     {
-        if (re_buffer.re_nsub > 0)
+        if (re_buffer. > 0)
         {
-            if (?.[1] < 0)
+            if (re_regs.[1] < 0)
                 v = str_value("");
             else
             {
-                sv.[?.[1]] = '\0';
-                v = str_value(sv. + ?.[1]);
+                sv.[re_regs.[1]] = '\0';
+                v = str_value(sv. + re_regs.[1]);
             };
         }
         else
         {
-            ulong i = ((__ctype_get_mb_cur_max()) ? 1 ? matchlen : mbs_offset_to_chars(sv., matchlen));
+            ulong i;
             v = int_value(i);
         };
     }
-    elif (matchlen == -1)
+    elif (matchlen == - 1)
     {
-        if (re_buffer.re_nsub > 0)
+        if (re_buffer. > 0)
             v = str_value("");
         else
             v = int_value(0);
     };
     else
-        error(EXPR_FAILURE, matchlen == -2 ? (?__errno_location()) : 0, gettext("error in regular expression matcher"));
-    if (0 < ?.)
+        error;
+    if (0 < re_regs.)
     {
-        free(?.);
-        free(?.);
+        free(re_regs.);
+        free(re_regs.);
     };
-    re_buffer = ((void*)0);
     regfree(@re_buffer);
     return v;
 };
@@ -386,38 +333,42 @@ cdecl docolon(valinfo* sv, valinfo* pv) -> valinfo*
 cdecl eval7(int evaluate) -> valinfo*
 {
     require_more_args();
-    if (?("("))
+    if (nextarg("("))
     {
-        valinfo* v = ?(?);
+        valinfo* v = eval(evaluate);
+        if (nomoreargs())
+            error(EXPR_INVALID, 0, gettext("syntax error: expecting ')' after %s"), quotearg_n_style);
+        if (!nextarg(")"))
+            error(EXPR_INVALID, 0, gettext("syntax error: expecting ')' instead of %s"), quotearg_n_style);
         return v;
     };
-    if (?(")"))
+    if (nextarg(")"))
         error(EXPR_INVALID, 0, gettext("syntax error: unexpected ')'"));
     return str_value(*args++);
 };
 
 cdecl eval6(int evaluate) -> valinfo*
 {
-    if (?("+"))
+    if (nextarg("+"))
     {
         require_more_args();
         return str_value(*args++);
     }
-    elif (?("length"))
+    elif (nextarg("length"))
     {
-        valinfo* r = ?(?);
+        valinfo* r = eval6(evaluate);
         tostring(r);
         valinfo* v = int_value(mbslen(r.));
         freev(r);
         return v;
     };
     else
-        if (?("match"))
+        if (nextarg("match"))
         {
-            valinfo* l = ?(?);
-            valinfo* r = ?(?);
+            valinfo* l = eval6(evaluate);
+            valinfo* r = eval6(evaluate);
             valinfo* v;
-            if (?)
+            if (evaluate)
             {
                 v = docolon(l, r);
                 freev(l);
@@ -427,10 +378,10 @@ cdecl eval6(int evaluate) -> valinfo*
             freev(r);
             return v;
         }
-        elif (?("index"))
+        elif (nextarg("index"))
         {
-            valinfo* l = ?(?);
-            valinfo* r = ?(?);
+            valinfo* l = eval6(evaluate);
+            valinfo* r = eval6(evaluate);
             tostring(l);
             tostring(r);
             ulong pos = mbs_logical_cspn(l., r.);
@@ -440,19 +391,19 @@ cdecl eval6(int evaluate) -> valinfo*
             return v;
         };
         else
-            if (?("substr"))
+            if (nextarg("substr"))
             {
-                valinfo* l = ?(?);
-                valinfo* i1 = ?(?);
-                valinfo* i2 = ?(?);
+                valinfo* l = eval6(evaluate);
+                valinfo* i1 = eval6(evaluate);
+                valinfo* i2 = eval6(evaluate);
                 tostring(l);
                 valinfo* v;
-                if (!?(i1) | !?(i2))
+                if (!toarith(i1) | !toarith(i2))
                     v = str_value("");
                 else
                 {
-                    ulong pos = ?(i1.);
-                    ulong len = ?(i2.);
+                    ulong pos = getsize(i1.);
+                    ulong len = getsize(i2.);
                     byte* s = mbs_logical_substr(l., pos, len);
                     v = str_value(s);
                     free(s);
@@ -463,18 +414,18 @@ cdecl eval6(int evaluate) -> valinfo*
                 return v;
             }
             else
-                return ?(?);
+                return eval7(evaluate);
 };
 
 cdecl eval5(int evaluate) -> valinfo*
 {
-    valinfo* l = ?(?);
-    while (?)
+    valinfo* l = eval6(evaluate);
+    while (true)
     {
-        if (?(":"))
+        if (nextarg(":"))
         {
-            valinfo* r = ?(?);
-            if (?)
+            valinfo* r = eval6(evaluate);
+            if (evaluate)
             {
                 valinfo* v = docolon(l, r);
                 freev(l);
@@ -489,23 +440,23 @@ cdecl eval5(int evaluate) -> valinfo*
 
 cdecl eval4(int evaluate) -> valinfo*
 {
-    valinfo* l = ?(?);
-    while (?)
+    valinfo* l = eval5(evaluate);
+    while (true)
     {
         enum (unnamed at tests/coreutils/expr.c:781:7) fxn = enum { multiply , divide , mod };
-        if (?("*"))
+        if (nextarg("*"))
             fxn = multiply;
-        elif (?("/"))
+        elif (nextarg("/"))
             fxn = divide;
         else
-            if (?("%"))
+            if (nextarg("%"))
                 fxn = mod;
             else
                 return l;
-        valinfo* r = ?(?);
-        if (?)
+        valinfo* r = eval5(evaluate);
+        if (evaluate)
         {
-            if (!?(l) | !?(r))
+            if (!toarith(l) | !toarith(r))
                 error(EXPR_INVALID, 0, gettext("non-integer argument"));
             if (fxn != multiply & mpz_sgn(r.) == 0)
                 error(EXPR_INVALID, 0, gettext("division by zero"));
@@ -516,20 +467,20 @@ cdecl eval4(int evaluate) -> valinfo*
 
 cdecl eval3(int evaluate) -> valinfo*
 {
-    valinfo* l = ?(?);
-    while (?)
+    valinfo* l = eval4(evaluate);
+    while (true)
     {
         enum (unnamed at tests/coreutils/expr.c:818:7) fxn = enum { plus , minus };
-        if (?("+"))
+        if (nextarg("+"))
             fxn = plus;
-        elif (?("-"))
+        elif (nextarg("-"))
             fxn = minus;
         else
             return l;
-        valinfo* r = ?(?);
-        if (?)
+        valinfo* r = eval4(evaluate);
+        if (evaluate)
         {
-            if (!?(l) | !?(r))
+            if (!toarith(l) | !toarith(r))
                 error(EXPR_INVALID, 0, gettext("non-integer argument"));
         };
         freev(r);
@@ -538,29 +489,29 @@ cdecl eval3(int evaluate) -> valinfo*
 
 cdecl eval2(int evaluate) -> valinfo*
 {
-    valinfo* l = ?(?);
-    while (?)
+    valinfo* l = eval3(evaluate);
+    while (true)
     {
         enum (unnamed at tests/coreutils/expr.c:848:7) fxn = enum { less_than , less_equal , equal , not_equal , greater_equal , greater_than };
-        if (?("<"))
+        if (nextarg("<"))
             fxn = less_than;
-        elif (?("<="))
+        elif (nextarg("<="))
             fxn = less_equal;
         else
-            if (?("=") | ?("=="))
+            if (nextarg("=") | nextarg("=="))
                 fxn = equal;
-            elif (?("!="))
+            elif (nextarg("!="))
                 fxn = not_equal;
             else
-                if (?(">="))
+                if (nextarg(">="))
                     fxn = greater_equal;
-                elif (?(">"))
+                elif (nextarg(">"))
                     fxn = greater_than;
                 else
                     return l;
-        valinfo* r = ?(?);
+        valinfo* r = eval3(evaluate);
         bool;
-        if (?)
+        if (evaluate)
         {
             tostring(l);
             tostring(r);
@@ -569,61 +520,60 @@ cdecl eval2(int evaluate) -> valinfo*
                 cmp = strintcmp(l., r.);
             else
             {
-                (?__errno_location()) ? 0;
                 cmp = strcoll(l., r.);
-                if ((?__errno_location()))
+                if (errno)
                 {
-                    error(0, (?__errno_location()), gettext("string comparison failed"));
+                    error;
                     error(0, 0, gettext("set LC_ALL='C' to work around the problem"));
+                    error(EXPR_INVALID, 0, gettext("the strings compared were %s and %s"), quotearg_n_style, quotearg_n_style);
                 };
             };
             switch (fxn)
             {
                 case (less_than)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188838783440;
                 case (less_equal)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188838783440;
                 case (equal)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188838783440;
                 case (not_equal)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188838783440;
                 case (greater_equal)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188838783440;
                 case (greater_than)
                 {
+                    break switch;
                 }
-                goto _switch_end_139188838783440;
                 default
                 {
-                    unreachable();
                 };
             };
-            label _switch_end_139188838783440:
         };
         freev(l);
         freev(r);
+        l = int_value;
     };
 };
 
 cdecl eval1(int evaluate) -> valinfo*
 {
-    valinfo* l = ?(?);
-    while (?)
+    valinfo* l = eval2(evaluate);
+    while (true)
     {
-        if (?("&"))
+        if (nextarg("&"))
         {
-            valinfo* r = ?(? & !?(l));
-            if (?(l) | ?(r))
+            valinfo* r = eval2(evaluate & !null(l));
+            if (null(l) | null(r))
             {
                 freev(l);
                 freev(r);

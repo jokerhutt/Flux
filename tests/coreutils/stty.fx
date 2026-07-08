@@ -45,29 +45,41 @@ macro Control(c)
     ( ( c ) `& 0x1f )
 };
 
-macro CEOL2
+macro CINTR
+{
+    Control ( 'c' )
+};
+
+uint CQUIT = 28;
+uint CERASE = 127;
+macro CKILL
+{
+    Control ( 'u' )
+};
+
+macro CEOF
+{
+    Control ( 'd' )
+};
+
+macro CEOL
 {
     _POSIX_VDISABLE
 };
 
-macro VSWTCH
+macro CSTART
 {
-    VSWTC
+    Control ( 'q' )
 };
 
-macro CSWTCH
+macro CSTOP
 {
-    _POSIX_VDISABLE
+    Control ( 's' )
 };
 
-macro VFLUSHO
+macro CSUSP
 {
-    VDISCARD
-};
-
-macro CFLUSHO
-{
-    Control ( 'o' )
+    Control ( 'z' )
 };
 
 uint SANE_SET = 1;
@@ -108,24 +120,24 @@ struct mode_info
     ulong mask;
 };
 
-mode_info[62] mode_info = mode_info;
+mode_info* mode_info = mode_info;
 struct control_info
 {
     byte* name;
-    byte saneval;
+    int saneval;
     ulong offset;
 };
 
-control_info[19] control_info = control_info;
-cdecl visible(byte ch) -> byte*;
-cdecl baud_to_value(uint speed) -> ulong;
+control_info* control_info = control_info;
+cdecl visible(int ch) -> byte*;
+cdecl baud_to_value(int speed) -> ulong;
 cdecl recover_mode(byte* arg, termios* mode) -> int;
 cdecl screen_columns() -> int;
 cdecl set_mode(mode_info* info, int reversed, termios* mode) -> int;
 cdecl eq_mode(termios* mode1, termios* mode2) -> int;
-cdecl integer_arg(byte* s, ulong max) -> ulong;
-cdecl string_to_baud(byte* arg) -> uint;
-cdecl mode_type_flag(mode_type type, termios* mode) -> uint*;
+cdecl integer_arg(byte* s, int max) -> int;
+cdecl string_to_baud(byte* arg) -> int;
+cdecl mode_type_flag(mode_type type, termios* mode) -> int*;
 cdecl display_all(termios* mode, byte* device_name) -> void;
 cdecl display_changed(termios* mode) -> void;
 cdecl display_recoverable(termios* mode) -> void;
@@ -139,22 +151,22 @@ cdecl set_speed(speed_setting type, byte* arg, termios* mode) -> void;
 cdecl set_window_size(int rows, int cols, byte* device_name) -> void;
 extern int max_col;
 extern int current_col;
-int tcsetattr_options = 0;
+extern int tcsetattr_options;
 extern int dev_debug;
-uint last_ibaud = speed_t;
-uint last_obaud = speed_t;
-uint DEV_DEBUG_OPTION = 128;
+extern int last_ibaud;
+extern int last_obaud;
+uint DEV_DEBUG_OPTION = 0;
 
-option[7] longopts = option;
+struct option;
+extern int longopts;
 cdecl ATTRIBUTE_FORMAT(int printf) -> int;
 cdecl wrapf(byte* message, ...) -> void
 {
-    __va_list_tag[1] args;
     byte* buf;
     int buflen;
-    __builtin_va_start(args, message);
-    buflen = vasprintf(@buf, message, args);
-    __builtin_va_end(args);
+    va_start;
+    buflen = vasprintf;
+    va_end;
     if (buflen < 0)
         xalloc_die();
     if (0 < current_col)
@@ -170,274 +182,90 @@ cdecl wrapf(byte* message, ...) -> void
             current_col++;
         };
     };
-    fputs(buf, stdout);
+    fputs;
     free(buf);
     current_col += buflen;
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print or change terminal characteristics.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("stty", gettext("\
-  -a, --all          print all current settings in human-readable form\n\
+        oputs_("stty", gettext("\
+  -a, --all          print all current settings in human-readable form\n\
 "));
-        oputs_("stty", gettext("\
-  -g, --save         print all current settings in a stty-readable form\n\
+        oputs_("stty", gettext("\
+  -g, --save         print all current settings in a stty-readable form\n\
 "));
-        oputs_("stty", gettext("\
-  -F, --file=DEVICE  open and use DEVICE instead of standard input\n\
+        oputs_("stty", gettext("\
+  -F, --file=DEVICE  open and use DEVICE instead of standard input\n\
 "));
         oputs_("stty", gettext("      --help\n         display this help and exit\n"));
         oputs_("stty", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-Optional - before SETTING indicates negation.  An * marks non-POSIX\n\
-settings.  The underlying system defines which settings are available.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Special characters:\n"), stdout);
-        fputs(gettext("\
- * discard CHAR  CHAR will toggle discarding of output\n\
-"), stdout);
-        fputs(gettext("\
-   eof CHAR      CHAR will send an end of file (terminate the input)\n\
-   eol CHAR      CHAR will end the line\n\
-"), stdout);
-        fputs(gettext("\
- * eol2 CHAR     alternate CHAR for ending the line\n\
-"), stdout);
-        fputs(gettext("\
-   erase CHAR    CHAR will erase the last character typed\n\
-   intr CHAR     CHAR will send an interrupt signal\n\
-   kill CHAR     CHAR will erase the current line\n\
-"), stdout);
-        fputs(gettext("\
- * lnext CHAR    CHAR will enter the next character quoted\n\
-"), stdout);
-        fputs(gettext("\
-   quit CHAR     CHAR will send a quit signal\n\
-"), stdout);
-        fputs(gettext("\
- * rprnt CHAR    CHAR will redraw the current line\n\
-"), stdout);
-        fputs(gettext("\
-   start CHAR    CHAR will restart the output after stopping it\n\
-   stop CHAR     CHAR will stop the output\n\
-   susp CHAR     CHAR will send a terminal stop signal\n\
-"), stdout);
-        fputs(gettext("\
- * swtch CHAR    CHAR will switch to a different shell layer\n\
-"), stdout);
-        fputs(gettext("\
- * werase CHAR   CHAR will erase the last word typed\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Special settings:\n\
-   N             set the input and output speeds to N bauds\n\
-"), stdout);
-        fputs(gettext("\
-   cols N        tell the kernel that the terminal has N columns\n\
- * columns N     same as cols N\n\
-"), stdout);
-        printf(gettext("\
- * [-]drain      wait for transmission before applying settings (%s by default)\
-\n"), tcsetattr_options == 0 ? gettext("on") : gettext("off"));
-        fputs(gettext("\
-   ispeed N      set the input speed to N\n\
-"), stdout);
-        fputs(gettext("\
-   min N         with -icanon, set N characters minimum for a completed read\n\
-   ospeed N      set the output speed to N\n\
-"), stdout);
-        fputs(gettext("\
-   rows N        tell the kernel that the terminal has N rows\n\
-   size          print the number of rows and columns according to the kernel\n\
-"), stdout);
-        fputs(gettext("\
-   speed         print the terminal speed\n\
-   time N        with -icanon, set read timeout of N tenths of a second\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Control settings:\n\
-   [-]clocal     disable modem control signals\n\
-   [-]cread      allow input to be received\n\
-"), stdout);
-        fputs(gettext("\
-   csN           set character size to N bits, N in [5..8]\n\
-"), stdout);
-        fputs(gettext("\
-   [-]cstopb     use two stop bits per character (one with '-')\n\
-   [-]hup        send a hangup signal when the last process closes the tty\n\
-   [-]hupcl      same as [-]hup\n\
-   [-]parenb     generate parity bit in output and expect parity bit in input\n\
-   [-]parodd     set odd parity (or even parity with '-')\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Input settings:\n\
-   [-]brkint     breaks cause an interrupt signal\n\
-   [-]icrnl      translate carriage return to newline\n\
-   [-]ignbrk     ignore break characters\n\
-   [-]igncr      ignore carriage return\n\
-   [-]ignpar     ignore characters with parity errors\n\
-"), stdout);
-        fputs(gettext("\
- * [-]imaxbel    beep and do not flush a full input buffer on a character\n\
-"), stdout);
-        fputs(gettext("\
-   [-]inlcr      translate newline to carriage return\n\
-   [-]inpck      enable input parity checking\n\
-   [-]istrip     clear high (8th) bit of input characters\n\
-"), stdout);
-        fputs(gettext("\
- * [-]iutf8      assume input characters are UTF-8 encoded\n\
-"), stdout);
-        fputs(gettext("\
- * [-]iuclc      translate uppercase characters to lowercase\n\
-"), stdout);
-        fputs(gettext("\
- * [-]ixany      let any character restart output, not only start character\n\
-"), stdout);
-        fputs(gettext("\
-   [-]ixoff      enable sending of start/stop characters\n\
-   [-]ixon       enable XON/XOFF flow control\n\
-   [-]parmrk     mark parity errors (with a 255-0-character sequence)\n\
-   [-]tandem     same as [-]ixoff\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Output settings:\n\
-"), stdout);
-        fputs(gettext("\
- * [-]ocrnl      translate carriage return to newline\n\
-"), stdout);
-        fputs(gettext("\
- * [-]ofdel      use delete characters for fill instead of NUL characters\n\
-"), stdout);
-        fputs(gettext("\
- * [-]ofill      use fill (padding) characters instead of timing for delays\n\
-"), stdout);
-        fputs(gettext("\
- * [-]olcuc      translate lowercase characters to uppercase\n\
-"), stdout);
-        fputs(gettext("\
- * [-]onlcr      translate newline to carriage return-newline\n\
-"), stdout);
-        fputs(gettext("\
- * [-]onlret     newline performs a carriage return\n\
-"), stdout);
-        fputs(gettext("\
- * [-]onocr      do not print carriage returns in the first column\n\
-"), stdout);
-        fputs(gettext("\
-   [-]opost      postprocess output\n\
-"), stdout);
-        fputs(gettext("\
- * vtN           vertical tab delay style, N in [0..1]\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Local settings:\n\
-   [-]crterase   echo erase characters as backspace-space-backspace\n\
-"), stdout);
-        fputs(gettext("\
-   [-]echo       echo input characters\n\
-"), stdout);
-        fputs(gettext("\
-   [-]echoe      same as [-]crterase\n\
-   [-]echok      echo a newline after a kill character\n\
-"), stdout);
-        fputs(gettext("\
-   [-]echonl     echo newline even if not echoing other characters\n\
-"), stdout);
-        printf(gettext("\
-   [-]icanon     enable special characters: %s\n\
-   [-]iexten     enable non-POSIX special characters\n\
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        printf;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        printf(gettext("\
+   [-]icanon     enable special characters: %s\n\
+   [-]iexten     enable non-POSIX special characters\n\
 "), "erase, kill");
-        fputs(gettext("\
-   [-]isig       enable interrupt, quit, and suspend special characters\n\
-   [-]noflsh     disable flushing after interrupt and quit special characters\n\
-"), stdout);
-        fputs(gettext("\
- * [-]tostop     stop background jobs that try to write to the terminal\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-Combination settings:\n\
-"), stdout);
-        fputs(gettext("\
-   cbreak        same as -icanon\n\
-   -cbreak       same as icanon\n\
-"), stdout);
-        fputs(gettext("\
-   cooked        same as brkint ignpar istrip icrnl ixon opost isig\n\
-                 icanon, eof and eol characters to their default values\n\
-   -cooked       same as raw\n\
-"), stdout);
-        printf(gettext("\
-   crt           same as %s\n\
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        printf(gettext("\
+   crt           same as %s\n\
 "), "echoe");
-        printf(gettext("\
-   dec           same as %s intr ^c erase 0177\n\
-                 kill ^u\n\
+        printf(gettext("\
+   dec           same as %s intr ^c erase 0177\n\
+                 kill ^u\n\
 "), "echoe");
-        fputs(gettext("\
- * [-]decctlq    same as [-]ixany\n\
-"), stdout);
-        fputs(gettext("\
-   ek            erase and kill characters to their default values\n\
-   evenp         same as parenb -parodd cs7\n\
-   -evenp        same as -parenb cs8\n\
-"), stdout);
-        fputs(gettext("\
-   litout        same as -parenb -istrip -opost cs8\n\
-   -litout       same as parenb istrip opost cs7\n\
-"), stdout);
-        printf(gettext("\
-   nl            same as %s\n\
-   -nl           same as %s\n\
+        fputs;
+        fputs;
+        printf(gettext("\
+   nl            same as %s\n\
+   -nl           same as %s\n\
 "), "-icrnl", "icrnl -inlcr -igncr");
-        fputs(gettext("\
-   oddp          same as parenb parodd cs7\n\
-   -oddp         same as -parenb cs8\n\
-   [-]parity     same as [-]evenp\n\
-   pass8         same as -parenb -istrip cs8\n\
-   -pass8        same as parenb istrip cs7\n\
-"), stdout);
-        printf(gettext("\
-   raw           same as -ignbrk -brkint -ignpar -parmrk -inpck -istrip\n\
-                 -inlcr -igncr -icrnl -ixon -ixoff -icanon -opost\n\
-                 -isig%s min 1 time 0\n\
-   -raw          same as cooked\n\
-"), " -iuclc");
-        printf(gettext("\
-   sane          same as cread -ignbrk brkint -inlcr -igncr icrnl\n\
-                 icanon iexten echo echoe echok -echonl -noflsh\n\
-                 %s\n\
-                 %s\n\
-                 %s,\n\
-                 all special characters to their default values\n\
+        fputs;
+        printf;
+        printf(gettext("\
+   sane          same as cread -ignbrk brkint -inlcr -igncr icrnl\n\
+                 icanon iexten echo echoe echok -echonl -noflsh\n\
+                 %s\n\
+                 %s\n\
+                 %s,\n\
+                 all special characters to their default values\n\
 "), "-ixoff", "opost", "isig");
-        fputs(gettext("\
-\n\
-Handle the tty line connected to standard input.  Without arguments,\n\
-prints baud rate, line discipline, and deviations from stty sane.  In\n\
-settings, CHAR is taken literally, or coded as in ^c, 0x37, 0177 or\n\
-127; special values ^- or undef used to disable special characters.\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("stty");
     };
     exit(status);
@@ -461,44 +289,15 @@ cdecl apply_settings(int checking, byte* device_name, byte** settings, int n_set
         {
             continue;
         };
-        for (int i = 0; mode_info[i].name != ((void*)0); ++i)
-        {
-            if (streq(arg, mode_info[i].name))
-            {
-                if ((mode_info[i].flags `& 16) == 0)
-                {
-                }
-                else
-                break;
-            };
-        };
-        if (?)
+        if (! match_found && reversed)
         {
             error(0, 0, gettext("invalid argument %s"), quote(arg - 1));
-            usage(0);
+            usage;
         };
-        if (?)
+        if (! match_found)
         {
-            for (int i = 0; control_info[i].name != ((void*)0); ++i)
-            {
-                if (streq(arg, control_info[i].name))
-                {
-                    do
-                    {
-                        if (k ? n_settings ? 1 ? ?settings[k ? 1])
-                        {
-                            error(0, 0, gettext("missing argument to %s"), quote(arg));
-                            usage(0);
-                        };
-                    }
-                    while (0);
-                    ++k;
-                    set_control_char(@control_info[i], settings[k], mode);
-                    break;
-                };
-            };
         };
-        if (?)
+        if (! match_found || not_set_attr)
         {
             if (streq(arg, "ispeed"))
             {
@@ -507,18 +306,18 @@ cdecl apply_settings(int checking, byte* device_name, byte** settings, int n_set
                     if (k ? n_settings ? 1 ? ?settings[k ? 1])
                     {
                         error(0, 0, gettext("missing argument to %s"), quote(arg));
-                        usage(0);
+                        usage;
                     };
                 }
                 while (0);
                 ++k;
-                if (string_to_baud(settings[k]) == (uint)-1)
+                if (string_to_baud ( settings [ k ] ) == ( speed_t ) - 1)
                 {
                     error(0, 0, gettext("invalid ispeed %s"), quote(settings[k]));
-                    usage(0);
+                    usage;
                 };
                 set_speed(input_speed, settings[k], mode);
-                if (?)
+                if (checking)
                     continue;
             }
             elif (streq(arg, "ospeed"))
@@ -528,85 +327,45 @@ cdecl apply_settings(int checking, byte* device_name, byte** settings, int n_set
                     if (k ? n_settings ? 1 ? ?settings[k ? 1])
                     {
                         error(0, 0, gettext("missing argument to %s"), quote(arg));
-                        usage(0);
+                        usage;
                     };
                 }
                 while (0);
                 ++k;
-                if (string_to_baud(settings[k]) == (uint)-1)
+                if (string_to_baud ( settings [ k ] ) == ( speed_t ) - 1)
                 {
                     error(0, 0, gettext("invalid ospeed %s"), quote(settings[k]));
-                    usage(0);
+                    usage;
                 };
                 set_speed(output_speed, settings[k], mode);
-                if (?)
+                if (checking)
                     continue;
             };
             else
-                if (streq(arg, "rows"))
+                if (streq(arg, "speed"))
                 {
-                    do
-                    {
-                        if (k ? n_settings ? 1 ? ?settings[k ? 1])
-                        {
-                            error(0, 0, gettext("missing argument to %s"), quote(arg));
-                            usage(0);
-                        };
-                    }
-                    while (0);
-                    ++k;
-                    if (?)
+                    if (checking)
                         continue;
-                    set_window_size(integer_arg(settings[k], 0), -1, device_name);
+                    max_col = screen_columns();
+                    display_speed;
                 }
-                elif (streq(arg, "cols") | streq(arg, "columns"))
+                elif (string_to_baud ( arg ) != ( speed_t ) - 1)
                 {
-                    do
-                    {
-                        if (k ? n_settings ? 1 ? ?settings[k ? 1])
-                        {
-                            error(0, 0, gettext("missing argument to %s"), quote(arg));
-                            usage(0);
-                        };
-                    }
-                    while (0);
-                    ++k;
-                    if (?)
+                    set_speed(both_speeds, arg, mode);
+                    if (checking)
                         continue;
-                    set_window_size(-1, integer_arg(settings[k], 0), device_name);
                 };
                 else
-                    if (streq(arg, "size"))
+                {
+                    if (!recover_mode(arg, mode))
                     {
-                        if (?)
-                            continue;
-                        max_col = screen_columns();
-                        current_col = 0;
-                    }
-                    elif (streq(arg, "speed"))
-                    {
-                        if (?)
-                            continue;
-                        max_col = screen_columns();
+                        error(0, 0, gettext("invalid argument %s"), quote(arg));
+                        usage;
                     };
-                    else
-                        if (string_to_baud(arg) != (uint)-1)
-                        {
-                            set_speed(both_speeds, arg, mode);
-                            if (?)
-                                continue;
-                        }
-                        else
-                        {
-                            if (!?(arg, mode))
-                            {
-                                error(0, 0, gettext("invalid argument %s"), quote(arg));
-                                usage(0);
-                            };
-                        };
+                };
         };
     };
-    if (?)
+    if (checking)
         check_speed(mode);
 };
 
@@ -621,85 +380,52 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     bool;
     bool;
-    byte* file_name = ((void*)0);
+    byte* file_name;
     byte* device_name;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     output_type = changed;
-    opterr = 0;
-    while ((optc = getopt_long(argc - argi, argv + argi, "-agF:", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('a')
-            {
-            }
-            output_type = all;
-            goto _switch_end_139188836028880;
-            case ('g')
-            {
-            }
-            output_type = recoverable;
-            goto _switch_end_139188836028880;
-            case ('F')
-            {
-                if (file_name)
-                    error(0, 0, gettext("only one device may be specified"));
-            }
-            file_name = optarg;
-            goto _switch_end_139188836028880;
-            case (DEV_DEBUG_OPTION)
-            {
-            }
-            goto _switch_end_139188836028880;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188836028880;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188836028880;
-            default
-            {
-            };
-            argi += opti;
-            opti = 1;
-            optind = 0;
-            goto _switch_end_139188836028880;
-        };
-        label _switch_end_139188836028880:
-        while (opti < optind)
-            argv[argi + opti++] = ((void*)0);
     };
-    if (?)
-        error(0, 0, gettext("the options for verbose and stty-readable output styles are\n"));
-    if (?)
-        error(0, 0, gettext("when specifying an output style, modes may not be set"));
+    if (verbose_output && recoverable_output)
+        error;
+    if (! noargs && ( verbose_output || recoverable_output ))
+        error;
     device_name = file_name ? file_name : gettext("standard input");
-    if (?)
+    if (! noargs && ! verbose_output && ! recoverable_output)
     {
         termios check_mode;
+        apply_settings;
     };
     if (file_name)
     {
         int fdflags;
+        if (fd_reopen < 0)
+            error;
+        if ((fdflags = fcntl) == -1 | fcntl < 0)
+            error;
     };
-    if (?)
+    if (tcgetattr)
+        error;
+    if (verbose_output || recoverable_output || noargs)
     {
         max_col = screen_columns();
         current_col = 0;
         display_settings(output_type, @mode, device_name);
-        return 0;
     };
-    if (?)
+    apply_settings;
+    if (require_set_attr)
     {
         termios new_mode;
-        if (!?(@mode, @new_mode))
+        if (tcsetattr)
+            error;
+        if (tcgetattr)
+            error;
+        if (!eq_mode(@mode, @new_mode))
         {
-            if (?)
+            if (dev_debug)
             {
                 error(0, 0, gettext("indx: mode: actual mode"));
                 for (uint i = 0; i < (sizeof ( new_mode ) / 8); i++)
@@ -709,35 +435,27 @@ cdecl main(int argc, byte** argv) -> int
                     error(0, 0, "0x%02x, 0x%02x: 0x%02x%s", i, oldc, newc, newc == oldc ? "" : " *");
                 };
             };
+            error;
         };
     };
-    return 0;
-};
-
-cdecl get_win_size(int fd, winsize* win) -> int
-{
-    int err = ioctl(fd, 0, (byte*)win);
-    return err;
 };
 
 extern int tcflag_t;
-cdecl strtoul_tcflag_t(byte* s, int base, byte** p, uint* result, byte delim) -> int
+cdecl strtoul_tcflag_t(byte* s, int base, byte** p, int* result, byte delim) -> int
 {
     ulong ul;
-    (?__errno_location()) ? 0;
     ul = strtoul(s, p, base);
-    if ((?__errno_location()) ? ?*p != delim ? *p == s ? (uint)ul != ul)
+    if (errno || * * p != delim || * p == s || ( tcflag_t ) ul != ul)
         return -1;
     *result = ul;
     return 0;
 };
 
-cdecl strtoul_cc_t(byte* s, int base, byte** p, byte* result, byte delim) -> int
+cdecl strtoul_cc_t(byte* s, int base, byte** p, int* result, byte delim) -> int
 {
     ulong ul;
-    (?__errno_location()) ? 0;
     ul = strtoul(s, p, base);
-    if ((?__errno_location()) ? ?*p != delim ? *p == s ? (byte)ul != ul)
+    if (errno || * * p != delim || * p == s || ( cc_t ) ul != ul)
         return -1;
     *result = ul;
     return 0;

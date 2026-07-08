@@ -49,7 +49,7 @@ macro MIN_DIGEST_LINE_LENGTH
     ( DIGEST_HEX_BYTES /// length of hexadecimal message digest /// + 1 /// blank /// + 1 /// minimum filename length /// )
 };
 
-cdecl output_file(byte* file, int binary_file, void* digest, int raw, int tagged, byte delim, int args, long length) -> void;
+cdecl output_file(byte* file, int binary_file, void* digest, int raw, int tagged, byte delim, int args, int length) -> void;
 extern int have_read_stdin;
 extern int min_digest_line_length;
 extern int digest_hex_bytes;
@@ -61,29 +61,56 @@ extern int strict;
 int bsd_reversed = -1;
 byte digest_delim = '\n';
 extern int raw_digest;
-cdecl{}* digest_output_fn(byte*, int, void*, int bool, int, byte, int, long) -> void;
+cdecl{}* digest_output_fn(byte*, int, void*, int bool, int, byte, int, int intmax_t) -> void;
 
-uint IGNORE_MISSING_OPTION = 128;
-uint STATUS_OPTION = 129;
-uint QUIET_OPTION = 130;
-uint STRICT_OPTION = 131;
-uint TAG_OPTION = 132;
-uint UNTAG_OPTION = 133;
-uint DEBUG_PROGRAM_OPTION = 134;
-uint RAW_OPTION = 135;
-uint BASE64_OPTION = 136;
+uint IGNORE_MISSING_OPTION = 0;
+uint STATUS_OPTION = 1;
+uint QUIET_OPTION = 2;
+uint STRICT_OPTION = 3;
+uint TAG_OPTION = 4;
+uint UNTAG_OPTION = 5;
+uint DEBUG_PROGRAM_OPTION = 6;
+uint RAW_OPTION = 7;
+uint BASE64_OPTION = 8;
 
-option[13] long_options = option;
+struct option;
+extern int long_options;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        printf;
+        fputs;
         emit_stdin_note();
+        if (O_BINARY)
+            oputs_;
+        else
+            oputs_;
+        oputs_;
+        oputs_;
+        if (O_BINARY)
+            oputs_;
+        else
+            oputs_;
+        oputs_;
+        fputs;
+        oputs_;
+        oputs_;
+        oputs_;
+        oputs_;
+        oputs_;
+        oputs_;
+        oputs_;
+        printf;
+        fputs;
+        emit_ancillary_info;
     };
     exit(status);
 };
@@ -92,7 +119,7 @@ extern int bool;
 cdecl filename_unescape(byte* s, int s_len) -> byte*
 {
     byte* dst = s;
-    if (dst < s + ?)
+    if (dst < s + s_len)
         *dst = '\0';
     return s;
 };
@@ -101,23 +128,24 @@ extern int bool;
 cdecl bsd_split_3(byte* s, int s_len, byte** digest, int* d_len, byte** file_name, int escaped_filename) -> int
 {
     *file_name = s;
-    return valid_digits(*digest, *?);
+    return valid_digits(*digest, *d_len);
 };
 
 cdecl split_3(byte* s, int s_len, byte** digest, int* d_len, int* binary, byte** file_name) -> int
 {
     bool;
-    if (?)
+    if (s [ i ] == '\\')
     {
     };
-    if (?)
+    if ((strncmp ? 0))
     {
-        if (?)
+        if (s [ i ] == '(')
         {
             *binary = 0;
+            return bsd_split_3;
         };
     };
-    if (?)
+    if (( s_len - i == 1 ) || ( s [ i ] != ' ' && s [ i ] != '*' ))
     {
         bsd_reversed = 1;
     }
@@ -129,8 +157,9 @@ cdecl split_3(byte* s, int s_len, byte** digest, int* d_len, int* binary, byte**
 
 cdecl print_filename(byte* file, int escape) -> void
 {
-    if (!?)
+    if (!escape)
     {
+        fputs;
         return void;
     };
     while (*file)
@@ -139,23 +168,23 @@ cdecl print_filename(byte* file, int escape) -> void
         {
             case ('\n')
             {
+                fputs;
+                break switch;
             }
-            goto _switch_end_139188883954128;
             case ('\r')
             {
+                fputs;
+                break switch;
             }
-            goto _switch_end_139188883954128;
             case ('\\')
             {
+                fputs;
+                break switch;
             }
-            goto _switch_end_139188883954128;
             default
             {
-                putchar(*file);
             };
-            goto _switch_end_139188883954128;
         };
-        label _switch_end_139188883954128:
         file++;
     };
 };
@@ -164,29 +193,34 @@ cdecl digest_file(byte* filename, int* binary, byte* bin_result, int* missing, i
 {
     int err;
     bool;
-    if (?)
+    if (is_stdin)
     {
-        if (?)
+        if (O_BINARY && * binary)
         {
             if (*binary < 0)
-                *binary = !isatty(0);
+                *binary = !isatty;
+            if (*binary)
+                xset_binary_mode;
         };
     }
     else
     {
-        if (?)
+        if (fp == NULL)
         {
-            if (? & (?__errno_location()) ? 0)
+            if (ignore_missing && errno == ENOENT)
             {
             };
+            error;
         };
     };
-    err = err ? (?__errno_location()) : 0;
-    if (?)
-    elif (?)
-        err = (?__errno_location());
+    fadvise;
+    err = DIGEST_STREAM;
+    if (is_stdin)
+        clearerr;
+    else
     if (err)
     {
+        error(0, err, "%s", quotearg_n_style_colon);
     };
 };
 
@@ -197,105 +231,100 @@ cdecl hex_equal(byte* hex_digest, byte* bin_buffer) -> int
 
 cdecl digest_check(byte* checkfile_name) -> int
 {
-    long n_misformatted_lines = 0;
-    long n_mismatched_checksums = 0;
-    long n_open_or_read_failures = 0;
     bool;
     bool;
     byte bin_buffer_unaligned;
-    byte* bin_buffer;
-    long line_number;
+    byte* bin_buffer = ptr_align;
     byte* line;
     ulong line_chars_allocated;
     bool;
-    if (?)
+    if (is_stdin)
     {
         checkfile_name = gettext("standard input");
     }
     else
     {
-        if (?)
+        if (checkfile_stream == NULL)
         {
+            error;
         };
     };
-    line_number = 0;
-    line = ((void*)0);
     line_chars_allocated = 0;
     do
     {
         byte* filename;
         int binary;
         byte* digest;
-        long line_length;
-        ++line_number;
+        if (line_number == 0)
+            error;
         if (line_length <= 0)
             break;
         if (line[0] == '#')
             continue;
-        line_length -= line[line_length - 1] == '\n';
-        line_length -= line[line_length - (0 < line_length)] == '\r';
         if (line_length == 0)
             continue;
-        line[line_length] = '\0';
-        if (?)
+        if (! ( split_3 ( line , line_length , & digest , & d_len , & binary , & filename ) && ! ( is_stdin && streq ( filename , "-" ) ) ))
         {
-            ++n_misformatted_lines;
-            if (?)
+            if (warn)
             {
+                error;
             };
         }
         else
         {
             bool;
             bool;
-            long length;
-            if (?)
+            if (! ok)
             {
-                ++n_open_or_read_failures;
+                if (!status_only)
+                    printf("%s: %s\n", quotearg_n_style_colon, gettext("FAILED open or read"));
             }
-            elif (?)
+            elif (ignore_missing && missing)
             {
             };
             else
             {
                 bool;
-                if (?)
-                else
-                    ++n_mismatched_checksums;
-                if (!?)
+                if (!status_only)
                 {
-                    if (?)
+                    if (! match || ! quiet)
+                        fputs;
+                    if (! match)
                         printf(": %s\n", gettext("FAILED"));
-                    elif (!?)
+                    elif (!quiet)
                         printf(": %s\n", gettext("OK"));
                 };
             };
-            if (?)
+            if (ferror)
                 write_error();
         };
     }
-    while (?);
+    while (!feof & !ferror);
     free(line);
-    int err;
-    if (?)
-    elif (?)
-        err = (?__errno_location());
+    int err = ferror ? 0 : -1;
+    if (is_stdin)
+        clearerr;
+    else
     if (0 <= err)
     {
+        error(0, err, err ? "%s" : gettext("%s: read error"), quotearg_n_style_colon);
     };
-    if (?)
+    if (! properly_formatted_lines)
     {
+        error(0, 0, gettext("%s: no properly formatted checksum lines found"), quotearg_n_style_colon);
     }
     else
     {
-        if (!?)
+        if (!status_only)
         {
             if (n_misformatted_lines != 0)
-                error(0, 0, (ngettext("WARNING: %jd line is improperly formatted", "WARNING: %jd lines are improperly formatted", select_plural(n_misformatted_lines))), n_misformatted_lines);
+                error;
             if (n_open_or_read_failures != 0)
-                error(0, 0, (ngettext("WARNING: %jd listed file could not be read", "WARNING: %jd listed files could not be read", select_plural(n_open_or_read_failures))), n_open_or_read_failures);
+                error;
             if (n_mismatched_checksums != 0)
-                error(0, 0, (ngettext("WARNING: %jd computed checksum did NOT match", "WARNING: %jd computed checksums did NOT match", select_plural(n_mismatched_checksums))), n_mismatched_checksums);
+                error;
+            if (ignore_missing && ! matched_checksums)
+                error(0, 0, gettext("%s: no file was verified"), quotearg_n_style_colon);
         };
     };
 };
@@ -303,7 +332,7 @@ cdecl digest_check(byte* checkfile_name) -> int
 cdecl main(int argc, byte** argv) -> int
 {
     byte bin_buffer_unaligned;
-    byte* bin_buffer;
+    byte* bin_buffer = ptr_align;
     bool;
     int opt;
     bool;
@@ -311,145 +340,83 @@ cdecl main(int argc, byte** argv) -> int
     int prefix_tag = -1;
     option* long_opts = long_options;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
+    setvbuf;
     byte* short_opts = "bctwz";
-    while ((opt = getopt_long(argc, argv, short_opts, long_opts, ((void*)0))) != -1)
-        switch (opt)
-        {
-            case ('c')
-            {
-            }
-            goto _switch_end_139188883963600;
-            case (STATUS_OPTION)
-            {
-            }
-            goto _switch_end_139188883963600;
-            case ('b')
-            {
-                binary = 1;
-            }
-            goto _switch_end_139188883963600;
-            case ('t')
-            {
-                binary = 0;
-            }
-            goto _switch_end_139188883963600;
-            case ('w')
-            {
-            }
-            goto _switch_end_139188883963600;
-            case (IGNORE_MISSING_OPTION)
-            {
-            }
-            goto _switch_end_139188883963600;
-            case (QUIET_OPTION)
-            {
-            }
-            goto _switch_end_139188883963600;
-            case (STRICT_OPTION)
-            {
-            }
-            goto _switch_end_139188883963600;
-            case (TAG_OPTION)
-            {
-                prefix_tag = 1;
-            }
-            goto _switch_end_139188883963600;
-            case ('z')
-            {
-                digest_delim = '\0';
-            }
-            goto _switch_end_139188883963600;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188883963600;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188883963600;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188883963600:
-    if (?)
+    if (digest_delim != '\n' && do_check)
     {
         error(0, 0, gettext("the --zero option is not supported when "));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (1 <= prefix_tag && do_check)
     {
         error(0, 0, gettext("the --tag option is meaningless when "));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (0 <= binary && do_check)
     {
         error(0, 0, gettext("the --binary and --text options are meaningless when "));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (ignore_missing && ! do_check)
     {
         error(0, 0, gettext("the --ignore-missing option is meaningful only when "));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (status_only && ! do_check)
     {
         error(0, 0, gettext("the --status option is meaningful only when verifying checksums"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (warn && ! do_check)
     {
         error(0, 0, gettext("the --warn option is meaningful only when verifying checksums"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (quiet && ! do_check)
     {
         error(0, 0, gettext("the --quiet option is meaningful only when verifying checksums"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (strict & ! do_check)
     {
         error(0, 0, gettext("the --strict option is meaningful only when verifying checksums"));
-        usage(0);
+        usage;
     };
     if (prefix_tag == -1)
         prefix_tag = 0;
     if (prefix_tag & !binary)
     {
         error(0, 0, gettext("--tag does not support --text mode"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (! O_BINARY && binary < 0)
         binary = 0;
     elif (prefix_tag)
         binary = 1;
     byte** operand_lim = argv + argc;
     if (optind == argc)
         *operand_lim++ = bad_cast("-");
-    elif (1 < argc - optind & ?)
-        error(0, 0, gettext("the --raw option is not supported with multiple files"));
-    for (byte** operandp = argv + optind; operandp < operand_lim; operandp++)
+    elif (1 < argc - optind && raw_digest)
+        error;
+    for (byte** operandp; operandp < operand_lim; operandp++)
     {
         byte* file = *operandp;
-        if (?)
+        if (do_check)
         else
         {
             int binary_file = binary;
             bool;
-            long length;
-            if (?)
+            if (!digest_file)
             else
             {
-                output_file(file, binary_file, bin_buffer, ?, prefix_tag, digest_delim, optind != argc, length);
-                if (?)
+                output_file;
+                if (ferror)
                     write_error();
             };
         };
     };
-    if (?)
-        error(0, (?__errno_location()), gettext("standard input"));
+    if (have_read_stdin && fclose ( stdin ) == EOF)
+        error;
 };

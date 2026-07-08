@@ -361,6 +361,15 @@ class CodegenVisitor:
         builder.branch(builder.break_block)
         return None
 
+    def visit_BreakSwitchStatement(self, node, builder, module):
+        if not hasattr(builder, 'switch_break_block') or builder.switch_break_block is None:
+            raise FluxCodegenError(
+                f"'break switch' outside of switch statement", node, module)
+        if builder.block.is_terminated:
+            return None
+        builder.branch(builder.switch_break_block)
+        return None
+
     def visit_ContinueStatement(self, node, builder, module):
         if not hasattr(builder, 'continue_block'):
             raise FluxCodegenError(

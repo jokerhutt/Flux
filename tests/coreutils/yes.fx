@@ -31,17 +31,16 @@ macro AUTHORS
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Repeatedly output a line with all specified STRING(s), or 'y'.\n\
-\n\
-"), stdout);
+        printf;
+        fputs;
         oputs_("yes", gettext("      --help\n         display this help and exit\n"));
         oputs_("yes", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("yes");
@@ -52,7 +51,7 @@ Repeatedly output a line with all specified STRING(s), or 'y'.\n\
 cdecl repeat_pattern(byte* dest, byte* src, int srcsize, int bufsize) -> void
 {
     if (dest != src)
-        memcpy(dest, src, ?);
+        memcpy(dest, src, srcsize);
 };
 
 cdecl splice_write(int* buf, int idx_t) -> int
@@ -63,10 +62,12 @@ cdecl splice_write(int* buf, int idx_t) -> int
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
+    parse_gnu_standard_options_only;
     byte** operands;
     byte** operand_lim = argv + argc;
-    if (?)
+    if (optind == argc)
         *operand_lim++ = bad_cast("y");
     ulong bufalloc = 0;
     bool;
@@ -77,9 +78,8 @@ cdecl main(int argc, byte** argv) -> int
         bufalloc += operand_len + 1;
     }
     while (++operandp < operand_lim);
-    if (bufalloc <= 0 ? 2)
+    if (bufalloc <= BUFSIZ / 2)
     {
-        bufalloc = 0;
     };
     byte* buf;
     ulong bufused = 0;
@@ -87,18 +87,19 @@ cdecl main(int argc, byte** argv) -> int
     do
     {
         ulong operand_len = strlen(*operandp);
-        if (?)
+        if (! reuse_operand_strings)
             memcpy(buf + bufused, *operandp, operand_len);
         bufused += operand_len;
         buf[bufused++] = ' ';
     }
     while (++operandp < operand_lim);
     buf[bufused - 1] = '\n';
-    if (?)
+    if (full_write ( STDOUT_FILENO , buf , copysize ) == copysize && splice_write ( buf , copysize ) == 0)
     {
-        while (full_write(0, buf, bufused) == bufused)
+        if (bufused > copysize)
+            repeat_pattern;
+        while (full_write == bufused)
             continue;
     };
-    error(0, (?__errno_location()), gettext("standard output"));
-    return 1;
+    error;
 };

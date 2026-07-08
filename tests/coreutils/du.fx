@@ -24,7 +24,7 @@
    * Doesn't simply ignore the names of regular files given as arguments
      when -a is given.
 
-   By tege@sics.se, TorbjÃ¶rn Granlund,
+   By tege@sics.se, Torbjörn Granlund,
    and djm@ai.mit.edu, David MacKenzie.
    Variable blocks added by lm@sgi.com and eggert@twinsun.com.
    Rewritten to use nftw, then to use fts by Jim Meyering.
@@ -47,33 +47,31 @@ di_set* di_mnt = di_set;
 extern int prev_level;
 struct duinfo
 {
-    ulong size;
-    ulong inodes;
+    int size;
+    int inodes;
     timespec tmax;
 };
 
 cdecl duinfo_init(duinfo* a) -> void
 {
-    a.size = 0;
-    a.inodes = 0;
-    a.tmax.tv_sec = TYPE_MINIMUM(?);
-    a.tmax.tv_nsec = -1;
+    a = 0;
+    a = 0;
+    a. = TYPE_MINIMUM;
+    a. = -1;
 };
 
-cdecl duinfo_set(duinfo* a, ulong size, timespec tmax) -> void
+cdecl duinfo_set(duinfo* a, int size, timespec tmax) -> void
 {
-    a.size = size;
-    a.inodes = 1;
-    a.tmax = tmax;
+    a = size;
+    a = 1;
+    a = tmax;
 };
 
 cdecl duinfo_add(duinfo* a, duinfo* b) -> void
 {
-    ulong sum = a.size + b.size;
-    a.size = a.size <= sum ? sum : (0);
-    a.inodes = a.inodes + b.inodes;
-    if (timespec_cmp(a.tmax, b.tmax) < 0)
-        a.tmax = b.tmax;
+    a = a + b;
+    if (timespec_cmp(a, b) < 0)
+        a = b;
 };
 
 struct dulevel
@@ -90,7 +88,7 @@ extern int opt_nul_terminate_output;
 extern int print_grand_total;
 extern int opt_separate_dirs;
 extern int max_depth;
-long opt_threshold = intmax_t;
+int opt_threshold = 0;
 extern int human_output_opts;
 extern int opt_inodes;
 extern int opt_time;
@@ -102,22 +100,23 @@ enum time_type
 };
 
 time_type time_type = time_type;
-byte* time_style = ((void*)0);
-byte* time_format = ((void*)0);
+extern byte* time_style;
+extern byte* time_format;
 extern int localtz;
-ulong output_block_size = uintmax_t;
+extern int output_block_size;
 struct exclude;
 exclude* exclude = exclude;
 duinfo tot_dui = duinfo;
-uint EXCLUDE_OPTION = 128;
-uint FILES0_FROM_OPTION = 129;
-uint HUMAN_SI_OPTION = 130;
-uint TIME_OPTION = 131;
-uint TIME_STYLE_OPTION = 132;
-uint INODES_OPTION = 133;
+uint EXCLUDE_OPTION = 0;
+uint FILES0_FROM_OPTION = 1;
+uint HUMAN_SI_OPTION = 2;
+uint TIME_OPTION = 3;
+uint TIME_STYLE_OPTION = 4;
+uint INODES_OPTION = 5;
 
-option[26] long_options = option;
-byte*[6] time_args = {"atime", "access", "use", "ctime", "status", ((void*)0)};
+struct option;
+extern int long_options;
+extern byte** time_args;
 time_type[5] time_types = time_type;
 cdecl ARGMATCH_VERIFY() -> int;
 enum time_style
@@ -127,146 +126,150 @@ enum time_style
     iso_time_style
 };
 
-byte*[4] time_style_args = {"full-iso", "long-iso", "iso", ((void*)0)};
+extern byte** time_style_args;
 time_style[3] time_style_types = time_style;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("du", gettext("\
-  -0, --null\n\
-         end each output line with NUL, not newline\n\
+        oputs_("du", gettext("\
+  -0, --null\n\
+         end each output line with NUL, not newline\n\
 "));
-        oputs_("du", gettext("\
-  -a, --all\n\
-         write counts for all files, not just directories\n\
+        oputs_("du", gettext("\
+  -a, --all\n\
+         write counts for all files, not just directories\n\
 "));
-        oputs_("du", gettext("\
-  -A, --apparent-size\n\
-         print apparent sizes rather than device usage;\n\
-         although the apparent size is usually smaller, it may be\n\
-         larger due to holes in ('sparse') files,\n\
-         internal fragmentation, indirect blocks, etc.\n\
+        oputs_("du", gettext("\
+  -A, --apparent-size\n\
+         print apparent sizes rather than device usage;\n\
+         although the apparent size is usually smaller, it may be\n\
+         larger due to holes in ('sparse') files,\n\
+         internal fragmentation, indirect blocks, etc.\n\
 "));
-        oputs_("du", gettext("\
-  -B, --block-size=SIZE\n\
-         scale sizes by SIZE before printing them; See SIZE format below;\n\
-         E.g., '-BM' prints sizes in units of 1,048,576 bytes\n\
+        oputs_("du", gettext("\
+  -B, --block-size=SIZE\n\
+         scale sizes by SIZE before printing them; See SIZE format below;\n\
+         E.g., '-BM' prints sizes in units of 1,048,576 bytes\n\
 "));
-        oputs_("du", gettext("\
-  -b, --bytes\n\
-         equivalent to '--apparent-size --block-size=1'\n\
+        oputs_("du", gettext("\
+  -b, --bytes\n\
+         equivalent to '--apparent-size --block-size=1'\n\
 "));
-        oputs_("du", gettext("\
-  -c, --total\n\
-         produce a grand total\n\
+        oputs_("du", gettext("\
+  -c, --total\n\
+         produce a grand total\n\
 "));
-        oputs_("du", gettext("\
-  -D, --dereference-args\n\
-         dereference only symlinks that are listed on the command line\n\
+        oputs_("du", gettext("\
+  -D, --dereference-args\n\
+         dereference only symlinks that are listed on the command line\n\
 "));
-        oputs_("du", gettext("\
-  -d, --max-depth=N\n\
-         print the total for a directory (or file, with --all)\n\
-         only if it is N or fewer levels below the command\n\
-         line argument;  --max-depth=0 is the same as --summarize\n\
+        oputs_("du", gettext("\
+  -d, --max-depth=N\n\
+         print the total for a directory (or file, with --all)\n\
+         only if it is N or fewer levels below the command\n\
+         line argument;  --max-depth=0 is the same as --summarize\n\
 "));
-        oputs_("du", gettext("\
-      --files0-from=F\n\
-         summarize device usage of the NUL-terminated file names\n\
-         specified in file F;  if F is -, read names from standard input\n\
+        oputs_("du", gettext("\
+      --files0-from=F\n\
+         summarize device usage of the NUL-terminated file names\n\
+         specified in file F;  if F is -, read names from standard input\n\
 "));
-        oputs_("du", gettext("\
-  -H\n\
-         equivalent to --dereference-args (-D)\n\
+        oputs_("du", gettext("\
+  -H\n\
+         equivalent to --dereference-args (-D)\n\
 "));
-        oputs_("du", gettext("\
-  -h, --human-readable\n\
-         print sizes in human readable format (e.g., 1K 234M 2G)\n\
+        oputs_("du", gettext("\
+  -h, --human-readable\n\
+         print sizes in human readable format (e.g., 1K 234M 2G)\n\
 "));
-        oputs_("du", gettext("\
-      --inodes\n\
-         list inode usage information instead of block usage\n\
+        oputs_("du", gettext("\
+      --inodes\n\
+         list inode usage information instead of block usage\n\
 "));
-        oputs_("du", gettext("\
-  -k\n\
-         like --block-size=1K\n\
+        oputs_("du", gettext("\
+  -k\n\
+         like --block-size=1K\n\
 "));
-        oputs_("du", gettext("\
-  -L, --dereference\n\
-         dereference all symbolic links\n\
+        oputs_("du", gettext("\
+  -L, --dereference\n\
+         dereference all symbolic links\n\
 "));
-        oputs_("du", gettext("\
-  -l, --count-links\n\
-         count sizes many times if hard linked\n\
+        oputs_("du", gettext("\
+  -l, --count-links\n\
+         count sizes many times if hard linked\n\
 "));
-        oputs_("du", gettext("\
-  -m\n\
-         like --block-size=1M\n\
+        oputs_("du", gettext("\
+  -m\n\
+         like --block-size=1M\n\
 "));
-        oputs_("du", gettext("\
-  -P, --no-dereference\n\
-         don't follow any symbolic links (this is the default)\n\
+        oputs_("du", gettext("\
+  -P, --no-dereference\n\
+         don't follow any symbolic links (this is the default)\n\
 "));
-        oputs_("du", gettext("\
-  -S, --separate-dirs\n\
-         for directories do not include size of subdirectories\n\
+        oputs_("du", gettext("\
+  -S, --separate-dirs\n\
+         for directories do not include size of subdirectories\n\
 "));
-        oputs_("du", gettext("\
-      --si\n\
-         like -h, but use powers of 1000 not 1024\n\
+        oputs_("du", gettext("\
+      --si\n\
+         like -h, but use powers of 1000 not 1024\n\
 "));
-        oputs_("du", gettext("\
-  -s, --summarize\n\
-         display only a total for each argument\n\
+        oputs_("du", gettext("\
+  -s, --summarize\n\
+         display only a total for each argument\n\
 "));
-        oputs_("du", gettext("\
-  -t, --threshold=SIZE\n\
-         exclude entries smaller than SIZE if positive,\n\
-         or entries greater than SIZE if negative\n\
+        oputs_("du", gettext("\
+  -t, --threshold=SIZE\n\
+         exclude entries smaller than SIZE if positive,\n\
+         or entries greater than SIZE if negative\n\
 "));
-        oputs_("du", gettext("\
-      --time\n\
-         show time of the last modification of any file in the directory,\n\
-         or any of its subdirectories\n\
+        oputs_("du", gettext("\
+      --time\n\
+         show time of the last modification of any file in the directory,\n\
+         or any of its subdirectories\n\
 "));
-        oputs_("du", gettext("\
-      --time=WORD\n\
-         show time as WORD instead of modification time:\n\
-         atime, access, use, ctime or status\n\
+        oputs_("du", gettext("\
+      --time=WORD\n\
+         show time as WORD instead of modification time:\n\
+         atime, access, use, ctime or status\n\
 "));
-        oputs_("du", gettext("\
-      --time-style=STYLE\n\
-         time/date format with --time; see TIME_STYLE below\n\
+        oputs_("du", gettext("\
+      --time-style=STYLE\n\
+         time/date format with --time; see TIME_STYLE below\n\
 "));
-        oputs_("du", gettext("\
-  -X, --exclude-from=FILE\n\
-         exclude files that match any pattern in FILE\n\
+        oputs_("du", gettext("\
+  -X, --exclude-from=FILE\n\
+         exclude files that match any pattern in FILE\n\
 "));
-        oputs_("du", gettext("\
-      --exclude=PATTERN\n\
-         exclude files that match PATTERN\n\
+        oputs_("du", gettext("\
+      --exclude=PATTERN\n\
+         exclude files that match PATTERN\n\
 "));
-        oputs_("du", gettext("\
-  -x, --one-file-system\n\
-         skip directories on different file systems\n\
+        oputs_("du", gettext("\
+  -x, --one-file-system\n\
+         skip directories on different file systems\n\
 "));
         oputs_("du", gettext("      --help\n         display this help and exit\n"));
         oputs_("du", gettext("      --version\n         output version information and exit\n"));
         emit_blocksize_note("DU");
         emit_size_note();
+        fputs;
         emit_ancillary_info("du");
     };
     exit(status);
 };
 
-cdecl hash_ins(di_set* di_set, ulong ino, ulong dev) -> int
+cdecl hash_ins(di_set* di_set, int ino, int dev) -> int
 {
     int inserted = di_set_insert(di_set, dev, ino);
     if (inserted < 0)
@@ -274,32 +277,35 @@ cdecl hash_ins(di_set* di_set, ulong ino, ulong dev) -> int
     return inserted;
 };
 
-cdecl print_only_size(ulong n_bytes) -> void
+cdecl print_only_size(int n_bytes) -> void
 {
     byte buf;
+    fputs;
 };
 
 cdecl print_size(duinfo* pdui, byte* string) -> void
 {
-    print_only_size(? ? pdui.inodes : pdui.size);
-    if (?)
+    print_only_size(opt_inodes ? pdui : pdui);
+    if (opt_time)
     {
         putchar('\t');
         bool;
-        if (?)
+        if (! ok)
         {
-            void* /* untranslated: char[INT_BUFSIZE_BOUND(<recovery-expr>())] */ buf = INT_BUFSIZE_BOUND(?);
+            void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ buf = INT_BUFSIZE_BOUND;
+            fputs;
         };
     };
     putchar('\t');
-    putchar(? ? '\0' : '\n');
-    if (?)
+    fputs;
+    putchar(opt_nul_terminate_output ? '\0' : '\n');
+    if (fflush < 0)
         write_error();
 };
 
 cdecl fill_mount_table() -> void
 {
-    mount_entry* mnt_ent;
+    mount_entry* mnt_ent = read_file_system_list;
     while (mnt_ent)
     {
         mount_entry* mnt_free;
@@ -307,7 +313,7 @@ cdecl fill_mount_table() -> void
         {
             stat buf;
             if (!stat(mnt_ent, @buf))
-                hash_ins(di_mnt, buf.st_ino, buf.st_dev);
+                hash_ins(di_mnt, buf., buf.);
             else
             {
             };
@@ -327,12 +333,12 @@ cdecl mount_point_in_fts_cycle(int* ent) -> int
             xalloc_die();
         fill_mount_table();
     };
-    while (?)
+    while (ent && ent != cycle_ent)
     {
-        if (di_set_lookup(di_mnt, ?.., ?..) > 0)
+        if (di_set_lookup(di_mnt, ent.., ent..) > 0)
         {
         };
-        ent = ?.;
+        ent = ent.;
     };
 };
 
@@ -343,69 +349,86 @@ cdecl process_file(int* fts, int* ent) -> int
     duinfo dui_to_print;
     int n_alloc;
     dulevel* dulvl;
-    byte* file = ?.;
-    stat* sb = ?.;
-    int info = ?.;
-    if (?)
+    byte* file = ent.;
+    stat* sb = ent.;
+    int info = ent.;
+    if (info == FTS_DNR)
     {
+        error(0, ent., gettext("cannot read directory %s"), quotearg_style);
     }
-    elif (?)
+    elif (info != FTS_DP)
     {
         bool;
-        if (?)
+        if (! excluded)
         {
-            if (?)
+            if (info == FTS_NSOK)
             {
-                info = ?.;
+                fts_set;
+                affirm;
+                info = ent.;
             };
-            if (?)
+            if (info == FTS_NS || info == FTS_SLNONE)
             {
+                error(0, ent., gettext("cannot access %s"), quotearg_style);
             };
         };
-        if (?)
+        if (excluded || ( ! opt_count_all && ( hash_all || ( ! S_ISDIR ( sb -> st_mode ) && 1 < sb -> st_nlink ) ) && ! hash_ins ( di_files , sb -> st_ino , sb -> st_dev ) ))
         {
-            if (?)
+            if (info == FTS_D)
             {
+                fts_set;
+                affirm;
             };
         };
         switch (info)
         {
-            goto _switch_end_139188840063952;
-            if (cycle_warning_required(?, ?) & !?(?))
+            error(0, ent., "%s", quotearg_n_style_colon);
+            if (cycle_warning_required(fts, ent) & !mount_point_in_fts_cycle(ent))
             {
                 do
                 {
+                    error(0, 0, gettext("\
+WARNING: Circular directory structure.\n\
+This almost certainly means that you have a corrupted file system.\n\
+NOTIFY YOUR SYSTEM MANAGER.\n\
+The following directory is part of the cycle:\n  %s\n"), quotearg_n_style_colon);
                 }
                 while (0);
             };
         };
-        label _switch_end_139188840063952:
     };
+    duinfo_set;
     dui_to_print = dui;
-    if (? == 0)
+    if (n_alloc == 0)
     {
-        dulvl = xcalloc(?, (sizeof * dulvl / 8));
+        dulvl = xcalloc(n_alloc, (sizeof * dulvl / 8));
     }
     else
     {
-        if (?)
+        if (level == prev_level)
         {
         }
-        elif (?)
+        elif (level > prev_level)
         {
+            if (n_alloc <= level)
+                dulvl = xpalloc;
         };
         else
         {
-            duinfo_add(@dui_to_print, @dulvl[?].);
-            if (!?)
-                duinfo_add(@dui_to_print, @dulvl[?].);
+            affirm;
+            duinfo_add(@dui_to_print, @dulvl[prev_level].);
+            if (!opt_separate_dirs)
+                duinfo_add(@dui_to_print, @dulvl[prev_level].);
+            duinfo_add;
+            duinfo_add;
         };
     };
+    if (! ( opt_separate_dirs && IS_DIR_TYPE ( info ) ))
+        duinfo_add;
     duinfo_add(@tot_dui, @dui);
-    if (?)
+    if (( IS_DIR_TYPE ( info ) && level <= max_depth ) || ( opt_all && level <= max_depth ) || level == 0)
     {
-        ulong v = ? ? dui_to_print.inodes : dui_to_print.size;
-        if (opt_threshold < 0 ? v <= -opt_threshold : v >= opt_threshold)
+        if (opt_threshold < 0 ? v <= - opt_threshold : v >= opt_threshold)
             print_size(@dui_to_print, file);
     };
 };
@@ -415,20 +438,21 @@ cdecl du_files(byte** files, int bit_flags) -> int
     bool;
     if (*files)
     {
-        while (?)
+        while (true)
         {
-            if (?)
+            if (ent == NULL)
             {
-                if ((?__errno_location()) ? 0)
+                if (errno != 0)
                 {
+                    error;
                 };
                 prev_level = 0;
                 break;
             };
         };
-        if (?)
+        if (fts_close != 0)
         {
-            error(0, (?__errno_location()), gettext("fts_close failed"));
+            error;
         };
     };
 };
@@ -438,208 +462,50 @@ cdecl main(int argc, byte** argv) -> int
     byte*[2] cwd_only = 2;
     bool;
     bool;
-    byte* files_from = ((void*)0);
+    byte* files_from;
     int bit_flags;
     int symlink_deref_bits;
     bool;
     cwd_only[0] = bad_cast(".");
-    cwd_only[1] = ((void*)0);
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     exclude = new_exclude();
     human_options(getenv("DU_BLOCK_SIZE"), @human_output_opts, @output_block_size);
-    while (?)
+    while (true)
     {
         int oi = -1;
         int c = getopt_long(argc, argv, "0aAbd:chHklmst:xB:DLPSX:", long_options, @oi);
         if (c == -1)
             break;
-        switch (c)
-        {
-            case ('0')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('a')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('A')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('b')
-            {
-            }
-            human_output_opts = 0;
-            output_block_size = 1;
-            goto _switch_end_139188838897360;
-            case ('c')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('h')
-            {
-            }
-            output_block_size = 1;
-            goto _switch_end_139188838897360;
-            case (HUMAN_SI_OPTION)
-            {
-            }
-            output_block_size = 1;
-            goto _switch_end_139188838897360;
-            case ('k')
-            {
-                human_output_opts = 0;
-            }
-            output_block_size = 1024;
-            goto _switch_end_139188838897360;
-            case ('d')
-            {
-                {
-                    long tmp;
-                    if (?)
-                    else
-                    {
-                        error(0, 0, gettext("invalid maximum depth %s"), quote(optarg));
-                    };
-                };
-            }
-            goto _switch_end_139188838897360;
-            case ('m')
-            {
-                human_output_opts = 0;
-            }
-            output_block_size = 1024 * 1024;
-            goto _switch_end_139188838897360;
-            case ('l')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('s')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('t')
-            {
-                {
-                    strtol_error e;
-                    e = xstrtoimax(optarg, ((void*)0), 0, @opt_threshold, "kKmMGTPEZYRQ0");
-                    if (?)
-                        xstrtol_fatal(?, oi, c, long_options, optarg);
-                    if (opt_threshold == 0 & *optarg == '-')
-                    {
-                        error(0, 0, gettext("invalid --threshold argument '-0'"));
-                    };
-                };
-            }
-            goto _switch_end_139188838897360;
-            case ('x')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('B')
-            {
-                {
-                    strtol_error e;
-                    if (?)
-                        xstrtol_fatal(?, oi, c, long_options, optarg);
-                };
-            }
-            goto _switch_end_139188838897360;
-            case ('H')
-            {
-                case ('D')
-                {
-                }
-            }
-            goto _switch_end_139188838897360;
-            case ('L')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('P')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('S')
-            {
-            }
-            goto _switch_end_139188838897360;
-            case ('X')
-            {
-                if (?)
-                {
-                };
-            }
-            goto _switch_end_139188838897360;
-            case (FILES0_FROM_OPTION)
-            {
-                files_from = optarg;
-            }
-            goto _switch_end_139188838897360;
-            case (EXCLUDE_OPTION)
-            {
-            }
-            goto _switch_end_139188838897360;
-            case (INODES_OPTION)
-            {
-            }
-            goto _switch_end_139188838897360;
-            case (TIME_OPTION)
-            {
-            }
-            time_type = (optarg ? XARGMATCH("--time", optarg, time_args, time_types) : time_mtime);
-            localtz = tzalloc(getenv("TZ"));
-            goto _switch_end_139188838897360;
-            case (TIME_STYLE_OPTION)
-            {
-                time_style = optarg;
-            }
-            goto _switch_end_139188838897360;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188838897360;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188838897360;
-            default
-            {
-            };
-        };
-        label _switch_end_139188838897360:
     };
-    if (?)
-        usage(0);
-    if (?)
+    if (! ok)
+        usage;
+    if (opt_all && opt_summarize_only)
     {
         error(0, 0, gettext("cannot both summarize and show all entries"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (opt_summarize_only && max_depth_specified && max_depth == 0)
     {
         error(0, 0, gettext("warning: summarizing is the same as using --max-depth=0"));
     };
-    if (?)
+    if (opt_summarize_only && max_depth_specified && max_depth != 0)
     {
-        error(0, 0, gettext("warning: summarizing conflicts with --max-depth=%td"), ?);
-        usage(0);
+        error(0, 0, gettext("warning: summarizing conflicts with --max-depth=%td"), max_depth);
+        usage;
     };
-    if (?)
+    if (opt_summarize_only)
         max_depth = 0;
-    if (?)
+    if (opt_inodes)
     {
-        if (?)
+        if (apparent_size)
         {
             error(0, 0, gettext("warning: options --apparent-size and -b are "));
         };
         output_block_size = 1;
     };
-    if (?)
+    if (opt_time)
     {
         if (!time_style)
         {
@@ -664,25 +530,24 @@ cdecl main(int argc, byte** argv) -> int
             time_format = time_style + 1;
         else
         {
-            switch (?)
+            switch (x_timestyle_match)
             {
                 case (full_iso_time_style)
                 {
                     time_format = "%Y-%m-%d %H:%M:%S.%N %z";
+                    break switch;
                 }
-                goto _switch_end_139188887821264;
                 case (long_iso_time_style)
                 {
                     time_format = "%Y-%m-%d %H:%M";
+                    break switch;
                 }
-                goto _switch_end_139188887821264;
                 case (iso_time_style)
                 {
                     time_format = "%Y-%m-%d";
+                    break switch;
                 }
-                goto _switch_end_139188887821264;
             };
-            label _switch_end_139188887821264:
         };
     };
     argv_iterator* ai;
@@ -690,13 +555,17 @@ cdecl main(int argc, byte** argv) -> int
     {
         if (optind < argc)
         {
-            error(0, 0, gettext("extra operand %s"), quote(argv[optind]));
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quote);
+            fprintf;
+            usage;
         };
+        if (!(streq(files_from, "-") | freopen))
+            error;
+        ai = argv_iter_init_stream;
     }
     else
     {
-        byte** files = (optind < argc ? argv + optind : cwd_only);
+        byte** files;
         ai = argv_iter_init_argv(files);
     };
     if (!ai)
@@ -705,37 +574,39 @@ cdecl main(int argc, byte** argv) -> int
     if (!di_files)
         xalloc_die();
     bit_flags `|= symlink_deref_bits;
-    byte*[2] temp_argv = {((void*)0), ((void*)0)};
-    while (?)
+    byte** temp_argv;
+    while (true)
     {
         bool;
         argv_iter_err ai_err;
-        byte* file_name = argv_iter(ai, @?);
+        byte* file_name = argv_iter(ai, @ai_err);
         if (!file_name)
         {
-            switch (?)
+            switch (ai_err)
             {
                 goto argv_iter_done;
+                error;
                 goto argv_iter_done;
                 xalloc_die();
                 default
                 {
-                    affirm(!"unexpected error code from argv_iter");
                 };
             };
         };
         if (files_from & streq(files_from, "-") & streq(file_name, "-"))
         {
+            error(0, 0, gettext("when reading file names from standard input, "), quotearg_style);
         };
         if (!file_name[0])
         {
-            if (files_from == ((void*)0))
+            if (files_from == NULL)
                 error(0, 0, "%s", gettext("invalid zero-length file name"));
             else
             {
+                error;
             };
         };
-        if (?)
+        if (skip_file)
         else
         {
             temp_argv[0] = file_name;
@@ -746,6 +617,8 @@ cdecl main(int argc, byte** argv) -> int
     di_set_free(di_files);
     if (di_mnt)
         di_set_free(di_mnt);
-    if (?)
+    if (files_from && ( ferror ( stdin ) || fclose ( stdin ) != 0 ) && ok)
+        error;
+    if (print_grand_total)
         print_size(@tot_dui, gettext("total"));
 };

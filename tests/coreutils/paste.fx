@@ -56,7 +56,8 @@ extern byte* delims;
 ulong* delim_lens = size_t;
 extern int num_delims;
 byte line_delim = '\n';
-option[6] longopts = option;
+struct option;
+extern int longopts;
 cdecl collapse_escapes(byte* strptr) -> int
 {
     byte* strout = xstrdup(strptr);
@@ -84,52 +85,51 @@ cdecl collapse_escapes(byte* strptr) -> int
                     case ('b')
                     {
                         *strout++ = '\b';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     case ('f')
                     {
                         *strout++ = '\f';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     case ('n')
                     {
                         *strout++ = '\n';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     case ('r')
                     {
                         *strout++ = '\r';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     case ('t')
                     {
                         *strout++ = '\t';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     case ('v')
                     {
                         *strout++ = '\v';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     case ('\\')
                     {
                         *strout++ = '\\';
+                        break switch;
                     }
-                    goto _switch_end_139188839715792;
                     default
                     {
-                        goto copy_character;
                     };
                 };
-                label _switch_end_139188839715792:
                 s++;
             };
             continue;
         };
         label copy_character:
+        strout = mempcpy;
     };
     *strout = '\0';
-    if (?)
+    if (idx == 0)
     {
         delim_lens[0] = 0;
     };
@@ -143,30 +143,31 @@ cdecl xputchar(byte c) -> void
 
 cdecl output_delim(byte* delimptr, ulong len) -> void
 {
-    if (len > 0 & fwrite(delimptr, 1, len, stdout) != len)
+    if (len > 0 & fwrite != len)
         write_error();
 };
 
 cdecl paste_parallel(ulong nfiles, byte** fnamptr) -> int
 {
     bool;
-    byte* delbuf = xmalloc((nfiles - 1) * (__ctype_get_mb_cur_max()) + 1);
-    _IO_FILE** fileptr = xnmalloc(nfiles + 1, (sizeof * fileptr / 8));
+    byte* delbuf = xmalloc;
     ulong files_open;
     bool;
     for (files_open = 0; files_open < nfiles; ++files_open)
     {
         if (streq(fnamptr[files_open], "-"))
         {
-            fileptr[files_open] = stdin;
         }
         else
         {
-            fileptr[files_open] = fopen(fnamptr[files_open], "r");
+            if (fileptr [ files_open ] == NULL)
+                error;
+            else
+            fadvise;
         };
     };
-    if (?)
-        error(0, 0, gettext("standard input is closed"));
+    if (opened_stdin && have_read_stdin)
+        error;
     while (files_open)
     {
         bool;
@@ -175,47 +176,44 @@ cdecl paste_parallel(ulong nfiles, byte** fnamptr) -> int
             int chr;
             int err;
             bool;
-            if (fileptr[i])
+            if (fileptr [ i ])
             {
-                chr = getc(fileptr[i]);
-                err = (?__errno_location());
-                if (?)
+                chr = getc;
+                if (chr != EOF && delims_saved)
                 {
-                    if (?)
+                    if (fwrite ( delbuf , 1 , delims_saved , stdout ) != delims_saved)
                         write_error();
                 };
-                while (chr != (?0))
+                while (chr != EOF)
                 {
                     if (chr == line_delim)
                         break;
                     xputchar(chr);
-                    chr = getc(fileptr[i]);
-                    err = (?__errno_location());
+                    chr = getc;
                 };
             };
-            if (?)
+            if (! sometodo)
             {
-                if (fileptr[i])
+                if (fileptr [ i ])
                 {
-                    if (!ferror(fileptr[i]))
+                    if (!ferror)
                         err = 0;
-                    if (fileptr[i] == stdin)
-                        clearerr(fileptr[i]);
-                    elif (fclose(fileptr[i]) == (?0) & !err)
-                        err = (?__errno_location());
+                    if (fileptr [ i ] == stdin)
+                        clearerr;
+                    else
                     if (err)
                     {
+                        error(0, err, "%s", quotearg_n_style_colon);
                     };
-                    fileptr[i] = ((void*)0);
                     files_open--;
                 };
                 if (i + 1 == nfiles)
                 {
-                    if (?)
+                    if (somedone)
                     {
-                        if (?)
+                        if (delims_saved)
                         {
-                            if (?)
+                            if (fwrite ( delbuf , 1 , delims_saved , stdout ) != delims_saved)
                                 write_error();
                         };
                         xputchar(line_delim);
@@ -227,8 +225,9 @@ cdecl paste_parallel(ulong nfiles, byte** fnamptr) -> int
                     ulong len;
                     if (len > 0)
                     {
+                        memcpy;
                     };
-                    if (?)
+                    if (++ delimidx == num_delims)
                     {
                     };
                 };
@@ -237,21 +236,22 @@ cdecl paste_parallel(ulong nfiles, byte** fnamptr) -> int
             {
                 if (i + 1 != nfiles)
                 {
-                    if (chr != line_delim & chr != (?0))
+                    if (chr != line_delim && chr != EOF)
                         xputchar(chr);
-                    if (?)
+                    output_delim;
+                    if (++ delimidx == num_delims)
                     {
                     };
                 }
                 else
                 {
-                    byte c = (chr == (?0) ? line_delim : chr);
+                    byte c;
                     xputchar(c);
                 };
             };
         };
     };
-    free(fileptr);
+    free;
     free(delbuf);
 };
 
@@ -260,32 +260,31 @@ cdecl paste_serial(ulong nfiles, byte** fnamptr) -> int
     bool;
     int charnew;
     int charold;
-    _IO_FILE* fileptr;
     for (nfiles; nfiles-- , fnamptr++; )
     {
         int saved_errno;
         bool;
-        if (?)
+        if (is_stdin)
         {
-            fileptr = stdin;
         }
         else
         {
-            fileptr = fopen(*fnamptr, "r");
-            if (fileptr == ((void*)0))
+            if (fileptr == NULL)
             {
+                error;
                 continue;
             };
+            fadvise;
         };
-        charold = getc(fileptr);
-        saved_errno = (?__errno_location());
-        if (charold != (?0))
+        charold = getc;
+        if (charold != EOF)
         {
-            while ((charnew = getc(fileptr)) != (?0))
+            while (( charnew = getc ( fileptr ) ) != EOF)
             {
                 if (charold == line_delim)
                 {
-                    if (?)
+                    output_delim;
+                    if (++ delimidx == num_delims)
                     {
                     };
                 }
@@ -293,54 +292,50 @@ cdecl paste_serial(ulong nfiles, byte** fnamptr) -> int
                     xputchar(charold);
                 charold = charnew;
             };
-            saved_errno = (?__errno_location());
             xputchar(charold);
         };
         if (charold != line_delim)
             xputchar(line_delim);
-        if (!ferror(fileptr))
+        if (!ferror)
             saved_errno = 0;
-        if (?)
-            clearerr(fileptr);
-        elif (fclose(fileptr) != 0 & !saved_errno)
-            saved_errno = (?__errno_location());
+        if (is_stdin)
+            clearerr;
+        else
         if (saved_errno)
         {
+            error(0, saved_errno, "%s", quotearg_n_style_colon);
         };
     };
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Write lines consisting of the sequentially corresponding lines from\n\
-each FILE, separated by TABs, to standard output.\n\
-The newline of every line except the line from the last file\n\
-is replaced with a TAB.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_stdin_note();
         emit_mandatory_arg_note();
-        oputs_("paste", gettext("\
-  -d, --delimiters=LIST\n\
-         reuse characters from LIST instead of TABs;\n\
-         backslash escapes are supported\n\
+        oputs_("paste", gettext("\
+  -d, --delimiters=LIST\n\
+         reuse characters from LIST instead of TABs;\n\
+         backslash escapes are supported\n\
 "));
-        oputs_("paste", gettext("\
-  -s, --serial\n\
-         paste one file at a time instead of in parallel; the newline of\n\
-         every line except the last line in each file is replaced with a TAB\
-\n\
+        oputs_("paste", gettext("\
+  -s, --serial\n\
+         paste one file at a time instead of in parallel; the newline of\n\
+         every line except the last line in each file is replaced with a TAB\
+\n\
 "));
-        oputs_("paste", gettext("\
-  -z, --zero-terminated\n\
-         line delimiter is NUL, not newline\n\
+        oputs_("paste", gettext("\
+  -z, --zero-terminated\n\
+         line delimiter is NUL, not newline\n\
 "));
         oputs_("paste", gettext("      --help\n         display this help and exit\n"));
         oputs_("paste", gettext("      --version\n         output version information and exit\n"));
@@ -354,54 +349,53 @@ cdecl main(int argc, byte** argv) -> int
     int optc;
     byte* delim_arg = "\t";
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "d:sz", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('d')
             {
-                delim_arg = (optarg[0] == '\0' ? "\\0" : optarg);
+                break switch;
             }
-            goto _switch_end_139188837221840;
             case ('s')
             {
+                break switch;
             }
-            goto _switch_end_139188837221840;
             case ('z')
             {
                 line_delim = '\0';
+                break switch;
             }
-            goto _switch_end_139188837221840;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837221840;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837221840;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188837221840:
     };
-    int nfiles = argc - optind;
+    int nfiles;
     if (nfiles == 0)
     {
-        argv[optind] = bad_cast("-");
         nfiles++;
     };
     if (collapse_escapes(delim_arg))
     {
+        error;
     };
     bool;
     free(delims);
     free(delim_lens);
-    if (? & fclose(stdin) == (?0))
-        error(0, (?__errno_location()), "-");
+    if (have_read_stdin && fclose ( stdin ) == EOF)
+        error;
 };

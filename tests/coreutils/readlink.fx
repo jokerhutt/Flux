@@ -31,55 +31,58 @@ macro AUTHORS
 
 extern int no_newline;
 extern int verbose;
-option[11] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("Print value of a symbolic link or canonical file name\n\n"), stdout);
-        oputs_("readlink", gettext("\
-  -f, --canonicalize\n\
-         canonicalize by following every symlink\n\
-         in every component of the given name recursively;\n\
-         all but the last component must exist\n\
+        printf;
+        fputs;
+        oputs_("readlink", gettext("\
+  -f, --canonicalize\n\
+         canonicalize by following every symlink\n\
+         in every component of the given name recursively;\n\
+         all but the last component must exist\n\
 "));
-        oputs_("readlink", gettext("\
-  -e, --canonicalize-existing\n\
-         canonicalize by following every symlink\n\
-         in every component of the given name recursively;\n\
-         all components must exist\n\
+        oputs_("readlink", gettext("\
+  -e, --canonicalize-existing\n\
+         canonicalize by following every symlink\n\
+         in every component of the given name recursively;\n\
+         all components must exist\n\
 "));
-        oputs_("readlink", gettext("\
-  -m, --canonicalize-missing\n\
-         canonicalize by following every symlink\n\
-         in every component of the given name recursively,\n\
-         without requirements on components existence\n\
+        oputs_("readlink", gettext("\
+  -m, --canonicalize-missing\n\
+         canonicalize by following every symlink\n\
+         in every component of the given name recursively,\n\
+         without requirements on components existence\n\
 "));
-        oputs_("readlink", gettext("\
-  -n, --no-newline\n\
-         do not output the trailing delimiter\n\
+        oputs_("readlink", gettext("\
+  -n, --no-newline\n\
+         do not output the trailing delimiter\n\
 "));
-        oputs_("readlink", gettext("\
-  -q, --quiet\n\
+        oputs_("readlink", gettext("\
+  -q, --quiet\n\
 "));
-        oputs_("readlink", gettext("\
-  -s, --silent\n\
-         suppress most error messages\n\
-         (on by default if POSIXLY_CORRECT is not set)\n\
+        oputs_("readlink", gettext("\
+  -s, --silent\n\
+         suppress most error messages\n\
+         (on by default if POSIXLY_CORRECT is not set)\n\
 "));
-        oputs_("readlink", gettext("\
-  -v, --verbose\n\
-         report error messages\n\
-         (on by default if POSIXLY_CORRECT is set)\n\
+        oputs_("readlink", gettext("\
+  -v, --verbose\n\
+         report error messages\n\
+         (on by default if POSIXLY_CORRECT is set)\n\
 "));
-        oputs_("readlink", gettext("\
-  -z, --zero\n\
-         end each output line with NUL, not newline\n\
+        oputs_("readlink", gettext("\
+  -z, --zero\n\
+         end each output line with NUL, not newline\n\
 "));
         oputs_("readlink", gettext("      --help\n         display this help and exit\n"));
         oputs_("readlink", gettext("      --version\n         output version information and exit\n"));
@@ -91,88 +94,69 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     int can_mode = -1;
-    int status = 0;
+    int status;
     int optc;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "efmnqsvz", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('e')
             {
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case ('f')
             {
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case ('m')
             {
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case ('n')
             {
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case ('q')
             {
-                case ('s')
-                {
-                }
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case ('v')
             {
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case ('z')
             {
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188840064592;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188840064592;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188840064592:
     };
     if (optind >= argc)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     if (argc - optind > 1)
     {
-        if (?)
+        if (no_newline)
             error(0, 0, gettext("ignoring --no-newline with multiple arguments"));
-    };
-    for (optind < argc; ++optind; )
-    {
-        byte* fname = argv[optind];
-        byte* value = (can_mode != -1 ? canonicalize_filename_mode(fname, can_mode) : areadlink_with_size(fname, 63));
-        if (value)
-        {
-            fputs(value, stdout);
-            free(value);
-            if (ferror(stdout))
-                write_error();
-        }
-        else
-        {
-            status = 0;
-        };
     };
     return status;
 };

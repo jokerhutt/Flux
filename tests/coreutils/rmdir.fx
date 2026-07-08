@@ -38,30 +38,18 @@ macro AUTHORS
 extern int remove_empty_parents;
 extern int ignore_fail_on_non_empty;
 extern int verbose;
-uint IGNORE_FAIL_ON_NON_EMPTY_OPTION = 128;
+uint IGNORE_FAIL_ON_NON_EMPTY_OPTION = 0;
 
-option[7] longopts = option;
+struct option;
+extern int longopts;
 cdecl errno_rmdir_non_empty(int error_number) -> int
 {
-    return error_number == 0 | error_number == 0;
 };
 
 cdecl errno_may_be_non_empty(int error_number) -> int
 {
     switch (error_number)
     {
-        case (0)
-        {
-            case (0)
-            {
-                case (0)
-                {
-                    case (0)
-                    {
-                    }
-                }
-            }
-        }
         default
         {
         };
@@ -70,30 +58,33 @@ cdecl errno_may_be_non_empty(int error_number) -> int
 
 cdecl ignorable_failure(int error_number, byte* dir) -> int
 {
+    return (ignore_fail_on_non_empty & (errno_rmdir_non_empty(error_number) | (errno_may_be_non_empty(error_number) & directory_status == DS_NONEMPTY)));
 };
 
 cdecl remove_parents(byte* dir) -> int
 {
     bool;
     strip_trailing_slashes(dir);
-    while (?)
+    while (true)
     {
         byte* slash = strrchr(dir, '/');
-        if (slash == ((void*)0))
+        if (slash == NULL)
             break;
         while (slash > dir & *slash == '/')
             --slash;
         slash[1] = 0;
-        int rmdir_errno = (?__errno_location());
-        if (?)
+        if (verbose)
+            prog_fprintf;
+        int rmdir_errno;
+        if (! ok)
         {
-            if (?(rmdir_errno, dir))
+            if (ignorable_failure(rmdir_errno, dir))
             {
             }
             else
             {
                 byte* error_msg;
-                if (rmdir_errno != 0)
+                if (rmdir_errno != ENOTDIR)
                 {
                     error_msg = "failed to remove directory %s";
                 }
@@ -101,6 +92,7 @@ cdecl remove_parents(byte* dir) -> int
                 {
                     error_msg = "failed to remove %s";
                 };
+                error(0, rmdir_errno, gettext(error_msg), quotearg_style);
             };
             break;
         };
@@ -109,29 +101,28 @@ cdecl remove_parents(byte* dir) -> int
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Remove the DIRECTORY(ies), if they are empty.\n\
-\n\
-"), stdout);
-        oputs_("rmdir", gettext("\
-      --ignore-fail-on-non-empty\n\
-         ignore each failure to remove a non-empty directory\n\
+        printf;
+        fputs;
+        oputs_("rmdir", gettext("\
+      --ignore-fail-on-non-empty\n\
+         ignore each failure to remove a non-empty directory\n\
 "));
-        oputs_("rmdir", gettext("\
-  -p, --parents\n\
-         remove DIRECTORY and its ancestors;\n\
-         e.g., 'rmdir -p a/b' is similar to 'rmdir a/b a'\n\
+        oputs_("rmdir", gettext("\
+  -p, --parents\n\
+         remove DIRECTORY and its ancestors;\n\
+         e.g., 'rmdir -p a/b' is similar to 'rmdir a/b a'\n\
 "));
-        oputs_("rmdir", gettext("\
-  -v, --verbose\n\
-         output a diagnostic for every directory processed\n\
+        oputs_("rmdir", gettext("\
+  -v, --verbose\n\
+         output a diagnostic for every directory processed\n\
 "));
         oputs_("rmdir", gettext("      --help\n         display this help and exit\n"));
         oputs_("rmdir", gettext("      --version\n         output version information and exit\n"));
@@ -143,77 +134,16 @@ Remove the DIRECTORY(ies), if they are empty.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "pv", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('p')
-            {
-            }
-            goto _switch_end_139188819521360;
-            case (IGNORE_FAIL_ON_NON_EMPTY_OPTION)
-            {
-            }
-            goto _switch_end_139188819521360;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188819521360;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188819521360;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188819521360;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188819521360:
     };
     if (optind == argc)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     bool;
-    for (optind < argc; ++optind; )
-    {
-        byte* dir = argv[optind];
-        if (rmdir(dir) != 0)
-        {
-            int rmdir_errno = (?__errno_location());
-            if (?(rmdir_errno, dir))
-                continue;
-            bool;
-            if (rmdir_errno == 0)
-            {
-                byte* last_unix_slash = strrchr(dir, '/');
-                if (last_unix_slash & (*(last_unix_slash + 1) == '\0'))
-                {
-                    stat st;
-                    int ret = stat(dir, @st);
-                    if ((ret != 0 & (?__errno_location()) ? 0) | (ret == 0 & ((((st.st_mode)) ? 0) ? (0040000))))
-                    {
-                        byte* dir_arg = xstrdup(dir);
-                        strip_trailing_slashes(dir);
-                        if (issymlink(dir) == 1)
-                        {
-                        };
-                        free(dir_arg);
-                    };
-                };
-            };
-        }
-        elif (?)
-        {
-        };
-    };
 };

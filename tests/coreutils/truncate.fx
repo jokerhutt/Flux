@@ -20,7 +20,7 @@
 ///
 
 ///
- Written by PÃ¡draig Brady
+ Written by Pádraig Brady
 
    This is backwards compatible with the FreeBSD utility, but is more
    flexible wrt the size specifications and the use of long options,
@@ -36,7 +36,8 @@ macro AUTHORS
 extern int no_create;
 extern int block_mode;
 extern byte* ref_file;
-option[7] longopts = option;
+struct option;
+extern int longopts;
 enum rel_mode_t
 {
     rm_abs,
@@ -50,267 +51,231 @@ enum rel_mode_t
 // typedef: rel_mode_t = rel_mode_t
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Shrink or extend the size of each FILE to the specified size\n\
-\n\
-A FILE argument that does not exist is created.\n\
-\n\
-If a FILE is larger than the specified size, the extra data is lost.\n\
-If a FILE is shorter, it is extended and the sparse extended part (hole)\n\
-reads as zero bytes.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("truncate", gettext("\
-  -c, --no-create        do not create any files\n\
+        oputs_("truncate", gettext("\
+  -c, --no-create        do not create any files\n\
 "));
-        oputs_("truncate", gettext("\
-  -o, --io-blocks        treat SIZE as number of IO blocks instead of bytes\n\
+        oputs_("truncate", gettext("\
+  -o, --io-blocks        treat SIZE as number of IO blocks instead of bytes\n\
 "));
-        oputs_("truncate", gettext("\
-  -r, --reference=RFILE  base size on RFILE\n\
+        oputs_("truncate", gettext("\
+  -r, --reference=RFILE  base size on RFILE\n\
 "));
-        oputs_("truncate", gettext("\
-  -s, --size=SIZE        set or adjust the file size by SIZE bytes\n\
+        oputs_("truncate", gettext("\
+  -s, --size=SIZE        set or adjust the file size by SIZE bytes\n\
 "));
         oputs_("truncate", gettext("      --help\n         display this help and exit\n"));
         oputs_("truncate", gettext("      --version\n         output version information and exit\n"));
         emit_size_note();
-        fputs(gettext("\n\
-SIZE may also be prefixed by one of the following modifying characters:\n\
-'+' extend by, '-' reduce by, '<' at most, '>' at least,\n\
-'/' round down to multiple of, '%' round up to multiple of.\n"), stdout);
+        fputs;
         emit_ancillary_info("truncate");
     };
     exit(status);
 };
 
-cdecl do_ftruncate(int fd, byte* fname, long ssize, long rsize, rel_mode_t rel_mode) -> int
+cdecl do_ftruncate(int fd, byte* fname, int ssize, int rsize, rel_mode_t rel_mode) -> int
 {
     stat sb;
-    long nsize;
-    if ((? | (rel_mode & rsize < 0)) & fstat(fd, @sb) != 0)
+    if ((block_mode | (rel_mode & rsize < 0)) & fstat(fd, @sb) != 0)
     {
+        error;
     };
-    if (?)
+    if (block_mode)
     {
-        long blksize = STP_BLKSIZE(@sb);
-        long ssize0 = ssize;
-        if (__builtin_mul_overflow((ssize), (blksize), (@ssize)))
+        if (ckd_mul)
         {
+            error;
         };
     };
     if (rel_mode)
     {
-        long fsize;
         if (0 <= rsize)
-            fsize = rsize;
         else
         {
-            if (?(@sb))
+            if (usable_st_size(@sb))
             {
-                fsize = sb.st_size;
                 if (fsize < 0)
                 {
+                    error(0, 0, gettext("%s has unusable, apparently negative size"), quotearg_style);
                 };
             }
             else
             {
-                fsize = lseek(fd, 0, 0);
                 if (fsize < 0)
                 {
+                    error;
                 };
             };
         };
         if (rel_mode == rm_min)
-            nsize = MAX(fsize, ssize);
         elif (rel_mode == rm_max)
-            nsize = MIN(fsize, ssize);
         else
             if (rel_mode == rm_rdn)
-                nsize = fsize - fsize % ssize;
             else
             {
                 if (rel_mode == rm_rup)
                 {
-                    long r = fsize % ssize;
-                    ssize = r == 0 ? 0 : ssize - r;
                 };
-                if (__builtin_add_overflow((fsize), (ssize), (@nsize)))
+                if (ckd_add)
                 {
+                    error(0, 0, gettext("overflow extending size of file %s"), quotearg_style);
                 };
             };
     }
     else
-        nsize = ssize;
-    if (nsize < 0)
-        nsize = 0;
-    if (ftruncate(fd, nsize) != 0)
+    if (ftruncate != 0)
     {
+        error;
     };
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
-    long size;
-    long rsize = -1;
     rel_mode_t rel_mode = rm_abs;
     int c;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((c = getopt_long(argc, argv, "cor:s:", longopts, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((c = getopt_long) != -1)
     {
         switch (c)
         {
             case ('c')
             {
+                break switch;
             }
-            goto _switch_end_139188838647632;
             case ('o')
             {
+                break switch;
             }
-            goto _switch_end_139188838647632;
             case ('r')
             {
-                ref_file = optarg;
+                break switch;
             }
-            goto _switch_end_139188838647632;
             case ('s')
             {
-                while (((?__ctype_b_loc())[(int)((to_uchar(*optarg)))] ? (uint)_ISspace))
-                    optarg++;
-            }
-            switch (*optarg)
-            {
-                case ('<')
+                switch (* optarg)
                 {
-                    rel_mode = rm_max;
-                }
-                optarg++;
-                goto _switch_end_139188838655568;
-                case ('>')
-                {
-                    rel_mode = rm_min;
-                }
-                optarg++;
-                goto _switch_end_139188838655568;
-                case ('/')
-                {
-                    rel_mode = rm_rdn;
-                }
-                optarg++;
-                goto _switch_end_139188838655568;
-                case ('%')
-                {
-                    rel_mode = rm_rup;
-                }
-                optarg++;
-                goto _switch_end_139188838655568;
-            };
-            label _switch_end_139188838655568:
-            while (((?__ctype_b_loc())[(int)((to_uchar(*optarg)))] ? (uint)_ISspace))
-                optarg++;
-            if (*optarg == '+' | *optarg == '-')
-            {
-                if (rel_mode)
-                {
-                    error(0, 0, gettext("multiple relative modifiers specified"));
-                    usage(0);
+                    case ('<')
+                    {
+                        rel_mode = rm_max;
+                        break switch;
+                    }
+                    case ('>')
+                    {
+                        rel_mode = rm_min;
+                        break switch;
+                    }
+                    case ('/')
+                    {
+                        rel_mode = rm_rdn;
+                        break switch;
+                    }
+                    case ('%')
+                    {
+                        rel_mode = rm_rup;
+                        break switch;
+                    }
                 };
-                rel_mode = rm_rel;
-            };
-            size = xdectoimax(optarg, TYPE_MINIMUM(?), TYPE_MAXIMUM(?), "EgGkKmMPQRtTYZ0", gettext("Invalid number"), 0);
-            if ((rel_mode == rm_rup | rel_mode == rm_rdn) & size == 0)
-                error(0, 0, gettext("division by zero"));
-            goto _switch_end_139188838647632;
+                if (* optarg == '+' || * optarg == '-')
+                {
+                    if (rel_mode)
+                    {
+                        error(0, 0, gettext("multiple relative modifiers specified"));
+                        usage;
+                    };
+                    rel_mode = rm_rel;
+                };
+                if (( rel_mode == rm_rup || rel_mode == rm_rdn ) && size == 0)
+                    error;
+                break switch;
+            }
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188838647632;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188838647632;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188838647632:
     };
-    argv += optind;
-    argc -= optind;
-    if (?)
+    if (! ref_file && ! got_size)
     {
         error(0, 0, gettext("you must specify either %s or %s"), quote_n(0, "--size"), quote_n(1, "--reference"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (ref_file && got_size && ! rel_mode)
     {
         error(0, 0, gettext("you must specify a relative %s with %s"), quote_n(0, "--size"), quote_n(1, "--reference"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (block_mode && ! got_size)
     {
         error(0, 0, gettext("%s was specified but %s was not"), quote_n(0, "--io-blocks"), quote_n(1, "--size"));
-        usage(0);
+        usage;
     };
     if (argc < 1)
     {
         error(0, 0, gettext("missing file operand"));
-        usage(0);
+        usage;
     };
     if (ref_file)
     {
         stat sb;
-        long file_size = -1;
-        if (?(@sb))
-            file_size = sb.st_size;
+        if (stat(ref_file, @sb) != 0)
+            error;
+        if (usable_st_size(@sb))
         else
         {
-            int ref_fd = open(ref_file, 0);
+            int ref_fd = open;
             if (0 <= ref_fd)
             {
-                long file_end = lseek(ref_fd, 0, 0);
-                int saved_errno = (?__errno_location());
+                int saved_errno;
                 close(ref_fd);
                 if (0 <= file_end)
-                    file_size = file_end;
                 else
                 {
-                    (?__errno_location()) ? saved_errno;
                 };
             };
         };
-        if (?)
-            size = file_size;
-        else
-            rsize = file_size;
+        if (file_size < 0)
+            error;
     };
-    int oflags = 0 ? (? ? 0 : 0) ? 0;
+    int oflags;
     bool;
     for (byte* fname; (fname = *argv); argv++)
     {
-        int fd = open(fname, oflags, (0 ? 0 ? (0 ? 0) ? (0 ? 0) ? ((0 ? 0) ? 0) ? ((0 ? 0) ? 0)));
+        int fd = open;
         if (fd < 0)
         {
-            if (!(? & (?__errno_location()) ? 0))
+            if (! ( no_create && errno == ENOENT ))
             {
+                error;
             };
         }
         else
         {
             if (close(fd) != 0)
             {
+                error;
             };
         };
     };

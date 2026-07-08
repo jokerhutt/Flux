@@ -21,27 +21,12 @@
 
 cdecl wc_lines_avx512(int fd) -> wc_lines
 {
-    long lines = 0;
-    long bytes = 0;
-    void* /* untranslated: __attribute__((__vector_size__(8 * sizeof(long long)))) long long */ endlines = _mm512_set1_epi8('\n');
-    while (0)
+    while (true)
     {
-        void* /* untranslated: __attribute__((__vector_size__(8 * sizeof(long long)))) long long */[4096] avx_buf = IO_BUFSIZE / (sizeof ( __m512i ) / 8);
-        long bytes_read = read(fd, avx_buf, (sizeof avx_buf / 8));
-        if (bytes_read <= 0)
-            return ( struct wc_lines ) { bytes_read == 0 ? 0 : errno , lines , bytes };
-        bytes += bytes_read;
-        void* /* untranslated: __attribute__((__vector_size__(8 * sizeof(long long)))) long long */* datap = avx_buf;
         while (bytes_read >= 64)
         {
-            void* /* untranslated: __attribute__((__vector_size__(8 * sizeof(long long)))) long long */ to_match = _mm512_load_si512(datap);
-            long matches = ((ulong)__builtin_ia32_cmpb512_mask((void* /* untranslated: __attribute__((__vector_size__(64 * sizeof(char)))) char */)(void* /* untranslated: __attribute__((__vector_size__(8 * sizeof(long long)))) long long */)((to_match)), (void* /* untranslated: __attribute__((__vector_size__(64 * sizeof(char)))) char */)(void* /* untranslated: __attribute__((__vector_size__(8 * sizeof(long long)))) long long */)((endlines)), (int)(_MM_CMPINT_EQ), (ulong)?0));
-            lines += __builtin_popcountll(matches);
-            datap += 1;
-            bytes_read -= 64;
+            long matches = _mm512_cmpeq_epi8_mask;
         };
-        byte* end = (byte*)datap + bytes_read;
-        for (byte* p = (byte*)datap; p < end; p++)
-        {};
+        byte* end;
     };
 };

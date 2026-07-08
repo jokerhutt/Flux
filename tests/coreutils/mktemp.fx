@@ -30,48 +30,54 @@ macro AUTHORS
 };
 
 byte* default_template = "tmp.XXXXXXXXXX";
-uint SUFFIX_OPTION = 128;
+uint SUFFIX_OPTION = 0;
 
-option[8] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        oputs_("mktemp", gettext("\
-  -d, --directory\n\
-         create a directory, not a file\n\
+        printf;
+        fputs;
+        fputs;
+        fputs;
+        oputs_("mktemp", gettext("\
+  -d, --directory\n\
+         create a directory, not a file\n\
 "));
-        oputs_("mktemp", gettext("\
-  -u, --dry-run\n\
-         do not create anything; merely print a name (unsafe)\n\
+        oputs_("mktemp", gettext("\
+  -u, --dry-run\n\
+         do not create anything; merely print a name (unsafe)\n\
 "));
-        oputs_("mktemp", gettext("\
-  -q, --quiet\n\
-         suppress diagnostics about file/dir-creation failure\n\
+        oputs_("mktemp", gettext("\
+  -q, --quiet\n\
+         suppress diagnostics about file/dir-creation failure\n\
 "));
-        oputs_("mktemp", gettext("\
-      --suffix=SUFF\n\
-         append SUFF to TEMPLATE; SUFF must not contain a slash.\n\
-         This option is implied if TEMPLATE does not end in X\n\
+        oputs_("mktemp", gettext("\
+      --suffix=SUFF\n\
+         append SUFF to TEMPLATE; SUFF must not contain a slash.\n\
+         This option is implied if TEMPLATE does not end in X\n\
 "));
-        oputs_("mktemp", gettext("\
-  -p DIR, --tmpdir[=DIR]\n\
-         interpret TEMPLATE relative to DIR;\n\
-         if DIR is not specified, use $TMPDIR if set, else /tmp.\n\
-         With this option, TEMPLATE must not be an absolute name;\n\
-         unlike with -t, TEMPLATE may contain slashes,\n\
-         but mktemp creates only the final component\n\
+        oputs_("mktemp", gettext("\
+  -p DIR, --tmpdir[=DIR]\n\
+         interpret TEMPLATE relative to DIR;\n\
+         if DIR is not specified, use $TMPDIR if set, else /tmp.\n\
+         With this option, TEMPLATE must not be an absolute name;\n\
+         unlike with -t, TEMPLATE may contain slashes,\n\
+         but mktemp creates only the final component\n\
 "));
-        oputs_("mktemp", gettext("\
-  -t\n\
-         interpret TEMPLATE as a single file name component,\n\
-         relative to a directory: $TMPDIR, if set;\n\
-         else the directory specified via -p; else /tmp [deprecated]\n\
+        oputs_("mktemp", gettext("\
+  -t\n\
+         interpret TEMPLATE as a single file name component,\n\
+         relative to a directory: $TMPDIR, if set;\n\
+         else the directory specified via -p; else /tmp [deprecated]\n\
 "));
         oputs_("mktemp", gettext("      --help\n         display this help and exit\n"));
         oputs_("mktemp", gettext("      --version\n         output version information and exit\n"));
@@ -90,95 +96,50 @@ cdecl count_consecutive_X_s(byte* s, ulong len) -> ulong
 
 cdecl mkstemp_len(byte* tmpl, ulong suff_len, ulong x_len, int dry_run) -> int
 {
+    return gen_tempname_len;
 };
 
 cdecl mkdtemp_len(byte* tmpl, ulong suff_len, ulong x_len, int dry_run) -> int
 {
+    return gen_tempname_len;
 };
 
 extern int stdout_closed;
 cdecl maybe_close_stdout() -> void
 {
-    if (!?)
+    if (!stdout_closed)
         close_stdout();
-    elif (?)
-        _exit(0);
+    elif (close_stream != 0)
+        _exit;
 };
 
 cdecl main(int argc, byte** argv) -> int
 {
     byte* dest_dir;
-    byte* dest_dir_arg = ((void*)0);
+    byte* dest_dir_arg;
     bool;
     int c;
     byte* template;
-    byte* suffix = ((void*)0);
+    byte* suffix;
     bool;
     bool;
     bool;
     bool;
-    int status = 0;
+    int status;
     ulong x_count;
     ulong suffix_len;
-    byte* dest_name = ((void*)0);
+    byte* dest_name;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     atexit(maybe_close_stdout);
-    while ((c = getopt_long(argc, argv, "dp:qtuV", longopts, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('d')
-            {
-            }
-            goto _switch_end_139188835350608;
-            case ('p')
-            {
-                dest_dir_arg = optarg;
-            }
-            goto _switch_end_139188835350608;
-            case ('q')
-            {
-            }
-            goto _switch_end_139188835350608;
-            case ('t')
-            {
-            }
-            goto _switch_end_139188835350608;
-            case ('u')
-            {
-            }
-            goto _switch_end_139188835350608;
-            case (SUFFIX_OPTION)
-            {
-                suffix = optarg;
-            }
-            goto _switch_end_139188835350608;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188835350608;
-            case ('V')
-            {
-                case (GETOPT_VERSION_CHAR)
-                {
-                }
-            }
-            exit(0);
-            goto _switch_end_139188835350608;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188835350608:
     };
-    int n_args = argc - optind;
+    int n_args;
     if (2 <= n_args)
     {
         error(0, 0, gettext("too many templates"));
-        usage(0);
+        usage;
     };
     if (n_args == 0)
     {
@@ -186,14 +147,13 @@ cdecl main(int argc, byte** argv) -> int
     }
     else
     {
-        template = argv[optind];
     };
     if (suffix)
     {
         ulong len = strlen(template);
         if (!len | template[len - 1] != 'X')
         {
-            error(0, 0, gettext("with --suffix, template %s must end in X"), quote(template));
+            error;
         };
         suffix_len = strlen(suffix);
         dest_name = xcharalloc(len + suffix_len + 1);
@@ -214,18 +174,18 @@ cdecl main(int argc, byte** argv) -> int
     };
     if (suffix_len & last_component(suffix) != suffix)
     {
-        error(0, 0, gettext("invalid suffix %s, contains directory separator"), quote(suffix));
+        error;
     };
     x_count = count_consecutive_X_s(template, suffix - template);
     if (x_count < 3)
     {
         if (template == dest_name)
             template[suffix - template] = '\0';
-        error(0, 0, gettext("too few X's in template %s"), quote(template));
+        error;
     };
-    if (?)
+    if (use_dest_dir)
     {
-        if (?)
+        if (deprecated_t_option)
         {
             byte* env = getenv("TMPDIR");
             if (env & *env)
@@ -235,7 +195,7 @@ cdecl main(int argc, byte** argv) -> int
             else
                 dest_dir = "/tmp";
             if (last_component(template) != template)
-                error(0, 0, gettext("invalid template, %s, contains directory separator"), quote(template));
+                error;
         }
         else
         {
@@ -247,42 +207,39 @@ cdecl main(int argc, byte** argv) -> int
                 dest_dir = (env & *env ? env : "/tmp");
             };
             if (IS_ABSOLUTE_FILE_NAME(template))
-                error(0, 0, gettext("invalid template, %s; with --tmpdir,"), quote(template));
+                error;
         };
-        dest_name = file_name_concat(dest_dir, template, ((void*)0));
+        dest_name = file_name_concat;
         free(template);
         template = dest_name;
     };
     dest_name = xstrdup(template);
-    if (?)
+    if (create_directory)
     {
-        int err;
+        int err = mkdtemp_len;
         if (err != 0)
         {
-            if (?)
-                error(0, (?__errno_location()), gettext("failed to create directory via template %s"), quote(template));
-            status = 0;
+            if (! suppress_file_err)
+                error;
         };
     }
     else
     {
-        int fd;
-        if (?)
+        int fd = mkstemp_len;
+        if (fd < 0 || ( ! dry_run && close ( fd ) != 0 ))
         {
-            if (?)
-                error(0, (?__errno_location()), gettext("failed to create file via template %s"), quote(template));
-            status = 0;
+            if (! suppress_file_err)
+                error;
         };
     };
-    if (status == 0)
+    if (status == EXIT_SUCCESS)
     {
         puts(dest_name);
-        if (?)
+        if (! dry_run && ( ( stdout_closed = true ) , close_stream ( stdout ) != 0 ))
         {
-            int saved_errno = (?__errno_location());
-            if (?)
+            int saved_errno;
+            if (! suppress_file_err)
                 error(0, saved_errno, gettext("write error"));
-            status = 0;
         };
     };
     return status;

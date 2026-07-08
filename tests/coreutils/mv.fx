@@ -29,21 +29,24 @@ macro AUTHORS
     proper_name ( "Mike Parker" ) , proper_name ( "David MacKenzie" ) , proper_name ( "Jim Meyering" )
 };
 
-uint DEBUG_OPTION = 128;
-uint EXCHANGE_OPTION = 129;
-uint NO_COPY_OPTION = 130;
-uint STRIP_TRAILING_SLASHES_OPTION = 131;
+uint DEBUG_OPTION = 0;
+uint EXCHANGE_OPTION = 1;
+uint NO_COPY_OPTION = 2;
+uint STRIP_TRAILING_SLASHES_OPTION = 3;
 
-byte*[5] update_type_string = {"all", "none", "none-fail", "older", ((void*)0)};
+extern byte** update_type_string;
 Update_type[4] update_type = Update_type;
 cdecl ARGMATCH_VERIFY() -> int;
-option[17] long_options = option;
+struct option;
+extern int long_options;
 cdecl rm_option_init(rm_options* x) -> void
 {
     x.interactive = RMI_NEVER;
     {
         dev_ino dev_ino_buf;
-        x.root_dev_ino = get_root_dev_ino(@?);
+        x.root_dev_ino = get_root_dev_ino(@dev_ino_buf);
+        if (x -> root_dev_ino == NULL)
+            error;
     };
 };
 
@@ -54,13 +57,10 @@ cdecl cp_option_init(cp_options* x) -> void
     x.reflink_mode = REFLINK_AUTO;
     x.dereference = DEREF_NEVER;
     x.interactive = I_UNSPECIFIED;
-    x.set_security_context = ((void*)0);
     x.sparse_mode = SPARSE_AUTO;
-    x.mode = 0;
-    x = isatty(0);
+    x = 0;
+    x = isatty;
     x.update = UPDATE_ALL;
-    x = ((void*)0);
-    x = ((void*)0);
 };
 
 cdecl do_move(byte* source, byte* dest, int dest_dirfd, byte* dest_relname, cp_options* x) -> int
@@ -68,22 +68,20 @@ cdecl do_move(byte* source, byte* dest, int dest_dirfd, byte* dest_relname, cp_o
     bool;
     bool;
     bool;
-    if (?)
+    if (ok)
     {
         byte* dir_to_remove;
-        if (?)
+        if (copy_into_self)
         {
-            dir_to_remove = ((void*)0);
         }
-        elif (?)
+        elif (rename_succeeded)
         {
-            dir_to_remove = ((void*)0);
         };
         else
         {
             dir_to_remove = source;
         };
-        if (dir_to_remove != ((void*)0))
+        if (dir_to_remove != NULL)
         {
             rm_options rm_options;
             rm_option_init(@rm_options);
@@ -97,84 +95,82 @@ cdecl do_move(byte* source, byte* dest, int dest_dirfd, byte* dest_relname, cp_o
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Rename SOURCE to DEST, or move SOURCE(s) to DIRECTORY.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("mv", gettext("\
-      --backup[=CONTROL]\n\
-         make a backup of each existing destination file\n\
+        oputs_("mv", gettext("\
+      --backup[=CONTROL]\n\
+         make a backup of each existing destination file\n\
 "));
-        oputs_("mv", gettext("\
-  -b\n\
-         like --backup but does not accept an argument\n\
+        oputs_("mv", gettext("\
+  -b\n\
+         like --backup but does not accept an argument\n\
 "));
-        oputs_("mv", gettext("\
-      --debug\n\
-         explain how a file is copied.  Implies -v\n\
+        oputs_("mv", gettext("\
+      --debug\n\
+         explain how a file is copied.  Implies -v\n\
 "));
-        oputs_("mv", gettext("\
-      --exchange\n\
-         exchange source and destination\n\
+        oputs_("mv", gettext("\
+      --exchange\n\
+         exchange source and destination\n\
 "));
-        oputs_("mv", gettext("\
-  -f, --force\n\
-         do not prompt before overwriting\n\
+        oputs_("mv", gettext("\
+  -f, --force\n\
+         do not prompt before overwriting\n\
 "));
-        oputs_("mv", gettext("\
-  -i, --interactive\n\
-         prompt before overwrite\n\
+        oputs_("mv", gettext("\
+  -i, --interactive\n\
+         prompt before overwrite\n\
 "));
-        oputs_("mv", gettext("\
-  -n, --no-clobber\n\
-         do not overwrite an existing file\n\
+        oputs_("mv", gettext("\
+  -n, --no-clobber\n\
+         do not overwrite an existing file\n\
 "));
-        fputs(gettext("\
-If you specify more than one of -i, -f, -n, only the final one takes effect.\n\
-"), stdout);
-        oputs_("mv", gettext("\
-      --no-copy\n\
-         do not copy if renaming fails\n\
+        fputs;
+        oputs_("mv", gettext("\
+      --no-copy\n\
+         do not copy if renaming fails\n\
 "));
-        oputs_("mv", gettext("\
-      --strip-trailing-slashes\n\
-         remove any trailing slashes from each SOURCE argument\n\
+        oputs_("mv", gettext("\
+      --strip-trailing-slashes\n\
+         remove any trailing slashes from each SOURCE argument\n\
 "));
-        oputs_("mv", gettext("\
-  -S, --suffix=SUFFIX\n\
-         override the usual backup suffix\n\
+        oputs_("mv", gettext("\
+  -S, --suffix=SUFFIX\n\
+         override the usual backup suffix\n\
 "));
-        oputs_("mv", gettext("\
-  -t, --target-directory=DIRECTORY\n\
-         move all SOURCE arguments into DIRECTORY\n\
+        oputs_("mv", gettext("\
+  -t, --target-directory=DIRECTORY\n\
+         move all SOURCE arguments into DIRECTORY\n\
 "));
-        oputs_("mv", gettext("\
-  -T, --no-target-directory\n\
-         treat DEST as a normal file\n\
+        oputs_("mv", gettext("\
+  -T, --no-target-directory\n\
+         treat DEST as a normal file\n\
 "));
-        oputs_("mv", gettext("\
-      --update[=UPDATE]\n\
-         control which existing files are updated;\n\
-         UPDATE={all,none,none-fail,older(default)}\n\
+        oputs_("mv", gettext("\
+      --update[=UPDATE]\n\
+         control which existing files are updated;\n\
+         UPDATE={all,none,none-fail,older(default)}\n\
 "));
-        oputs_("mv", gettext("\
-  -u\n\
-         equivalent to --update[=older].  See below\n\
+        oputs_("mv", gettext("\
+  -u\n\
+         equivalent to --update[=older].  See below\n\
 "));
-        oputs_("mv", gettext("\
-  -v, --verbose\n\
-         explain what is being done\n\
+        oputs_("mv", gettext("\
+  -v, --verbose\n\
+         explain what is being done\n\
 "));
-        oputs_("mv", gettext("\
-  -Z, --context\n\
-         set SELinux security context of destination file to default type\n\
+        oputs_("mv", gettext("\
+  -Z, --context\n\
+         set SELinux security context of destination file to default type\n\
 "));
         oputs_("mv", gettext("      --help\n         display this help and exit\n"));
         oputs_("mv", gettext("      --version\n         output version information and exit\n"));
@@ -188,136 +184,50 @@ If you specify more than one of -i, -f, -n, only the final one takes effect.\n\
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
-    byte* backup_suffix = ((void*)0);
-    byte* version_control_string = ((void*)0);
+    byte* backup_suffix;
+    byte* version_control_string;
     cp_options x;
     bool;
-    byte* target_directory = ((void*)0);
+    byte* target_directory;
     bool;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     cp_option_init(@x);
     priv_set_remove_linkdir();
     int c;
-    while ((c = getopt_long(argc, argv, "bfint:uvS:TZ", long_options, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case ('b')
-            {
-            }
-            if (optarg)
-                version_control_string = optarg;
-            goto _switch_end_139188887392976;
-            case ('f')
-            {
-                x.interactive = I_ALWAYS_YES;
-            }
-            goto _switch_end_139188887392976;
-            case ('i')
-            {
-                x.interactive = I_ASK_USER;
-            }
-            goto _switch_end_139188887392976;
-            case ('n')
-            {
-                x.interactive = I_ALWAYS_SKIP;
-            }
-            goto _switch_end_139188887392976;
-            case (DEBUG_OPTION)
-            {
-            }
-            goto _switch_end_139188887392976;
-            case (EXCHANGE_OPTION)
-            {
-            }
-            goto _switch_end_139188887392976;
-            case (NO_COPY_OPTION)
-            {
-            }
-            goto _switch_end_139188887392976;
-            case (STRIP_TRAILING_SLASHES_OPTION)
-            {
-            }
-            goto _switch_end_139188887392976;
-            case ('t')
-            {
-                if (target_directory)
-                    error(0, 0, gettext("multiple target directories specified"));
-            }
-            target_directory = optarg;
-            goto _switch_end_139188887392976;
-            case ('T')
-            {
-            }
-            goto _switch_end_139188887392976;
-            case ('u')
-            {
-                x.update = UPDATE_OLDER;
-            }
-            if (optarg)
-                x.update = XARGMATCH("--update", optarg, update_type_string, update_type);
-            goto _switch_end_139188887392976;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188887392976;
-            case ('S')
-            {
-            }
-            backup_suffix = optarg;
-            goto _switch_end_139188887392976;
-            case ('Z')
-            {
-                if (?)
-                {
-                    if (!x.set_security_context)
-                        error(0, (?__errno_location()), gettext("warning: ignoring --context"));
-                };
-            }
-            goto _switch_end_139188887392976;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188887392976;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188887392976;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188887392976:
     };
-    int n_files = argc - optind;
-    byte** file = argv + optind;
+    int n_files;
+    byte** file;
     if (n_files <= !target_directory)
     {
         if (n_files <= 0)
             error(0, 0, gettext("missing file operand"));
         else
-        usage(0);
+            error(0, 0, gettext("missing destination file operand after %s"), quotearg_style);
+        usage;
     };
     stat sb;
-    sb.st_mode = 0;
+    sb. = 0;
     int target_dirfd;
-    if (?)
+    if (no_target_directory)
     {
         if (target_directory)
-            error(0, 0, gettext("cannot combine --target-directory (-t) "));
+            error;
         if (2 < n_files)
         {
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quotearg_style);
+            usage;
         };
     }
     elif (target_directory)
     {
         target_dirfd = target_directory_operand(target_directory, @sb);
+        if (!target_dirfd_valid(target_dirfd))
+            error;
     };
     else
     {
@@ -334,19 +244,21 @@ cdecl main(int argc, byte** argv) -> int
             }
             else
             {
-                int err = (?__errno_location());
+                int err;
+                if (2 < n_files || ( O_PATHSEARCH == O_SEARCH && err == EACCES && ( sb . st_mode != 0 || stat ( lastfile , & sb ) == 0 ) && S_ISDIR ( sb . st_mode ) ))
+                    error;
             };
         };
     };
-    if (?)
+    if (remove_trailing_slashes)
         for (int i = 0; i < n_files; i++)
         {};
     if (x.interactive == I_ALWAYS_SKIP)
         x.update = UPDATE_NONE;
-    if (?)
+    if (make_backups && ( x . exchange || x . update == UPDATE_NONE || x . update == UPDATE_NONE_FAIL ))
     {
         error(0, 0, gettext("cannot combine --backup with "));
-        usage(0);
+        usage;
     };
     set_simple_backup_suffix(backup_suffix);
     hash_init();

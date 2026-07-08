@@ -42,37 +42,42 @@ enum output_error
 };
 
 output_error output_error = output_error;
-option[6] long_options = option;
-byte*[5] output_error_args = {"warn", "warn-nopipe", "exit", "exit-nopipe", ((void*)0)};
+struct option;
+extern int long_options;
+extern byte** output_error_args;
 output_error[4] output_error_types = output_error;
 cdecl ARGMATCH_VERIFY() -> int;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        oputs_("tee", gettext("\
-  -a, --append\n\
-         append to the given FILEs, do not overwrite\n\
+        printf;
+        fputs;
+        oputs_("tee", gettext("\
+  -a, --append\n\
+         append to the given FILEs, do not overwrite\n\
 "));
-        oputs_("tee", gettext("\
-  -i, --ignore-interrupts\n\
-         ignore interrupt signals\n\
+        oputs_("tee", gettext("\
+  -i, --ignore-interrupts\n\
+         ignore interrupt signals\n\
 "));
-        oputs_("tee", gettext("\
-  -p\n\
-         operate in a more appropriate MODE with pipes\n\
+        oputs_("tee", gettext("\
+  -p\n\
+         operate in a more appropriate MODE with pipes\n\
 "));
-        oputs_("tee", gettext("\
-      --output-error[=MODE]\n\
-         set behavior on write error.  See MODE below\n\
+        oputs_("tee", gettext("\
+      --output-error[=MODE]\n\
+         set behavior on write error.  See MODE below\n\
 "));
         oputs_("tee", gettext("      --help\n         display this help and exit\n"));
         oputs_("tee", gettext("      --version\n         output version information and exit\n"));
+        fputs;
         emit_ancillary_info("tee");
     };
     exit(status);
@@ -81,53 +86,53 @@ cdecl usage(int status) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "aip", long_options, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('a')
             {
+                break switch;
             }
-            goto _switch_end_139188837624656;
             case ('i')
             {
+                break switch;
             }
-            goto _switch_end_139188837624656;
             case ('p')
             {
                 if (optarg)
-                    output_error = XARGMATCH("--output-error", optarg, output_error_args, output_error_types);
+                    output_error = XARGMATCH;
                 else
                     output_error = output_error_warn_nopipe;
+                break switch;
             }
-            goto _switch_end_139188837624656;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837624656;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837624656;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188837624656:
     };
-    if (?)
-        signal(0, ((def{}*(int) -> void)0));
+    if (ignore_interrupts)
+        signal;
     if (output_error != output_error_sigpipe)
-        signal(0, ((def{}*(int) -> void)0));
+        signal;
     bool;
     bool;
-    if (close(0) != 0)
-        error(0, (?__errno_location()), "%s", gettext("standard input"));
+    if (close != 0)
+        error;
 };
 
 cdecl get_next_out(int* descriptors, int nfiles, int idx) -> int
@@ -139,10 +144,11 @@ cdecl get_next_out(int* descriptors, int nfiles, int idx) -> int
 
 cdecl fail_output(int* descriptors, byte** files, int i) -> int
 {
-    int w_errno = (?__errno_location());
+    int w_errno;
     bool;
-    if (?)
+    if (fail)
     {
+        error(output_error == output_error_exit | output_error == output_error_exit_nopipe, w_errno, "%s", quotearg_n_style_colon);
     };
     descriptors[i] = -1;
 };

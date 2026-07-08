@@ -74,7 +74,7 @@ byte[8] printf_flags = "'-+ #0I";
 byte[35] fmt_terse_fs = "%Qn %i %l %t %s %S %b %f %a %c %d\n";
 byte[50] fmt_terse_regular = "%Qn %s %b %f %u %g %D %i %h %t %T";
 byte[53] fmt_terse_selinux = "%Qn %s %b %f %u %g %D %i %h %t %T";
-uint PRINTF_OPTION = 128;
+uint PRINTF_OPTION = 0;
 
 enum cached_mode
 {
@@ -83,9 +83,10 @@ enum cached_mode
     cached_always
 };
 
-byte*[4] cached_args = {"default", "never", "always", ((void*)0)};
+extern byte** cached_args;
 cached_mode[3] cached_modes = cached_mode;
-option[9] long_options = option;
+struct option;
+extern int long_options;
 extern int follow_links;
 extern int interpret_backslash_escapes;
 byte* trailing_delim = "";
@@ -96,149 +97,8 @@ cdecl human_fstype(statfs* statfsbuf) -> int*
 {
     switch (statfsbuf)
     {
-        return "aafs";
-        return "acfs";
-        return "adfs";
-        return "affs";
-        return "afs";
-        return "anon-inode FS";
-        return "aufs";
-        return "autofs";
-        return "balloon-kvm-fs";
-        return "bcachefs";
-        return "befs";
-        return "bdevfs";
-        return "bfs";
-        return "binderfs";
-        return "bpf_fs";
-        return "binfmt_misc";
-        return "btrfs";
-        return "btrfs_test";
-        return "ceph";
-        return "cgroupfs";
-        return "cgroup2fs";
-        return "cifs";
-        return "coda";
-        return "coh";
-        return "configfs";
-        return "cramfs";
-        return "cramfs-wend";
-        return "daxfs";
-        return "debugfs";
-        return "devfs";
-        return "devmem";
-        return "devpts";
-        return "dma-buf-fs";
-        return "ecryptfs";
-        return "efivarfs";
-        return "efs";
-        return "erofs";
-        return "exfat";
-        return "exfs";
-        return "exofs";
-        return "ext";
-        return "ext2/ext3";
-        return "ext2";
-        return "f2fs";
-        return "fat";
-        return "fhgfs";
-        return "fuse";
-        return "fusectl";
-        return "futexfs";
-        return "gfs/gfs2";
-        return "gpfs";
-        return "guest-memfd";
-        return "hfs";
-        return "hfs+";
-        return "hfsx";
-        return "hostfs";
-        return "hpfs";
-        return "hugetlbfs";
-        return "inodefs";
-        return "ibrix";
-        return "inotifyfs";
-        return "isofs";
-        return "isofs";
-        return "isofs";
-        return "jffs";
-        return "jffs2";
-        return "jfs";
-        return "k-afs";
-        return "logfs";
-        return "lustre";
-        return "m1fs";
-        return "minix";
-        return "minix (30 char.)";
-        return "minix v2";
-        return "minix v2 (30 char.)";
-        return "minix3";
-        return "mqueue";
-        return "msdos";
-        return "novell";
-        return "nfs";
-        return "nfsd";
-        return "nilfs";
-        return "nsfs";
-        return "ntfs";
-        return "openprom";
-        return "ocfs2";
-        return "overlayfs";
-        return "panfs";
-        return "pidfs";
-        return "pipefs";
-        return "ppc-cmm-fs";
-        return "prl_fs";
-        return "proc";
-        return "pstorefs";
-        return "qnx4";
-        return "qnx6";
-        return "ramfs";
-        return "rdt";
-        return "reiserfs";
-        return "romfs";
-        return "rpc_pipefs";
-        return "sdcardfs";
-        return "secretmem";
-        return "securityfs";
-        return "selinux";
-        return "smackfs";
-        return "smb";
-        return "smb2";
-        return "snfs";
-        return "sockfs";
-        return "squashfs";
-        return "sysfs";
-        return "sysv2";
-        return "sysv4";
-        return "tmpfs";
-        return "tracefs";
-        return "ubifs";
-        return "udf";
-        return "ufs";
-        return "ufs";
-        return "usbdevfs";
-        return "v9fs";
-        return "vboxsf";
-        return "vmhgfs";
-        return "vxfs";
-        return "vzfs";
-        return "wslfs";
-        return "xenfs";
-        return "xenix";
-        return "xfs";
-        return "xia";
-        return "z3fold";
-        return "zfs";
-        return "zonefs";
-        return "zsmallocfs";
         default
         {
-            {
-                ulong type = statfsbuf;
-                byte[29] buf = (sizeof "UNKNOWN (0x%lx)" / 8) - 3 + ((sizeof type / 8) * 0 + 3) / 4;
-                sprintf(buf, "UNKNOWN (0x%lx)", type);
-                return buf;
-            };
         };
     };
 };
@@ -253,20 +113,20 @@ cdecl human_access(stat* statbuf) -> int*
 
 cdecl human_time(timespec t) -> int*
 {
-    byte str;
+    void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND) + <recovery-expr>(INT_STRLEN_BOUND) + 1 + sizeof "-MM-DD HH:MM:SS.NNNNNNNNN +"] */ str = INT_BUFSIZE_BOUND + INT_STRLEN_BOUND /* YYYY */ 1 /* because YYYY might equal INT_MAX + 1900 */ (sizeof "-MM-DD HH:MM:SS.NNNNNNNNN +" / 8);
     int tz;
-    if (!?)
+    if (!tz)
         tz = tzalloc(getenv("TZ"));
     tm tm;
-    int ns = t.tv_nsec;
-    if (localtime_rz(?, @t.tv_sec, @tm))
-        nstrftime(?, (sizeof str / 8), "%Y-%m-%d %H:%M:%S.%N %z", @tm, ?, ns);
+    int ns = t.;
+    if (localtime_rz(tz, @t., @tm))
+        nstrftime(str, (sizeof str / 8), "%Y-%m-%d %H:%M:%S.%N %z", @tm, tz, ns);
     else
     {
-        void* /* untranslated: char[INT_BUFSIZE_BOUND(<recovery-expr>())] */ secbuf = INT_BUFSIZE_BOUND(?);
-        sprintf(?, "%s.%09d", timetostr(t.tv_sec, secbuf), ns);
+        void* /* untranslated: char[<recovery-expr>(INT_BUFSIZE_BOUND)] */ secbuf = INT_BUFSIZE_BOUND;
+        sprintf(str, "%s.%09d", timetostr(t., secbuf), ns);
     };
-    return ?;
+    return str;
 };
 
 cdecl make_format(byte* pformat, ulong prefix_len, byte* allowed_flags, byte* suffix) -> void
@@ -287,25 +147,25 @@ cdecl out_string(byte* pformat, ulong prefix_len, byte* arg) -> void
     printf(pformat, arg);
 };
 
-cdecl out_int(byte* pformat, ulong prefix_len, long arg) -> int
+cdecl out_int(byte* pformat, ulong prefix_len, int arg) -> int
 {
     make_format(pformat, prefix_len, "'-+ 0", "jd");
     return printf(pformat, arg);
 };
 
-cdecl out_uint(byte* pformat, ulong prefix_len, ulong arg) -> int
+cdecl out_uint(byte* pformat, ulong prefix_len, int arg) -> int
 {
     make_format(pformat, prefix_len, "'-0", "ju");
     return printf(pformat, arg);
 };
 
-cdecl out_uint_o(byte* pformat, ulong prefix_len, ulong arg) -> void
+cdecl out_uint_o(byte* pformat, ulong prefix_len, int arg) -> void
 {
     make_format(pformat, prefix_len, "-#0", "jo");
     printf(pformat, arg);
 };
 
-cdecl out_uint_x(byte* pformat, ulong prefix_len, ulong arg) -> void
+cdecl out_uint_x(byte* pformat, ulong prefix_len, int arg) -> void
 {
     make_format(pformat, prefix_len, "-#0", "jx");
     printf(pformat, arg);
@@ -330,8 +190,7 @@ cdecl out_epoch_sec(byte* pformat, ulong prefix_len, timespec arg) -> void
         pformat[prefix_len] = '\0';
         if (c_isdigit(dot[1]))
         {
-            long lprec = strtol(dot + 1, ((void*)0), 10);
-            precision = (lprec <= 0 ? lprec : 0);
+            long lprec = strtol;
         }
         else
         {
@@ -344,8 +203,7 @@ cdecl out_epoch_sec(byte* pformat, ulong prefix_len, timespec arg) -> void
             do
                 --p;
             while (c_isdigit(p[-1]));
-            long lwidth = strtol(p, ((void*)0), 10);
-            width = (lwidth <= 0 ? lwidth : 0);
+            long lwidth = strtol;
             if (1 < width)
             {
                 p += (*p == '0');
@@ -371,20 +229,20 @@ cdecl out_epoch_sec(byte* pformat, ulong prefix_len, timespec arg) -> void
     int divisor = 1;
     for (int i = precision; i < 9; i++)
     {};
-    int frac_sec = arg.tv_nsec / divisor;
+    int frac_sec = arg. / divisor;
     int int_len;
-    if (TYPE_SIGNED(?))
+    if (TYPE_SIGNED)
     {
         bool;
-        if (arg.tv_sec < 0 & arg.tv_nsec != 0)
+        if (arg. < 0 & arg. != 0)
         {
             int frac_sec_modulus = 1000000000 / divisor;
-            frac_sec = (frac_sec_modulus - frac_sec - (arg.tv_nsec % divisor != 0));
-            arg.tv_sec += (frac_sec != 0);
+            frac_sec = (frac_sec_modulus - frac_sec - (arg. % divisor != 0));
+            arg. += (frac_sec != 0);
         };
     }
     else
-        int_len = out_uint(pformat, sec_prefix_len, arg.tv_sec);
+        int_len = out_uint(pformat, sec_prefix_len, arg.);
     if (precision)
     {
         int prec = (precision < 9 ? precision : 9);
@@ -399,35 +257,36 @@ extern int bool;
 cdecl getenv_quoting_style() -> void
 {
     int got_quoting_style;
-    if (?)
+    if (got_quoting_style)
         return void;
     byte* q_style = getenv("QUOTING_STYLE");
     if (q_style)
     {
-        int i;
+        int i = ARGMATCH;
         if (0 <= i)
+            set_quoting_style;
         else
         {
+            set_quoting_style;
             error(0, 0, gettext("ignoring invalid value of environment "), quote(q_style));
         };
     }
     else
+        set_quoting_style;
 };
 
 extern int bool;
 cdecl find_bind_mount(byte* name) -> int*
 {
-    byte* bind_mount = ((void*)0);
+    byte* bind_mount;
     mount_entry* mount_list;
     int tried_mount_list;
-    if (!?)
+    if (!tried_mount_list)
     {
-        if (?)
-            error(0, (?__errno_location()), "%s", gettext("cannot read table of mounted file systems"));
+        if (!(mount_list = read_file_system_list))
+            error;
     };
     stat name_stats;
-    if (stat(name, @name_stats) != 0)
-        return ((void*)0);
     for (mount_entry* me = mount_list; me; me = me)
     {
         if (me & me[0] == '/' & streq(me, name))
@@ -444,11 +303,12 @@ cdecl find_bind_mount(byte* name) -> int*
 };
 
 extern int bool;
+struct timespec;
 cdecl neg_to_zero(timespec ts) -> timespec
 {
-    if (0 <= ts.tv_nsec)
+    if (0 <= ts.)
         return ts;
-    timespec z = {0};
+    timespec z;
     return z;
 };
 
@@ -459,57 +319,50 @@ cdecl print_esc_char(byte c) -> void
         case ('a')
         {
             c = '\a';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('b')
         {
             c = '\b';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('e')
         {
             c = '\x1B';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('f')
         {
             c = '\f';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('n')
         {
             c = '\n';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('r')
         {
             c = '\r';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('t')
         {
             c = '\t';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('v')
         {
             c = '\v';
+            break switch;
         }
-        goto _switch_end_139188883808720;
         case ('"')
         {
-            case ('\\')
-            {
-                goto _switch_end_139188883808720;
-            }
         }
         default
         {
-            error(0, 0, gettext("warning: unrecognized escape '\\%c'"), c);
         };
-        goto _switch_end_139188883808720;
     };
-    label _switch_end_139188883808720:
     putchar(c);
 };
 
@@ -526,22 +379,21 @@ extern int dont_sync;
 extern int force_sync;
 cdecl get_birthtime(int fd, byte* filename, stat* st) -> timespec
 {
-    timespec ts = get_stat_birthtime(st);
+    timespec ts;
     return ts;
 };
 
 extern int bool;
-cdecl unsigned_file_size(long size) -> ulong
+cdecl unsigned_file_size(int size) -> int
 {
-    return size + (size < 0) * ((ulong)TYPE_MAXIMUM(?) - TYPE_MINIMUM(?) + 1);
 };
 
 cdecl default_format(int fs, int terse, int device) -> byte*
 {
     byte* format;
-    if (?)
+    if (fs)
     {
-        if (?)
+        if (terse)
             format = xstrdup(fmt_terse_fs);
         else
         {
@@ -550,7 +402,7 @@ cdecl default_format(int fs, int terse, int device) -> byte*
     }
     else
     {
-        if (?)
+        if (terse)
         {
             if (0 < is_selinux_enabled())
                 format = xstrdup(fmt_terse_selinux);
@@ -560,24 +412,24 @@ cdecl default_format(int fs, int terse, int device) -> byte*
         else
         {
             byte* temp;
-            format = xstrdup(gettext("\
-  File: %N\n\
-  Size: %-10s\tBlocks: %-10b IO Block: %-6o %F\n\
+            format = xstrdup(gettext("\
+  File: %N\n\
+  Size: %-10s\tBlocks: %-10b IO Block: %-6o %F\n\
 "));
             temp = format;
-            if (?)
+            if (device)
             {
-                format = xasprintf("%s%s", format, gettext("\
+                format = xasprintf("%s%s", format, gettext("\
 "));
             }
             else
             {
-                format = xasprintf("%s%s", format, gettext("\
+                format = xasprintf("%s%s", format, gettext("\
 "));
             };
             free(temp);
             temp = format;
-            format = xasprintf("%s%s", format, gettext("\
+            format = xasprintf("%s%s", format, gettext("\
 "));
             free(temp);
             if (0 < is_selinux_enabled())
@@ -596,127 +448,61 @@ cdecl default_format(int fs, int terse, int device) -> byte*
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Display file or file system status.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("stat", gettext("\
-  -L, --dereference\n\
-         follow links\n\
+        oputs_("stat", gettext("\
+  -L, --dereference\n\
+         follow links\n\
 "));
-        oputs_("stat", gettext("\
-  -f, --file-system\n\
-         display file system status instead of file status\n\
+        oputs_("stat", gettext("\
+  -f, --file-system\n\
+         display file system status instead of file status\n\
 "));
-        oputs_("stat", gettext("\
-      --cached=MODE\n\
-         specify how to use cached attributes;\n\
-         useful on remote file systems. See MODE below\n\
+        oputs_("stat", gettext("\
+      --cached=MODE\n\
+         specify how to use cached attributes;\n\
+         useful on remote file systems. See MODE below\n\
 "));
-        oputs_("stat", gettext("\
-  -c, --format=FORMAT\n\
-         use the specified FORMAT instead of the default;\n\
-         output a newline after each use of FORMAT\n\
+        oputs_("stat", gettext("\
+  -c, --format=FORMAT\n\
+         use the specified FORMAT instead of the default;\n\
+         output a newline after each use of FORMAT\n\
 "));
-        oputs_("stat", gettext("\
-      --printf=FORMAT\n\
-         like --format, but interpret backslash escapes,\n\
-         and do not output a mandatory trailing newline;\n\
-         if you want a newline, include \\n in FORMAT\n\
+        oputs_("stat", gettext("\
+      --printf=FORMAT\n\
+         like --format, but interpret backslash escapes,\n\
+         and do not output a mandatory trailing newline;\n\
+         if you want a newline, include \\n in FORMAT\n\
 "));
-        oputs_("stat", gettext("\
-  -t, --terse\n\
-         print the information in terse form\n\
+        oputs_("stat", gettext("\
+  -t, --terse\n\
+         print the information in terse form\n\
 "));
         oputs_("stat", gettext("      --help\n         display this help and exit\n"));
         oputs_("stat", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\n\
-The MODE argument of --cached can be: always, never, or default.\n\
-'always' will use cached attributes if available, while\n\
-'never' will try to synchronize with the latest attributes, and\n\
-'default' will leave it up to the underlying file system.\n\
-"), stdout);
-        fputs(gettext("\n\
-The valid format sequences for files (without --file-system):\n\
-\n\
-  %a   permission bits in octal (see '#' and '0' printf flags)\n\
-  %A   permission bits and file type in human readable form\n\
-  %b   number of blocks allocated (see %B)\n\
-  %B   the size in bytes of each block reported by %b\n\
-  %C   SELinux security context string\n\
-"), stdout);
-        fputs(gettext("\
-  %d   device number in decimal (st_dev)\n\
-  %D   device number in hex (st_dev)\n\
-  %Hd  major device number in decimal\n\
-  %Ld  minor device number in decimal\n\
-  %f   raw mode in hex\n\
-  %F   file type\n\
-  %g   group ID of owner\n\
-  %G   group name of owner\n\
-"), stdout);
-        fputs(gettext("\
-  %h   number of hard links\n\
-  %i   inode number\n\
-  %m   mount point\n\
-  %n   file name\n\
-  %Qn  quoted file name\n\
-  %N   quoted file name with dereference if symbolic link\n\
-  %o   optimal I/O transfer size hint\n\
-  %s   total size, in bytes\n\
-  %r   device type in decimal (st_rdev)\n\
-  %R   device type in hex (st_rdev)\n\
-  %Hr  major device type in decimal, for character/block device special files\n\
-  %Lr  minor device type in decimal, for character/block device special files\n\
-  %t   major device type in hex, for character/block device special files\n\
-  %T   minor device type in hex, for character/block device special files\n\
-"), stdout);
-        fputs(gettext("\
-  %u   user ID of owner\n\
-  %U   user name of owner\n\
-  %w   time of file birth, human-readable; - if unknown\n\
-  %W   time of file birth, seconds since Epoch; 0 if unknown\n\
-  %x   time of last access, human-readable\n\
-  %X   time of last access, seconds since Epoch\n\
-  %y   time of last data modification, human-readable\n\
-  %Y   time of last data modification, seconds since Epoch\n\
-  %z   time of last status change, human-readable\n\
-  %Z   time of last status change, seconds since Epoch\n\
-\n\
-"), stdout);
-        fputs(gettext("\
-Valid format sequences for file systems:\n\
-\n\
-  %a   free blocks available to non-superuser\n\
-  %b   total data blocks in file system\n\
-  %c   total file nodes in file system\n\
-  %d   free file nodes in file system\n\
-  %f   free blocks in file system\n\
-"), stdout);
-        fputs(gettext("\
-  %i   file system ID in hex\n\
-  %l   maximum length of filenames\n\
-  %n   file name\n\
-  %Qn  quoted file name\n\
-  %s   block size (for faster transfers)\n\
-  %S   fundamental block size (for block counts)\n\
-  %t   file system type in hex\n\
-  %T   file system type in human readable form\n\
-"), stdout);
-        printf(gettext("\n\
---terse is equivalent to the following FORMAT:\n\
-    %s\
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        fputs;
+        printf(gettext("\n\
+--terse is equivalent to the following FORMAT:\n\
+    %s\
 "), fmt_terse_regular);
-        printf(gettext("\
---terse --file-system is equivalent to the following FORMAT:\n\
-    %s\
+        printf(gettext("\
+--terse --file-system is equivalent to the following FORMAT:\n\
+    %s\
 "), fmt_terse_fs);
         printf(gettext("\n"), "stat");
         emit_ancillary_info("stat");
@@ -729,82 +515,22 @@ cdecl main(int argc, byte** argv) -> int
     int c;
     bool;
     bool;
-    byte* format = ((void*)0);
+    byte* format;
     byte* format2;
     bool;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     lconv* locale = localeconv();
-    decimal_point = (locale.decimal_point[0] ? locale.decimal_point : ".");
+    decimal_point = (locale[0] ? locale : ".");
     decimal_point_len = strlen(decimal_point);
-    while ((c = getopt_long(argc, argv, "c:fLt", long_options, ((void*)0))) != -1)
+    atexit;
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case (PRINTF_OPTION)
-            {
-                format = optarg;
-            }
-            trailing_delim = "";
-            goto _switch_end_139188839396944;
-            case ('c')
-            {
-                format = optarg;
-            }
-            trailing_delim = "\n";
-            goto _switch_end_139188839396944;
-            case ('L')
-            {
-            }
-            goto _switch_end_139188839396944;
-            case ('f')
-            {
-            }
-            goto _switch_end_139188839396944;
-            case ('t')
-            {
-            }
-            goto _switch_end_139188839396944;
-            case (0)
-            {
-                switch (XARGMATCH("--cached", optarg, cached_args, cached_modes))
-                {
-                    case (cached_never)
-                    {
-                    }
-                    goto _switch_end_139188839385680;
-                    case (cached_always)
-                    {
-                    }
-                    goto _switch_end_139188839385680;
-                    case (cached_default)
-                    {
-                    }
-                };
-                label _switch_end_139188839385680:
-            }
-            goto _switch_end_139188839396944;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188839396944;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188839396944;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188839396944:
     };
     if (argc == optind)
     {
         error(0, 0, gettext("missing operand"));
-        usage(0);
+        usage;
     };
     if (format)
     {
@@ -812,5 +538,7 @@ cdecl main(int argc, byte** argv) -> int
     }
     else
     {
+        format = default_format;
+        format2 = default_format;
     };
 };

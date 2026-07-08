@@ -18,7 +18,7 @@
    You should have received a copy of the GNU General Public License
    along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-   Written by TorbjÃ¶rn Granlund, David MacKenzie, and Jim Meyering.
+   Written by Torbjörn Granlund, David MacKenzie, and Jim Meyering.
 ///
 
 byte* PROGRAM_NAME = "cp";
@@ -35,215 +35,191 @@ struct dir_attr
     dir_attr* next;
 };
 
-uint ATTRIBUTES_ONLY_OPTION = 128;
-uint COPY_CONTENTS_OPTION = 129;
-uint DEBUG_OPTION = 130;
-uint NO_PRESERVE_ATTRIBUTES_OPTION = 131;
-uint PARENTS_OPTION = 132;
-uint PRESERVE_ATTRIBUTES_OPTION = 133;
-uint REFLINK_OPTION = 134;
-uint SPARSE_OPTION = 135;
-uint STRIP_TRAILING_SLASHES_OPTION = 136;
-uint UNLINK_DEST_BEFORE_OPENING = 137;
-uint KEEP_DIRECTORY_SYMLINK_OPTION = 138;
+uint ATTRIBUTES_ONLY_OPTION = 0;
+uint COPY_CONTENTS_OPTION = 1;
+uint DEBUG_OPTION = 2;
+uint NO_PRESERVE_ATTRIBUTES_OPTION = 3;
+uint PARENTS_OPTION = 4;
+uint PRESERVE_ATTRIBUTES_OPTION = 5;
+uint REFLINK_OPTION = 6;
+uint SPARSE_OPTION = 7;
+uint STRIP_TRAILING_SLASHES_OPTION = 8;
+uint UNLINK_DEST_BEFORE_OPENING = 9;
+uint KEEP_DIRECTORY_SYMLINK_OPTION = 10;
 
 extern int selinux_enabled;
 extern int parents_option;
 extern int remove_trailing_slashes;
-byte*[4] sparse_type_string = {"never", "auto", "always", ((void*)0)};
+extern byte** sparse_type_string;
 Sparse_type[3] sparse_type = Sparse_type;
 cdecl ARGMATCH_VERIFY() -> int;
-byte*[4] reflink_type_string = {"auto", "always", "never", ((void*)0)};
+extern byte** reflink_type_string;
 Reflink_type[3] reflink_type = Reflink_type;
-byte*[5] update_type_string = {"all", "none", "none-fail", "older", ((void*)0)};
+extern byte** update_type_string;
 Update_type[4] update_type = Update_type;
-option[32] long_opts = option;
+struct option;
+extern int long_opts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Copy SOURCE to DEST, or multiple SOURCE(s) to DIRECTORY.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("cp", gettext("\
-  -a, --archive\n\
-         same as -dR --preserve=all\n\
+        oputs_("cp", gettext("\
+  -a, --archive\n\
+         same as -dR --preserve=all\n\
 "));
-        oputs_("cp", gettext("\
-      --attributes-only\n\
-         don't copy the file data, just the attributes\n\
+        oputs_("cp", gettext("\
+      --attributes-only\n\
+         don't copy the file data, just the attributes\n\
 "));
-        oputs_("cp", gettext("\
-      --backup[=CONTROL]\n\
-         make a backup of each existing destination file\n\
+        oputs_("cp", gettext("\
+      --backup[=CONTROL]\n\
+         make a backup of each existing destination file\n\
 "));
-        oputs_("cp", gettext("\
-  -b\n\
-         like --backup but does not accept an argument\n\
+        oputs_("cp", gettext("\
+  -b\n\
+         like --backup but does not accept an argument\n\
 "));
-        oputs_("cp", gettext("\
-      --copy-contents\n\
-         copy contents of special files when recursive\n\
+        oputs_("cp", gettext("\
+      --copy-contents\n\
+         copy contents of special files when recursive\n\
 "));
-        oputs_("cp", gettext("\
-  -d\n\
-         same as --no-dereference --preserve=links\n\
+        oputs_("cp", gettext("\
+  -d\n\
+         same as --no-dereference --preserve=links\n\
 "));
-        oputs_("cp", gettext("\
-      --debug\n\
-         explain how a file is copied.  Implies -v\n\
+        oputs_("cp", gettext("\
+      --debug\n\
+         explain how a file is copied.  Implies -v\n\
 "));
-        oputs_("cp", gettext("\
-  -f, --force\n\
-         if an existing destination file cannot be opened, remove it and try\n\
-         again (this option is ignored when the -n option is also used)\n\
+        oputs_("cp", gettext("\
+  -f, --force\n\
+         if an existing destination file cannot be opened, remove it and try\n\
+         again (this option is ignored when the -n option is also used)\n\
 "));
-        oputs_("cp", gettext("\
-  -i, --interactive\n\
-         prompt before overwrite (overrides a previous -n option)\n\
+        oputs_("cp", gettext("\
+  -i, --interactive\n\
+         prompt before overwrite (overrides a previous -n option)\n\
 "));
-        oputs_("cp", gettext("\
-  -H\n\
-         follow command-line symbolic links in SOURCE\n\
+        oputs_("cp", gettext("\
+  -H\n\
+         follow command-line symbolic links in SOURCE\n\
 "));
-        oputs_("cp", gettext("\
-  -L, --dereference\n\
-         always follow symbolic links in SOURCE\n\
+        oputs_("cp", gettext("\
+  -L, --dereference\n\
+         always follow symbolic links in SOURCE\n\
 "));
-        oputs_("cp", gettext("\
-  -P, --no-dereference\n\
-         never follow symbolic links in SOURCE\n\
+        oputs_("cp", gettext("\
+  -P, --no-dereference\n\
+         never follow symbolic links in SOURCE\n\
 "));
-        oputs_("cp", gettext("\
-      --keep-directory-symlink\n\
-         follow existing symlinks to directories\n\
+        oputs_("cp", gettext("\
+      --keep-directory-symlink\n\
+         follow existing symlinks to directories\n\
 "));
-        oputs_("cp", gettext("\
-  -l, --link\n\
-         hard link files instead of copying\n\
+        oputs_("cp", gettext("\
+  -l, --link\n\
+         hard link files instead of copying\n\
 "));
-        oputs_("cp", gettext("\
-  -n, --no-clobber\n\
-         (deprecated) silently skip existing files.  See also --update\n\
+        oputs_("cp", gettext("\
+  -n, --no-clobber\n\
+         (deprecated) silently skip existing files.  See also --update\n\
 "));
-        oputs_("cp", gettext("\
-  -p\n\
-         same as --preserve=mode,ownership,timestamps\n\
+        oputs_("cp", gettext("\
+  -p\n\
+         same as --preserve=mode,ownership,timestamps\n\
 "));
-        oputs_("cp", gettext("\
-      --preserve[=ATTR_LIST]\n\
-         preserve the specified attributes\n\
+        oputs_("cp", gettext("\
+      --preserve[=ATTR_LIST]\n\
+         preserve the specified attributes\n\
 "));
-        oputs_("cp", gettext("\
-      --no-preserve=ATTR_LIST\n\
-         don't preserve the specified attributes\n\
+        oputs_("cp", gettext("\
+      --no-preserve=ATTR_LIST\n\
+         don't preserve the specified attributes\n\
 "));
-        oputs_("cp", gettext("\
-      --parents\n\
-         use full source file name under DIRECTORY\n\
+        oputs_("cp", gettext("\
+      --parents\n\
+         use full source file name under DIRECTORY\n\
 "));
-        oputs_("cp", gettext("\
-  -R, -r, --recursive\n\
-         copy directories recursively\n\
+        oputs_("cp", gettext("\
+  -R, -r, --recursive\n\
+         copy directories recursively\n\
 "));
-        oputs_("cp", gettext("\
-      --reflink[=WHEN]\n\
-         control clone/CoW copies. See below\n\
+        oputs_("cp", gettext("\
+      --reflink[=WHEN]\n\
+         control clone/CoW copies. See below\n\
 "));
-        oputs_("cp", gettext("\
-      --remove-destination\n\
-         remove each existing destination file before attempting to open it\n\
-         (contrast with --force)\n\
+        oputs_("cp", gettext("\
+      --remove-destination\n\
+         remove each existing destination file before attempting to open it\n\
+         (contrast with --force)\n\
 "));
-        oputs_("cp", gettext("\
-      --sparse=WHEN\n\
-         control creation of sparse files. See below\n\
+        oputs_("cp", gettext("\
+      --sparse=WHEN\n\
+         control creation of sparse files. See below\n\
 "));
-        oputs_("cp", gettext("\
-      --strip-trailing-slashes\n\
-         remove any trailing slashes from each SOURCE argument\n\
+        oputs_("cp", gettext("\
+      --strip-trailing-slashes\n\
+         remove any trailing slashes from each SOURCE argument\n\
 "));
-        oputs_("cp", gettext("\
-  -s, --symbolic-link\n\
-         make symbolic links instead of copying\n\
+        oputs_("cp", gettext("\
+  -s, --symbolic-link\n\
+         make symbolic links instead of copying\n\
 "));
-        oputs_("cp", gettext("\
-  -S, --suffix=SUFFIX\n\
-         override the usual backup suffix\n\
+        oputs_("cp", gettext("\
+  -S, --suffix=SUFFIX\n\
+         override the usual backup suffix\n\
 "));
-        oputs_("cp", gettext("\
-  -t, --target-directory=DIRECTORY\n\
-         copy all SOURCE arguments into DIRECTORY\n\
+        oputs_("cp", gettext("\
+  -t, --target-directory=DIRECTORY\n\
+         copy all SOURCE arguments into DIRECTORY\n\
 "));
-        oputs_("cp", gettext("\
-  -T, --no-target-directory\n\
-         treat DEST as a normal file\n\
+        oputs_("cp", gettext("\
+  -T, --no-target-directory\n\
+         treat DEST as a normal file\n\
 "));
-        oputs_("cp", gettext("\
-      --update[=UPDATE]\n\
-         control which existing files are updated;\n\
-         UPDATE={all,none,none-fail,older(default)}\n\
+        oputs_("cp", gettext("\
+      --update[=UPDATE]\n\
+         control which existing files are updated;\n\
+         UPDATE={all,none,none-fail,older(default)}\n\
 "));
-        oputs_("cp", gettext("\
-  -u\n\
-         equivalent to --update[=older].  See below\n\
+        oputs_("cp", gettext("\
+  -u\n\
+         equivalent to --update[=older].  See below\n\
 "));
-        oputs_("cp", gettext("\
-  -v, --verbose\n\
-         explain what is being done\n\
+        oputs_("cp", gettext("\
+  -v, --verbose\n\
+         explain what is being done\n\
 "));
-        oputs_("cp", gettext("\
-  -x, --one-file-system\n\
-         stay on this file system\n\
+        oputs_("cp", gettext("\
+  -x, --one-file-system\n\
+         stay on this file system\n\
 "));
-        oputs_("cp", gettext("\
-  -Z\n\
-         set SELinux security context of destination file to default type\n\
+        oputs_("cp", gettext("\
+  -Z\n\
+         set SELinux security context of destination file to default type\n\
 "));
-        oputs_("cp", gettext("\
-      --context[=CTX]\n\
-         like -Z, or if CTX is specified then set the\n\
-         SELinux or SMACK security context to CTX\n\
+        oputs_("cp", gettext("\
+      --context[=CTX]\n\
+         like -Z, or if CTX is specified then set the\n\
+         SELinux or SMACK security context to CTX\n\
 "));
         oputs_("cp", gettext("      --help\n         display this help and exit\n"));
         oputs_("cp", gettext("      --version\n         output version information and exit\n"));
-        fputs(gettext("\
-\n\
-ATTR_LIST is a comma-separated list of attributes. Attributes are 'mode' for\n\
-permissions (including any ACL and xattr permissions), 'ownership' for user\n\
-and group, 'timestamps' for file timestamps, 'links' for hard links, 'context'\
-\nfor security context, 'xattr' for extended attributes, and 'all' for all\n\
-attributes.\n\
-"), stdout);
-        fputs(gettext("\
-\n\
-By default, sparse SOURCE files are detected by a crude heuristic and the\n\
-corresponding DEST file is made sparse as well.  That is the behavior\n\
-selected by --sparse=auto.  Specify --sparse=always to create a sparse DEST\n\
-file whenever the SOURCE file contains a long enough sequence of zero bytes.\n\
-Use --sparse=never to inhibit creation of sparse files.\n\
-"), stdout);
+        fputs;
+        fputs;
         emit_update_parameters_note();
-        fputs(gettext("\
-\n\
-By default or with --reflink=auto, cp will try a lightweight copy, where the\n\
-data blocks are copied only when modified, falling back to a standard copy\n\
-if this is not possible.  With --reflink[=always] cp will fail if CoW is not\n\
-supported, while --reflink=never ensures a standard copy is performed.\n\
-"), stdout);
+        fputs;
         emit_backup_suffix_note();
-        fputs(gettext("\
-\n\
-As a special case, cp makes a backup of SOURCE when the force and backup\n\
-options are given and SOURCE and DEST are the same name for an existing,\n\
-regular file.\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("cp");
     };
     exit(status);
@@ -256,7 +232,7 @@ cdecl re_protect(byte* const_dst_name, byte* dst_src_name, int dst_dirfd, byte* 
     {
         byte* s_ = (const_dst_name);
         ulong len_ = strlen(s_) ? 0;
-        byte* tmp_dest_ = __builtin_alloca(len_);
+        byte* tmp_dest_ = alloca(len_);
         dst_name ? memcpy(tmp_dest_, s_, len_);
     }
     while (0);
@@ -267,19 +243,21 @@ cdecl re_protect(byte* const_dst_name, byte* dst_src_name, int dst_dirfd, byte* 
         dst_name[p.slash_offset] = '\0';
         if (x)
         {
-            timespec[2] timespec = 2;
+            int timespec = {get_stat_atime(@p), get_stat_mtime(@p)};
             if (utimensat(dst_dirfd, relname, timespec, 0))
             {
+                error;
             };
         };
         if (x)
         {
-            if (lchownat(dst_dirfd, relname, p.st.st_uid, p.st.st_gid) != 0)
+            if (lchownat(dst_dirfd, relname, p., p.) != 0)
             {
                 if (!chown_failure_ok(x))
                 {
+                    error;
                 };
-                ignore_value(lchownat(dst_dirfd, relname, -1, p.st.st_gid));
+                ignore_value(lchownat(dst_dirfd, relname, -1, p.));
             };
         };
         if (x)
@@ -287,8 +265,9 @@ cdecl re_protect(byte* const_dst_name, byte* dst_src_name, int dst_dirfd, byte* 
         }
         elif (p)
         {
-            if (lchmodat(dst_dirfd, relname, p.st.st_mode) != 0)
+            if (lchmodat(dst_dirfd, relname, p.) != 0)
             {
+                error;
             };
         };
         dst_name[p.slash_offset] = '/';
@@ -297,18 +276,18 @@ cdecl re_protect(byte* const_dst_name, byte* dst_src_name, int dst_dirfd, byte* 
 
 cdecl make_dir_parents_private(byte* const_dir, ulong src_offset, int dst_dirfd, byte* verbose_fmt_string, dir_attr** attr_list, int* new_dst, cp_options* x) -> int
 {
-    *attr_list = ((void*)0);
     byte* dir;
     do
     {
         byte* s_ = (const_dir);
         ulong len_ = strlen(s_) ? 0;
-        byte* tmp_dest_ = __builtin_alloca(len_);
+        byte* tmp_dest_ = alloca(len_);
         dir ? memcpy(tmp_dest_, s_, len_);
     }
     while (0);
     byte* src = dir + src_offset;
-    byte* dst_dir;
+    byte* dst_dir = alloca;
+    memcpy;
     byte* dst_reldir = dst_dir + src_offset;
     while (*dst_reldir == '/')
         dst_reldir++;
@@ -324,57 +303,55 @@ cdecl make_dir_parents_private(byte* const_dir, ulong src_offset, int dst_dirfd,
             dir_attr* new;
             *slash = '\0';
             bool;
-            if (?)
+            if (missing_dir || x -> preserve_ownership || x -> preserve_mode || x -> preserve_timestamps)
             {
                 stat src_st;
-                int src_errno = (stat(src, @src_st) != 0 ? (?__errno_location()) : ((((src_st.st_mode)) ? 0) ? (0040000)) ? 0 : 0);
+                int src_errno;
                 if (src_errno)
                 {
+                    error(0, src_errno, gettext("failed to get attributes of %s"), quotearg_style);
                 };
                 new = xmalloc((sizeof * new / 8));
-                new.st = src_st;
+                new = src_st;
                 new.slash_offset = slash - dir;
                 new.next = *attr_list;
                 *attr_list = new;
             };
-            if (?)
+            if (missing_dir)
             {
-                uint src_mode = new.st.st_mode;
-                uint omitted_permissions = (src_mode `& (x ? ((0 ? 0 ? 0) ? 0) ? (((0 ? 0 ? 0) ? 0) ? 0) : x ? (0 ? 0) ? ((0 ? 0) ? 0) : 0));
-                uint mkdir_mode;
-                if (mkdirat(dst_dirfd, dst_reldir, mkdir_mode) != 0)
+                if (mkdirat != 0)
                 {
+                    error;
                 }
                 else
                 {
-                    if (verbose_fmt_string != ((void*)0))
+                    if (verbose_fmt_string != NULL)
                         printf(verbose_fmt_string, src, dir);
                 };
-                if (?)
+                if (fstatat)
                 {
+                    error;
                 };
                 if (!x)
                 {
-                    if (omitted_permissions `& `!stats.st_mode)
-                        omitted_permissions `&= `!cached_umask();
-                    if (omitted_permissions `& `!stats.st_mode | (stats.st_mode `& (0 ? 0 ? 0)) != (0 ? 0 ? 0))
+                    if (omitted_permissions & ~ stats . st_mode || ( stats . st_mode & S_IRWXU ) != S_IRWXU)
                     {
-                        new.st.st_mode = stats.st_mode `| omitted_permissions;
                     };
                 };
-                uint accessible = stats.st_mode `| (0 ? 0 ? 0);
-                if (stats.st_mode != accessible)
+                if (stats . st_mode != accessible)
                 {
-                    if (lchmodat(dst_dirfd, dst_reldir, accessible) != 0)
+                    if (lchmodat != 0)
                     {
+                        error;
                     };
                 };
             }
-            elif (!((((stats.st_mode)) ? 0) ? (0040000)))
+            elif (!S_ISDIR(stats.))
             {
+                error(0, 0, gettext("%s exists but is not a directory"), quotearg_style);
             };
             else
-            if (!*? & (x.set_security_context | x))
+            if (!*new_dst & (x.set_security_context | x))
             {
             };
             *slash++ = '/';
@@ -382,8 +359,9 @@ cdecl make_dir_parents_private(byte* const_dir, ulong src_offset, int dst_dirfd,
                 slash++;
         };
     }
-    elif (!((((stats.st_mode)) ? 0) ? (0040000)))
+    elif (!S_ISDIR(stats.))
     {
+        error(0, 0, gettext("%s exists but is not a directory"), quotearg_style);
     };
     else
     {
@@ -397,25 +375,29 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
         if (n_files <= 0)
             error(0, 0, gettext("missing file operand"));
         else
-        usage(0);
+            error(0, 0, gettext("missing destination file operand after %s"), quotearg_style);
+        usage;
     };
     stat sb;
-    sb.st_mode = 0;
+    sb. = 0;
     int target_dirfd;
     bool;
     bool;
-    if (?)
+    if (no_target_directory)
     {
         if (target_directory)
-            error(0, 0, gettext("cannot combine --target-directory (-t) "));
+            error;
         if (2 < n_files)
         {
-            usage(0);
+            error(0, 0, gettext("extra operand %s"), quotearg_style);
+            usage;
         };
     }
     elif (target_directory)
     {
         target_dirfd = target_directory_operand(target_directory, @sb);
+        if (!target_dirfd_valid(target_dirfd))
+            error;
     };
     else
     {
@@ -429,7 +411,9 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
         }
         else
         {
-            int err = (?__errno_location());
+            int err;
+            if (2 < n_files || ( O_PATHSEARCH == O_SEARCH && err == EACCES && ( sb . st_mode || stat ( lastfile , & sb ) == 0 ) && S_ISDIR ( sb . st_mode ) ))
+                error;
         };
     };
     if (target_directory)
@@ -446,16 +430,16 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
             dir_attr* attr_list;
             byte* arg_in_concat;
             byte* arg = file[i];
-            if (?)
+            if (remove_trailing_slashes)
                 strip_trailing_slashes(arg);
-            if (?)
+            if (parents_option)
             {
                 byte* arg_no_trailing_slash;
                 do
                 {
                     byte* s_ = (arg);
                     ulong len_ = strlen(s_) ? 0;
-                    byte* tmp_dest_ = __builtin_alloca(len_);
+                    byte* tmp_dest_ = alloca(len_);
                     arg_no_trailing_slash ? memcpy(tmp_dest_, s_, len_);
                 }
                 while (0);
@@ -469,7 +453,7 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
                 {
                     byte* s_ = (last_component(arg));
                     ulong len_ = strlen(s_) ? 0;
-                    byte* tmp_dest_ = __builtin_alloca(len_);
+                    byte* tmp_dest_ = alloca(len_);
                     arg_base ? memcpy(tmp_dest_, s_, len_);
                 }
                 while (0);
@@ -477,7 +461,7 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
                 arg_base += streq(arg_base, "..");
                 dst_name = file_name_concat(target_directory, arg_base, @arg_in_concat);
             };
-            if (?)
+            if (! parent_exists)
             {
             }
             else
@@ -487,7 +471,7 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
                     dst_relname++;
                 bool;
             };
-            if (?)
+            if (parents_option)
             {
                 while (attr_list)
                 {
@@ -501,16 +485,17 @@ cdecl do_copy(int n_files, byte** file, byte* target_directory, int no_target_di
     }
     else
     {
-        if (?)
+        if (parents_option)
         {
             error(0, 0, gettext("with --parents, the destination must be a directory"));
-            usage(0);
+            usage;
         };
         byte* source = file[0];
         byte* dest = file[1];
-        if (?)
+        if (x -> unlink_dest_after_failed_open && x -> backup_type != no_backups && streq ( source , dest ) && ! new_dst && ( sb . st_mode != 0 || stat ( dest , & sb ) == 0 ) && S_ISREG ( sb . st_mode ))
         {
             cp_options x_tmp;
+            dest = find_backup_file_name;
             x_tmp = *x;
             x = @x_tmp;
         };
@@ -524,19 +509,15 @@ cdecl cp_option_init(cp_options* x) -> void
     x.dereference = DEREF_UNDEFINED;
     x.interactive = I_UNSPECIFIED;
     x.reflink_mode = REFLINK_AUTO;
-    x.set_security_context = ((void*)0);
     x.sparse_mode = SPARSE_AUTO;
-    x.mode = 0;
+    x = 0;
     x.update = UPDATE_ALL;
-    x = getenv("POSIXLY_CORRECT") != ((void*)0);
-    x = ((void*)0);
-    x = ((void*)0);
 };
 
 cdecl decode_preserve_arg(byte* arg, cp_options* x, int on_off) -> void
 {
     File_attribute[7] preserve_vals = {PRESERVE_MODE, PRESERVE_TIMESTAMPS, PRESERVE_OWNERSHIP, PRESERVE_LINK, PRESERVE_CONTEXT, PRESERVE_XATTR, PRESERVE_ALL};
-    byte*[8] preserve_args = {"mode", "timestamps", "ownership", "links", "context", "xattr", "all", ((void*)0)};
+    byte** preserve_args;
     ARGMATCH_VERIFY(preserve_args, preserve_vals);
     byte* arg_writable = xstrdup(arg);
     byte* s = arg_writable;
@@ -546,59 +527,58 @@ cdecl decode_preserve_arg(byte* arg, cp_options* x, int on_off) -> void
         File_attribute val;
         if (comma)
             *comma++ = 0;
-        val = XARGMATCH(? ? "--preserve" : "--no-preserve", s, preserve_args, preserve_vals);
+        val = XARGMATCH(on_off ? "--preserve" : "--no-preserve", s, preserve_args, preserve_vals);
         switch (val)
         {
             case (PRESERVE_MODE)
             {
-                x = ?;
+                x = on_off;
+                x = !on_off;
+                break switch;
             }
-            x = !?;
-            goto _switch_end_139188837411536;
             case (PRESERVE_TIMESTAMPS)
             {
-                x = ?;
+                x = on_off;
+                break switch;
             }
-            goto _switch_end_139188837411536;
             case (PRESERVE_OWNERSHIP)
             {
-                x = ?;
+                x = on_off;
+                break switch;
             }
-            goto _switch_end_139188837411536;
             case (PRESERVE_LINK)
             {
-                x = ?;
+                x = on_off;
+                break switch;
             }
-            goto _switch_end_139188837411536;
             case (PRESERVE_CONTEXT)
             {
-                x = ?;
+                x = on_off;
+                x = on_off;
+                break switch;
             }
-            x = ?;
-            goto _switch_end_139188837411536;
             case (PRESERVE_XATTR)
             {
-                x = ?;
+                x = on_off;
+                x = on_off;
+                break switch;
             }
-            x = ?;
-            goto _switch_end_139188837411536;
             case (PRESERVE_ALL)
             {
-                x = ?;
+                x = on_off;
+                x = on_off;
+                x = on_off;
+                x = on_off;
+                x = !on_off;
+                if (selinux_enabled)
+                    x = on_off;
+                x = on_off;
+                break switch;
             }
-            x = ?;
-            x = ?;
-            x = ?;
-            x = !?;
-            if (?)
-                x = ?;
-            x = ?;
-            goto _switch_end_139188837411536;
             default
             {
             };
         };
-        label _switch_end_139188837411536:
         s = comma;
     }
     while (s);
@@ -608,225 +588,40 @@ cdecl decode_preserve_arg(byte* arg, cp_options* x, int on_off) -> void
 cdecl main(int argc, byte** argv) -> int
 {
     bool;
-    byte* backup_suffix = ((void*)0);
-    byte* version_control_string = ((void*)0);
+    byte* backup_suffix;
+    byte* version_control_string;
     cp_options x;
     bool;
-    byte* target_directory = ((void*)0);
+    byte* target_directory;
     bool;
-    byte* scontext = ((void*)0);
+    byte* scontext;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     selinux_enabled = (0 < is_selinux_enabled());
     cp_option_init(@x);
     int c;
-    while ((c = getopt_long(argc, argv, "abdfHilLnprst:uvxPRS:TZ", long_opts, ((void*)0))) != -1)
+    while ((c = getopt_long) != -1)
     {
-        switch (c)
-        {
-            case (SPARSE_OPTION)
-            {
-                x.sparse_mode = XARGMATCH("--sparse", optarg, sparse_type_string, sparse_type);
-            }
-            goto _switch_end_139188837415632;
-            case (REFLINK_OPTION)
-            {
-                if (optarg == ((void*)0))
-                    x.reflink_mode = REFLINK_ALWAYS;
-                else
-                    x.reflink_mode = XARGMATCH("--reflink", optarg, reflink_type_string, reflink_type);
-            }
-            goto _switch_end_139188837415632;
-            case ('a')
-            {
-                x.dereference = DEREF_NEVER;
-            }
-            goto _switch_end_139188837415632;
-            case ('b')
-            {
-            }
-            if (optarg)
-                version_control_string = optarg;
-            goto _switch_end_139188837415632;
-            case (ATTRIBUTES_ONLY_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case (DEBUG_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case (COPY_CONTENTS_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('d')
-            {
-            }
-            x.dereference = DEREF_NEVER;
-            goto _switch_end_139188837415632;
-            case ('f')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('H')
-            {
-                x.dereference = DEREF_COMMAND_LINE_ARGUMENTS;
-            }
-            goto _switch_end_139188837415632;
-            case ('i')
-            {
-                x.interactive = I_ASK_USER;
-            }
-            goto _switch_end_139188837415632;
-            case ('l')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('L')
-            {
-                x.dereference = DEREF_ALWAYS;
-            }
-            goto _switch_end_139188837415632;
-            case ('n')
-            {
-                x.interactive = I_ALWAYS_SKIP;
-            }
-            goto _switch_end_139188837415632;
-            case ('P')
-            {
-                x.dereference = DEREF_NEVER;
-            }
-            goto _switch_end_139188837415632;
-            case (NO_PRESERVE_ATTRIBUTES_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case (PRESERVE_ATTRIBUTES_OPTION)
-            {
-                if (optarg == ((void*)0))
-                {
-                }
-                else
-                {
-                    goto _switch_end_139188837415632;
-                };
-            }
-            case ('p')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case (PARENTS_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('r')
-            {
-                case ('R')
-                {
-                }
-            }
-            goto _switch_end_139188837415632;
-            case (UNLINK_DEST_BEFORE_OPENING)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case (STRIP_TRAILING_SLASHES_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('s')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('t')
-            {
-                if (target_directory)
-                    error(0, 0, gettext("multiple target directories specified"));
-            }
-            target_directory = optarg;
-            goto _switch_end_139188837415632;
-            case ('T')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('u')
-            {
-                x.update = UPDATE_OLDER;
-            }
-            if (optarg)
-                x.update = XARGMATCH("--update", optarg, update_type_string, update_type);
-            goto _switch_end_139188837415632;
-            case ('v')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case (KEEP_DIRECTORY_SYMLINK_OPTION)
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('x')
-            {
-            }
-            goto _switch_end_139188837415632;
-            case ('Z')
-            {
-                if (?)
-                {
-                    if (optarg)
-                        scontext = optarg;
-                    else
-                    {
-                        if (!x.set_security_context)
-                            error(0, (?__errno_location()), gettext("warning: ignoring --context"));
-                    };
-                }
-                elif (optarg)
-                {
-                    error(0, 0, gettext("warning: ignoring --context; "));
-                };
-            }
-            goto _switch_end_139188837415632;
-            case ('S')
-            {
-            }
-            backup_suffix = optarg;
-            goto _switch_end_139188837415632;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188837415632;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188837415632;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188837415632:
     };
     if (x.reflink_mode == REFLINK_AUTO & x.sparse_mode == SPARSE_NEVER)
         x.reflink_mode = REFLINK_NEVER;
     if (x & x)
     {
         error(0, 0, gettext("cannot make both hard and symbolic links"));
-        usage(0);
+        usage;
     };
     if (x.interactive == I_ALWAYS_SKIP)
         x.update = UPDATE_NONE;
-    if (?)
+    if (make_backups && ( x . update == UPDATE_NONE || x . update == UPDATE_NONE_FAIL ))
     {
         error(0, 0, gettext("--backup is mutually exclusive with -n or --update=none-fail"));
-        usage(0);
+        usage;
     };
     if (x.reflink_mode == REFLINK_ALWAYS & x.sparse_mode != SPARSE_AUTO)
     {
         error(0, 0, gettext("--reflink can be used only with --sparse=auto"));
-        usage(0);
+        usage;
     };
     set_simple_backup_suffix(backup_suffix);
     if (x.dereference == DEREF_UNDEFINED)
@@ -837,13 +632,13 @@ cdecl main(int argc, byte** argv) -> int
             x.dereference = DEREF_ALWAYS;
     };
     if (x & (x.set_security_context | scontext))
-        error(0, 0, gettext("cannot set target context and preserve it"));
-    if (x & !?)
-        error(0, 0, gettext("cannot preserve security context "));
+        error;
+    if (x & !selinux_enabled)
+        error;
     if (scontext & setfscreatecon(scontext) < 0)
-        error(0, (?__errno_location()), gettext("failed to set default file creation context to %s"), quote(scontext));
+        error;
     if (x)
-        error(0, 0, gettext("cannot preserve extended attributes, cp is "));
+        error;
     hash_init();
     bool;
 };

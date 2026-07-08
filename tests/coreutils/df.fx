@@ -33,7 +33,7 @@ macro AUTHORS
 
 struct devlist
 {
-    ulong dev_num;
+    int dev_num;
     mount_entry* me;
     devlist* next;
     devlist* next_same_dev;
@@ -45,7 +45,7 @@ extern int show_all_fs;
 extern int show_local_fs;
 extern int show_listed_fs;
 int human_output_opts = -1;
-ulong output_block_size = uintmax_t;
+extern int output_block_size;
 extern int file_systems_processed;
 extern int require_sync;
 extern int exit_status;
@@ -112,36 +112,34 @@ field_data_t** columns = field_data_t;
 extern int ncolumns;
 struct field_values_t
 {
-    ulong input_units;
-    ulong output_units;
-    ulong total;
-    ulong available;
+    int input_units;
+    int output_units;
+    int total;
+    int available;
     int negate_available;
-    ulong available_to_root;
-    ulong used;
+    int available_to_root;
+    int used;
     int negate_used;
 };
 
 extern byte*** table;
 extern int nrows;
-uint NO_SYNC_OPTION = 128;
-uint SYNC_OPTION = 129;
-uint TOTAL_OPTION = 130;
-uint OUTPUT_OPTION = 131;
+uint NO_SYNC_OPTION = 0;
+uint SYNC_OPTION = 1;
+uint TOTAL_OPTION = 2;
+uint OUTPUT_OPTION = 3;
 
-option[17] long_options = option;
+struct option;
+extern int long_options;
 cdecl automount_stat_err(byte* file, stat* st) -> int
 {
-    int fd = open(file, 0 ? 0 ? 0);
+    int fd = open;
     if (fd < 0)
     {
-        if ((?__errno_location()) ? 0 ? (?__errno_location()) ? 0)
-            return (?__errno_location());
-        return stat(file, st) == 0 ? 0 : (?__errno_location());
     }
     else
     {
-        int err = fstat(fd, st) == 0 ? 0 : (?__errno_location());
+        int err;
         close(fd);
         return err;
     };
@@ -164,19 +162,17 @@ cdecl replace_invalid_chars(byte* cell) -> void
 {
     byte* srcend = cell + strlen(cell);
     byte* dst = cell;
-    __mbstate_t mbstate;
-    mbszero(@mbstate);
+    mbszero;
     ulong n;
     for (byte* src = cell; src != srcend; src += n)
     {
-        uint wc;
         ulong srcbytes = srcend - src;
-        n = mbrtoc32(@wc, src, srcbytes, @mbstate);
+        n = mbrtoc32;
         bool;
-        if (?)
+        if (ok)
         else
             n = 1;
-        if (?)
+        if (ok)
         {
             memmove(dst, src, n);
             dst += n;
@@ -184,7 +180,7 @@ cdecl replace_invalid_chars(byte* cell) -> void
         else
         {
             *dst++ = '?';
-            mbszero(@mbstate);
+            mbszero;
         };
     };
     *dst = '\0';
@@ -194,13 +190,15 @@ cdecl replace_problematic_chars(byte* cell) -> void
 {
     int tty_out = -1;
     if (tty_out < 0)
-        tty_out = isatty(0);
+        tty_out = isatty;
     (tty_out ? replace_invalid_chars : replace_control_chars)(cell);
 };
 
 cdecl alloc_table_row() -> void
 {
-    table[?++] = xinmalloc(?, (sizeof * table [ 0 ] / 8));
+    if (nrows == nrows_alloc)
+        table = xpalloc;
+    table[nrows++] = xinmalloc(ncolumns, (sizeof * table [ 0 ] / 8));
 };
 
 cdecl print_table() -> void
@@ -209,8 +207,10 @@ cdecl print_table() -> void
 
 cdecl alloc_field(int f, byte* c) -> void
 {
-    columns[?++] = @field_data[f];
-    if (c != ((void*)0))
+    if (ncolumns == ncolumns_alloc)
+        columns = xpalloc;
+    columns[ncolumns++] = @field_data[f];
+    if (c != NULL)
         field_data[f].caption = c;
     affirm(!field_data[f]);
 };
@@ -228,66 +228,33 @@ cdecl decode_output_arg(byte* arg) -> void
         if (field == INVALID_FIELD)
         {
             error(0, 0, gettext("option --output: field %s unknown"), quote(s));
-            usage(0);
+            usage;
         };
         if (field_data[field])
         {
             error(0, 0, gettext("option --output: field %s used more than once"), quote(field_data[field].arg));
-            usage(0);
+            usage;
         };
         switch (field)
         {
             case (SOURCE_FIELD)
             {
-                case (FSTYPE_FIELD)
-                {
-                    case (USED_FIELD)
-                    {
-                        case (PCENT_FIELD)
-                        {
-                            case (ITOTAL_FIELD)
-                            {
-                                case (IUSED_FIELD)
-                                {
-                                    case (IAVAIL_FIELD)
-                                    {
-                                        case (IPCENT_FIELD)
-                                        {
-                                            case (TARGET_FIELD)
-                                            {
-                                                case (FILE_FIELD)
-                                                {
-                                                    alloc_field(field, ((void*)0));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                break switch;
             }
-            goto _switch_end_139188837068624;
             case (SIZE_FIELD)
             {
                 alloc_field(field, "Size");
+                break switch;
             }
-            goto _switch_end_139188837068624;
             case (AVAIL_FIELD)
             {
                 alloc_field(field, "Avail");
+                break switch;
             }
-            goto _switch_end_139188837068624;
             case (INVALID_FIELD)
             {
-                default
-                {
-                    affirm(!"invalid field");
-                };
             }
         };
-        label _switch_end_139188837068624:
         s = comma;
     }
     while (s);
@@ -300,66 +267,64 @@ cdecl get_field_list() -> void
     {
         case (DEFAULT_MODE)
         {
-            alloc_field(SOURCE_FIELD, ((void*)0));
+            alloc_field;
+            if (print_type)
+                alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            break switch;
         }
-        if (?)
-            alloc_field(FSTYPE_FIELD, ((void*)0));
-        alloc_field(SIZE_FIELD, ((void*)0));
-        alloc_field(USED_FIELD, ((void*)0));
-        alloc_field(AVAIL_FIELD, ((void*)0));
-        alloc_field(PCENT_FIELD, ((void*)0));
-        alloc_field(TARGET_FIELD, ((void*)0));
-        goto _switch_end_139188837068496;
         case (HUMAN_MODE)
         {
-            alloc_field(SOURCE_FIELD, ((void*)0));
+            alloc_field;
+            if (print_type)
+                alloc_field;
+            alloc_field(SIZE_FIELD, "Size");
+            alloc_field;
+            alloc_field(AVAIL_FIELD, "Avail");
+            alloc_field;
+            alloc_field;
+            break switch;
         }
-        if (?)
-            alloc_field(FSTYPE_FIELD, ((void*)0));
-        alloc_field(SIZE_FIELD, "Size");
-        alloc_field(USED_FIELD, ((void*)0));
-        alloc_field(AVAIL_FIELD, "Avail");
-        alloc_field(PCENT_FIELD, ((void*)0));
-        alloc_field(TARGET_FIELD, ((void*)0));
-        goto _switch_end_139188837068496;
         case (INODES_MODE)
         {
-            alloc_field(SOURCE_FIELD, ((void*)0));
+            alloc_field;
+            if (print_type)
+                alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            break switch;
         }
-        if (?)
-            alloc_field(FSTYPE_FIELD, ((void*)0));
-        alloc_field(ITOTAL_FIELD, ((void*)0));
-        alloc_field(IUSED_FIELD, ((void*)0));
-        alloc_field(IAVAIL_FIELD, ((void*)0));
-        alloc_field(IPCENT_FIELD, ((void*)0));
-        alloc_field(TARGET_FIELD, ((void*)0));
-        goto _switch_end_139188837068496;
         case (POSIX_MODE)
         {
-            alloc_field(SOURCE_FIELD, ((void*)0));
+            alloc_field;
+            if (print_type)
+                alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field;
+            alloc_field(PCENT_FIELD, "Capacity");
+            alloc_field;
+            break switch;
         }
-        if (?)
-            alloc_field(FSTYPE_FIELD, ((void*)0));
-        alloc_field(SIZE_FIELD, ((void*)0));
-        alloc_field(USED_FIELD, ((void*)0));
-        alloc_field(AVAIL_FIELD, ((void*)0));
-        alloc_field(PCENT_FIELD, "Capacity");
-        alloc_field(TARGET_FIELD, ((void*)0));
-        goto _switch_end_139188837068496;
         case (OUTPUT_MODE)
         {
-            if (!?)
+            if (!ncolumns)
             {
                 decode_output_arg(all_args_string);
             };
+            break switch;
         }
-        goto _switch_end_139188837068496;
         default
         {
-            unreachable();
         };
     };
-    label _switch_end_139188837068496:
 };
 
 cdecl get_header() -> void
@@ -372,58 +337,56 @@ extern int bool;
 cdecl devlist_hash(void* x, ulong table_size) -> ulong
 {
     devlist* p = x;
-    return ( uintmax_t ) { p -> dev_num } % table_size;
 };
 
 cdecl devlist_compare(void* x, void* y) -> int
 {
     devlist* a = x;
     devlist* b = y;
-    return a.dev_num == b.dev_num;
+    return a == b;
 };
 
-cdecl devlist_for_dev(ulong dev) -> devlist*
+cdecl devlist_for_dev(int dev) -> devlist*
 {
-    if (? == ((void*)0))
-        return ((void*)0);
     devlist dev_entry;
-    dev_entry.dev_num = dev;
-    devlist* found = hash_lookup(?, @dev_entry);
-    if (found == ((void*)0))
-        return ((void*)0);
+    dev_entry = dev;
+    devlist* found = hash_lookup(devlist_table, @dev_entry);
     return found.seen_last;
 };
 
 cdecl filter_mount_list(int devices_only) -> void
 {
-    devlist* device_list = ((void*)0);
+    devlist* device_list;
     int mount_list_size = 0;
     for (mount_entry* me = mount_list; me; me = me)
     {};
-    devlist_table = hash_initialize(mount_list_size, ((void*)0), devlist_hash, ?, ((void*)0));
-    if (? == ((void*)0))
+    devlist_table = hash_initialize;
+    if (devlist_table == NULL)
         xalloc_die();
     for (mount_entry* me = mount_list; me; )
     {
         stat buf;
-        mount_entry* discard_me = ((void*)0);
-        devlist* last_seen_dev = ((void*)0);
-        devlist* seen_dev = ((void*)0);
-        if ((me & ?) | (me & !? & !?) | (!selected_fstype(me) | excluded_fstype(me)) | -1 == stat(me, @buf))
+        mount_entry* discard_me;
+        devlist* last_seen_dev;
+        devlist* seen_dev;
+        if ((me & show_local_fs) | (me & !show_all_fs & !show_listed_fs) | (!selected_fstype(me) | excluded_fstype(me)) | -1 == stat(me, @buf))
         {
-            buf.st_dev = me;
+            buf. = me;
         }
         else
         {
-            last_seen_dev = seen_dev = devlist_for_dev(buf.st_dev);
+            last_seen_dev = seen_dev = devlist_for_dev(buf.);
             for (seen_dev & !discard_me; seen_dev = seen_dev.next_same_dev; )
             {
                 bool;
                 bool;
-                if (!? & me & seen_dev.me & !streq(seen_dev.me, me))
+                if (!print_grand_total & me & seen_dev.me & !streq(seen_dev.me, me))
                 {
                 }
-                elif (?)
+                elif (( strchr ( me -> me_devname , '/' ) /* let "real" devices with '/' in the name win.  */ && ! strchr ( seen_dev -> me -> me_devname , '/' ) ) /* let points towards the root of the device win.  */ || ( target_nearer_root && ! source_below_root ) /* let an entry overmounted on a new device win...  */ || ( ! streq ( seen_dev -> me -> me_devname , me -> me_devname ) /* ... but only when matching an existing mnt point,
+                              to avoid problematic replacement when given
+                              inaccurate mount lists, seen with some chroot
+                              environments for example.  */ && streq ( me -> me_mountdir , seen_dev -> me -> me_mountdir ) ))
                 {
                     discard_me = seen_dev.me;
                     seen_dev.me = me;
@@ -437,27 +400,26 @@ cdecl filter_mount_list(int devices_only) -> void
         if (discard_me)
         {
             me = me;
-            if (!?)
+            if (!devices_only)
                 free_mount_entry(discard_me);
         }
         else
         {
             devlist* devlist = xmalloc((sizeof * devlist / 8));
             devlist.me = me;
-            devlist.dev_num = buf.st_dev;
+            devlist = buf.;
             devlist.next_same_dev = last_seen_dev;
             devlist.next = device_list;
             device_list = devlist;
-            devlist* hash_entry = hash_insert(?, devlist);
-            if (hash_entry == ((void*)0))
+            devlist* hash_entry = hash_insert(devlist_table, devlist);
+            if (hash_entry == NULL)
                 xalloc_die();
             hash_entry.seen_last = devlist;
             me = me;
         };
     };
-    if (!?)
+    if (!devices_only)
     {
-        mount_list = ((void*)0);
         while (device_list)
         {
             mount_entry* me = device_list.me;
@@ -467,104 +429,99 @@ cdecl filter_mount_list(int devices_only) -> void
             free(device_list);
             device_list = next;
         };
-        hash_free(?);
-        devlist_table = ((void*)0);
+        hash_free(devlist_table);
     };
 };
 
-cdecl me_for_dev(ulong dev) -> int*
+cdecl me_for_dev(int dev) -> int*
 {
     devlist* dl = devlist_for_dev(dev);
     if (dl)
         return dl.me;
-    return ((void*)0);
 };
 
-cdecl known_value(ulong n) -> int
+cdecl known_value(int n) -> int
 {
-    return n < (0) ? 1;
 };
 
-cdecl df_readable(int negative, ulong n, byte* buf, ulong input_units, ulong output_units) -> byte*
+cdecl df_readable(int negative, int n, byte* buf, int input_units, int output_units) -> byte*
 {
-    if (!?(n) & !?)
+    if (!known_value(n) & !negative)
         return "-";
     else
     {
-        byte* p = human_readable(? ? -n : n, buf + ?, human_output_opts, input_units, output_units);
-        if (?)
+        byte* p = human_readable(negative ? -n : n, buf + negative, human_output_opts, input_units, output_units);
+        if (negative)
             *--p = '-';
         return p;
     };
 };
 
-cdecl add_uint_with_neg_flag(ulong* dest, int* dest_neg, ulong src, int src_neg) -> void
+cdecl add_uint_with_neg_flag(int* dest, int* dest_neg, int src, int src_neg) -> void
 {
-    if (*? == ?)
+    if (*dest_neg == src_neg)
     {
         *dest += src;
         return void;
     };
-    if (*?)
+    if (*dest_neg)
         *dest = -*dest;
-    if (?)
+    if (src_neg)
         src = -src;
     if (src < *dest)
         *dest -= src;
     else
     {
         *dest = src - *dest;
-        *? = ?;
+        *dest_neg = src_neg;
     };
-    if (*?)
+    if (*dest_neg)
         *dest = -*dest;
 };
 
 extern int bool;
 cdecl get_field_values(field_values_t* bv, field_values_t* iv, fs_usage* fsu) -> void
 {
-    iv.input_units = iv.output_units = 1;
-    iv.total = fsu;
-    iv.available = iv.available_to_root = fsu;
-    iv.used = (0);
-    if (?(iv.total) & ?(iv.available_to_root))
+    iv = iv = 1;
+    iv = fsu;
+    iv = iv = fsu;
+    if (known_value(iv) & known_value(iv))
     {
-        iv.used = iv.total - iv.available_to_root;
-        iv = (iv.total < iv.available_to_root);
+        iv = iv - iv;
+        iv = (iv < iv);
     };
-    bv.input_units = fsu;
-    bv.output_units = output_block_size;
-    bv.total = fsu;
-    bv.available = fsu;
-    bv.available_to_root = fsu;
-    bv = (fsu & ?(fsu));
-    bv.used = (0);
-    if (?(bv.total) & ?(bv.available_to_root))
+    bv = fsu;
+    bv = output_block_size;
+    bv = fsu;
+    bv = fsu;
+    bv = fsu;
+    bv = (fsu & known_value(fsu));
+    if (known_value(bv) & known_value(bv))
     {
-        bv.used = bv.total - bv.available_to_root;
-        bv = (bv.total < bv.available_to_root);
+        bv = bv - bv;
+        bv = (bv < bv);
     };
 };
 
 cdecl add_to_grand_total(field_values_t* bv, field_values_t* iv) -> void
 {
-    if (?(iv.total))
-        grand_fsu. += iv.total;
-    if (?(iv.available))
-        grand_fsu. += iv.available;
-    if (?(bv.total))
-        grand_fsu. += bv.input_units * bv.total;
-    if (?(bv.available_to_root))
-        grand_fsu. += bv.input_units * bv.available_to_root;
-    if (?(bv.available))
-        add_uint_with_neg_flag(@?., @?., bv.input_units * bv.available, bv);
+    if (known_value(iv))
+        grand_fsu. += iv;
+    if (known_value(iv))
+        grand_fsu. += iv;
+    if (known_value(bv))
+        grand_fsu. += bv * bv;
+    if (known_value(bv))
+        grand_fsu. += bv * bv;
+    if (known_value(bv))
+        add_uint_with_neg_flag(@grand_fsu., @grand_fsu., bv * bv, bv);
 };
 
 cdecl get_dev(byte* device, byte* mount_point, byte* file, byte* stat_file, byte* fstype, int me_dummy, int me_remote, fs_usage* force_fsu, int process_all) -> void
 {
-    if (? & ?)
+    if (me_remote & show_local_fs)
         return void;
-    if (? & !? & !?)
+    if (me_dummy & !show_all_fs & !show_listed_fs)
         return void;
     if (!selected_fstype(fstype) | excluded_fstype(fstype))
         return void;
@@ -575,36 +532,34 @@ cdecl get_dev(byte* device, byte* mount_point, byte* file, byte* stat_file, byte
     fs_usage fsu;
     if (force_fsu)
         fsu = *force_fsu;
-    elif (get_fs_usage(stat_file, device, @?))
+    elif (get_fs_usage(stat_file, device, @fsu))
     {
-        if (? & ((?__errno_location()) ? 0 ? (?__errno_location()) ? 0))
+        if (process_all && ( errno == EACCES || errno == ENOENT ))
         {
-            if (!?)
+            if (!show_all_fs)
                 return void;
             fstype = "-";
-            fsu. = ?. = ?. = ?. = ?. = ?. = (0);
         }
         else
         {
-            exit_status = 0;
+            error;
             return void;
         };
     };
     else
-        if (? & ?)
+        if (process_all & show_all_fs)
         {
             stat sb;
             if (stat(stat_file, @sb) == 0)
             {
-                mount_entry* dev_me = ?(sb.st_dev);
-                if (dev_me & !streq(dev_me, device) & (!dev_me | !?))
+                mount_entry* dev_me = me_for_dev(sb.);
+                if (dev_me & !streq(dev_me, device) & (!dev_me | !me_remote))
                 {
                     fstype = "-";
-                    fsu. = ?. = ?. = ?. = ?. = ?. = (0);
                 };
             };
         };
-    if (?. == 0 & !? & !?)
+    if (fsu. == 0 & !show_all_fs & !show_listed_fs)
         return void;
     alloc_table_row();
     if (!device)
@@ -613,7 +568,7 @@ cdecl get_dev(byte* device, byte* mount_point, byte* file, byte* stat_file, byte
         file = "-";
     byte* dev_name = xstrdup(device);
     byte* resolved_dev;
-    if (?)
+    if (process_all & has_uuid_suffix(dev_name) & (resolved_dev = canonicalize_filename_mode))
     {
         free(dev_name);
         dev_name = resolved_dev;
@@ -622,15 +577,15 @@ cdecl get_dev(byte* device, byte* mount_point, byte* file, byte* stat_file, byte
         fstype = "-";
     field_values_t block_values;
     field_values_t inode_values;
-    get_field_values(@block_values, @inode_values, @?);
-    if (? & !force_fsu)
+    get_field_values(@block_values, @inode_values, @fsu);
+    if (print_grand_total & !force_fsu)
         add_to_grand_total(@block_values, @inode_values);
     free(dev_name);
 };
 
 cdecl last_device_for_mount(byte* mount) -> byte*
 {
-    mount_entry* le = ((void*)0);
+    mount_entry* le;
     for (mount_entry* me = mount_list; me; me = me)
     {
         if (streq(me, mount))
@@ -646,19 +601,18 @@ cdecl last_device_for_mount(byte* mount) -> byte*
         return xstrdup(le);
     }
     else
-        return ((void*)0);
 };
 
 cdecl get_device(byte* device) -> int
 {
-    mount_entry* best_match = ((void*)0);
+    mount_entry* best_match;
     bool;
     bool;
     byte* file = device;
     byte* resolved = canonicalize_file_name(device);
     if (resolved & IS_ABSOLUTE_FILE_NAME(resolved))
         device = resolved;
-    ulong best_match_len = (0);
+    ulong best_match_len;
     for (mount_entry* me = mount_list; me; me = me)
     {
         byte* devname = me;
@@ -669,11 +623,11 @@ cdecl get_device(byte* device) -> int
         {
             byte* last_device = last_device_for_mount(me);
             ulong len = strlen(me);
-            if (?)
+            if (! eclipsed_device && ( ! best_match_accessible || len < best_match_len ))
             {
                 stat device_stats;
                 bool;
-                if (?)
+                if (this_match_accessible || ( ! best_match_accessible && len < best_match_len ))
                 {
                     best_match = me;
                     if (len == 1)
@@ -693,17 +647,18 @@ cdecl get_device(byte* device) -> int
     free(resolved);
     if (best_match)
     {
+        get_dev;
     }
-    elif (?)
+    elif (eclipsed_device)
     {
-        exit_status = 0;
+        error(0, 0, gettext("cannot access %s: over-mounted by another device"), quotearg_style);
     };
 };
 
 cdecl get_point(byte* point, stat* statp) -> void
 {
     stat device_stats;
-    mount_entry* best_match = ((void*)0);
+    mount_entry* best_match;
     byte* resolved = canonicalize_file_name(point);
     if (resolved & resolved[0] == '/')
     {
@@ -723,38 +678,36 @@ cdecl get_point(byte* point, stat* statp) -> void
         };
     };
     free(resolved);
-    if (best_match & (stat(best_match, @device_stats) != 0 | device_stats.st_dev != statp.st_dev))
-        best_match = ((void*)0);
     if (!best_match)
         for (mount_entry* me = mount_list; me; me = me)
         {
-            if (me == (ulong)-1)
+            if (me -> me_dev == ( dev_t ) - 1)
             {
                 if (stat(me, @device_stats) == 0)
-                    me = device_stats.st_dev;
+                    me = device_stats.;
                 else
                 {
-                    if ((?__errno_location()) ? 0)
+                    if (errno == EIO)
                     {
-                        exit_status = 0;
+                        error;
                     };
-                    me = (ulong)-2;
                 };
             };
-            if (statp.st_dev == me & !streq(me, "lofs") & (!best_match | best_match | !me))
+            if (statp == me & !streq(me, "lofs") & (!best_match | best_match | !me))
             {
-                if (stat(me, @device_stats) != 0 | device_stats.st_dev != me)
-                    me = (ulong)-2;
+                if (stat(me, @device_stats) != 0 | device_stats. != me)
                 else
                     best_match = me;
             };
         };
     if (best_match)
+        get_dev;
     else
     {
         byte* mp = find_mount_point(point, statp);
         if (mp)
         {
+            get_dev;
             free(mp);
         };
     };
@@ -762,14 +715,16 @@ cdecl get_point(byte* point, stat* statp) -> void
 
 cdecl get_entry(byte* name, stat* statp) -> void
 {
-    if ((((((statp.st_mode)) ? 0) ? (0060000)) ? ((((statp.st_mode)) ? 0) ? (0020000))) & ?(name))
+    if ((S_ISBLK(statp) | S_ISCHR(statp)) & get_device(name))
         return void;
     get_point(name, statp);
 };
 
 cdecl get_all_entries() -> void
 {
-    filter_mount_list(?);
+    filter_mount_list(show_all_fs);
+    for (mount_entry* me = mount_list; me; me = me)
+    {};
 };
 
 cdecl add_fs_type(byte* fstype) -> void
@@ -792,94 +747,89 @@ cdecl add_excluded_fs_type(byte* fstype) -> void
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Show information about the file system on which each FILE resides,\n\
-or all file systems by default.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("df", gettext("\
-  -a, --all\n\
-         include pseudo, duplicate, inaccessible file systems\n\
+        oputs_("df", gettext("\
+  -a, --all\n\
+         include pseudo, duplicate, inaccessible file systems\n\
 "));
-        oputs_("df", gettext("\
-  -B, --block-size=SIZE\n\
-         scale sizes by SIZE before printing them; see SIZE format below;\n\
-         E.g., '-BM' prints sizes in units of 1,048,576 bytes\n\
+        oputs_("df", gettext("\
+  -B, --block-size=SIZE\n\
+         scale sizes by SIZE before printing them; see SIZE format below;\n\
+         E.g., '-BM' prints sizes in units of 1,048,576 bytes\n\
 "));
-        oputs_("df", gettext("\
-  -h, --human-readable\n\
-         print sizes in powers of 1024 (e.g., 1023M)\n\
+        oputs_("df", gettext("\
+  -h, --human-readable\n\
+         print sizes in powers of 1024 (e.g., 1023M)\n\
 "));
-        oputs_("df", gettext("\
-  -H, --si\n\
-         print sizes in powers of 1000 (e.g., 1.1G)\n\
+        oputs_("df", gettext("\
+  -H, --si\n\
+         print sizes in powers of 1000 (e.g., 1.1G)\n\
 "));
-        oputs_("df", gettext("\
-  -i, --inodes\n\
-         list inode information instead of block usage\n\
+        oputs_("df", gettext("\
+  -i, --inodes\n\
+         list inode information instead of block usage\n\
 "));
-        oputs_("df", gettext("\
-  -k\n\
-         like --block-size=1K\n\
+        oputs_("df", gettext("\
+  -k\n\
+         like --block-size=1K\n\
 "));
-        oputs_("df", gettext("\
-  -l, --local\n\
-         limit listing to local file systems\n\
+        oputs_("df", gettext("\
+  -l, --local\n\
+         limit listing to local file systems\n\
 "));
-        oputs_("df", gettext("\
-      --no-sync\n\
-         do not invoke sync before getting usage info (default)\n\
+        oputs_("df", gettext("\
+      --no-sync\n\
+         do not invoke sync before getting usage info (default)\n\
 "));
-        oputs_("df", gettext("\
-      --output[=FIELD_LIST]\n\
-         use the output format defined by FIELD_LIST,\n\
-         or print all fields if FIELD_LIST is omitted\n\
+        oputs_("df", gettext("\
+      --output[=FIELD_LIST]\n\
+         use the output format defined by FIELD_LIST,\n\
+         or print all fields if FIELD_LIST is omitted\n\
 "));
-        oputs_("df", gettext("\
-  -P, --portability\n\
-         use the POSIX output format\n\
+        oputs_("df", gettext("\
+  -P, --portability\n\
+         use the POSIX output format\n\
 "));
-        oputs_("df", gettext("\
-      --sync\n\
-         invoke sync before getting usage info\n\
+        oputs_("df", gettext("\
+      --sync\n\
+         invoke sync before getting usage info\n\
 "));
-        oputs_("df", gettext("\
-      --total\n\
-         elide all entries insignificant to available space,\n\
-         and produce a grand total\n\
+        oputs_("df", gettext("\
+      --total\n\
+         elide all entries insignificant to available space,\n\
+         and produce a grand total\n\
 "));
-        oputs_("df", gettext("\
-  -t, --type=TYPE\n\
-         limit listing to file systems of type TYPE\n\
+        oputs_("df", gettext("\
+  -t, --type=TYPE\n\
+         limit listing to file systems of type TYPE\n\
 "));
-        oputs_("df", gettext("\
-  -T, --print-type\n\
-         print file system type\n\
+        oputs_("df", gettext("\
+  -T, --print-type\n\
+         print file system type\n\
 "));
-        oputs_("df", gettext("\
-  -x, --exclude-type=TYPE\n\
-         limit listing to file systems not of type TYPE\n\
+        oputs_("df", gettext("\
+  -x, --exclude-type=TYPE\n\
+         limit listing to file systems not of type TYPE\n\
 "));
-        oputs_("df", gettext("\
-  -v\n\
-         (ignored)\n\
+        oputs_("df", gettext("\
+  -v\n\
+         (ignored)\n\
 "));
         oputs_("df", gettext("      --help\n         display this help and exit\n"));
         oputs_("df", gettext("      --version\n         output version information and exit\n"));
         emit_blocksize_note("DF");
         emit_size_note();
-        fputs(gettext("\n\
-FIELD_LIST is a comma-separated list of columns to be included.  Valid\n\
-field names are: 'source', 'fstype', 'itotal', 'iused', 'iavail', 'ipcent',\n\
-'size', 'used', 'avail', 'pcent', 'file' and 'target' (see info page).\n\
-"), stdout);
+        fputs;
         emit_ancillary_info("df");
     };
     exit(status);
@@ -887,157 +837,22 @@ field names are: 'source', 'fstype', 'itotal', 'iused', 'iavail', 'ipcent',\n\
 
 cdecl main(int argc, byte** argv) -> int
 {
-    stat* stats = ((void*)0);
+    stat* stats;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     bool;
     byte* msg_mut_excl = gettext("options %s and %s are mutually exclusive");
-    while (?)
+    while (true)
     {
         int oi = -1;
         int c = getopt_long(argc, argv, "aB:iF:hHklmPTt:vx:", long_options, @oi);
         if (c == -1)
             break;
-        switch (c)
-        {
-            case ('a')
-            {
-            }
-            goto _switch_end_139188837059152;
-            case ('B')
-            {
-                {
-                    strtol_error e;
-                    if (?)
-                        xstrtol_fatal(?, oi, c, long_options, optarg);
-                };
-            }
-            goto _switch_end_139188837059152;
-            case ('i')
-            {
-                if (header_mode == OUTPUT_MODE)
-                {
-                    error(0, 0, msg_mut_excl, "-i", "--output");
-                    usage(0);
-                };
-            }
-            header_mode = INODES_MODE;
-            goto _switch_end_139188837059152;
-            case ('h')
-            {
-            }
-            output_block_size = 1;
-            goto _switch_end_139188837059152;
-            case ('H')
-            {
-            }
-            output_block_size = 1;
-            goto _switch_end_139188837059152;
-            case ('k')
-            {
-                human_output_opts = 0;
-            }
-            output_block_size = 1024;
-            goto _switch_end_139188837059152;
-            case ('l')
-            {
-            }
-            goto _switch_end_139188837059152;
-            case ('m')
-            {
-                human_output_opts = 0;
-            }
-            output_block_size = 1024 * 1024;
-            goto _switch_end_139188837059152;
-            case ('T')
-            {
-                if (header_mode == OUTPUT_MODE)
-                {
-                    error(0, 0, msg_mut_excl, "-T", "--output");
-                    usage(0);
-                };
-            }
-            goto _switch_end_139188837059152;
-            case ('P')
-            {
-                if (header_mode == OUTPUT_MODE)
-                {
-                    error(0, 0, msg_mut_excl, "-P", "--output");
-                    usage(0);
-                };
-            }
-            goto _switch_end_139188837059152;
-            case (SYNC_OPTION)
-            {
-            }
-            goto _switch_end_139188837059152;
-            case (NO_SYNC_OPTION)
-            {
-            }
-            goto _switch_end_139188837059152;
-            case ('F')
-            {
-                case ('t')
-                {
-                    add_fs_type(optarg);
-                }
-            }
-            goto _switch_end_139188837059152;
-            case ('v')
-            {
-                goto _switch_end_139188837059152;
-            }
-            case ('x')
-            {
-                add_excluded_fs_type(optarg);
-            }
-            goto _switch_end_139188837059152;
-            case (OUTPUT_OPTION)
-            {
-                if (header_mode == INODES_MODE)
-                {
-                    error(0, 0, msg_mut_excl, "-i", "--output");
-                    usage(0);
-                };
-            }
-            if (?)
-            {
-                error(0, 0, msg_mut_excl, "-P", "--output");
-                usage(0);
-            };
-            if (?)
-            {
-                error(0, 0, msg_mut_excl, "-T", "--output");
-                usage(0);
-            };
-            header_mode = OUTPUT_MODE;
-            if (optarg)
-                decode_output_arg(optarg);
-            goto _switch_end_139188837059152;
-            case (TOTAL_OPTION)
-            {
-            }
-            goto _switch_end_139188837059152;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188837059152;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188837059152;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188837059152:
     };
     if (human_output_opts == -1)
     {
-        if (?)
+        if (posix_format)
         {
             human_output_opts = 0;
             output_block_size = (getenv("POSIXLY_CORRECT") ? 512 : 1024);
@@ -1046,10 +861,10 @@ cdecl main(int argc, byte** argv) -> int
             human_options(getenv("DF_BLOCK_SIZE"), @human_output_opts, @output_block_size);
     };
     if (header_mode == INODES_MODE | header_mode == OUTPUT_MODE)
-    elif (?)
+    elif (human_output_opts & human_autoscale)
         header_mode = HUMAN_MODE;
     else
-        if (?)
+        if (posix_format)
             header_mode = POSIX_MODE;
     {
         bool;
@@ -1064,51 +879,49 @@ cdecl main(int argc, byte** argv) -> int
                 };
             };
         };
-        if (?)
-            return 0;
     };
     if (optind < argc)
     {
-        stats = xnmalloc(argc - optind, (sizeof * stats / 8));
-        for (int i = optind; i < argc; ++i)
+        stats = xnmalloc;
+        for (int i; i < argc; ++i)
         {
-            int err = automount_stat_err(argv[i], @stats[i - optind]);
+            int err = automount_stat_err;
             if (err != 0)
             {
-                exit_status = 0;
-                argv[i] = ((void*)0);
+                error(0, err, "%s", quotearg_n_style_colon);
             };
         };
     };
-    mount_list = read_file_system_list((fs_select_list != ((void*)0) | fs_exclude_list != ((void*)0) | ? | field_data[FSTYPE_FIELD] | ?));
-    if (mount_list == ((void*)0))
+    mount_list = read_file_system_list;
+    if (mount_list == NULL)
     {
         int status = 0;
-        if (!(optind < argc) | (? | ? | fs_select_list != ((void*)0) | fs_exclude_list != ((void*)0)))
+        if (! ( optind < argc ) || ( show_all_fs || show_local_fs || fs_select_list != NULL || fs_exclude_list != NULL ))
         {
-            status = 0;
         };
         byte* warning = (status == 0 ? gettext("Warning: ") : "");
-        error(status, (?__errno_location()), "%s%s", warning, gettext("cannot read table of mounted file systems"));
+        error;
     };
-    if (?)
+    if (require_sync)
     get_field_list();
     get_header();
     if (stats)
     {
-        for (int i = optind; i < argc; ++i)
+        for (int i; i < argc; ++i)
         {};
     }
     else
         get_all_entries();
-    if (?)
+    if (file_systems_processed)
     {
+        if (print_grand_total)
+            get_dev;
         print_table();
     }
     else
     {
-        if (exit_status == 0)
-            error(0, 0, gettext("no file systems processed"));
+        if (exit_status == EXIT_SUCCESS)
+            error;
     };
     return exit_status;
 };

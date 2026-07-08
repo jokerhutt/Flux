@@ -30,20 +30,20 @@ macro AUTHORS
     proper_name ( "David MacKenzie" ) , proper_name ( "James Youngman" )
 };
 
-option[3] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print group memberships for each USERNAME or, if no USERNAME is specified, for\
-\n\
-the current process (which may differ if the groups database has changed).\n"), stdout);
+        printf;
+        fputs;
         oputs_("groups", gettext("      --help\n         display this help and exit\n"));
         oputs_("groups", gettext("      --version\n         output version information and exit\n"));
         emit_ancillary_info("groups");
@@ -54,65 +54,41 @@ the current process (which may differ if the groups database has changed).\n"), 
 cdecl main(int argc, byte** argv) -> int
 {
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
+    atexit;
     int optc;
-    while ((optc = getopt_long(argc, argv, "", longopts, ((void*)0))) != -1)
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188840055504;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188840055504;
             default
             {
-                usage(0);
             };
         };
-        label _switch_end_139188840055504:
     };
     bool;
     if (optind == argc)
     {
-        uint NO_UID = -1;
-        uint NO_GID = -1;
-        (?__errno_location()) ? 0;
-        uint ruid = getuid();
-        if (ruid == NO_UID & (?__errno_location()))
-            error(0, (?__errno_location()), gettext("cannot get real UID"));
-        (?__errno_location()) ? 0;
-        uint egid = getegid();
-        if (egid == NO_GID & (?__errno_location()))
-            error(0, (?__errno_location()), gettext("cannot get effective GID"));
-        (?__errno_location()) ? 0;
-        uint rgid = getgid();
-        if (rgid == NO_GID & (?__errno_location()))
-            error(0, (?__errno_location()), gettext("cannot get real GID"));
+        if (ruid == NO_UID && errno)
+            error;
+        if (egid == NO_GID && errno)
+            error;
+        if (rgid == NO_GID && errno)
+            error;
         putchar('\n');
     }
     else
     {
-        for (optind < argc; optind++; )
-        {
-            passwd* pwd = getpwnam(argv[optind]);
-            if (pwd == ((void*)0))
-            {
-                error(0, 0, gettext("%s: no such user"), quote(argv[optind]));
-                continue;
-            };
-            uint ruid = pwd.pw_uid;
-            uint rgid = pwd.pw_gid;
-            uint egid = rgid;
-            printf("%s : ", argv[optind]);
-            putchar('\n');
-            if (ferror(stdout))
-                write_error();
-        };
     };
 };

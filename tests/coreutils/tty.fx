@@ -40,23 +40,23 @@ uint TTY_WRITE_ERROR = 3;
 uint TTY_TTYNAME_FAILURE = 4;
 
 extern int silent;
-option[5] longopts = option;
+struct option;
+extern int longopts;
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Print the file name of the terminal connected to standard input.\n\
-\n\
-"), stdout);
-        oputs_("tty", gettext("\
-  -s, --silent, --quiet\n\
-         print nothing, only return an exit status\n\
+        printf;
+        fputs;
+        oputs_("tty", gettext("\
+  -s, --silent, --quiet\n\
+         print nothing, only return an exit status\n\
 "));
         oputs_("tty", gettext("      --help\n         display this help and exit\n"));
         oputs_("tty", gettext("      --version\n         output version information and exit\n"));
@@ -69,48 +69,45 @@ cdecl main(int argc, byte** argv) -> int
 {
     int optc;
     set_program_name(argv[0]);
-    setlocale(0, "");
+    setlocale;
     initialize_exit_failure(TTY_WRITE_ERROR);
-    while ((optc = getopt_long(argc, argv, "s", longopts, ((void*)0))) != -1)
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
         switch (optc)
         {
             case ('s')
             {
+                break switch;
             }
-            goto _switch_end_139188837837008;
             case (GETOPT_HELP_CHAR)
             {
-                usage(0);
+                usage;
+                break switch;
             }
-            goto _switch_end_139188837837008;
             case (GETOPT_VERSION_CHAR)
             {
+                version_etc;
+                exit;
+                break switch;
             }
-            exit(0);
-            goto _switch_end_139188837837008;
             default
             {
-                usage(TTY_USAGE);
             };
         };
-        label _switch_end_139188837837008:
     };
     if (optind < argc)
     {
-        error(0, 0, gettext("extra operand %s"), quote(argv[optind]));
+        error(0, 0, gettext("extra operand %s"), quote);
         usage(TTY_USAGE);
     };
-    if (?)
-        return isatty(0) ? 0 : TTY_STDIN_NOTTY;
     int status;
-    byte* tty = ttyname(0);
+    byte* tty = ttyname;
     if (tty)
-        status = 0;
     else
     {
-        int ttyname_err = (?__errno_location());
-        if (isatty(0))
+        int ttyname_err;
+        if (isatty)
             error(TTY_TTYNAME_FAILURE, ttyname_err, gettext("ttyname error"));
         tty = gettext("not a tty");
         status = TTY_STDIN_NOTTY;

@@ -20,37 +20,37 @@
 ///
 
 extern int convert_entire_line;
-long tab_size = colno;
-long extend_size = colno;
-long increment_size = colno;
+int tab_size = colno;
+int extend_size = colno;
+int increment_size = colno;
 extern int max_column_width;
-long* tab_list = colno;
-extern int n_tabs_allocated;
-extern int first_free_tab;
-byte** file_list = ((void*)0);
-byte*[2] stdin_argv = {(byte*)"-", ((void*)0)};
+int* tab_list = colno;
+int n_tabs_allocated = 0;
+int first_free_tab = 0;
+extern byte** file_list;
+extern byte** stdin_argv;
 extern int have_read_stdin;
-int exit_status = 0;
-cdecl set_max_column_width(long width) -> void
+extern int exit_status;
+cdecl set_max_column_width(int width) -> void
 {
-    if (? < width)
+    if (max_column_width < width)
     {
-        if (__builtin_add_overflow((width), (0), (@?)))
-            error(0, 0, gettext("tabs are too far apart"));
+        if (ckd_add(@max_column_width, width, 0))
+            error;
     };
 };
 
-cdecl add_tab_stop(long tabval) -> void
+cdecl add_tab_stop(int tabval) -> void
 {
-    long prev_column = ? ? tab_list[? - 1] : 0;
-    long column_width = prev_column <= tabval ? tabval - prev_column : 0;
-    if (? == ?)
-        tab_list = xpalloc(tab_list, @?, 1, -1, (sizeof * tab_list / 8));
-    tab_list[?++] = tabval;
+    int prev_column = first_free_tab ? tab_list[first_free_tab - 1] : 0;
+    int column_width = prev_column <= tabval ? tabval - prev_column : 0;
+    if (first_free_tab == n_tabs_allocated)
+        tab_list = xpalloc(tab_list, @n_tabs_allocated, 1, -1, (sizeof * tab_list / 8));
+    tab_list[first_free_tab++] = tabval;
     set_max_column_width(column_width);
 };
 
-cdecl set_extend_size(long tabval) -> int
+cdecl set_extend_size(int tabval) -> int
 {
     bool;
     if (extend_size)
@@ -61,7 +61,7 @@ cdecl set_extend_size(long tabval) -> int
     set_max_column_width(extend_size);
 };
 
-cdecl set_increment_size(long tabval) -> int
+cdecl set_increment_size(int tabval) -> int
 {
     bool;
     if (increment_size)
@@ -75,27 +75,27 @@ cdecl set_increment_size(long tabval) -> int
 cdecl parse_tab_stops(byte* stops) -> void
 {
     bool;
-    long tabval = 0;
+    int tabval = 0;
     bool;
     bool;
-    byte* num_start = ((void*)0);
+    byte* num_start;
     bool;
     for (*stops; stops++; )
     {
-        if (*stops == ',' | ((?__ctype_b_loc())[(int)((to_uchar(*stops)))] ? (uint)_ISblank))
+        if (*stops == ',' | isblank(to_uchar(*stops)))
         {
-            if (?)
+            if (have_tabval)
             {
-                if (?)
+                if (extend_tabval)
                 {
-                    if (!?(tabval))
+                    if (!set_extend_size(tabval))
                     {
                         break;
                     };
                 }
-                elif (?)
+                elif (increment_tabval)
                 {
-                    if (!?(tabval))
+                    if (!set_increment_size(tabval))
                     {
                         break;
                     };
@@ -106,7 +106,7 @@ cdecl parse_tab_stops(byte* stops) -> void
         }
         elif (*stops == '/')
         {
-            if (?)
+            if (have_tabval)
             {
                 error(0, 0, gettext("'/' specifier not at start of number: %s"), quote(stops));
             };
@@ -114,21 +114,21 @@ cdecl parse_tab_stops(byte* stops) -> void
         else
             if (*stops == '+')
             {
-                if (?)
+                if (have_tabval)
                 {
                     error(0, 0, gettext("'+' specifier not at start of number: %s"), quote(stops));
                 };
             }
             elif (c_isdigit(*stops))
             {
-                if (?)
+                if (! have_tabval)
                 {
                     tabval = 0;
                     num_start = stops;
                 };
-                if (!(?__builtin_mul_overflow((tabval), (10), (@(tabval))) ? ?__builtin_add_overflow((tabval), (*stops ? '0'), (@(tabval)))))
+                if (!(?ckd_mul(?(tabval), tabval, 0) ? ?ckd_add(?(tabval), tabval, *stops ? '0')))
                 {
-                    byte* bad_num;
+                    byte* bad_num = ximemdup0;
                     error(0, 0, gettext("tab stop is too large %s"), quote(bad_num));
                     free(bad_num);
                 };
@@ -139,45 +139,45 @@ cdecl parse_tab_stops(byte* stops) -> void
                 break;
             };
     };
-    if (?)
+    if (ok && have_tabval)
     {
-        if (?)
-        elif (?)
+        if (extend_tabval)
+        elif (increment_tabval)
         else
             add_tab_stop(tabval);
     };
-    if (?)
-        exit(0);
+    if (! ok)
+        exit;
 };
 
-cdecl validate_tab_stops(long* tabs, int entries) -> void
+cdecl validate_tab_stops(int* tabs, int entries) -> void
 {
-    long prev_tab = 0;
+    int prev_tab = 0;
     if (increment_size & extend_size)
-        error(0, 0, gettext("'/' specifier is mutually exclusive with '+'"));
+        error;
 };
 
 cdecl finalize_tab_stops() -> void
 {
-    validate_tab_stops(tab_list, ?);
-    if (? == 0)
-        tab_size = ? = extend_size ? extend_size : increment_size ? increment_size : 8;
-    elif (? == 1 & !extend_size & !increment_size)
+    validate_tab_stops(tab_list, first_free_tab);
+    if (first_free_tab == 0)
+        tab_size = max_column_width = extend_size ? extend_size : increment_size ? increment_size : 8;
+    elif (first_free_tab == 1 & !extend_size & !increment_size)
         tab_size = tab_list[0];
     else
         tab_size = 0;
 };
 
-cdecl get_next_tab_column(long column, int* tab_index, int* last_tab) -> long
+cdecl get_next_tab_column(int column, int* tab_index, int* last_tab) -> int
 {
-    long tab_distance;
+    int tab_distance;
     if (tab_size)
         tab_distance = tab_size - column % tab_size;
     else
     {
-        for (*? < ?; (*?)++; )
+        for (*tab_index < first_free_tab; (*tab_index)++; )
         {
-            long tab = tab_list[*?];
+            int tab = tab_list[*tab_index];
             if (column < tab)
                 return tab;
         };
@@ -185,7 +185,7 @@ cdecl get_next_tab_column(long column, int* tab_index, int* last_tab) -> long
             tab_distance = extend_size - column % extend_size;
         elif (increment_size)
         {
-            long end_tab = tab_list[? - 1];
+            int end_tab = tab_list[first_free_tab - 1];
             tab_distance = increment_size - ((column - end_tab) % increment_size);
         };
         else
@@ -193,9 +193,9 @@ cdecl get_next_tab_column(long column, int* tab_index, int* last_tab) -> long
             tab_distance = 1;
         };
     };
-    long tab_stop;
-    if (__builtin_add_overflow((column), (tab_distance), (@tab_stop)))
-        error(0, 0, gettext("input line is too long"));
+    int tab_stop;
+    if (ckd_add(@tab_stop, column, tab_distance))
+        error;
     return tab_stop;
 };
 
@@ -207,59 +207,51 @@ cdecl set_file_list(byte** list) -> void
         file_list = list;
 };
 
-cdecl next_file(_IO_FILE* fp) -> _IO_FILE*
+cdecl next_file(int* fp) -> int*
 {
     byte* prev_file;
     byte* file;
     if (fp)
     {
-        int err = (?__errno_location());
+        int err;
         if (!ferror(fp))
             err = 0;
         if (streq(prev_file, "-"))
             clearerr(fp);
-        elif (fclose(fp) != 0)
-            err = (?__errno_location());
+        else
         if (err)
         {
-            exit_status = 0;
+            error(0, err, "%s", quotearg_n_style_colon);
         };
     };
-    while ((file = *file_list++) != ((void*)0))
+    while (( file = * file_list ++ ) != NULL)
     {
         if (streq(file, "-"))
         {
-            fp = stdin;
         }
         else
             fp = fopen(file, "r");
         if (fp)
         {
             prev_file = file;
+            fadvise;
             return fp;
         };
-        exit_status = 0;
+        error;
     };
-    return ((void*)0);
 };
 
 cdecl cleanup_file_list_stdin() -> void
 {
-    if (? & fclose(stdin) != 0)
-        error(0, (?__errno_location()), "-");
+    if (have_read_stdin & fclose != 0)
+        error;
 };
 
 cdecl emit_tab_list_info(byte* program) -> void
 {
-    oputs_(program, gettext("\
-  -t, --tabs=LIST\n\
-         use comma separated list of tab positions.\n\
+    oputs_(program, gettext("\
+  -t, --tabs=LIST\n\
+         use comma separated list of tab positions.\n\
 "));
-    fputs(gettext("\
-         The last specified position can be prefixed with '/'\n\
-         to specify a tab size to use after the last\n\
-         explicitly specified tab stop.  Also a prefix of '+'\n\
-         can be used to align remaining tab stops relative to\n\
-         the last specified tab stop instead of the first column\n\
-"), stdout);
+    fputs;
 };

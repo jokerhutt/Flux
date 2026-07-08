@@ -36,56 +36,57 @@ extern byte* specified_user;
 extern byte* specified_role;
 extern byte* specified_range;
 extern byte* specified_type;
-uint DEREFERENCE_OPTION = 128;
-uint NO_PRESERVE_ROOT = 129;
-uint PRESERVE_ROOT = 130;
-uint REFERENCE_FILE_OPTION = 131;
+uint DEREFERENCE_OPTION = 0;
+uint NO_PRESERVE_ROOT = 1;
+uint PRESERVE_ROOT = 2;
+uint REFERENCE_FILE_OPTION = 3;
 
-option[14] long_options = option;
+struct option;
+extern int long_options;
 cdecl compute_context_from_mask(byte* context, int* ret) -> int
 {
     bool;
-    if (?)
+    if (! new_context)
     {
-        error(0, (?__errno_location()), gettext("failed to create security context: %s"), quote(context));
+        error;
         return 1;
     };
     do
     {
-        if (?)
+        if (specified_user ? context_user_set)
         {
-            error(0, (?__errno_location()), gettext("failed to set %s security context component to %s"), "", quote(specified_user));
+            error;
         };
     }
     while (0);
     do
     {
-        if (?)
+        if (specified_range ? context_range_set)
         {
-            error(0, (?__errno_location()), gettext("failed to set %s security context component to %s"), "", quote(specified_range));
+            error;
         };
     }
     while (0);
     do
     {
-        if (?)
+        if (specified_role ? context_role_set)
         {
-            error(0, (?__errno_location()), gettext("failed to set %s security context component to %s"), "", quote(specified_role));
+            error;
         };
     }
     while (0);
     do
     {
-        if (?)
+        if (specified_type ? context_type_set)
         {
-            error(0, (?__errno_location()), gettext("failed to set %s security context component to %s"), "", quote(specified_type));
+            error;
         };
     }
     while (0);
-    if (?)
+    if (! ok)
     {
-        int saved_errno = (?__errno_location());
-        (?__errno_location()) ? saved_errno;
+        int saved_errno;
+        context_free;
         return 1;
     };
     return 0;
@@ -93,40 +94,45 @@ cdecl compute_context_from_mask(byte* context, int* ret) -> int
 
 cdecl change_file_context(int fd, byte* file) -> int
 {
-    byte* file_context = ((void*)0);
+    byte* file_context;
     byte* context_string;
     int errors = 0;
-    if (specified_context == ((void*)0))
+    if (specified_context == NULL)
     {
-        int status = (? ? getfileconat(fd, file, @file_context) : lgetfileconat(fd, file, @file_context));
-        if (status < 0 & (?__errno_location()) ? 0)
+        int status = (affect_symlink_referent ? getfileconat(fd, file, @file_context) : lgetfileconat(fd, file, @file_context));
+        if (status < 0 && errno != ENODATA)
         {
+            error;
             return 1;
         };
-        if (file_context == ((void*)0))
+        if (file_context == NULL)
         {
+            error(0, 0, gettext("can't apply partial context to unlabeled file %s"), quotearg_style);
             return 1;
         };
-        if (?)
+        if (compute_context_from_mask)
         {
             freecon(file_context);
             return 1;
         };
+        context_string = context_str;
     }
     else
     {
         context_string = specified_context;
     };
-    if (file_context == ((void*)0) | !streq(context_string, file_context))
+    if (file_context == NULL || ! streq ( context_string , file_context ))
     {
-        int fail = (? ? setfileconat(fd, file, context_string) : lsetfileconat(fd, file, context_string));
+        int fail = (affect_symlink_referent ? setfileconat(fd, file, context_string) : lsetfileconat(fd, file, context_string));
         if (fail)
         {
             errors = 1;
+            error;
         };
     };
-    if (specified_context == ((void*)0))
+    if (specified_context == NULL)
     {
+        context_free;
         freecon(file_context);
     };
     return errors;
@@ -134,130 +140,135 @@ cdecl change_file_context(int fd, byte* file) -> int
 
 cdecl process_file(int* fts, int* ent) -> int
 {
-    byte* file_full_name = ?.;
-    byte* file = ?.;
-    stat* file_stats = ?.;
+    byte* file_full_name = ent.;
+    byte* file = ent.;
+    stat* file_stats = ent.;
     bool;
-    switch (?.)
+    switch (ent.)
     {
-        if (?)
+        if (recurse)
         {
-            if (ROOT_DEV_INO_CHECK(root_dev_ino, ?.))
+            if (ROOT_DEV_INO_CHECK(root_dev_ino, ent.))
             {
                 ROOT_DEV_INO_WARN(file_full_name);
-                ignore_value(fts_read(?));
+                fts_set;
+                ignore_value(fts_read(fts));
             };
         };
-        goto _switch_end_139188835711952;
-        goto _switch_end_139188835711952;
-        if (?)
+        if (ent -> fts_level == FTS_ROOTLEVEL && ent -> fts_number == 0)
         {
             ent. = 1;
+            fts_set;
         };
-        goto _switch_end_139188835711952;
-        goto _switch_end_139188835711952;
-        goto _switch_end_139188835711952;
-        if (cycle_warning_required(?, ?))
+        error(0, ent., gettext("cannot access %s"), quotearg_style);
+        error(0, ent., "%s", quotearg_n_style_colon);
+        error(0, ent., gettext("cannot read directory %s"), quotearg_style);
+        if (cycle_warning_required(fts, ent))
         {
             do
             {
+                error(0, 0, gettext("\
+WARNING: Circular directory structure.\n\
+This almost certainly means that you have a corrupted file system.\n\
+NOTIFY YOUR SYSTEM MANAGER.\n\
+The following directory is part of the cycle:\n  %s\n"), quotearg_n_style_colon);
             }
             while (0);
         };
-        goto _switch_end_139188835711952;
         default
         {
-            goto _switch_end_139188835711952;
         };
     };
-    label _switch_end_139188835711952:
-    if (?)
+    if (ent -> fts_info == FTS_DP && ok && ROOT_DEV_INO_CHECK ( root_dev_ino , file_stats ))
     {
         ROOT_DEV_INO_WARN(file_full_name);
     };
-    if (?)
+    if (ok)
     {
+        if (verbose)
+            printf(gettext("changing security context of %s\n"), quotearg_style);
     };
+    if (!recurse)
+        fts_set;
 };
 
 cdecl process_files(byte** files, int bit_flags) -> int
 {
     bool;
-    while (?)
+    while (true)
     {
-        if (?)
+        if (ent == NULL)
         {
-            if ((?__errno_location()) ? 0)
+            if (errno != 0)
             {
-                error(0, (?__errno_location()), gettext("fts_read failed"));
+                error;
             };
             break;
         };
     };
-    if (?)
+    if (fts_close != 0)
     {
-        error(0, (?__errno_location()), gettext("fts_close failed"));
+        error;
     };
 };
 
 cdecl usage(int status) -> void
 {
-    if (status != 0)
+    if (status != EXIT_SUCCESS)
         do
         {
+            fprintf;
         }
         while (0);
     else
     {
-        fputs(gettext("\
-Change the SELinux security context of each FILE to CONTEXT.\n\
-With --reference, change the security context of each FILE to that of RFILE.\n\
-"), stdout);
+        printf;
+        fputs;
         emit_mandatory_arg_note();
-        oputs_("chcon", gettext("\
-      --dereference\n\
-         affect the referent of each symbolic link (this is\n\
-         the default), rather than the symbolic link itself\n\
+        oputs_("chcon", gettext("\
+      --dereference\n\
+         affect the referent of each symbolic link (this is\n\
+         the default), rather than the symbolic link itself\n\
 "));
-        oputs_("chcon", gettext("\
-  -h, --no-dereference\n\
-         affect symbolic links instead of any referenced file\n\
+        oputs_("chcon", gettext("\
+  -h, --no-dereference\n\
+         affect symbolic links instead of any referenced file\n\
 "));
-        oputs_("chcon", gettext("\
-  -u, --user=USER\n\
-         set user USER in the target security context\n\
+        oputs_("chcon", gettext("\
+  -u, --user=USER\n\
+         set user USER in the target security context\n\
 "));
-        oputs_("chcon", gettext("\
-  -r, --role=ROLE\n\
-         set role ROLE in the target security context\n\
+        oputs_("chcon", gettext("\
+  -r, --role=ROLE\n\
+         set role ROLE in the target security context\n\
 "));
-        oputs_("chcon", gettext("\
-  -t, --type=TYPE\n\
-         set type TYPE in the target security context\n\
+        oputs_("chcon", gettext("\
+  -t, --type=TYPE\n\
+         set type TYPE in the target security context\n\
 "));
-        oputs_("chcon", gettext("\
-  -l, --range=RANGE\n\
-         set range RANGE in the target security context\n\
+        oputs_("chcon", gettext("\
+  -l, --range=RANGE\n\
+         set range RANGE in the target security context\n\
 "));
-        oputs_("chcon", gettext("\
-      --no-preserve-root\n\
-         do not treat '/' specially (the default)\n\
+        oputs_("chcon", gettext("\
+      --no-preserve-root\n\
+         do not treat '/' specially (the default)\n\
 "));
-        oputs_("chcon", gettext("\
-      --preserve-root\n\
-         fail to operate recursively on '/'\n\
+        oputs_("chcon", gettext("\
+      --preserve-root\n\
+         fail to operate recursively on '/'\n\
 "));
-        oputs_("chcon", gettext("\
-      --reference=RFILE\n\
-         use RFILE's security context rather than specifying a CONTEXT value\n\
+        oputs_("chcon", gettext("\
+      --reference=RFILE\n\
+         use RFILE's security context rather than specifying a CONTEXT value\n\
 "));
-        oputs_("chcon", gettext("\
-  -R, --recursive\n\
-         operate on files and directories recursively\n\
+        oputs_("chcon", gettext("\
+  -R, --recursive\n\
+         operate on files and directories recursively\n\
 "));
-        oputs_("chcon", gettext("\
-  -v, --verbose\n\
-         output a diagnostic for every file processed\n\
+        oputs_("chcon", gettext("\
+  -v, --verbose\n\
+         output a diagnostic for every file processed\n\
 "));
         emit_symlink_recurse_options_("chcon", "-P");
         oputs_("chcon", gettext("      --help\n         display this help and exit\n"));
@@ -274,150 +285,67 @@ cdecl main(int argc, byte** argv) -> int
     bool;
     bool;
     bool;
-    byte* reference_file = ((void*)0);
+    byte* reference_file;
     int optc;
     set_program_name(argv[0]);
-    setlocale(0, "");
-    while ((optc = getopt_long(argc, argv, "HLPRhvu:r:t:l:", long_options, ((void*)0))) != -1)
+    setlocale;
+    atexit;
+    while ((optc = getopt_long) != -1)
     {
-        switch (optc)
-        {
-            case ('H')
-            {
-            }
-            goto _switch_end_139188835807056;
-            case ('L')
-            {
-            }
-            goto _switch_end_139188835807056;
-            case ('P')
-            {
-            }
-            goto _switch_end_139188835807056;
-            case ('h')
-            {
-                dereference = 0;
-            }
-            goto _switch_end_139188835807056;
-            case (DEREFERENCE_OPTION)
-            {
-                dereference = 1;
-            }
-            goto _switch_end_139188835807056;
-            case (NO_PRESERVE_ROOT)
-            {
-            }
-            goto _switch_end_139188835807056;
-            case (PRESERVE_ROOT)
-            {
-            }
-            goto _switch_end_139188835807056;
-            case (REFERENCE_FILE_OPTION)
-            {
-                reference_file = optarg;
-            }
-            goto _switch_end_139188835807056;
-            case ('R')
-            {
-            }
-            goto _switch_end_139188835807056;
-            case ('f')
-            {
-                goto _switch_end_139188835807056;
-            }
-            case ('v')
-            {
-            }
-            goto _switch_end_139188835807056;
-            case ('u')
-            {
-                specified_user = optarg;
-            }
-            goto _switch_end_139188835807056;
-            case ('r')
-            {
-                specified_role = optarg;
-            }
-            goto _switch_end_139188835807056;
-            case ('t')
-            {
-                specified_type = optarg;
-            }
-            goto _switch_end_139188835807056;
-            case ('l')
-            {
-                specified_range = optarg;
-            }
-            goto _switch_end_139188835807056;
-            case (GETOPT_HELP_CHAR)
-            {
-                usage(0);
-            }
-            goto _switch_end_139188835807056;
-            case (GETOPT_VERSION_CHAR)
-            {
-            }
-            exit(0);
-            goto _switch_end_139188835807056;
-            default
-            {
-                usage(0);
-            };
-        };
-        label _switch_end_139188835807056:
     };
-    if (?)
+    if (recurse)
     {
-        if (?)
+        if (bit_flags == FTS_PHYSICAL)
         {
             if (dereference == 1)
-                error(0, 0, gettext("-R --dereference requires either -H or -L"));
+                error;
         }
         else
         {
             if (dereference == 0)
-                error(0, 0, gettext("-R -h requires -P"));
+                error;
         };
     }
     else
     {
         affect_symlink_referent = (dereference != 0);
     };
-    if (?)
+    if (argc - optind < ( reference_file || component_specified ? 1 : 2 ))
     {
         if (argc <= optind)
             error(0, 0, gettext("missing operand"));
         else
             error(0, 0, gettext("missing operand after %s"), quote(argv[argc - 1]));
-        usage(0);
+        usage;
     };
     if (reference_file)
     {
-        byte* ref_context = ((void*)0);
+        byte* ref_context;
+        if (getfilecon(reference_file, @ref_context) < 0)
+            error;
         specified_context = ref_context;
     }
-    elif (?)
+    elif (component_specified)
     {
-        specified_context = ((void*)0);
     };
     else
     {
-        specified_context = argv[optind++];
         if (0 < is_selinux_enabled() & security_check_context(specified_context) < 0)
-            error(0, (?__errno_location()), gettext("invalid context: %s"), quote(specified_context));
+            error;
     };
-    if (?)
+    if (reference_file && component_specified)
     {
         error(0, 0, gettext("conflicting security context specifiers given"));
-        usage(0);
+        usage;
     };
-    if (?)
+    if (recurse && preserve_root)
     {
         dev_ino dev_ino_buf;
-        root_dev_ino = get_root_dev_ino(@?);
+        root_dev_ino = get_root_dev_ino(@dev_ino_buf);
+        if (root_dev_ino == NULL)
+            error;
     }
     else
     {
-        root_dev_ino = ((void*)0);
     };
 };
