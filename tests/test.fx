@@ -89,10 +89,10 @@ comptime
         Thing3
     };
 
-    union MyU1 { int a; };
+    union MyU1 { int a; } # MyEnum1;
+    MyU1 myU;
 
-    MyEnum1 me1;
-    me1._ = MyU1;
+    myU.# = MyU1;
 };
 
 comptime
@@ -210,8 +210,8 @@ comptime
     };
     compiler.io.console.print("before zed()\n");
     zed();
-    compiler.io.console.print("after zod()\n");
     // execution escapes here
+    compiler.io.console.print("after zod()\n");
 };
 
 comptime

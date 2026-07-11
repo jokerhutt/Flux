@@ -2703,14 +2703,8 @@ class FVMCodegen:
         if node.is_recursive:
             fn_cg._tail_call_self = node.name
             fn_cg._tail_call_argc = len(node.parameters)
-        # Skip forward declarations -- empty Block bodies with None params.
-        _is_forward_decl = (
-            node.body is None or
-            (isinstance(node.body, Block) and
-             not node.body.statements and
-             all(getattr(p, 'name', p) is None for p in node.parameters))
-        )
-        if _is_forward_decl:
+        # Skip forward declarations (prototypes only -- no body).
+        if node.is_prototype or node.body is None:
             return
         # Compile the body
         body_stmts = (

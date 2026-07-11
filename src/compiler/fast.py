@@ -809,6 +809,7 @@ class BreakSwitchStatement(Statement):
     pass
 
 @dataclass
+class ContinueStatement(Statement):
     pass
 
 @dataclass

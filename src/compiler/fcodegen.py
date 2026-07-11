@@ -6478,6 +6478,7 @@ class CodegenVisitor:
         return struct_type
 
     def visit_ExternBlock(self, node, builder, module):
+        from fast import VariableDeclaration
         for decl in node.declarations:
             if isinstance(decl, VariableDeclaration):
                 # Extern variable: declare as external global with no initializer
