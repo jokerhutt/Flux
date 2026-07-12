@@ -290,6 +290,14 @@ class FluxCompiler:
         try:
             cg = fbc_mod.CallGraph()
             cg.collect(ast)
+            # register mangled main variants so the Linux FRTStartup call to
+            # main__0__ret_intE1 resolves to the user's main function
+            if 'main' in cg.funcs:
+                for mangled in list(cg.short_names.keys()):
+                    if mangled.startswith('main__') or mangled == 'main__0__ret_intE1':
+                        cg.funcs[mangled] = cg.funcs['main']
+                # always register the canonical no-arg form directly
+                cg.funcs['main__0__ret_intE1'] = cg.funcs['main']
             checker = fbc_mod.BorrowChecker(
                 call_graph=cg,
                 entry='FRTStartup',
