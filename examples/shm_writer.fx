@@ -10,7 +10,7 @@
 //   [8..71]  byte[64]    - null-terminated message string
 //   [72..]   i32[8]      - array of integers
 
-#import "standard.fx", "atomics.fx", "sharedmemory.fx";
+#import <standard.fx>, <atomics.fx>, <sharedmemory.fx>;
 
 using standard::io::console,
       standard::atomic,
