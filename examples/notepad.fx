@@ -1,6 +1,6 @@
 // notepad.fx - Notepad clone in Flux
 
-#import "standard.fx", "windows.fx";
+#import <standard.fx>, <windows.fx>;
 
 using standard::io::console,
       standard::strings,

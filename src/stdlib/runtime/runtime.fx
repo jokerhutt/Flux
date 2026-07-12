@@ -306,6 +306,7 @@ def !!FRTStartup() -> int
 
         // Copy low byte of each wchar into byte buffer
         arg = (byte*)fmalloc((u64)len + (u64)1);
+        defer ffree(@arg);
         j = 0;
         while (j < len)
         {
@@ -352,7 +353,7 @@ def !!FRTStartup() -> int
         ffree((u64)argv[k]);
         k = k + 1;
     };
-    ffree(long(argv));
+    ffree(ulong(argv));
 
     if (return_code != 0)
     {

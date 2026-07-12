@@ -158,6 +158,14 @@ class FluxCompiler:
         
         # Initialize predefined_macros as empty dict
         self.predefined_macros = {}
+
+        # Borrow checker flags -- set by fxc.py or CLI
+        self.borrow_check = False
+        self.borrow_check_warn = False
+
+        # Entrypoint for DCE and linker -- overridable via --entrypoint CLI flag
+        # or 'entrypoint' key in flux_config.cfg. Default is FRTStartup.
+        self.entrypoint = config.get('entrypoint', 'FRTStartup')
         
         # Default to False; set correctly by _configure_target_triple
         self.is_arm64 = False
@@ -262,6 +270,72 @@ class FluxCompiler:
         return flags
 
 
+    def _run_borrow_check(self, ast, line_map, filename: str):
+        """Run the borrow checker on an already-parsed AST without re-parsing."""
+        import importlib.util
+        from pathlib import Path as _Path
+        fbc_path = _Path(__file__).parent.parent.parent / 'fbc.py'
+        if not fbc_path.exists():
+            # try alongside fc.py
+            fbc_path = _Path(__file__).parent / 'fbc.py'
+        if not fbc_path.exists():
+            self.logger.warning("fbc.py not found, skipping borrow check.", "FBC"); return
+            return
+
+        spec = importlib.util.spec_from_file_location('fbc', fbc_path)
+        fbc_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fbc_mod)
+
+        self.logger.step("Borrow checking", LogLevel.INFO, "FBC")
+        try:
+            cg = fbc_mod.CallGraph()
+            cg.collect(ast)
+            checker = fbc_mod.BorrowChecker(
+                call_graph=cg,
+                entry='FRTStartup',
+                check_threads=True,
+                check_leaks=True,
+                line_map=line_map,
+            )
+            checker.run()
+            violations = checker.violations
+            use_color = sys.stderr.isatty()
+            fbc_mod.print_violations(violations,
+                                     mode='warn' if self.borrow_check_warn else 'error',
+                                     use_color=use_color)
+            fbc_mod.print_summary(violations, files_checked=1,
+                                  funcs_checked=checker.funcs_checked,
+                                  use_color=use_color)
+            if violations and not self.borrow_check_warn:
+                self.logger.error("Borrow check failed -- compilation aborted.", "FBC")
+                sys.exit(1)
+        except Exception as e:
+            self.logger.warning(f"Borrow check error: {e}", "FBC")
+            if not self.borrow_check_warn:
+                sys.exit(1)
+
+    def _run_dce(self, ast, entry: str):
+        """Run dead code elimination on an already-parsed AST."""
+        import importlib.util
+        from pathlib import Path as _Path
+        fdce_path = _Path(__file__).parent.parent.parent / 'fdce.py'
+        if not fdce_path.exists():
+            fdce_path = _Path(__file__).parent / 'fdce.py'
+        if not fdce_path.exists():
+            self.logger.warning("fdce.py not found, skipping DCE.", "dce")
+            return
+
+        spec = importlib.util.spec_from_file_location('fdce', fdce_path)
+        fdce_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fdce_mod)
+
+        self.logger.step("Dead code elimination", LogLevel.INFO, "dce")
+        try:
+            verbose = (self.verbosity is not None and self.verbosity >= 1)
+            fdce_mod.eliminate(ast, entry=entry, verbose=verbose)
+        except Exception as e:
+            self.logger.warning(f"DCE error: {e}", "dce")
+
     def compile_file(self, filename: str, output_bin: str = None, extra_libs: list = None) -> str:
         """
         Compile a Flux source file to executable binary
@@ -315,7 +389,14 @@ class FluxCompiler:
             #
             # LEFT OFF REPLACING LOG DEBUGGER WITH DEBUGGER FUNCTION
             # CONTINUE BELOW
-            
+
+            # DCE -- runs unconditionally on the parsed AST before borrow check
+            self._run_dce(ast, self.entrypoint)
+
+            # Borrow check (optional) -- runs on the already-parsed AST and line map
+            if self.borrow_check:
+                self._run_borrow_check(ast, parser._line_map, filename)
+
             # Step 4: Code generation
             self.logger.step("LLVM IR code generation", LogLevel.INFO, "codegen")
             try:

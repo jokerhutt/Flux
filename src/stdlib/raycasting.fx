@@ -3375,7 +3375,9 @@ namespace raycaster
         R3DClipVert* v1;
         R3DClipVert* v2;
         double inv_w0, inv_w1, inv_w2;
-        double sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2;
+        double sx0, sy0, sz0, sx1, sy1, sz1, sx2, sy2, sz2,
+               ex0, ey0, ez0, ex1, ey1, ez1,
+               fnlen;
 
         t = 0;
         while (t < mesh.tri_count)
@@ -3409,7 +3411,6 @@ namespace raycaster
             // This is identical for both triangles of a quad face, unlike
             // the sum of vertex normals which differs per triangle.
             {
-                double ex0, ey0, ez0, ex1, ey1, ez1;
                 ex0 = wb.x - wa.x; ey0 = wb.y - wa.y; ez0 = wb.z - wa.z;
                 ex1 = wc.x - wa.x; ey1 = wc.y - wa.y; ez1 = wc.z - wa.z;
                 fnx = ey0*ez1 - ez0*ey1;
@@ -3424,7 +3425,6 @@ namespace raycaster
 
             // Normalize face normal for flat shading gbuf write
             {
-                double fnlen;
                 fnlen = sqrt(fnx*fnx + fny*fny + fnz*fnz);
                 if (fnlen > RC_EPSILON) { fnx /= fnlen; fny /= fnlen; fnz /= fnlen; };
             };
@@ -4907,7 +4907,8 @@ namespace raycaster
         u64 centre_delta, half_delta;
         u64 dA1, dA2, dB1, dB2;
         bool sustained;
-        u64 blend16, ib16;
+        u64 blend16, ib16,
+            excess;
 
         y = 1;
         while (y < sh - 1)
@@ -5043,7 +5044,6 @@ namespace raycaster
                 // so moderate edges blend well and extreme-contrast (backlit) edges
                 // don't over-smear. Clamp to FXAA_MAX_BLEND.
                 {
-                    u64 excess;
                     excess   = contrast - (u64)FXAA_EDGE_THRESHOLD;
                     blend16  = (excess << 16) / ((u64)FXAA_EDGE_THRESHOLD * (u64)4);
                     if (blend16 > (u64)FXAA_MAX_BLEND) { blend16 = (u64)FXAA_MAX_BLEND; };

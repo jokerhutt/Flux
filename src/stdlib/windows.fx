@@ -37,8 +37,8 @@ namespace standard
 
             // Basic Win32 types
             unsigned data{32} as UINT,
-                                 DWORD,
-                                 BYTE;
+                                 DWORD;
+            unsigned data{8} as BYTE;
 
             unsigned data{16} as WORD;
 

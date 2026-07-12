@@ -300,19 +300,35 @@ def _index_namespace_functions(program) -> Dict[str, List[Any]]:
 
 def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
                              used_ns_prefixes: set,
+                             entry: str = 'FRTStartup',
                              verbose: bool = False) -> Set[str]:
-    from fast import NamespaceDef, NamespaceDefStatement
+    from fast import NamespaceDef, NamespaceDefStatement, UsingStatement
 
     from fast import ObjectDef
 
-    # Step 1: Seed from all non-namespace top-level code.
+    # Step 1: Seed from the named entrypoint.
+    # All suffix variants of the entrypoint name are added so that regardless
+    # of what namespace it lives in, the fixed-point expansion will find it.
     seed: Set[str] = set()
+    for variant in _all_suffixes(entry.replace('::', '__')):
+        if variant:
+            seed.add(variant)
+
+    # Step 1b: Seed from non-namespace, non-using top-level statements.
+    # Global variable initializers and top-level expressions can reference
+    # functions that must remain live even if the entrypoint does not call them
+    # directly. Using statements are excluded -- they carry namespace path
+    # strings that are not function names.
     for stmt in program.statements:
         if isinstance(stmt, (NamespaceDef, NamespaceDefStatement)):
             continue
+        if isinstance(stmt, UsingStatement):
+            continue
         seed |= _collect_refs(stmt)
 
-    # Step 2: Seed entry points.
+    # Step 2: Seed extern / no_mangle / prototype functions unconditionally.
+    # These are always preserved by _func_is_entry_point; seeding their names
+    # ensures that anything they call is also considered live.
     for name, funcs in ns_func_index.items():
         for func in funcs:
             if _func_is_entry_point(func):
@@ -370,17 +386,18 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
         if ns is not None:
             _index_obj_methods(ns, '')
 
-    # Step 4: Fixed-point expansion over namespace functions ONLY.
-    # Object methods are NOT included in this expansion — their bare names
-    # (e.g. 'println', 'len') collide with namespace function names and would
-    # incorrectly mark object methods live just because a namespace function
-    # of the same name is reachable.
+    # Step 4: Fixed-point expansion.
     #
-    # Object method liveness is determined entirely by the pruner: a method is
-    # live only if its fully-qualified  cur_prefix__ObjName__methodName  variant
-    # (or a suffix of it) appears in the live set — which only happens when
-    # _RefCollector sees an explicit  TypeName.__init  or  obj.method()  call
-    # site in live code and registers the dot→dunder form.
+    # For each newly-live name we walk two indexes:
+    #   ns_func_index    -- namespace-level FunctionDefs
+    #   obj_method_index -- object methods
+    #
+    # Object methods are NOT used to mark OTHER methods live via bare name
+    # matching (that would cause 'println'/'len' etc. to collide with same-named
+    # namespace functions). But we DO need to walk their bodies so that any
+    # namespace functions they call are added to the frontier. Without this,
+    # a live __init that calls a namespace helper (e.g. setup_opengl) would
+    # fail to keep that helper alive.
     live: Set[str] = set()
     frontier: Set[str] = seed
 
@@ -390,15 +407,24 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
             if name in live:
                 continue
             live.add(name)
+            # Walk namespace function bodies
             funcs = ns_func_index.get(name)
             if funcs:
                 for func in funcs:
                     for ref in _collect_refs(func):
                         if ref not in live:
                             new_frontier.add(ref)
+            # Walk object method bodies to catch namespace function calls made
+            # from within live methods (e.g. __init calling setup_opengl)
+            methods = obj_method_index.get(name)
+            if methods:
+                for method in methods:
+                    for ref in _collect_refs(method):
+                        if ref not in live:
+                            new_frontier.add(ref)
         frontier = new_frontier
 
-    return live
+    return live, obj_method_index
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +440,8 @@ def _ns_is_used(full_prefix: str, used_ns_prefixes: set) -> bool:
 
 
 def _prune_namespace(ns_node: Any, live: Set[str], full_prefix: str,
-                     verbose: bool, used_ns_prefixes: set) -> int:
+                     verbose: bool, used_ns_prefixes: set,
+                     obj_method_index: dict) -> int:
     from fast import FunctionDef, ObjectDef
 
     eliminated = 0
@@ -495,11 +522,22 @@ def _prune_namespace(ns_node: Any, live: Set[str], full_prefix: str,
                 # live set.  A method is only live if something explicitly referenced
                 # it in qualified form (e.g. 'string____init', 'string__println').
                 obj_anchor = obj_name + '__' + method_name
+                # Primary check: a qualified variant (containing the object name)
+                # appears in the live set. This is the normal case for explicit
+                # TypeName.__init or obj.method() call sites that the collector
+                # was able to qualify.
                 method_live = any(
                     v in live
                     for v in _all_suffixes(full_method)
                     if obj_anchor in v or v == full_method
                 )
+                # Fallback: the bare method name is live AND it appears in
+                # obj_method_index, meaning it was reached by walking a live
+                # method or function body (e.g. win.process_messages() where
+                # 'win' is a variable -- the collector cannot know its type,
+                # so it can only emit the bare method name into the live set).
+                if not method_live and method_name in live and method_name in obj_method_index:
+                    method_live = True
 
                 if method_live:
                     kept_methods.append(method)
@@ -554,7 +592,7 @@ def _prune_namespace(ns_node: Any, live: Set[str], full_prefix: str,
         ns_node.objects = kept_objs
 
     for nested in getattr(ns_node, 'nested_namespaces', []):
-        eliminated += _prune_namespace(nested, live, cur_prefix, verbose, used_ns_prefixes)
+        eliminated += _prune_namespace(nested, live, cur_prefix, verbose, used_ns_prefixes, obj_method_index)
 
     return eliminated
 
@@ -563,7 +601,7 @@ def _prune_namespace(ns_node: Any, live: Set[str], full_prefix: str,
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def eliminate(program, *, verbose: bool = False):
+def eliminate(program, *, entry: str = 'FRTStartup', verbose: bool = False):
     """
     Run dead code elimination on a parsed Flux *Program* AST node.
 
@@ -574,6 +612,10 @@ def eliminate(program, *, verbose: bool = False):
     ----------
     program : fast.Program
         Root AST node from FluxParser.parse().
+    entry : str
+        Name of the program entrypoint function. Liveness is seeded from this
+        name. Defaults to 'FRTStartup'. Override via --entrypoint on the CLI
+        or 'entrypoint' in flux_config.cfg.
     verbose : bool
         Print a line for each eliminated declaration when True.
 
@@ -586,7 +628,8 @@ def eliminate(program, *, verbose: bool = False):
 
     if verbose:
         print(f"[DCE] Starting dead code elimination "
-              f"({len(program.statements)} top-level statement(s))...",
+              f"(entrypoint: '{entry}', "
+              f"{len(program.statements)} top-level statement(s))...",
               file=sys.stdout)
 
     ns_func_index = _index_namespace_functions(program)
@@ -603,7 +646,8 @@ def eliminate(program, *, verbose: bool = False):
         if isinstance(stmt, UsingStatement):
             used_ns_prefixes.add(stmt.namespace_path.replace('::', '__'))
 
-    live = _compute_live_functions(program, ns_func_index, used_ns_prefixes, verbose=verbose)
+    live, obj_method_index = _compute_live_functions(program, ns_func_index, used_ns_prefixes,
+                                                        entry=entry, verbose=verbose)
 
     if verbose:
         print(f"[DCE] Live set: {len(live)} name variant(s).", file=sys.stdout)
@@ -616,14 +660,15 @@ def eliminate(program, *, verbose: bool = False):
         elif isinstance(stmt, NamespaceDefStatement):
             ns = getattr(stmt, 'namespace_def', None)
         if ns is not None:
-            total_eliminated += _prune_namespace(ns, live, '', verbose, used_ns_prefixes)
+            total_eliminated += _prune_namespace(ns, live, '', verbose, used_ns_prefixes, obj_method_index)
+
+    if total_eliminated == 0:
+        print("[DCE] No dead namespace functions found.", file=sys.stdout)
+    else:
+        print(f"[DCE] Eliminated {total_eliminated} unreferenced namespace "
+              f"function(s).", file=sys.stdout)
 
     if verbose:
-        if total_eliminated == 0:
-            print("[DCE] No dead namespace functions found.", file=sys.stdout)
-        else:
-            print(f"[DCE] Eliminated {total_eliminated} unreferenced namespace "
-                  f"function(s).", file=sys.stdout)
         print(f"[DCE] Done. {len(program.statements)} top-level statement(s) remain.",
               file=sys.stdout)
 
