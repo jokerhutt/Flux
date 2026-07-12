@@ -4,7 +4,9 @@
 //
 // Do not modify.
 
-#def FLUX_REDUCED_SPECIFICATION 1;
+// 
+// #def FLUX_REDUCED_SPECIFICATION 1;
+//
 
 #ifndef FLUX_STANDARD
 #def FLUX_STANDARD 1;

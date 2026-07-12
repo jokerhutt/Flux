@@ -14,14 +14,14 @@ This guide assumes you're already comfortable with systems programming concepts 
 struct Header {
     unsigned data{16} magic;
     unsigned data{32} offset;
-};  // Declaration: creates a vtable describing bit layout
+};  // Declaration: a compile-time layout specification
 
-Header h1;  // Instance: raw data container, no vtable pointer, just bits
+Header h1;  // Instance: raw data container, zero overhead, just bits
 ```
 
 **Critical distinction:**
-- **Declarations** allocate a virtual pointer table describing the memory layout
-- **Instances** are pure data with zero overhead—no vtable pointers, no padding unless explicitly specified
+- **Declarations** are pure compile-time layout specifications -- no runtime metadata, no vtable, nothing allocated
+- **Instances** are pure data with zero overhead -- no padding unless explicitly specified
 - This enables `(StructType)rawBytes` to be a zero-cost operation
 
 ### Why This Matters
@@ -85,11 +85,11 @@ int* px = @x;      // @ is address-of
 
 // Function pointers
 def add(int a, int b) -> int { return a + b; };
-int* fp(int, int) = @add;
-int result = *fp(5, 3);  // Must dereference to call
+def{}* fp(int, int) -> int = @add;
+int result = fp(5, 3);  // Compiler auto-dereferences function pointers
 ```
 
-**No implicit conversions.** Arrays don't decay to pointers. Functions require explicit `@` to take their address.
+**No implicit conversions.** Arrays decay to pointers. Functions require explicit `@` to take their address.
 
 ---
 
@@ -117,10 +117,10 @@ object SmartPtr {
 };
 ```
 
-**RAII is manual but explicit:**
+**Cleanup is explicit:**
 - `__init()` must return `this`
-- `__exit()` is destructor, called on scope exit or manually
-- No automatic move semantics—you control ownership
+- `__exit()` must be called manually or via `defer` -- it is NOT called automatically on scope exit
+- No automatic move semantics -- you control ownership
 
 ### Object vs Struct: When to Use Which
 
@@ -149,55 +149,58 @@ object Vector {
 
 ---
 
-## Ownership with `~`
+## Ownership with `~` (Tie Operator)
 
-Flux has optional ownership tracking with the `~` prefix:
+The `~` prefix is the **tie operator** -- it enforces single-use move semantics. A tied value can only be passed to another tied parameter, and once moved the original reference is invalidated at compile time.
 
 ```flux
-def allocate() -> ~int {
-    heap int ~x = 42;
-    (void)~x;
-    return ~x;  // Explicit transfer
+def foo(~int z) -> void
+{
+    return;
 };
 
-def main() -> int {
-    heap int ~value = ~allocate();
-    (void)~value;
+def main() -> int
+{
+    ~int x;
+
+    foo(~x);  // Untie from main, tie to foo()
+    foo(~x);  // Compile error -- use after untie
+
     return 0;
 };
 ```
 
-**Enforcement:**
-- Compiler tracks `~` variables
-- Must explicitly move/destroy before scope end
-- Escape hatch: `int* raw = @(~owned);` drops tracking
+**Rules:**
+- A tied value can only move to another tied type
+- Once moved, the original name is invalidated -- reuse is a compile error
+- A function returning `~T` cannot be assigned to a non-tied variable
+- The tie operator does not automatically free memory -- it only tracks moves
 
 ```flux
-def oops() -> void {
-    heap int ~x = 42;  // ERROR: ~x not moved/destroyed
-};
-
+// Tie with heap allocation
 def correct() -> void {
     heap int ~x = 42;
-    (void)~x;  // Explicitly freed
+    (void)~x;  // Free explicitly -- (void) cast calls ffree
 };
 ```
 
 ---
 
-## Compile-Time Execution with `compt`
+## Compile-Time Execution with `comptime`
 
 ```flux
-compt {
-    def fibonacci(int n) -> int {
+comptime
+{
+    def fibonacci(int n) -> int
+    {
         if (n <= 1) return n;
         return fibonacci(n-1) + fibonacci(n-2);
     };
-    
-    global def FIB_10 fibonacci(10);  // Computed at compile time
 };
 
-int array[FIB_10];  // Array size known at compile time
+macro FIB_10 { fibonacci(10) };  // Computed at compile time
+
+int[FIB_10] array;  // Array size known at compile time
 ```
 
 **Key points:**
@@ -208,15 +211,17 @@ int array[FIB_10];  // Array size known at compile time
 ### Macros and Conditional Compilation
 
 ```flux
-compt {
-    if (!def(MY_CONSTANT)) {
-        global def MY_CONSTANT 0x1000;
+comptime
+{
+    if (!def(MY_CONSTANT))
+    {
+        #def MY_CONSTANT 0x1000;
     };
 };
 
-// Operator macros
-def MASK_SET `&;   // Define custom operators
-gpio_reg MASK_SET 0x0F;  // Expands to: gpio_reg & 0x0F;
+// Custom infix operators use the operator keyword
+operator (int a, int b) [MASK_SET] -> int { return a & b; };
+gpio_reg MASK_SET 0x0F;  // Calls the operator
 ```
 
 ---
@@ -229,9 +234,9 @@ Casting in Flux is **data reinterpretation**, not type conversion.
 float pi = 3.14159;
 int bits = (int)pi;  // Reinterpret float bits as int, not convert
 
-// Casting to void = free memory
-int* ptr = malloc(100);
-(void)ptr;  // Memory freed immediately
+// Casting to void = free memory (only for fmalloc-allocated memory)
+byte* ptr = fmalloc(100);
+(void)ptr;  // Calls ffree -- memory freed immediately
 
 // Struct casting
 byte[14] raw = readBytes(14);
@@ -240,19 +245,21 @@ NetworkHeader hdr = (NetworkHeader)raw;  // Zero-cost reinterpretation
 
 **Void casting vs assignment:**
 ```flux
-int* ptr = malloc(100);
+byte* ptr = fmalloc(100);
 
-(void)ptr;       // Frees the memory immediately
+(void)ptr;       // Calls ffree -- frees the memory immediately
 ptr = void;      // Sets ptr to null, memory NOT freed
 
-if (ptr is void) { /* null check */ };
+if (ptr is void) { /// null check /// };
 ```
+
+> **Important:** `(void)` casting calls `ffree()` under the hood. Only use it on memory allocated with `fmalloc()` or the `heap` keyword. It is **not** compatible with C's `malloc`/`free`.
 
 ---
 
 ## Contracts: Design by Contract
 
-Contracts are assertion collections for preconditions and postconditions.
+Contracts are compile-time code injection. A pre-contract's body is inserted at the start of the function; a post-contract's body is inserted before every return. They can contain any statement that could appear inside a function body -- not just assertions.
 
 ```flux
 contract NonZero {
@@ -269,8 +276,8 @@ def divide(int a, int b) -> int : NonZero {
 ```
 
 **Strategic use:**
-- Contracts have runtime overhead—use sparingly in hot paths
-- In `compt` blocks, contract failures halt compilation
+- Contracts are compile-time transformation only -- the injected code runs with no additional overhead beyond what you wrote
+- In `comptime` blocks, contract failures halt compilation
 - Perfect for validating complex invariants
 
 ```flux
@@ -299,9 +306,9 @@ operator (UniquePtr a, UniquePtr b)[=] -> UniquePtr : NotSame {
 int x = 42;
 
 // Heap allocation (manual)
-int* heap = malloc(sizeof(int));
-*heap = 42;
-(void)heap;  // Must free explicitly
+// Use fmalloc/ffree or the heap keyword -- NOT C's malloc/free
+heap int y = 42;    // heap keyword: calls fmalloc under the hood
+(void)y;            // calls ffree under the hood
 
 // Struct instances are always tightly packed
 struct Data {
@@ -309,8 +316,10 @@ struct Data {
     int b;   // No padding between a and b
 };
 
-sizeof(Data);  // 40 bits (8 + 32), not 64
+sizeof(Data);  // 40 (bits: 8 + 32), not 64
 ```
+
+> **Note:** `sizeof` returns **bits**, not bytes. `alignof` returns **bytes**. Keep this in mind when doing manual pointer arithmetic.
 
 **Platform-specific allocation:**
 
@@ -357,7 +366,7 @@ object Vector<T> {
     size_t len;
     
     def __init(size_t size) -> this {
-        this.data = malloc(sizeof(T) * size);
+        this.data = fmalloc((sizeof(T) / 8) * size);  // sizeof returns bits, divide by 8 for bytes
         this.len = size;
         return this;
     };
@@ -390,9 +399,8 @@ operator (Complex a, Complex b)[+] -> Complex {
     return result;
 };
 
-// Custom operators
-def CHAIN `<-;
-operator (int a, int b)[<-] -> int {
+// Custom identifier-based infix operator
+operator (int a, int b) [CHAIN] -> int {
     return a + b;
 };
 
@@ -404,14 +412,14 @@ int x = 5 CHAIN 10;  // x = 15
 ## Array Comprehensions
 
 ```flux
-// Basic
-int[] squares = [x^2 for (int x in 1..10)];
+// Basic -- array comprehensions produce statically-sized arrays
+int[10] squares = [x ^ 2 for (int x in 1..10)];
 
 // With condition
-int[] evens = [x for (int x in 1..100) if (x % 2 == 0)];
+int[50] evens = [x for (int x in 1..100) if (x % 2 == 0)];
 
-// With transformation
-float[] normalized = [(float)x / 100.0 for (int x in data)];
+// With transformation (size must match source)
+float[sizeof(data)] normalized = [(float)x / 100.0 for (int x in data)];
 ```
 
 ---
@@ -494,7 +502,7 @@ def main() -> int
 };
 ```
 
-**Why this works:** Literals are materialized in read-only memory, so you can point to them.
+**Why this works:** The literal creates a new stack allocation, assigns the value to it, then takes the address of that allocation.
 
 ### Address Casting: `(@)` Operator
 
@@ -639,7 +647,19 @@ def main() -> int
 **Pattern:**
 - Type: `def{}* name(params) -> return_type`
 - Assign: `@function_name`
-- Call: `pointer(args)`
+- Call: `pointer(args)` -- compiler auto-dereferences
+
+### Calling Convention Function Pointers
+
+The `def` keyword can be replaced with a calling convention name to create a typed function pointer for non-default conventions:
+
+```flux
+cdecl{}* pfoo(int) -> int = @some_cdecl_func;        // C calling convention
+vectorcall{}* pvec(float, float) -> float = @vfunc;  // Vectorcall
+stdcall{}* pstd(int) -> int = @winfunc;              // Stdcall (Win32 API)
+```
+
+This is essential when interfacing with foreign code (C libraries, OS APIs) where the calling convention differs from Flux's default.
 
 ### Null Coalesce: `??` Operator
 
@@ -722,7 +742,7 @@ union tag_union
 {
     int x;
     char y;
-} my_enum;
+} # my_enum;
 
 def main() -> int
 {
@@ -735,9 +755,9 @@ def main() -> int
     
     tag_union myT;
     
-    myT._ = my_enum.GOOD_RETURN;  // ._ accesses the union tag
+    myT.# = my_enum.GOOD_RETURN;  // .# accesses the union tag
     
-    switch (myT._)
+    switch (myT.#)
     {
         case (0)
         {
@@ -751,10 +771,10 @@ def main() -> int
 ```
 
 **Key points:**
-- Syntax: `union Name { ... } EnumType;`
-- Access tag with `._`
+- Syntax: `union Name { ... } # EnumType;`
+- Access tag with `.#`
 - Enables runtime type tracking for unions
-- Pattern matching with switch on `._`
+- Pattern matching with switch on `.#`
 
 **Advanced pattern:**
 
@@ -771,23 +791,23 @@ union Result
     int value;
     int error_code;
     float progress;
-} ResultType;
+} # ResultType;
 
 def processResult(Result r) -> void
 {
-    switch (r._)
+    switch (r.#)
     {
-        case ResultType.OK:
+        case (ResultType.OK)
         {
             print("Value: \0");
             print(r.value);
-        };
-        case ResultType.ERROR:
+        }
+        case (ResultType.ERROR)
         {
             print("Error: \0");
             print(r.error_code);
-        };
-        case ResultType.PENDING:
+        }
+        case (ResultType.PENDING)
         {
             print("Progress: \0");
             print(r.progress);
@@ -907,16 +927,16 @@ else
 ```flux
 // Check if pointer is null
 int* ptr = (int*)void;
-if (ptr is void) { /* it's null */ };
-if (ptr == void) { /* also null */ };
-if (!ptr) { /* also null */ };
+if (ptr is void) { /// it's null /// };
+if (ptr == void) { /// also null /// };
+if (!ptr) { /// also null /// };
 
 // Set to null
 ptr = void;
 
 // Free memory (DIFFERENT from setting to null!)
-int* heap_ptr = malloc(sizeof(int));
-(void)heap_ptr;  // Frees memory immediately
+byte* heap_ptr = fmalloc(sizeof(int) / 8);
+(void)heap_ptr;  // Calls ffree -- frees memory immediately
 ```
 
 ---
@@ -950,7 +970,7 @@ def main() -> int
 ### Selective Import and Exclusion
 
 ```flux
-// Import specific items
+// Import specific items only
 using standard::io::print, standard::io::input;
 
 // Import everything EXCEPT specific items
@@ -960,6 +980,40 @@ using standard::io;
 not using standard::io::debug_print;  // Same as !using
 ```
 
+### Why `!using` Exists
+
+`using` is permanent and sticky -- once you bring a namespace in, everything in it is resolved unqualified for the rest of the file. There is no "undo using". This is usually fine, but imagine you're midway through a large file and you hit a name collision you didn't expect:
+
+```flux
+using engine::math;   // Gives you sin, cos, lerp, clamp, etc.
+using audio::math;    // Also has lerp -- now lerp is ambiguous, compiler error
+```
+
+In another language you'd have to go back and either refactor the `using` at the top, or qualify every single call in the file below it. `!using` is the escape hatch -- you keep both `using` directives and just punch out the one name that's causing trouble:
+
+```flux
+using engine::math;
+using audio::math;
+!using audio::math::lerp;  // Keep everything from audio::math EXCEPT lerp
+
+lerp(a, b, t);             // Resolves to engine::math::lerp -- unambiguous now
+// audio::math::lerp is gone -- if you need it, re-use it explicitly:
+using audio::math::lerp;   // Bring just that one name back
+```
+
+The point isn't that you planned for this -- it's that you didn't have to. No refactor, no hunt-and-qualify, just one line that says "not that one."
+
+**Conflict resolution:**
+
+```flux
+using network::send;
+using io::send;
+!using io::send;  // io::send is gone -- network::send wins unqualified
+
+send(packet);     // network::send
+// io::send is not accessible at all -- use: using io::send; to bring it back
+```
+
 **Pattern for library organization:**
 
 ```flux
@@ -967,13 +1021,13 @@ namespace mylib
 {
     namespace core
     {
-        def init() -> void { /* ... */ };
-        def cleanup() -> void { /* ... */ };
+        def init() -> void { /// ... /// };
+        def cleanup() -> void { /// ... /// };
     };
     
     namespace utils
     {
-        def helper() -> int { /* ... */ };
+        def helper() -> int { /// ... /// };
     };
 };
 
@@ -988,17 +1042,6 @@ def main() -> int
     cleanup();
     return 0;
 };
-```
-
-**Avoiding name conflicts:**
-
-```flux
-using network::send;
-!using io::send;  // Exclude io::send to avoid conflict
-
-// Or use full qualification
-network::send(data);
-io::write(data);  // Use write instead of send
 ```
 
 ---
@@ -1017,7 +1060,7 @@ def main() -> int
     // Files can exceed stack limits - use heap
     noopstr f = "src\\stdlib\\redio.fx\0";
     int size = get_file_size(f);
-    byte* buffer = malloc((u64)size + 1);  // +1 for null terminator
+    byte* buffer = fmalloc((u64)size + 1);  // +1 for null terminator
     
     int bytes_read = read_file(f, buffer, size);
     
@@ -1029,16 +1072,16 @@ def main() -> int
     print(buffer);
     print();
     
-    free(buffer);  // Always free heap memory
+    (void)buffer;  // Always free heap memory (calls ffree)
     return 0;
 };
 ```
 
 **Critical pattern:**
 1. Calculate size needed
-2. `malloc()` with proper size
+2. `fmalloc()` with proper size
 3. Use the buffer
-4. `free()` when done
+4. `(void)` cast to free when done (calls `ffree`)
 
 ### Stack Limits
 
@@ -1053,7 +1096,7 @@ def processLargeFile() -> int
 // RIGHT - use heap for large allocations
 def processLargeFile() -> int
 {
-    byte* buffer = malloc(1048576);
+    byte* buffer = fmalloc(1048576);
     if (buffer is void)
     {
         return -1;  // Allocation failed
@@ -1061,7 +1104,7 @@ def processLargeFile() -> int
     
     // Process file...
     
-    free(buffer);
+    (void)buffer;  // calls ffree
     return 0;
 };
 ```
@@ -1287,7 +1330,7 @@ unsigned data{32::1} as big32;     // Big-endian 32-bit
 **Endianness values:**
 - `::0` = little-endian
 - `::1` = big-endian
-- No suffix = platform default (usually little-endian)
+- No suffix = big-endian (Flux data types are big-endian by default)
 
 ### Using `endianof` Operator
 
@@ -1397,11 +1440,13 @@ struct AlignedData
     unsigned data{8:16} as byte16 status; // 8 bits, 16-bit aligned
 };  // Total: 64 bits (8 bytes) with padding
 
-sizeof(PackedRGB);    // 16 bits = 2 bytes
-sizeof(AlignedData);  // 64 bits = 8 bytes
+sizeof(PackedRGB);    // 16  (bits)
+sizeof(AlignedData);  // 64  (bits)
 
-alignof(PackedRGB);   // 1 byte (byte-aligned)
-alignof(AlignedData); // 4 bytes (strictest member)
+alignof(PackedRGB);   // 1   (bytes)
+alignof(AlignedData); // 4   (bytes)
+
+// sizeof returns bits. alignof returns bytes.
 ```
 
 ### Manual Offset Calculation
@@ -1421,8 +1466,8 @@ def get_y_ptr(Vector3* vec) -> float*
     // Get base address
     u64ptr base = (u64ptr)vec;
     
-    // Manual offset to 'y' (sizeof(float) = 4 bytes = 32 bits)
-    u64ptr y_addr = base + 4;
+    // Manual offset to 'y' (sizeof(float) = 32 bits; divide by 8 for byte offset)
+    u64ptr y_addr = base + (sizeof(float) / 8);
     
     // Return pointer to y member
     return (float*)y_addr;
@@ -1442,7 +1487,7 @@ def traverse_as_bytes(int* ptr, int count) -> void
 {
     byte* bp = (byte*)ptr;
     
-    for (int i = 0; i < count * sizeof(int); i++)
+    for (int i = 0; i < count * (sizeof(int) / 8); i++)
     {
         print("Byte \0");
         print(i);
@@ -1718,7 +1763,8 @@ def calculate(int opcode, int a, int b) -> int
 {
     if (opcode >= 0 & opcode < 4)
     {
-        return operations[opcode](a, b);  // Jump table dispatch
+        def{}* fp(int,int)->int = (@)operations[opcode];  // Extract function pointer
+        return fp(a, b);
     };
     return 0;
 };
@@ -1823,14 +1869,11 @@ def risky_operation(int mode) -> void
 {
     if (mode == 1)
     {
-        ErrorA err(100);
-        throw(err);
+        throw(ErrorA(100));
     }
     elif (mode == 2)
     {
-        byte[] msg = "Something failed\0";
-        ErrorB err(msg);
-        throw(err);
+        throw(ErrorB("Something failed\0"));
     }
     else
     {
@@ -1856,7 +1899,7 @@ def main() -> int
         print(@e.message[0]);
         print("\n\0");
     }
-    catch (byte[] s)
+    catch (string s)
     {
         print("String error: \0");
         print(s);
@@ -1955,11 +1998,15 @@ def parsePacket(byte[] raw) -> PacketHeader {
 ### Compile-Time Configuration
 
 ```flux
-compt {
-    if (def(DEBUG)) {
-        global def LOG_LEVEL 3;
-    } else {
-        global def LOG_LEVEL 0;
+comptime
+{
+    if (def(DEBUG))
+    {
+        #def LOG_LEVEL 3;
+    }
+    else
+    {
+        #def LOG_LEVEL 0;
     };
 };
 
@@ -1984,7 +2031,7 @@ def log(string msg) -> void {
 - No borrow checker by default (use `~` for ownership tracking)
 - More explicit pointer operations
 - Structs as zero-cost data reinterpretation contracts
-- `compt` blocks for compile-time metaprogramming
+- `comptime` blocks for compile-time metaprogramming
 
 ### vs C
 - Type-safe bit manipulation with `data`
@@ -1997,9 +2044,9 @@ def log(string msg) -> void {
 ## Performance Considerations
 
 1. **Struct casts are free** - Use them liberally for data reinterpretation
-2. **Contracts have overhead** - Use sparingly in hot paths
-3. **Objects have vtables** - Structs don't, use structs for POD
-4. **`compt` runs at compile time** - Move expensive computations there
+2. **Contracts are zero-overhead** - They are compile-time code injection, not runtime wrappers
+3. **Objects and structs are both zero-overhead** - Use structs for pure data layout, objects for behavior
+4. **`comptime` runs at compile time** - Move expensive computations there
 5. **No implicit copies** - Everything is explicit
 
 ---
@@ -2010,10 +2057,10 @@ def log(string msg) -> void {
 2. Use objects for behavior and state management
 3. Leverage `data` for exact bit control
 4. Use `~` ownership for critical resources
-5. Move invariant checks to `compt` blocks when possible
+5. Move invariant checks to `comptime` blocks when possible
 6. Be explicit with memory management
-7. Use contracts to document preconditions/postconditions
-8. Prefer compile-time computation with `compt`
+7. Use contracts to inject reusable pre/post logic into functions
+8. Prefer compile-time computation with `comptime`
 
 ---
 

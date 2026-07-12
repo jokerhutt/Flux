@@ -18,6 +18,7 @@ root dir
 |   `--> fpreprocess.py // Preprocessor  
 |   `--> flexer.py      // Lexer  
 |   `--> fparser.py     // Parser  
+|   `--> fdce.py        // Dead code elimination module
 |	`--> ftypesys.py    // Type System  
 |   `--> fcodegen.py    // Code Generation
 |   `--> fvmcodegen.py  // FVM Code Generation
@@ -27,8 +28,13 @@ root dir
 |   `--> fc.py          // Compiler front-end  
 |  
 `--> fxc.py             // Compiler front-end entrypoint, root, calls to fc.py in src\compiler\
+`--> fbc.py             // Borrow Checker
+`--> fbc_alias.py       // Alias map and violation detection
+`--> fbc_report.py      // Violation reporting
 `--> fpm.py             // Flux Package Manager
 `--> fvm.py             // Flux Virtual Machine for comptime execution of Flux code & REPL
 `--> fvm_test.py        // Tests the FVM
 `--> frepl.py           // REPL for Flux, uses the FVM
+`--> tg.py              // Type geometry visualizer
+`--> cft.py             // C->Flux translation utility
 ```

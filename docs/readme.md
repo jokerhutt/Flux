@@ -14,3 +14,5 @@ The [standard library](https://github.com/kvthweatt/FluxLang/blob/main/docs/Stan
 There are setup guides for [Windows](https://github.com/kvthweatt/FluxLang/blob/main/docs/SetupGuides/windows_setup_guide.md) and [Linux](https://github.com/kvthweatt/FluxLang/blob/main/docs/SetupGuides/linux_setup_guide.md).
 
 Every language needs a [style guide](https://github.com/kvthweatt/FluxLang/blob/main/docs/style_guide.md). This guide is a reflection of the standard library.
+
+Information on the [Flux Virtual Machine](https://github.com/kvthweatt/FluxLang/blob/main/docs/fvm.md) and [Borrow Checker](https://github.com/kvthweatt/FluxLang/blob/main/docs/fbc.md)

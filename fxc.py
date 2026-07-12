@@ -97,6 +97,9 @@ def main():
             print("Flux Language Compiler")
             print("Usage: python fxc.py <input.fx> [options]\n")
             print("Basic Options:")
+            print("  --borrowcheck       Run borrow checker before compiling (errors block compilation)")
+            print("  --borrowcheck-warn  Run borrow checker in warning-only mode (never blocks)")
+            print("  --entrypoint        Set the entrypoint (default FRTStartup)")
             print("  -o <output>         Output binary name")
             print("  -v <level>          Legacy verbosity level (0-5)")
             print("  -dos                Compile for DOS (16-bit)")
@@ -130,6 +133,7 @@ def main():
             print("  python fxc.py hello.fx -dos -com        # Create DOS COM file")
             print("  python fxc.py hello.fx -dos -o hello.exe # Create DOS EXE file")
             print("  python fxc.py hello.fx --log-filter lexer,parser --log-timestamp")
+            print("  python fxc.py hello.fx --borrowcheck   # Run borrow checker before compiling")
             sys.exit(1)
     
         args = sys.argv[1:]  # Skip script name
@@ -143,6 +147,9 @@ def main():
         logger_config = {}
         llc_config = {}
     
+        borrow_check = False
+        borrow_check_warn = False
+        cli_entrypoint = None
         i = 0
         while i < len(args):
             arg = args[i]
@@ -197,6 +204,16 @@ def main():
                 # TODO Implement in fc.py
                 llc_config['mattr'] = args[i + 1]
                 i += 2
+            elif arg == "--borrowcheck":
+                borrow_check = True
+                i += 1
+            elif arg == "--borrowcheck-warn":
+                borrow_check = True
+                borrow_check_warn = True
+                i += 1
+            elif arg == "--entrypoint" and i + 1 < len(args):
+                cli_entrypoint = args[i + 1]
+                i += 2
             else:
                 # Positional argument - should be input file
                 if input_file is None:
@@ -236,7 +253,16 @@ def main():
                     print(f"  Component filter: {', '.join(logger_config['component_filter'])}")
         
             binary_path = ""
-        
+
+            # Pass borrow check flags to the compiler -- it runs inline after parsing
+            if borrow_check:
+                compiler.borrow_check = True
+                compiler.borrow_check_warn = borrow_check_warn
+
+            # Override entrypoint if provided on CLI -- takes priority over flux_config.cfg
+            if cli_entrypoint:
+                compiler.entrypoint = cli_entrypoint
+
             # Compile the file based on target
             if dos_mode:
                 # Use DOS compilation method
