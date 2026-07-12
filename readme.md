@@ -15,7 +15,7 @@
 
 ---
 
-Flux is a compiled, statically typed systems programming language. It has the performance of C and a type system that goes further than C in every direction that matters: arbitrary-width integers with alignment and endianness baked into the type, first-class bit manipulation, opt-in ownership without a borrow checker, compile-time code generation with `emitflux`, contracts, templates with type geometry constraints, and inline FVM assembly in comptime blocks.
+Flux is a compiled, statically typed systems programming language. It has the performance of C and a type system that goes further than C in every direction that matters: arbitrary-width integers with alignment and endianness baked into the type, first-class bit manipulation, opt-in ownership and a totally optional borrow checker, compile-time code generation with `emitflux`, contracts, templates with type geometry constraints, and inline FVM assembly in comptime blocks.
 
 It is not a C derivative. It is not a safe language in the Rust sense. It is a high-trust language that gives you sharp tools and expects you to use them correctly.
 
