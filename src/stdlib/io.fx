@@ -317,15 +317,15 @@ namespace standard
 #ifdef __ARCH_ARM64__
             def mac_print(byte* msg, int x) -> void
             {
+                i64 count = x;
                 volatile asm
                 {
-                    movz x16, #0x4
-                    movk x16, #0x2000, lsl #16
                     mov x0, #1
-                    ldr x1, [sp]
-                    ldr x2, [sp, #8]
+                    mov x1, $0
+                    mov x2, $1
+                    movz x16, #0x4
                     svc #0x80
-                } : : "r"(msg), "r"(x) : "x0","x1","x2","x16","memory";
+                } : : "r"(msg), "r"(count) : "x0","x1","x2","x16","memory";
                 return;
             };
 #endif; // ARCH ARM

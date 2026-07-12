@@ -140,23 +140,41 @@ def !!atexit(void* fn) -> int
 #ifdef __MACOS__
 def !!exit(int code) -> void
 {
+#ifdef __ARCH_ARM64__
+    volatile asm
+    {
+        mov x0, $0
+        movz x16, #0x1
+        svc #0x80
+    } : : "r"(code) : "x0", "x16", "memory";
+#else
     volatile asm
     {
         movl $0, %edi
         movq $$0x2000001, %rax
         syscall
     } : : "r"(code) : "edi", "rax", "memory";
+#endif;
     noreturn;
 };
 
 def !!abort() -> void
 {
+#ifdef __ARCH_ARM64__
+    volatile asm
+    {
+        mov x0, #134
+        movz x16, #0x1
+        svc #0x80
+    } : : : "x0", "x16", "memory";
+#else
     volatile asm
     {
         movq $$0x2000001, %rax
         movq $$134, %rdi
         syscall
     } : : : "rax", "rdi", "memory";
+#endif;
     noreturn;
 };
 

@@ -664,6 +664,12 @@ class FluxCompiler:
             
             # Step 8: Link executable
             output_bin = output_bin or f"./{base_name}"
+            if self.platform == "Darwin":
+                # Keep the executable beside its intermediate files rather than
+                # placing it in the repository root. macOS binaries need no suffix.
+                output_name = Path(output_bin).name
+                output_bin = str(Path("build") / output_name / output_name)
+                Path(output_bin).parent.mkdir(parents=True, exist_ok=True)
             # Add .exe extension for Windows executables
             output_dir = output_bin.replace(".exe","")
             if self.platform == "Windows" and not output_bin.endswith('.exe'):
@@ -674,7 +680,23 @@ class FluxCompiler:
             self.logger.step(f"Linking executable: {output_bin}", LogLevel.INFO, "linker")
             
             if self.platform == "Darwin":  # macOS
-                link_cmd = ["clang", str(obj_file), "-o", f"build/{output_dir}/{output_bin}"]
+                link_cmd = [
+                    "clang",
+                    str(obj_file),
+                    *extra_libs,
+                    f"-Wl,-e,_{self.entrypoint}",
+                    "-o",
+                    output_bin,
+                ]
+                self.logger.debug(f"Running: {' '.join(link_cmd)}", "linker")
+                try:
+                    result = subprocess.run(link_cmd, check=True, capture_output=True, text=True)
+                    self.logger.trace(f"Linker output: {result.stdout}", "linker")
+                    if result.stderr:
+                        self.logger.warning(f"Linker stderr: {result.stderr}", "linker")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Linking failed: {e.stderr}", "linker")
+                    raise
             elif self.platform == "Windows":
                 # Use LLD — resolve the full path so non-default LLVM installs work.
                 linker_name = config['linker']
