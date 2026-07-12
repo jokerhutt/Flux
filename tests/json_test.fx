@@ -2,8 +2,7 @@
 
 // json_test.fx - Tests for json.fx
 
-#import "standard.fx";
-#import "json.fx";
+#import <standard.fx>, <json.fx>;
 
 using standard::io::console,
 	standard::strings,

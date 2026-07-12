@@ -1,8 +1,17 @@
-#import "standard.fx";
+#import <standard.fx>;
 
-!using standard::io::file;
+using standard::io::console;
+
+def bar(int* arr) -> int
+{
+	return arr[10];
+};
 
 def main() -> int
 {
+	int[10] x = [1,2,3,4,5,6,7,8,9,10];
+
+	print(bar(x));
+
 	return 0;
 };

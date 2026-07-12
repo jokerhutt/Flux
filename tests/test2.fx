@@ -132,13 +132,20 @@ comptime BoZo
 	compiler.io.console.print("BoZo\n");
 	goto ZaZa;
 };
-///
 
 comptime
 {
 	data{8::0} as lebyte;
 
 	compiler.io.console.print(endianof(lebyte));
+};
+///
+
+comptime
+{
+	int x = (int)10ul;
+
+	compiler.io.console.print(x);
 };
 
 def !!FRTStartup() -> int { return 0; };

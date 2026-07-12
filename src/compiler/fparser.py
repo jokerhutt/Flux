@@ -2715,7 +2715,13 @@ class FluxParser:
         declarations are chained with commas.
         """
         if self._loop_depth > 0 and not self._in_for_init:
-            self.warn("pointer declaration inside a loop body, this will continually allocate new slots on the stack each iteration.")
+            _is_singinit = self.expect(TokenType.SINGINIT)
+            if not _is_singinit:
+                _peek_idx = self.position + 1
+                if _peek_idx < len(self.tokens):
+                    _is_singinit = self.tokens[_peek_idx].type == TokenType.SINGINIT
+            if not _is_singinit:
+                self.warn("pointer declaration inside a loop body, this will continually allocate new slots on the stack each iteration.")
         def _parse_one_fp() -> 'FunctionPointerDeclaration':
             """Parse a single name + type + optional initializer."""
             name = self.consume(TokenType.IDENTIFIER).value
@@ -5173,7 +5179,17 @@ class FluxParser:
     def variable_declaration(self) -> Union[VariableDeclaration, TypeDeclaration, List[VariableDeclaration]]:
         tok = self.current_token
         if self._loop_depth > 0 and not self._in_for_init:
-            self.warn("variable declaration inside a loop body - this will continually allocate new slots on the stack each iteration.")
+            # singinit declares a singleton -- it allocates exactly once regardless
+            # of how many times the loop iterates, so the warning does not apply
+            _is_singinit = self.expect(TokenType.SINGINIT)
+            # also check one token ahead in case the declaration starts with a
+            # storage class before singinit (e.g. heap singinit ...)
+            if not _is_singinit:
+                _peek_idx = self.position + 1
+                if _peek_idx < len(self.tokens):
+                    _is_singinit = self.tokens[_peek_idx].type == TokenType.SINGINIT
+            if not _is_singinit:
+                self.warn("variable declaration inside a loop body - this will continually allocate new slots on the stack each iteration.")
         # Capture the raw identifier used as a type name before alias resolution wipes custom_typename
         raw_type_identifier = None
         if self.expect(TokenType.IDENTIFIER):

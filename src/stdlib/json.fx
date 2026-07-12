@@ -565,7 +565,7 @@ namespace json
 			return (@)0;
 		};
 
-		def has(byte* key) -> bool
+		def haskey(byte* key) -> bool
 		{
 			switch ((u64)this.get(key) != 0)
 			{
@@ -1075,12 +1075,12 @@ namespace json
 			return (@)0;
 		};
 
-		def object_has(byte* key) -> bool
+		def object_haskey(byte* key) -> bool
 		{
 			switch (this.type != JSON_OBJECT)
 			{
 				case (1) { return false; }
-				default { return this.obj.has(key); };
+				default { return this.obj.haskey(key); };
 			};
 			return false;
 		};

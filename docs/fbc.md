@@ -49,10 +49,7 @@ The Flux Borrow Checker (`fbc.py`) is a standalone static analysis tool that per
 
 **What it does NOT check:**
 
-- Use-after-free (tracked indirectly via aliasing, not directly).
-- Buffer overflows or bounds violations.
 - Data races on non-pointer types.
-- Lifetime constraints across function boundaries (analysis is intraprocedural per function, with call-graph traversal for reachability).
 
 ---
 
@@ -163,23 +160,25 @@ python fbc.py src/ --warn
 
 ## 4. Analysis Passes
 
-The FBC makes a single forward pass through the call graph starting from the entry point. The pass is **intraprocedural** — each function is analysed independently — but **interprocedural** in reachability: any function called from reachable code is also analysed.
+The FBC makes a single forward pass through the call graph starting from the entry point. The pass is **interprocedural** in both reachability and alias identity: argument sites from the caller are propagated into the callee's parameter slots, so alias checking operates on real site identities across call boundaries.
 
 **Pass ordering:**
 
-1. **Parse** — all `.fx` files are preprocessed and parsed into ASTs.
-2. **Collect** — the call graph is built by indexing all `FunctionDef` nodes.
-3. **Check** — `BorrowChecker.run()` starts at the entry point and recursively visits every reachable function exactly once (cycle prevention via `CallGraph.visited`).
-4. **Report** — accumulated violations are line-remapped and printed.
+1. **Parse** -- all `.fx` files are preprocessed and parsed into ASTs.
+2. **Collect** -- the call graph is built by indexing all `FunctionDef` nodes.
+3. **Check** -- `BorrowChecker.run()` starts at the entry point and recursively visits every reachable function. Each function may be analysed multiple times if it is called with different argument site combinations (call contexts); it is only re-analysed when a new distinct context is seen.
+4. **Report** -- accumulated violations are line-remapped and printed.
 
 Each function analysis follows this sequence:
 
 1. Push a new scope frame onto `AliasMap`.
-2. Register all pointer parameters as borrowed sites in the current scope.
+2. Register all pointer parameters: if the caller supplied a resolved site for a parameter, use that site; otherwise fall back to the opaque `param:<func>:<name>` site.
 3. Walk the function body statement by statement.
 4. On scope exit, optionally check for heap leaks.
 5. Pop the scope frame.
 6. Remap merged line numbers to original source locations and collect violations.
+
+**Call-context sensitivity** -- a call context is a tuple of site strings, one per pointer parameter of the callee in declaration order, derived from the argument expressions at the call site using the caller's current alias state. The callee is re-entered only when a new distinct context tuple is seen. This bounds the analysis: the number of distinct sites is finite and each context tuple is bounded by the callee's pointer-parameter count.
 
 ---
 
@@ -187,11 +186,14 @@ Each function analysis follows this sequence:
 
 ```python
 class CallGraph:
-    funcs:       dict[str, FunctionDef]   # mangled name → FunctionDef
-    short_names: dict[str, str]           # short name → mangled name (unique only)
-    overloads:   dict[str, list]          # base name → [mangled names]
-    visited:     set[str]                 # prevents re-checking and infinite recursion
+    funcs:       dict[str, FunctionDef]          # mangled name -> FunctionDef
+    short_names: dict[str, str]                  # short name -> mangled name (unique only)
+    overloads:   dict[str, list]                 # base name -> [mangled names]
+    visited_main:   dict[str, set[tuple]]        # func_name -> set of call-context tuples analysed (main context)
+    visited_thread: dict[str, set[tuple]]        # func_name -> set of call-context tuples analysed (thread context)
 ```
+
+`is_visited(name, ctx, thread)` returns `True` if the `(name, ctx)` pair has already been analysed in the given context. `mark_visited(name, ctx, thread)` records it. The `.visited` property returns the set of function names that have been entered in at least one context (for backward compatibility).
 
 ### `CallGraph.collect(program: fast.Program)`
 
@@ -271,14 +273,14 @@ class BorrowChecker:
 
 Entry point for analysis. Looks up `self.entry` in `cg.funcs` and calls `_check_function()`. If the entry point is not found (commonly because its body is inside an unresolved `#ifdef`), it falls back to checking all functions in the call graph.
 
-### `BorrowChecker._check_function(func: fast.FunctionDef)`
+### `BorrowChecker._check_function(func, thread_context, call_ctx)`
 
-Analyses one function. Guards against re-entry via `cg.visited`. Steps:
+Analyses one function. Guards against re-entry via `(func.name, call_ctx)` in the appropriate visited table. Steps:
 
-1. Mark the function as visited.
+1. Mark `(func.name, call_ctx)` as visited.
 2. Switch `AliasMap.func_name` to this function's name.
 3. Push a new scope frame.
-4. Register all pointer-typed parameters as `param:<func>:<name>` sites.
+4. Register pointer parameters: if the caller supplied a resolved site at the corresponding positional index in `call_ctx`, use that site; otherwise use the opaque `param:<func>:<name>` fallback.
 5. Walk the function body with `_walk_block()`.
 6. Optionally check heap leaks (unless this function is a recognised allocator wrapper).
 7. Pop the scope frame.
@@ -308,7 +310,7 @@ The FBC identifies memory by **site strings** — stable identifiers for where a
 | `heap:<func>:<line>` | `_make_heap_site(func, line)` | Result of an `fmalloc()` call at `line` inside `func`. |
 | `param:<func>:<param>` | `_make_param_site(func, param)` | A pointer parameter `param` passed into `func` from the caller. |
 | `derived:<base_site>` | inline in `_resolve_site` | A pointer derived from `<base_site>` via cast, type-convert, or pointer arithmetic. Treated as a distinct alias to avoid spurious aliasing with the original. |
-| `unknown` | inline | Site could not be determined statically (e.g. through a double-dereference). |
+| `unknown` | inline | Site could not be determined statically or via FVM execution (e.g. a value only known at program runtime). |
 
 ---
 
@@ -358,8 +360,8 @@ The same logic is also applied inside `_walk_expr` when an `Assignment` appears 
 
 | AST Node | Action |
 |---|---|
-| `fast.FunctionCall` | Resolve callee, recurse into the call graph if not yet visited; walk all arguments. |
-| `fast.MethodCall` | Walk object and all arguments. |
+| `fast.FunctionCall` | Resolve callee. If `node.name` is a plain string, look it up in the call graph directly. If it is an expression (function pointer), compile and execute it through the FVM to recover the callee name. Once resolved, enter `_check_function` with a call context built from the argument sites. If unresolved after FVM, check argument aliasing at the call site via `check_call_args`. Walk all arguments. |
+| `fast.MethodCall` | Walk object and all arguments. Attempt static resolution via `<obj>__<method>` and short-name lookup. If that fails, compile and execute the full method call expression through the FVM to recover the callee name. Once resolved, enter `_check_function` with a call context. If still unresolved, check argument aliasing via `check_call_args`. |
 | `fast.BinaryOp` | Walk left and right operands. |
 | `fast.UnaryOp` | Walk operand. |
 | `fast.AddressOf` | Walk inner expression. |
@@ -482,8 +484,8 @@ The resolution rules, in order:
 | `someVar` (`Identifier`) | Copy the site from `someVar`'s `AliasMap` entry if it exists, else `"unknown"`. |
 | `cast<T>(expr)` (`CastExpression`) | `derived:<resolved site of expr>`, or `"unknown"`. |
 | `T(expr)` (`TypeConvertExpression`) | `derived:<resolved site of expr>`, or `"unknown"`. |
-| `*ptr` (`PointerDeref`) | `"unknown"` (double-dereference is not tracked without full type information). |
-| Anything else | `"unknown"` |
+| `*ptr` (`PointerDeref`) | FVM execution attempted; if successful, slot-to-variable mapping recovers the site. Falls back to `"unknown"` only if FVM cannot resolve. |
+| Anything else | FVM execution attempted on the full expression. Falls back to `"unknown"` only if FVM cannot resolve. |
 
 The `derived:` prefix distinguishes a cast or arithmetic derivative from its original so that two differently-derived pointers to the same base do not spuriously alias each other.
 
@@ -872,17 +874,9 @@ checker2.run()
 
 ## 22. Limitations and Design Notes
 
-### Intraprocedural aliasing
-
-Pointer aliasing is tracked within each function scope. Cross-function aliasing (a pointer aliased through a return value that is then passed into another function) is not tracked. Parameters are registered as `param:` sites, which are treated as opaque borrowed references.
-
 ### Conservative pointer classification
 
 All pointer parameters are treated as mutable (`mutable=True`). This is conservative — it may produce more aliasing violation candidates than necessary for parameters that are logically immutable, but prevents missed violations.
-
-### Unknown sites are not checked for aliasing
-
-When a pointer's site resolves to `"unknown"` (e.g. from a double-dereference or an untracked call return), it is registered but not checked for aliasing against other `"unknown"` sites. This avoids a large number of false positives from unresolvable expressions.
 
 ### Derived sites
 
@@ -899,7 +893,3 @@ When multiple `.fx` files are parsed, each goes through its own preprocessor and
 ### Cycle prevention
 
 The `cg.visited` set prevents infinite recursion on recursive or mutually recursive functions. Each function is analysed at most once per `BorrowChecker` run, regardless of how many call sites reach it.
-
-### Nested function definitions
-
-`FunctionDefStatement` nodes encountered during statement walking (nested function definitions in Flux) are recursively analysed via `_check_function()`. They share the same `cg.visited` set, so they are not re-analysed if already reached from the call graph.

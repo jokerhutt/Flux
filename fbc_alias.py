@@ -33,7 +33,7 @@ class PtrInfo:
 
 @dataclass
 class Violation:
-    kind: str           # 'mutable_alias' | 'scope_escape' | 'use_after_scope' | 'heap_leak'
+    kind: str           # 'mutable_alias' | 'scope_escape' | 'use_after_scope' | 'heap_leak' | 'use_after_free' | 'buffer_overflow' | 'out_of_bounds'
     message: str
     file: str
     line: int
@@ -87,6 +87,13 @@ class AliasMap:
         # heap allocation sites that have been fmalloc'd but not ffree'd
         # site -> (file, line)
         self.heap_sites: dict[str, tuple[str, int]] = {}
+        # sites that have been freed via ffree -- any subsequent dereference
+        # or array access through a pointer whose site is in here is a violation
+        # site -> (file, line) of the ffree call
+        self.freed_sites: dict[str, tuple[str, int]] = {}
+        # known byte-sizes of allocations; -1 means unknown
+        # site -> byte count
+        self.alloc_sizes: dict[str, int] = {}
         # sites that have been passed to a spawned thread -- any subsequent
         # mutable access to these sites is a race condition
         # site -> (thread_file, thread_line)
@@ -137,11 +144,16 @@ class AliasMap:
     # ------------------------------------------------------------------
 
     def declare_ptr(self, var_name: str, site: str, mutable: bool,
-                    file: str, line: int, is_stack_owner: bool = False):
+                    file: str, line: int, is_stack_owner: bool = False,
+                    source_var: str = None):
         """
         Register a new pointer variable in the current scope.
         is_stack_owner=True means this var IS the stack allocation (its address
         may be taken later -- we track the site now).
+        source_var: the name of the pointer variable whose site was copied to
+        produce this one (e.g. the RHS of `byte* p = q`).  That variable is
+        excluded from the alias check so that a plain pointer copy does not
+        produce a false-positive violation.
         """
         if not self.frames:
             return
@@ -159,22 +171,42 @@ class AliasMap:
             line=line,
         )
         frame.add_ptr(info)
-        self._check_mutable_alias(info)
+        # alias check deferred to call sites -- checking at declaration time
+        # produces false positives when a pointer is copied from another live pointer
 
     def assign_ptr(self, var_name: str, site: str, mutable: bool,
-                   file: str, line: int):
-        """Update an existing pointer variable to point to a new site."""
+                   file: str, line: int, source_var: str = None):
+        """Update an existing pointer variable to point to a new site.
+        source_var: excluded from the alias check (see declare_ptr).
+        When a pointer is reassigned to a fresh allocation, its old freed
+        site is no longer reachable through this variable -- remove it so
+        accesses after the reassignment are not falsely flagged.
+        """
         info = self._find_ptr(var_name)
         if info is None:
             # new pointer introduced via assignment without prior declaration
-            self.declare_ptr(var_name, site, mutable, file, line)
+            self.declare_ptr(var_name, site, mutable, file, line, source_var=source_var)
             return
         old_site = info.site
         info.site = site
         info.mutable = mutable
         info.file = file
         info.line = line
-        self._check_mutable_alias(info)
+        # if reassigned to a fresh non-freed site, the old freed record is
+        # no longer reachable through this variable -- only remove it if no
+        # other tracked pointer still points to that site
+        if (old_site and old_site in self.freed_sites
+                and site != old_site
+                and not site.startswith('freed:')):
+            still_used = any(
+                p.site == old_site
+                for frame in self.frames
+                for p in frame.all_ptrs()
+                if p.var_name != var_name
+            )
+            if not still_used:
+                self.freed_sites.pop(old_site, None)
+        # alias check deferred to call sites
 
     def _find_ptr(self, var_name: str) -> Optional[PtrInfo]:
         """Search all frames top-down for a pointer variable."""
@@ -193,6 +225,92 @@ class AliasMap:
     def record_free(self, site: str):
         self.heap_sites.pop(site, None)
 
+    @staticmethod
+    def _base_site(site: str) -> str:
+        """Strip a single derived: prefix to get the base allocation site."""
+        if site.startswith('derived:'):
+            return site[len('derived:'):]
+        return site
+
+    def mark_freed(self, site: str, file: str, line: int):
+        """Record that a heap site has been passed to ffree."""
+        if site and site != 'unknown' and not site.startswith('derived:'):
+            self.freed_sites[site] = (file, line)
+
+    def check_use_after_free(self, var_name: str, file: str, line: int):
+        """
+        Check if the pointer named var_name points to a freed site.
+        Also checks the base site for derived pointers (e.g. p+10 after ffree(p)).
+        Called at every dereference, array access, and pointer-target assignment.
+        """
+        info = self._find_ptr(var_name)
+        if info is None:
+            return
+        site = info.site
+        base = self._base_site(site)
+        matched = None
+        if site in self.freed_sites:
+            matched = site
+        elif base != site and base in self.freed_sites:
+            matched = base
+        if matched is not None:
+            free_file, free_line = self.freed_sites[matched]
+            self.violations.append(Violation(
+                kind='use_after_free',
+                message=(
+                    f"pointer '{var_name}' used after its allocation site "
+                    f"'{matched}' was passed to ffree"
+                ),
+                file=file,
+                line=line,
+                detail=[
+                    f"ffree called at {free_file}:{free_line}",
+                    f"'{var_name}' -> {site} at {file}:{line}",
+                ]
+            ))
+
+    def record_alloc_size(self, site: str, size: int):
+        """Associate a known byte size with an allocation site."""
+        if site and site != 'unknown' and not site.startswith('derived:'):
+            self.alloc_sizes[site] = size
+
+    def check_bounds(self, var_name: str, index: int, file: str, line: int, write: bool = False):
+        """
+        Check if a concrete array index is out of bounds for a known site.
+        Also checks the base site for derived pointers.
+        Reports buffer_overflow for out-of-bounds writes, out_of_bounds for reads.
+        """
+        info = self._find_ptr(var_name)
+        if info is None:
+            return
+        site = info.site
+        base = self._base_site(site)
+        # prefer the direct site, fall back to base for derived pointers
+        if site in self.alloc_sizes:
+            lookup = site
+        elif base != site and base in self.alloc_sizes:
+            lookup = base
+        else:
+            return
+        size = self.alloc_sizes[lookup]
+        if size < 0:
+            return
+        if index < 0 or index >= size:
+            kind = 'buffer_overflow' if write else 'out_of_bounds'
+            self.violations.append(Violation(
+                kind=kind,
+                message=(
+                    f"array {'write' if write else 'access'} through '{var_name}' at index {index} is "
+                    f"out of bounds for site '{lookup}' (size {size})"
+                ),
+                file=file,
+                line=line,
+                detail=[
+                    f"'{var_name}' -> {site} (size {size}) at {file}:{line}",
+                    f"index {index} {'< 0' if index < 0 else '>= size'}",
+                ]
+            ))
+
     def check_heap_leaks(self):
         """Call at function exit to report unfreed heap allocations."""
         for site, (file, line) in self.heap_sites.items():
@@ -203,6 +321,8 @@ class AliasMap:
                 line=line,
             ))
         self.heap_sites.clear()
+        self.freed_sites.clear()
+        self.alloc_sizes.clear()
 
     # ------------------------------------------------------------------
     # Alias checking
@@ -214,24 +334,38 @@ class AliasMap:
             result.extend(frame.all_ptrs())
         return result
 
-    def _check_mutable_alias(self, new_ptr: PtrInfo):
+    def _check_mutable_alias(self, new_ptr: PtrInfo, exclude_var: str = None):
         """
         Check if new_ptr creates a mutable aliasing violation with any
         currently live pointer pointing to the same site.
+        Compares base sites so that a derived pointer (p+10) is caught as an
+        alias of the original pointer (p) into the same allocation.
+
+        exclude_var: name of the source pointer whose site was copied to
+        produce new_ptr (e.g. the RHS of an assignment).  Excluded from the
+        check so that a plain pointer copy does not produce a false positive.
         """
-        if new_ptr.site == 'unknown' or new_ptr.site.startswith('derived:'):
+        if new_ptr.site == 'unknown':
             return
+        new_base = self._base_site(new_ptr.site)
         for existing in self._all_live_ptrs():
             if existing.var_name == new_ptr.var_name:
                 continue
-            if existing.site != new_ptr.site:
+            if exclude_var and existing.var_name == exclude_var:
                 continue
-            # same site -- violation if either is mutable
+            if existing.site == 'unknown':
+                continue
+            existing_base = self._base_site(existing.site)
+            if existing_base != new_base:
+                continue
+            # same base site -- violation if either is mutable
             if new_ptr.mutable or existing.mutable:
+                is_derived = new_ptr.site != new_base or existing.site != existing_base
+                detail_suffix = ' (derived pointer into same allocation)' if is_derived else ''
                 self.violations.append(Violation(
                     kind='mutable_alias',
                     message=(
-                        f"mutable alias violation on site '{new_ptr.site}'"
+                        f"mutable alias violation on site '{new_base}'{detail_suffix}"
                     ),
                     file=new_ptr.file,
                     line=new_ptr.line,
@@ -244,6 +378,85 @@ class AliasMap:
                         f"at {existing.file}:{existing.line}",
                     ]
                 ))
+
+    def check_write_alias(self, var_name: str, file: str, line: int):
+        """
+        Called when a write occurs through pointer var_name (*p = x or p[i] = x).
+        Checks if any other live pointer shares the same base site -- if so,
+        that is a mutable alias: two pointers can write into the same allocation.
+        Only fires for derived pointers (base site differs from site) to avoid
+        duplicating the declaration-time alias check for plain copies.
+        """
+        info = self._find_ptr(var_name)
+        if info is None:
+            return
+        site = info.site
+        base = self._base_site(site)
+        for existing in self._all_live_ptrs():
+            if existing.var_name == var_name:
+                continue
+            if existing.site == 'unknown':
+                continue
+            # skip pointers whose site has been freed -- no longer a live alias
+            existing_base = self._base_site(existing.site)
+            if existing.site in self.freed_sites or existing_base in self.freed_sites:
+                continue
+            if existing_base != base:
+                continue
+            if not (info.mutable or existing.mutable):
+                continue
+            self.violations.append(Violation(
+                kind='mutable_alias',
+                message=(
+                    f"mutable alias violation on site '{base}' "
+                    f"(write through derived pointer into same allocation)"
+                ),
+                file=file,
+                line=line,
+                detail=[
+                    f"'{var_name}' -> {site} "
+                    f"({'mutable' if info.mutable else 'immutable'}) "
+                    f"at {file}:{line}",
+                    f"'{existing.var_name}' -> {existing.site} "
+                    f"({'mutable' if existing.mutable else 'immutable'}) "
+                    f"at {existing.file}:{existing.line}",
+                ]
+            ))
+            break  # one report per write is enough
+
+    def check_call_args(self, arg_sites: list, file: str, line: int):
+        """
+        Check pointer arguments at an opaque call site (unresolved callee,
+        extern, function pointer, or unresolved method) for mutable aliasing.
+
+        arg_sites is a list of (name_hint, site) pairs -- one per pointer
+        argument expression at the call site.  Only argument pairs are checked
+        against each other -- checking arguments against all live caller pointers
+        would produce false positives when a local pointer variable was copied
+        from a live pointer and both are passed as arguments.
+
+        unknown and derived: sites are skipped per the standard rules.
+        """
+        # check argument pairs against each other only
+        for i in range(len(arg_sites)):
+            name_a, site_a = arg_sites[i]
+            if site_a == 'unknown' or site_a.startswith('derived:'):
+                continue
+            for j in range(i + 1, len(arg_sites)):
+                name_b, site_b = arg_sites[j]
+                if site_b == 'unknown' or site_b.startswith('derived:'):
+                    continue
+                if site_a == site_b:
+                    self.violations.append(Violation(
+                        kind='mutable_alias',
+                        message=f"mutable alias violation on site '{site_a}'",
+                        file=file,
+                        line=line,
+                        detail=[
+                            f"argument '{name_a}' -> {site_a} (mutable) at {file}:{line}",
+                            f"argument '{name_b}' -> {site_b} (mutable) at {file}:{line}",
+                        ]
+                    ))
 
     # ------------------------------------------------------------------
     # Thread safety
@@ -291,26 +504,34 @@ class AliasMap:
     def check_use_after_escape(self, ptr_var: str, file: str, line: int):
         """
         Call this when a pointer is read or written after a spawn.
-        Flags if the pointer's site was passed to a thread.
+        Flags if the pointer's site (or its base site for derived pointers)
+        was passed to a thread.
         """
         info = self._find_ptr(ptr_var)
         if info is None:
             return
-        if info.site in self.thread_escaped_sites:
-            spawn_file, spawn_line = self.thread_escaped_sites[info.site]
-            # skip if this is the same line as the escape (the spawn call itself)
-            if spawn_line == line:
-                return
-            self.violations.append(Violation(
-                kind='thread_race',
-                message=(
-                    f"pointer '{ptr_var}' accessed after its site '{info.site}' "
-                    f"was passed to a thread (potential data race)"
-                ),
-                file=file,
-                line=line,
-                detail=[
-                    f"site escaped to thread at {spawn_file}:{spawn_line}",
-                    f"'{ptr_var}' -> {info.site} (mutable) at {file}:{line}",
-                ]
-            ))
+        site = info.site
+        base = self._base_site(site)
+        matched = None
+        if site in self.thread_escaped_sites:
+            matched = site
+        elif base != site and base in self.thread_escaped_sites:
+            matched = base
+        if matched is None:
+            return
+        spawn_file, spawn_line = self.thread_escaped_sites[matched]
+        if spawn_line == line:
+            return
+        self.violations.append(Violation(
+            kind='thread_race',
+            message=(
+                f"pointer '{ptr_var}' accessed after its site '{matched}' "
+                f"was passed to a thread (potential data race)"
+            ),
+            file=file,
+            line=line,
+            detail=[
+                f"site escaped to thread at {spawn_file}:{spawn_line}",
+                f"'{ptr_var}' -> {site} (mutable) at {file}:{line}",
+            ]
+        ))

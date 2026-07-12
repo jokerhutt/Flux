@@ -58,6 +58,13 @@ except ImportError as e:
     print("      Looked for fparser.py in src/compiler/, compiler/, and project root.")
     sys.exit(2)
 
+try:
+    from fvm import FluxVM, VMError, Op, TTag, Instr, Val
+    from fvmcodegen import FVMCodegen
+    _FVM_AVAILABLE = True
+except ImportError:
+    _FVM_AVAILABLE = False
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -116,18 +123,29 @@ class CallGraph:
         self.short_names: dict[str, str] = {}
         # base name -> list of mangled names (for overload resolution at call sites)
         self.overloads: dict[str, list] = {}
-        # functions already walked from a non-thread (main) context
-        self.visited_main: set[str] = set()
-        # functions already walked from a thread context
-        self.visited_thread: set[str] = set()
+        # func_name -> set of call-context tuples already analysed (main context)
+        self.visited_main: dict[str, set[tuple]] = {}
+        # func_name -> set of call-context tuples already analysed (thread context)
+        self.visited_thread: dict[str, set[tuple]] = {}
         # how many times each function has been passed to a thread spawn
         # name -> int
         self.spawn_count: dict[str, int] = {}
 
     # kept as a property so existing code that reads cg.visited still compiles
+    # returns the set of function names that have been analysed in at least one context
     @property
     def visited(self) -> set[str]:
-        return self.visited_main
+        return set(self.visited_main.keys())
+
+    def is_visited(self, name: str, ctx: tuple, thread: bool) -> bool:
+        """Return True if this (name, ctx) pair has already been analysed."""
+        table = self.visited_thread if thread else self.visited_main
+        return ctx in table.get(name, set())
+
+    def mark_visited(self, name: str, ctx: tuple, thread: bool):
+        """Record that (name, ctx) has been analysed."""
+        table = self.visited_thread if thread else self.visited_main
+        table.setdefault(name, set()).add(ctx)
 
     def collect(self, program: fast.Program):
         """Walk the top-level program and collect all function definitions."""
@@ -201,6 +219,15 @@ class CallGraph:
 # AST Walker
 # ---------------------------------------------------------------------------
 
+class _SyntheticCall:
+    """Minimal stand-in for a FunctionCall node used when resolving MethodCall targets."""
+    def __init__(self, name, arguments, source_file, source_line):
+        self.name = name
+        self.arguments = arguments
+        self.source_file = source_file
+        self.source_line = source_line
+
+
 class BorrowChecker:
 
     def __init__(self, call_graph: CallGraph, entry: str,
@@ -217,6 +244,14 @@ class BorrowChecker:
         self.funcs_checked = 0
         # True while walking a function that was invoked from a thread spawn
         self._in_thread_context: bool = False
+        # set of function names currently on the active call stack -- prevents
+        # infinite recursion when context-sensitive re-entry produces a new
+        # call_ctx tuple for an already-active recursive function
+        self._call_stack: set[str] = set()
+        self._current_func_node: fast.FunctionDef | None = None
+        # cache for FVM expression evaluation -- keyed by id(ast_node)
+        # stores the result (int, str, or None) so each node is only executed once
+        self._fvm_cache: dict[int, object] = {}
 
     def _remap(self, merged_line: int) -> tuple:
         """Map a merged-source line number back to (original_file, original_line)."""
@@ -233,7 +268,7 @@ class BorrowChecker:
             print(f"      This usually means the entry point body is inside an unresolved #ifdef block.")
             print(f"      Checking all reachable functions instead.")
             for name, func in self.cg.funcs.items():
-                if name not in self.cg.visited:
+                if not self.cg.is_visited(name, (), False):
                     self._check_function(func)
         else:
             self._check_function(self.cg.funcs[self.entry])
@@ -269,31 +304,75 @@ class BorrowChecker:
                         return True
         return False
 
-    def _check_function(self, func: fast.FunctionDef, thread_context: bool = False):
-        visited_set = self.cg.visited_thread if thread_context else self.cg.visited_main
-        if func.name in visited_set:
+    def _check_function(self, func: fast.FunctionDef, thread_context: bool = False,
+                        call_ctx: tuple = ()):
+        """
+        Analyse one function body.
+
+        call_ctx is a tuple of site strings, one per pointer parameter in
+        declaration order, derived from the actual argument expressions at the
+        call site.  When a positional site is available it replaces the opaque
+        param:<func>:<name> site so alias checking operates on real identities
+        across the call boundary.  An empty tuple means the caller could not
+        resolve any argument sites (e.g. the call target was not in the call
+        graph) and the opaque fallback is used for every parameter.
+        """
+        if self.cg.is_visited(func.name, call_ctx, thread_context):
             return
-        visited_set.add(func.name)
+        # guard against re-entrant recursion: a recursive function called with a
+        # new call_ctx would pass the visited check but is already active on the
+        # call stack -- analysing it again would loop forever
+        if func.name in self._call_stack:
+            return
+        self.cg.mark_visited(func.name, call_ctx, thread_context)
+        self._call_stack.add(func.name)
         self.funcs_checked += 1
 
         prev_func = self.alias.func_name
         prev_thread_ctx = self._in_thread_context
+        prev_func_node = self._current_func_node
+        # isolate callee from caller's live pointer frames so that
+        # _check_mutable_alias only sees pointers declared inside this
+        # function, not the caller's scope chain
+        prev_frames = self.alias.frames
+        self.alias.frames = []
+        prev_heap_sites = dict(self.alias.heap_sites)
+        self.alias.heap_sites = {}
+        prev_freed_sites = dict(self.alias.freed_sites)
+        self.alias.freed_sites = {}
+        prev_alloc_sizes = dict(self.alias.alloc_sizes)
+        self.alias.alloc_sizes = {}
         self.alias.func_name = func.name
         self._in_thread_context = thread_context
+        self._current_func_node = func
 
         self.alias.push_scope()
 
-        # register pointer parameters as borrowed sites
-        for param in (func.parameters or []):
-            if param.name and _is_pointer_type(param.type_spec):
+        # register pointer parameters
+        # if a positional site was supplied by the caller, use it; otherwise
+        # fall back to the opaque param: site
+        ptr_params = [p for p in (func.parameters or []) if p.name and _is_pointer_type(p.type_spec)]
+        param_sites = []
+        for idx, param in enumerate(ptr_params):
+            if idx < len(call_ctx) and call_ctx[idx] not in ('unknown', ''):
+                site = call_ctx[idx]
+                # propagate the caller's known allocation size for this site
+                # so bounds checks inside the callee have the size available
+                if site in prev_alloc_sizes:
+                    self.alias.alloc_sizes[site] = prev_alloc_sizes[site]
+            else:
                 site = _make_param_site(func.name, param.name)
-                self.alias.declare_ptr(
-                    var_name=param.name,
-                    site=site,
-                    mutable=True,  # conservative: treat all pointer params as mutable
-                    file=_node_file(func),
-                    line=_node_line(func),
-                )
+            self.alias.declare_ptr(
+                var_name=param.name,
+                site=site,
+                mutable=True,  # conservative: treat all pointer params as mutable
+                file=_node_file(func),
+                line=_node_line(func),
+            )
+            param_sites.append((param.name, site))
+        # check parameter pairs for aliasing -- this is the interprocedural catch:
+        # two parameters with the same caller-propagated site are mutable aliases
+        self.alias.check_call_args(param_sites, _node_file(func), _node_line(func))
 
         if func.body:
             self._walk_block(func.body)
@@ -302,9 +381,18 @@ class BorrowChecker:
             self.alias.check_heap_leaks()
         else:
             self.alias.heap_sites.clear()
+            self.alias.freed_sites.clear()
+            self.alias.alloc_sizes.clear()
 
         self.alias.pop_scope()
+        self._call_stack.discard(func.name)
+        # restore caller's frame state
+        self.alias.frames = prev_frames
+        self.alias.heap_sites = prev_heap_sites
+        self.alias.freed_sites = prev_freed_sites
+        self.alias.alloc_sizes = prev_alloc_sizes
         self.alias.func_name = prev_func
+        self._current_func_node = prev_func_node
         self._in_thread_context = prev_thread_ctx
 
         # collect violations -- remap merged line numbers to original source locations
@@ -366,19 +454,61 @@ class BorrowChecker:
 
         elif isinstance(node, fast.IfStatement):
             self._walk_expr(node.condition)
+            # snapshot freed_sites and heap_sites before each branch
+            pre_freed = dict(self.alias.freed_sites)
+            pre_heap  = dict(self.alias.heap_sites)
             if node.then_block:
                 self._walk_block(node.then_block)
+            then_freed = dict(self.alias.freed_sites)
+            then_heap  = dict(self.alias.heap_sites)
+            # restore to pre-branch state before walking else
+            self.alias.freed_sites = dict(pre_freed)
+            self.alias.heap_sites  = dict(pre_heap)
             if node.else_block:
                 self._walk_block(node.else_block)
+            else_freed = dict(self.alias.freed_sites)
+            else_heap  = dict(self.alias.heap_sites)
+            # freed_sites intersection: only keep sites freed on ALL paths
+            if node.else_block:
+                self.alias.freed_sites = {s: v for s, v in then_freed.items() if s in else_freed}
+                # heap_sites union: keep sites that might not be freed on all paths
+                merged_heap = dict(then_heap)
+                merged_heap.update(else_heap)
+                # only drop a site if it was freed on both paths (not in either heap snapshot)
+                self.alias.heap_sites = {s: v for s, v in merged_heap.items()
+                                         if s in then_heap or s in else_heap}
+            else:
+                self.alias.freed_sites = dict(pre_freed)
+                # no else -- then-branch allocs may or may not have been freed
+                merged_heap = dict(pre_heap)
+                merged_heap.update(then_heap)
+                self.alias.heap_sites = merged_heap
 
         elif isinstance(node, fast.WhileLoop):
             self._walk_expr(node.condition)
             if node.body:
+                pre_freed = dict(self.alias.freed_sites)
+                pre_heap  = dict(self.alias.heap_sites)
                 self._walk_block(node.body)
+                # restore freed_sites -- loop may not execute
+                self.alias.freed_sites = dict(pre_freed)
+                # keep any new heap allocations from the body (they may leak)
+                # but restore frees -- a free inside a loop is not guaranteed
+                loop_heap = dict(self.alias.heap_sites)
+                merged_heap = dict(pre_heap)
+                merged_heap.update(loop_heap)
+                self.alias.heap_sites = merged_heap
 
         elif isinstance(node, fast.DoWhileLoop):
             if node.body:
+                pre_freed = dict(self.alias.freed_sites)
+                pre_heap  = dict(self.alias.heap_sites)
                 self._walk_block(node.body)
+                self.alias.freed_sites = dict(pre_freed)
+                loop_heap = dict(self.alias.heap_sites)
+                merged_heap = dict(pre_heap)
+                merged_heap.update(loop_heap)
+                self.alias.heap_sites = merged_heap
             self._walk_expr(node.condition)
 
         elif isinstance(node, fast.ForLoop):
@@ -389,34 +519,102 @@ class BorrowChecker:
             if node.update:
                 self._walk_stmt(node.update)
             if node.body:
+                pre_freed = dict(self.alias.freed_sites)
+                pre_heap  = dict(self.alias.heap_sites)
                 self._walk_block(node.body)
+                self.alias.freed_sites = dict(pre_freed)
+                loop_heap = dict(self.alias.heap_sites)
+                merged_heap = dict(pre_heap)
+                merged_heap.update(loop_heap)
+                self.alias.heap_sites = merged_heap
 
         elif isinstance(node, fast.ForInLoop):
             if node.body:
+                pre_freed = dict(self.alias.freed_sites)
+                pre_heap  = dict(self.alias.heap_sites)
                 self._walk_block(node.body)
+                self.alias.freed_sites = dict(pre_freed)
+                loop_heap = dict(self.alias.heap_sites)
+                merged_heap = dict(pre_heap)
+                merged_heap.update(loop_heap)
+                self.alias.heap_sites = merged_heap
 
         elif isinstance(node, fast.SwitchStatement):
             self._walk_expr(node.expression)
+            pre_freed = dict(self.alias.freed_sites)
+            pre_heap  = dict(self.alias.heap_sites)
+            case_freeds = []
+            case_heaps  = []
             for case in node.cases:
+                self.alias.freed_sites = dict(pre_freed)
+                self.alias.heap_sites  = dict(pre_heap)
                 if case.body:
                     self._walk_block(case.body)
+                case_freeds.append(dict(self.alias.freed_sites))
+                case_heaps.append(dict(self.alias.heap_sites))
+            if case_freeds:
+                intersection = dict(case_freeds[0])
+                for cf in case_freeds[1:]:
+                    intersection = {s: v for s, v in intersection.items() if s in cf}
+                self.alias.freed_sites = intersection
+                merged_heap = {}
+                for ch in case_heaps:
+                    merged_heap.update(ch)
+                self.alias.heap_sites = merged_heap
+            else:
+                self.alias.freed_sites = dict(pre_freed)
+                self.alias.heap_sites  = dict(pre_heap)
 
         elif isinstance(node, fast.ReturnStatement):
             if node.value:
                 self._walk_expr(node.value)
 
         elif isinstance(node, fast.DeferStatement):
+            # deferred code executes at function exit, not at this point in
+            # control flow -- snapshot freed_sites so any ffree inside the
+            # defer body does not falsely mark sites as freed for UAF purposes.
+            # heap_sites is NOT snapshotted -- a deferred ffree genuinely removes
+            # the site from leak tracking, same as an immediate ffree would.
+            pre_freed = dict(self.alias.freed_sites)
             if node.expression:
                 self._walk_expr(node.expression)
             if node.body:
                 for s in node.body:
                     self._walk_stmt(s)
+            self.alias.freed_sites = dict(pre_freed)
 
         elif isinstance(node, fast.TryBlock):
             if node.try_body:
+                pre_freed = dict(self.alias.freed_sites)
+                pre_heap  = dict(self.alias.heap_sites)
                 self._walk_block(node.try_body)
+                try_freed = dict(self.alias.freed_sites)
+                try_heap  = dict(self.alias.heap_sites)
+            else:
+                pre_freed = dict(self.alias.freed_sites)
+                pre_heap  = dict(self.alias.heap_sites)
+                try_freed = dict(pre_freed)
+                try_heap  = dict(pre_heap)
+            catch_freeds = []
+            catch_heaps  = []
             for _, _, catch_body in (node.catch_blocks or []):
+                self.alias.freed_sites = dict(pre_freed)
+                self.alias.heap_sites  = dict(pre_heap)
                 self._walk_block(catch_body)
+                catch_freeds.append(dict(self.alias.freed_sites))
+                catch_heaps.append(dict(self.alias.heap_sites))
+            # intersection of try and all catch paths for freed_sites
+            all_paths = [try_freed] + catch_freeds
+            intersection = dict(all_paths[0])
+            for pf in all_paths[1:]:
+                intersection = {s: v for s, v in intersection.items() if s in pf}
+            self.alias.freed_sites = intersection
+            # union of heap_sites across all paths
+            all_heaps = [try_heap] + catch_heaps
+            merged_heap = {}
+            for h in all_heaps:
+                merged_heap.update(h)
+            self.alias.heap_sites = merged_heap
 
         elif isinstance(node, fast.FunctionDefStatement):
             # nested function def -- walk it under current context
@@ -437,6 +635,23 @@ class BorrowChecker:
         if is_ptr:
             # it's a pointer variable -- what does it point to?
             ptr_site = self._resolve_site(node.initial_value, node.name, file, line)
+            # if the RHS is a plain identifier, exclude it from the alias check
+            # so that a pointer copy (byte* q = p) does not self-report as an alias --
+            # q IS p, they're the same pointer, not a genuine alias.
+            # pointer arithmetic (byte* q = p + 8) is a different view into the same
+            # allocation -- that IS a genuine alias and must not be excluded.
+            rhs = node.initial_value
+            if isinstance(rhs, fast.Identifier):
+                source_var = rhs.name
+            elif isinstance(rhs, (fast.CastExpression, fast.TypeConvertExpression)):
+                inner = rhs.expression
+                if isinstance(inner, fast.Identifier):
+                    source_var = inner.name
+                else:
+                    source_var = None
+            else:
+                source_var = None
+            #import sys as _sys; _sys.stderr.write(f'[FBC DEBUG] declare_ptr: name={node.name!r} site={ptr_site!r} func={self.alias.func_name!r}\n'); _sys.stderr.flush()
             self.alias.declare_ptr(
                 var_name=node.name,
                 site=ptr_site,
@@ -444,6 +659,7 @@ class BorrowChecker:
                 file=file,
                 line=line,
                 is_stack_owner=False,
+                source_var=source_var,
             )
         else:
             # non-pointer stack variable -- register its site so @node.name can be resolved
@@ -451,6 +667,20 @@ class BorrowChecker:
                 frame = self.alias.frames[-1]
                 frame.owned_sites.add(site)
                 frame.var_sites[node.name] = site
+            # if this is a fixed-size stack array, record the element count as
+            # the allocation size so bounds checks can use it
+            ts = node.type_spec
+            if ts is not None and getattr(ts, 'array_size', None) is not None:
+                arr_sz = ts.array_size
+                if isinstance(arr_sz, int):
+                    self.alias.record_alloc_size(site, arr_sz)
+                elif hasattr(arr_sz, 'value') and isinstance(arr_sz.value, int):
+                    self.alias.record_alloc_size(site, int(arr_sz.value))
+                else:
+                    # non-constant array size -- try FVM evaluation
+                    evaled = self._eval_size_via_fvm(arr_sz)
+                    if evaled is not None:
+                        self.alias.record_alloc_size(site, evaled)
 
         if node.initial_value:
             self._walk_expr(node.initial_value)
@@ -467,7 +697,8 @@ class BorrowChecker:
             existing = self.alias._find_ptr(var_name)
             if existing is not None:
                 new_site = self._resolve_site(node.value, var_name, file, line)
-                self.alias.assign_ptr(var_name, new_site, True, file, line)
+                source_var = node.value.name if isinstance(node.value, fast.Identifier) else None
+                self.alias.assign_ptr(var_name, new_site, True, file, line, source_var=source_var)
 
     _SPAWN_IMPL_FUNCS = {'thread_create', 'thread_create_stack', 'pthread_create', 'CreateThread'}
 
@@ -490,6 +721,96 @@ class BorrowChecker:
         if isinstance(expr, fast.FunctionCall) and expr.arguments:
             return self._unwrap_ptr_ident(expr.arguments[0])
         return None
+
+    def _resolve_fptr_expr(self, expr) -> str | None:
+        """
+        Compile and execute an arbitrary expression through the FVM to resolve
+        a function pointer value to a callee name.
+
+        The FVM represents function pointers as Val(TTag.BYTES, func_name_bytes).
+        Executing the expression leaves that value on the stack; we decode it
+        and look it up in the call graph.
+
+        Returns the resolved mangled function name, or None if the expression
+        cannot be executed or does not resolve to a known function.
+        """
+        if not _FVM_AVAILABLE:
+            return None
+        try:
+            cg = FVMCodegen()
+            cg._visit_expr(expr)
+            cg._emit(Instr(Op.HALT, [], 0))
+            vm = FluxVM()
+            for name, instrs in cg.compiled_functions.items():
+                vm.register_function(name, instrs)
+            vm.execute(cg._instructions, cg._local_count)
+            if not vm.stack:
+                return None
+            top = vm.stack[-1]
+            if top.tag == TTag.BYTES:
+                name = top.data.decode('utf-8') if isinstance(top.data, (bytes, bytearray)) else str(top.data)
+            elif top.tag == TTag.PTR:
+                # PTR may carry a meta dict with a function name when used as a func ptr slot
+                meta = getattr(top, 'meta', {}) or {}
+                name = meta.get('func_name') or str(top.data)
+            else:
+                return None
+            name = name.strip()
+            if name in self.cg.funcs:
+                return name
+            if name in self.cg.short_names:
+                return self.cg.short_names[name]
+            return None
+        except Exception:
+            return None
+
+    def _collect_arg_sites(self, args: list, file: str, line: int) -> list:
+        """
+        Resolve each argument expression to a (name_hint, site) pair using the
+        caller's current alias state.  Used to check aliasing at opaque call sites
+        where the callee body is unavailable.
+        """
+        result = []
+        for arg in args:
+            hint = self._unwrap_ptr_ident(arg) or '<arg>'
+            site = self._resolve_site(arg, hint, file, line)
+            result.append((hint, site))
+        return result
+
+    def _build_call_ctx(self, func: fast.FunctionDef, call_node: fast.FunctionCall) -> tuple:
+        """
+        Build a call context tuple for a call site.
+
+        For each pointer parameter of the callee (in declaration order), resolve
+        the corresponding argument expression to a site string using the caller's
+        current alias state.  Parameters with no corresponding argument (variadics,
+        missing args) get 'unknown'.  Non-pointer parameters are skipped so the
+        tuple length equals the number of pointer parameters only.
+
+        The tuple is used as a cache key: the callee is re-analysed only when a
+        new distinct context (different set of argument sites) is seen.
+        """
+        ptr_params = [p for p in (func.parameters or []) if p.name and _is_pointer_type(p.type_spec)]
+        if not ptr_params:
+            return ()
+
+        args = list(call_node.arguments or [])
+
+        # build a positional index: callee param index -> argument expression
+        # we need to map pointer-param position back to the full parameter list
+        # position so we can select the right argument by index
+        full_params = list(func.parameters or [])
+        ctx = []
+        for ptr_param in ptr_params:
+            # find this param's position in the full parameter list
+            full_idx = next((i for i, p in enumerate(full_params) if p.name == ptr_param.name), None)
+            if full_idx is not None and full_idx < len(args):
+                site = self._resolve_site(args[full_idx], ptr_param.name,
+                                          _node_file(call_node), _node_line(call_node))
+            else:
+                site = 'unknown'
+            ctx.append(site)
+        return tuple(ctx)
 
     def _resolve_ffree_arg(self, arg) -> str:
         """
@@ -514,16 +835,84 @@ class BorrowChecker:
             inner = arg.expression
             if isinstance(inner, fast.Identifier):
                 info = self.alias._find_ptr(inner.name)
+                #import sys as _sys; _sys.stderr.write(f'[FBC DEBUG] resolve_ffree_arg @{inner.name!r}: info={info!r}\n'); _sys.stderr.flush()
                 return info.site if info else 'unknown'
         # type convert: long(argv), u64(argv) etc.
         if isinstance(arg, fast.TypeConvertExpression):
             return self._resolve_ffree_arg(arg.expression)
         return 'unknown'
 
+    def _resolve_site_via_fvm(self, expr, var_name: str, file: str, line: int) -> str | None:
+        """
+        Compile and execute expr through the FVM to recover a site string.
+        Results are cached by AST node id.
+        """
+        if expr is None:
+            return None
+        key = id(expr)
+        if key in self._fvm_cache:
+            result = self._fvm_cache[key]
+            return result if isinstance(result, str) else None
+        if not _FVM_AVAILABLE:
+            self._fvm_cache[key] = None
+            return None
+        try:
+            cg = FVMCodegen()
+            if self._current_func_node is not None:
+                func = self._current_func_node
+                for param in (func.parameters or []):
+                    cg._alloc_local(param.name)
+                body = func.body
+                stmts = body.statements if isinstance(body, fast.Block) else ([body] if body else [])
+                for stmt in stmts:
+                    if isinstance(stmt, fast.VariableDeclaration):
+                        cg._alloc_local(stmt.name)
+            start = len(cg._instructions)
+            cg._visit_expr(expr)
+            cg._emit(Instr(Op.HALT, [], 0))
+            vm = FluxVM()
+            for name, instrs in cg.compiled_functions.items():
+                vm.register_function(name, instrs)
+            vm.execute(cg._instructions[start:], cg._local_count)
+            if not vm.stack:
+                self._fvm_cache[key] = None
+                return None
+            top = vm.stack[-1]
+            if top.tag == TTag.PTR:
+                slot = int(top.data)
+                if slot < cg._local_count:
+                    slot_to_name = {v: k for k, v in cg._locals.items()}
+                    var = slot_to_name.get(slot)
+                    if var:
+                        for frame in reversed(self.alias.frames):
+                            if var in frame.var_sites:
+                                result = frame.var_sites[var]
+                                self._fvm_cache[key] = result
+                                return result
+                        result = _make_stack_site(self.alias.func_name, var, line)
+                        self._fvm_cache[key] = result
+                        return result
+                else:
+                    result = f"heap:fvm:{slot}"
+                    self._fvm_cache[key] = result
+                    return result
+            if top.tag == TTag.BYTES:
+                name = top.data.decode('utf-8') if isinstance(top.data, (bytes, bytearray)) else str(top.data)
+                name = name.strip()
+                result = _make_param_site(self.alias.func_name, name)
+                self._fvm_cache[key] = result
+                return result
+            self._fvm_cache[key] = None
+            return None
+        except Exception:
+            self._fvm_cache[key] = None
+            return None
+
     def _resolve_site(self, expr, var_name: str, file: str, line: int) -> str:
         """
         Try to determine what allocation site an expression refers to.
-        Returns a site identity string.
+        Returns a site identity string.  Falls back to FVM execution before
+        giving up and returning 'unknown'.
         """
         if expr is None:
             return 'unknown'
@@ -546,7 +935,7 @@ class BorrowChecker:
                         if target_name in frame.var_sites:
                             return frame.var_sites[target_name]
                     return _make_stack_site(self.alias.func_name, target_name, line)
-            return 'unknown'
+            return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
 
         # fmalloc() call
         if _is_fmalloc(expr):
@@ -561,28 +950,145 @@ class BorrowChecker:
             base_site = self._resolve_site(expr.left, var_name, file, line)
             if base_site != 'unknown':
                 return f"derived:{base_site}"
-            return self._resolve_site(expr.right, var_name, file, line)
+            right_site = self._resolve_site(expr.right, var_name, file, line)
+            if right_site != 'unknown':
+                return right_site
+            return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
 
         # identifier -- copy the site from the existing pointer
         if isinstance(expr, fast.Identifier):
             info = self.alias._find_ptr(expr.name)
             if info:
-                return info.site
-            return 'unknown'
+                site = info.site
+                if site in self.alias.freed_sites:
+                    return f"freed:{site}"
+                return site
+            # not a tracked pointer -- check var_sites for stack arrays
+            for frame in reversed(self.alias.frames):
+                if expr.name in frame.var_sites:
+                    return frame.var_sites[expr.name]
+            return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
 
         # cast / type convert -- mark as derived to avoid false alias with original
+        # exception: a cast directly wrapping fmalloc is a fresh allocation and
+        # must keep the raw heap: site so ffree can match it
         if isinstance(expr, fast.CastExpression):
+            if _is_fmalloc(expr.expression):
+                return _make_heap_site(self.alias.func_name, _node_line(expr.expression))
             inner = self._resolve_site(expr.expression, var_name, file, line)
-            return f"derived:{inner}" if inner != 'unknown' else 'unknown'
+            if inner != 'unknown':
+                return f"derived:{inner}"
+            return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
         if isinstance(expr, fast.TypeConvertExpression):
+            if _is_fmalloc(expr.expression):
+                return _make_heap_site(self.alias.func_name, _node_line(expr.expression))
             inner = self._resolve_site(expr.expression, var_name, file, line)
-            return f"derived:{inner}" if inner != 'unknown' else 'unknown'
+            if inner != 'unknown':
+                return f"derived:{inner}"
+            return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
 
-        # deref -- we can't easily track through double-deref without full type info
+        # deref -- try FVM before giving up
         if isinstance(expr, fast.PointerDeref):
-            return 'unknown'
+            return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
 
-        return 'unknown'
+        return self._resolve_site_via_fvm(expr, var_name, file, line) or 'unknown'
+
+    def _eval_index_via_fvm(self, expr) -> int | None:
+        """
+        Evaluate an expression to a concrete integer via the FVM.
+        Results are cached by AST node id so each expression is only executed once.
+        """
+        if expr is None:
+            return None
+        # fast path: plain integer literal
+        if isinstance(expr, fast.Literal) and isinstance(expr.value, int):
+            return expr.value
+        # cache check
+        key = id(expr)
+        if key in self._fvm_cache:
+            result = self._fvm_cache[key]
+            return result if isinstance(result, int) else None
+        if not _FVM_AVAILABLE:
+            self._fvm_cache[key] = None
+            return None
+        try:
+            cg = FVMCodegen()
+            if self._current_func_node is not None:
+                func = self._current_func_node
+                for param in (func.parameters or []):
+                    cg._alloc_local(param.name)
+                body = func.body
+                stmts = body.statements if isinstance(body, fast.Block) else ([body] if body else [])
+                for stmt in stmts:
+                    if isinstance(stmt, fast.VariableDeclaration):
+                        cg._alloc_local(stmt.name)
+            start = len(cg._instructions)
+            cg._visit_expr(expr)
+            cg._emit(Instr(Op.HALT, [], 0))
+            vm = FluxVM()
+            for name, instrs in cg.compiled_functions.items():
+                vm.register_function(name, instrs)
+            vm.execute(cg._instructions[start:], cg._local_count)
+            if not vm.stack:
+                self._fvm_cache[key] = None
+                return None
+            top = vm.stack[-1]
+            if top.tag in (TTag.INT, TTag.UINT):
+                result = int(top.data)
+                self._fvm_cache[key] = result
+                return result
+            self._fvm_cache[key] = None
+            return None
+        except Exception:
+            self._fvm_cache[key] = None
+            return None
+
+    def _eval_size_via_fvm(self, expr) -> int | None:
+        """
+        Evaluate a size/count expression to a concrete integer via the FVM.
+        Unwraps casts and type conversions to reach the underlying value.
+        """
+        inner = expr
+        while isinstance(inner, (fast.CastExpression, fast.TypeConvertExpression)):
+            inner = inner.expression
+        return self._eval_index_via_fvm(inner)
+
+    def _check_bounds_at_access(self, var_name: str, index_expr, file: str, line: int, write: bool = False):
+        """
+        Evaluate index_expr to a concrete integer and call alias.check_bounds.
+        Silently skips if the index is not statically determinable.
+        For stack arrays, var_name is not in ptrs -- look it up via var_sites.
+        """
+        idx = self._eval_index_via_fvm(index_expr)
+        if idx is None:
+            return
+        # try pointer tracking first (heap allocations)
+        info = self.alias._find_ptr(var_name)
+        if info is not None:
+            self.alias.check_bounds(var_name, idx, file, line, write=write)
+            return
+        # fall back to var_sites for stack arrays and pointer params with known sizes
+        for frame in reversed(self.alias.frames):
+            if var_name in frame.var_sites:
+                site = frame.var_sites[var_name]
+                if site in self.alias.alloc_sizes:
+                    size = self.alias.alloc_sizes[site]
+                    if size >= 0 and (idx < 0 or idx >= size):
+                        kind = 'buffer_overflow' if write else 'out_of_bounds'
+                        self.alias.violations.append(Violation(
+                            kind=kind,
+                            message=(
+                                f"array {'write' if write else 'access'} on '{var_name}' at index {idx} is "
+                                f"out of bounds (size {size})"
+                            ),
+                            file=file,
+                            line=line,
+                            detail=[
+                                f"'{var_name}' -> {site} (size {size})",
+                                f"index {idx} {'< 0' if idx < 0 else '>= size'}",
+                            ]
+                        ))
+                return
 
     def _walk_expr(self, node):
         """Walk an expression for side effects (calls, thread spawns, ffree)."""
@@ -592,17 +1098,29 @@ class BorrowChecker:
         file = _node_file(node)
         line = _node_line(node)
 
-        if _is_fmalloc(node) and self.check_leaks:
-            site = _make_heap_site(self.alias.func_name, _node_line(node))
-            self.alias.record_malloc(site, _node_file(node), _node_line(node))
+        # fmalloc may be wrapped in a cast: (byte**)fmalloc(...)
+        _fmalloc_node = node
+        if isinstance(node, (fast.CastExpression, fast.TypeConvertExpression)):
+            _fmalloc_node = node.expression
+        if _is_fmalloc(_fmalloc_node) and self.check_leaks:
+            site = _make_heap_site(self.alias.func_name, _node_line(_fmalloc_node))
+            self.alias.record_malloc(site, _node_file(_fmalloc_node), _node_line(_fmalloc_node))
+            #import sys as _sys; _sys.stderr.write(f'[FBC DEBUG] record_malloc: site={site!r} func={self.alias.func_name!r}\n'); _sys.stderr.flush()
+            # record the allocation size if the argument is statically determinable
+            if isinstance(_fmalloc_node, fast.FunctionCall) and _fmalloc_node.arguments:
+                size = self._eval_size_via_fvm(_fmalloc_node.arguments[0])
+                if size is not None:
+                    self.alias.record_alloc_size(site, size)
 
         if _is_ffree(node) and self.check_leaks:
             if isinstance(node, fast.FunctionCall) and node.arguments:
                 arg = node.arguments[0]
                 # resolve the argument to a site -- handles Identifier, @x, cast(x), etc.
                 freed_site = self._resolve_ffree_arg(arg)
+                #import sys as _sys; _sys.stderr.write(f'[FBC DEBUG] ffree: arg type={type(arg).__name__!r} freed_site={freed_site!r} func={self.alias.func_name!r} heap_sites={list(self.alias.heap_sites.keys())!r} freed_sites={list(self.alias.freed_sites.keys())!r}\n'); _sys.stderr.flush()
                 if freed_site and freed_site != 'unknown':
                     self.alias.record_free(freed_site)
+                    self.alias.mark_freed(freed_site, file, line)
 
         if self.check_threads and _is_thread_spawn(node):
             # look for pointer arguments being passed -- unwrap casts to find identifiers
@@ -629,9 +1147,11 @@ class BorrowChecker:
                 prev_count = self.cg.spawn_count.get(spawned_func_name, 0)
                 self.cg.spawn_count[spawned_func_name] = prev_count + 1
 
-                # walk spawned function under thread context if not done yet
-                if spawned_func_name not in self.cg.visited_thread:
-                    self._check_function(self.cg.funcs[spawned_func_name], thread_context=True)
+                # walk spawned function under thread context if not done yet under this context
+                spawned_func = self.cg.funcs[spawned_func_name]
+                spawn_ctx = self._build_call_ctx(spawned_func, node)
+                if not self.cg.is_visited(spawned_func_name, spawn_ctx, True):
+                    self._check_function(spawned_func, thread_context=True, call_ctx=spawn_ctx)
 
                 # if this function is spawned more than once, its mutable pointer
                 # params can race with themselves across concurrent instances
@@ -666,23 +1186,45 @@ class BorrowChecker:
         # resolve calls into the call graph
         if isinstance(node, fast.FunctionCall):
             callee_name = node.name if isinstance(node.name, str) else None
+            # if the callee is an expression (function pointer), try FVM to resolve it
+            if callee_name is None and node.name is not None:
+                callee_name = self._resolve_fptr_expr(node.name)
             if callee_name:
                 cur_ctx = self._in_thread_context
-                visited_set = self.cg.visited_thread if cur_ctx else self.cg.visited_main
                 resolved = callee_name if callee_name in self.cg.funcs else self.cg.short_names.get(callee_name)
-                if resolved and resolved not in visited_set:
-                    self._check_function(self.cg.funcs[resolved], thread_context=cur_ctx)
-                elif not resolved:
+                # never walk into allocator bodies -- their internal heap management
+                # would pollute freed_sites and heap_sites with false entries
+                base_name = (resolved or callee_name or '').split('__')[-1]
+                is_allocator = base_name in self._ALLOCATOR_FUNCS or callee_name in self._ALLOCATOR_FUNCS
+                if resolved and not is_allocator:
+                    ctx_tuple = self._build_call_ctx(self.cg.funcs[resolved], node)
+                    if not self.cg.is_visited(resolved, ctx_tuple, cur_ctx):
+                        self._check_function(self.cg.funcs[resolved], thread_context=cur_ctx,
+                                             call_ctx=ctx_tuple)
+                elif not is_allocator:
                     # try overload index -- call site uses base name, codegen adds arity suffix
                     for mangled in self.cg.overloads.get(callee_name, []):
-                        if mangled not in visited_set:
-                            self._check_function(self.cg.funcs[mangled], thread_context=cur_ctx)
+                        ctx_tuple = self._build_call_ctx(self.cg.funcs[mangled], node)
+                        if not self.cg.is_visited(mangled, ctx_tuple, cur_ctx):
+                            self._check_function(self.cg.funcs[mangled], thread_context=cur_ctx,
+                                                 call_ctx=ctx_tuple)
+                    # callee not in call graph (extern, truly-runtime function pointer)
+                    # check argument aliasing at the call site in the caller scope
+                    if not self.cg.overloads.get(callee_name):
+                        arg_sites = self._collect_arg_sites(list(node.arguments or []), file, line)
+                        self.alias.check_call_args(arg_sites, file, line)
                     # DEBUG
                     #if not self.cg.overloads.get(callee_name):
                     #    print(f"[FBC DEBUG] unresolved call in {self.alias.func_name!r}: {callee_name!r}")
                 # DEBUG
                 #elif not resolved:
                 #    print(f"[FBC DEBUG] unresolved call: {callee_name!r} -- likely extern or intra-namespace (caller scope not tracked)")
+            else:
+                # name expression could not be resolved even with FVM -- check args for aliasing
+                arg_sites = self._collect_arg_sites(list(node.arguments or []), file, line)
+                self.alias.check_call_args(arg_sites, file, line)
+                # DEBUG
+                #print(f"[FBC DEBUG] unresolvable call expr in {self.alias.func_name!r}: {type(node.name).__name__}")
             for arg in (node.arguments or []):
                 self._walk_expr(arg)
 
@@ -690,6 +1232,48 @@ class BorrowChecker:
             self._walk_expr(node.object)
             for arg in (node.arguments or []):
                 self._walk_expr(arg)
+            # attempt to resolve the method to a known function body
+            method_name = getattr(node, 'method_name', None) or getattr(node, 'name', None)
+            if method_name:
+                obj_hint = self._unwrap_ptr_ident(node.object) or ''
+                resolved_method = None
+                # try <obj_hint>__<method> (variable name), then short name lookup,
+                # then scan all functions whose name ends with __<method>
+                candidates = []
+                if obj_hint:
+                    candidates.append(f"{obj_hint}__{method_name}")
+                candidates.append(method_name)
+                for candidate in candidates:
+                    if candidate in self.cg.funcs:
+                        resolved_method = candidate
+                        break
+                    if candidate in self.cg.short_names:
+                        resolved_method = self.cg.short_names[candidate]
+                        break
+                # scan all functions whose mangled name ends with __<method_name>
+                # this covers Type__method when obj_hint is a variable name not the type
+                if not resolved_method:
+                    suffix = f"__{method_name}"
+                    for mangled in self.cg.funcs:
+                        if mangled.endswith(suffix):
+                            resolved_method = mangled
+                            break
+                #import sys as _sys; _sys.stderr.write(f'[FBC DEBUG] MethodCall obj={obj_hint!r} method={method_name!r} resolved={resolved_method!r}\n'); _sys.stderr.flush()
+                # if static name lookup failed, try FVM on the full method expression
+                if not resolved_method:
+                    resolved_method = self._resolve_fptr_expr(node)
+                if resolved_method:
+                    synth = _SyntheticCall(resolved_method, list(node.arguments or []),
+                                           _node_file(node), _node_line(node))
+                    ctx_tuple = self._build_call_ctx(self.cg.funcs[resolved_method], synth)
+                    cur_ctx = self._in_thread_context
+                    if not self.cg.is_visited(resolved_method, ctx_tuple, cur_ctx):
+                        self._check_function(self.cg.funcs[resolved_method],
+                                             thread_context=cur_ctx, call_ctx=ctx_tuple)
+                else:
+                    # callee not resolvable -- check argument aliasing at the call site
+                    arg_sites = self._collect_arg_sites(list(node.arguments or []), file, line)
+                    self.alias.check_call_args(arg_sites, file, line)
 
         elif isinstance(node, fast.BinaryOp):
             self._walk_expr(node.left)
@@ -705,6 +1289,10 @@ class BorrowChecker:
             # check for use-after-thread-escape
             if self.check_threads and isinstance(node.pointer, fast.Identifier):
                 self.alias.check_use_after_escape(node.pointer.name, file, line)
+            # check for use-after-free
+            if isinstance(node.pointer, fast.Identifier):
+                #import sys as _sys; _sys.stderr.write(f'[FBC DEBUG] PointerDeref: ptr={node.pointer.name!r} freed_sites={list(self.alias.freed_sites.keys())!r}\n'); _sys.stderr.flush()
+                self.alias.check_use_after_free(node.pointer.name, file, line)
             self._walk_expr(node.pointer)
 
         elif isinstance(node, fast.MemberAccess):
@@ -714,6 +1302,12 @@ class BorrowChecker:
             # check for access to thread-escaped pointer
             if self.check_threads and isinstance(node.array, fast.Identifier):
                 self.alias.check_use_after_escape(node.array.name, file, line)
+            # check for use-after-free
+            if isinstance(node.array, fast.Identifier):
+                self.alias.check_use_after_free(node.array.name, file, line)
+            # check for statically-determinable out-of-bounds index
+            if isinstance(node.array, fast.Identifier):
+                self._check_bounds_at_access(node.array.name, node.index, file, line)
             self._walk_expr(node.array)
             self._walk_expr(node.index)
 
@@ -743,14 +1337,27 @@ class BorrowChecker:
                     arr = node.target.array
                     if isinstance(arr, fast.Identifier):
                         self._check_ident_escape(arr.name, file, line)
+            # check lvalue target for use-after-free
+            if isinstance(node.target, fast.PointerDeref):
+                inner = node.target.pointer
+                if isinstance(inner, fast.Identifier):
+                    self.alias.check_use_after_free(inner.name, file, line)
+                    self.alias.check_write_alias(inner.name, file, line)
+            elif isinstance(node.target, fast.ArrayAccess):
+                arr = node.target.array
+                if isinstance(arr, fast.Identifier):
+                    self.alias.check_use_after_free(arr.name, file, line)
+                    self.alias.check_write_alias(arr.name, file, line)
+                    self._check_bounds_at_access(arr.name, node.target.index, file, line, write=True)
             # if target is a known pointer, update its site
             if isinstance(node.target, fast.Identifier):
                 existing = self.alias._find_ptr(node.target.name)
                 if existing is not None:
                     new_site = self._resolve_site(node.value, node.target.name,
                                                   _node_file(node), _node_line(node))
+                    source_var = node.value.name if isinstance(node.value, fast.Identifier) else None
                     self.alias.assign_ptr(node.target.name, new_site, True,
-                                          _node_file(node), _node_line(node))
+                                          _node_file(node), _node_line(node), source_var=source_var)
 
         elif isinstance(node, fast.CompoundAssignment):
             self._walk_expr(node.value)

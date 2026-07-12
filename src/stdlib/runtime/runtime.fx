@@ -261,6 +261,7 @@ def !!FRTStartup() -> int
 
     // Allocate argv
     argv = (byte**)fmalloc((u64)argc * (u64)8);
+    defer ffree(ulong(argv));
 
     // Fill argv
     argi = 0;

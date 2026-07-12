@@ -1,6 +1,6 @@
 # Flux Type Algebra - Relational Constraints
 
-Type algebra relations are the operators used inside `constra` blocks and inline `:{...}` constraint sets on template functions. Each operator defines an independent dimension of type behavior - a pair of types can satisfy constraints on one dimension while being restricted on another.
+Type algebra relations are the operators used inside `constraint` blocks and inline `:{...}` constraint sets on template functions. Each operator defines an independent dimension of type behavior - a pair of types can satisfy constraints on one dimension while being restricted on another.
 
 ---
 
@@ -90,10 +90,10 @@ A and B cannot be used together in unsigned arithmetic operations. Enforces that
 
 ## Syntax
 
-### `constra` Block
+### `constraint` Block
 
 ```
-constra Name(A, B, ...)
+constraint Name(A, B, ...)
 {
     relation_expr
 };
@@ -110,7 +110,7 @@ is three independent relations: `A ~= B`, `B !~= C`, `C !`< D`.
 Multiple independent chains are separated by commas:
 
 ```
-constra MyCS(A, B, C)
+constraint MyCS(A, B, C)
 {
     A ~= B,
     C !`< C
@@ -146,7 +146,7 @@ This is the unary form - the single parameter appears on both sides.
 
 ---
 
-## Applying a `constra` to a Template Function
+## Applying a `constraint` to a Template Function
 
 ### Bare name (auto-mapped by declaration order)
 
@@ -170,20 +170,20 @@ The constra's formal parameters are explicitly mapped to the given template para
 def foo<T: int, :{T !`< T}>(T x) -> void { ... };
 ```
 
-A relation can be written directly inline without a named `constra`.
+A relation can be written directly inline without a named `constraint`.
 
 ---
 
 ## Merging Constraint Sets
 
 ```
-constra Combined = MyCS1 + MyCS2;
+constraint Combined = MyCS1 + MyCS2;
 ```
 
 All sources must have the same arity. Parameter names are taken from the first source. An explicit rename list can be provided:
 
 ```
-constra Combined(M, N) = MyCS1 + MyCS2;
+constraint Combined(M, N) = MyCS1 + MyCS2;
 ```
 
 The merge checks for mutex conflicts at definition time. The following pairs are mutually exclusive on the same operand pair and will error if both appear in the merged set:

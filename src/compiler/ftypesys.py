@@ -1171,6 +1171,7 @@ class TypeSystem:
     array_element_type: Optional['TypeSystem'] = None  # For tracking element type signedness in arrays
     is_pointer: bool = False
     pointer_depth: int = 0
+    is_const_pointer: bool = False
     custom_typename: Optional[str] = None
     storage_class: Optional[StorageClass] = None
     
@@ -4355,6 +4356,8 @@ class AssignmentTypeHandler:
         if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
             if symbol_entry.type_spec.is_const:
                 raise TypeError(f"AssignmentTypeHandler.handle_identifier_assignment: Cannot assign to const variable '{target_name}'")
+            if symbol_entry.type_spec.is_const_pointer:
+                raise TypeError(f"AssignmentTypeHandler.handle_identifier_assignment: Cannot reassign const pointer '{target_name}'")
 
         # Check if variable has been invalidated by a prior tie-transfer (~)
         if hasattr(builder, '_untied_vars') and target_name in builder._untied_vars:
@@ -4991,6 +4994,8 @@ class AssignmentTypeHandler:
             if symbol_entry and symbol_entry.type_spec and hasattr(symbol_entry.type_spec, 'is_const'):
                 if symbol_entry.type_spec.is_const:
                     raise TypeError(f"AssignmentTypeHandler.handle_compound_assignment: Cannot modify const variable '{target_expr.name}' with compound assignment")
+                if symbol_entry.type_spec.is_const_pointer:
+                    raise TypeError(f"AssignmentTypeHandler.handle_compound_assignment: Cannot reassign const pointer '{target_expr.name}' with compound assignment")
         
         # Map compound assignment tokens to binary operators
         op_map = {
