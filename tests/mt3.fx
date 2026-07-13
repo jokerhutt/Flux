@@ -20,17 +20,17 @@ comptime
         {
             comptime
             {
-                compiler.io.console.print(f"Stage 2: generating for type {T}\n");
+                compiler.io.console.print(f"Stage 2: generating for type {$~$T}\n");
                 emitflux
                 {
-                    def ~$f"clamp_{T}"(T val, T lo, T hi) -> T
+                    def ~$f"clamp_{T}"(~$T val, ~$T lo, ~$T hi) -> ~$T
                     {
                         if (val < lo) { return lo; };
                         if (val > hi) { return hi; };
                         return val;
                     };
 
-                    def ~$f"is_{T}"(T x) -> bool
+                    def ~$f"is_{T}"(~$T x) -> bool
                     {
                         return true;
                     };

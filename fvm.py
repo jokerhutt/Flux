@@ -2344,16 +2344,12 @@ class FluxVM:
 
     def _op_emitflux(self, source_text: str, var_names: list):
         """
-        Perform variable substitution on source_text using the current comptime
-        locals (passed as a snapshot via var_names: list of (name, slot) pairs),
-        then append ('flux', substituted_text) to emit_results.
+        Expand ~$f"..." and ~$i"...":{...} codification tokens in source_text,
+        then append ('flux', result) to emit_results.
 
-        Substitution rules:
-          - Plain identifiers: replace each occurrence of `name` that appears
-            as a whole word with the string representation of its value.
-          - ~$f"..." format strings in the text are expanded: the embedded
-            {name} placeholders are replaced with the value, then the entire
-            ~$f"..." expression is replaced with the resulting identifier text.
+        Everything else — identifiers, strings, f-strings — is passed through
+        verbatim.  Variable substitution is NOT performed on the surrounding
+        source text; that is entirely the job of the ~$f / ~$i operators.
         """
         frame = self.frames[-1] if self.frames else None
 
@@ -2368,35 +2364,84 @@ class FluxVM:
                 return v.data.decode('utf-8', errors='replace')
             return str(v.data)
 
-        # Build name -> Val mapping from the provided snapshot (for expression evaluation)
+        # Build name -> Val and name -> str mappings for codify expressions.
         local_vals: Dict[str, Val] = {}
         for name, slot in var_names:
             if frame is not None and slot < len(frame.locals):
                 local_vals[name] = frame.locals[slot]
             else:
                 local_vals[name] = Val(TTag.INT, 0)
+        subst: Dict[str, str] = {name: val_to_str(v) for name, v in local_vals.items()}
 
-        # Build name -> value-string mapping from the provided snapshot
-        subst: Dict[str, str] = {}
-        for name, v in local_vals.items():
-            subst[name] = val_to_str(v)
-
-        import re
+        def _scan_codify_token(src: str, i: int):
+            """
+            If src[i:] is a ~$f"..." or ~$i"...":{...} or ~$IDENT token, consume and
+            return (kind, body, exprs_or_None, end_i).  Otherwise None.
+            kind is 'f', 'i', or 'v' (bare variable).
+            """
+            n = len(src)
+            if i + 2 >= n or src[i] != '~' or src[i+1] != '$':
+                return None
+            kind = src[i+2]
+            # ~$f"..." or ~$i"..." codify expression — must check BEFORE bare ident
+            # because 'f' and 'i' are valid ident chars but have special meaning here.
+            if kind in ('f', 'i') and i + 3 < n and src[i+3] == '"':
+                pass  # fall through to quoted body scanner below
+            # ~$IDENT  — bare variable substitution
+            elif src[i+2].isalpha() or src[i+2] == '_':
+                j = i + 2
+                while j < n and (src[j].isalnum() or src[j] == '_'):
+                    j += 1
+                name = src[i+2:j]
+                return ('v', name, None, j)
+            else:
+                return None
+            if i + 3 >= n or src[i+3] != '"':
+                return None
+            j = i + 4
+            body_chars = []
+            while j < n:
+                c = src[j]
+                if c == '\\':
+                    body_chars.append(src[j:j+2])
+                    j += 2
+                    continue
+                if c == '"':
+                    j += 1
+                    break
+                body_chars.append(c)
+                j += 1
+            body = ''.join(body_chars)
+            if kind == 'f':
+                return ('f', body, None, j)
+            # ~$i: expect :{expr;expr;...}
+            while j < n and src[j] in (' ', '\t', '\n', '\r'):
+                j += 1
+            if j >= n or src[j] != ':':
+                return None
+            j += 1
+            while j < n and src[j] in (' ', '\t', '\n', '\r'):
+                j += 1
+            if j >= n or src[j] != '{':
+                return None
+            j += 1
+            exprs_chars = []
+            while j < n and src[j] != '}':
+                exprs_chars.append(src[j])
+                j += 1
+            if j < n:
+                j += 1
+            exprs = [e.strip() for e in ''.join(exprs_chars).split(';') if e.strip()]
+            return ('i', body, exprs, j)
 
         def _eval_istr_expr(expr_text: str) -> str:
-            """
-            Evaluate a single i-string positional expression against current locals.
-            Supports: bare identifier, identifier[identifier], identifier[integer].
-            Array subscripts are resolved directly against local_vals.
-            """
+            """Evaluate one ~$i positional expression against current locals."""
             expr_text = expr_text.strip()
-            # Try identifier[index]
-            m = re.fullmatch(r'(\w+)\[(\w+)\]', expr_text)
-            if m:
-                arr_name = m.group(1)
-                idx_name = m.group(2)
+            bracket = expr_text.find('[')
+            if bracket != -1 and expr_text.endswith(']'):
+                arr_name = expr_text[:bracket]
+                idx_name = expr_text[bracket+1:-1]
                 arr_val  = local_vals.get(arr_name)
-                # Resolve index: may be a local name or a bare integer literal
                 if idx_name.lstrip('-').isdigit():
                     idx = int(idx_name)
                 else:
@@ -2407,200 +2452,79 @@ class FluxVM:
                     if 0 <= idx < len(elements):
                         return val_to_str(elements[idx])
                 return '0'
-            # Bare identifier
-            if re.fullmatch(r'\w+', expr_text):
+            if expr_text and all(c.isalnum() or c == '_' for c in expr_text):
                 return subst.get(expr_text, expr_text)
-            # Fallback: plain text substitute and return
-            result = expr_text
-            for nm, vs in subst.items():
-                result = re.sub(r'\b' + re.escape(nm) + r'\b', vs, result)
-            return result
+            return expr_text
 
-        def expand_codify_istr(m):
-            """Expand ~$i"template":{expr1;expr2;} into the resulting identifier."""
-            template   = m.group(1)
-            exprs_text = m.group(2)
-            exprs = [e.strip() for e in exprs_text.split(';') if e.strip()]
-            result = ''
-            slot   = 0
-            i      = 0
-            while i < len(template):
-                if template[i] == '{' and i + 1 < len(template) and template[i + 1] == '}':
-                    if slot < len(exprs):
-                        result += _eval_istr_expr(exprs[slot])
-                        slot += 1
-                    i += 2
+        def _expand_fstr_body(body: str) -> str:
+            """
+            Expand {name} slots in a ~$f body.
+            Bare text outside {} is copied verbatim — NOT substituted.
+            ~$f"clamp_{T}" -> "clamp_int"
+            ~$f"is_T"      -> "is_T"   (no braces, nothing touched)
+            """
+            out = []
+            k   = 0
+            nb  = len(body)
+            while k < nb:
+                ch = body[k]
+                if ch == '{' and k+1 < nb and body[k+1] != '{':
+                    k += 1
+                    name_chars = []
+                    while k < nb and body[k] != '}':
+                        name_chars.append(body[k])
+                        k += 1
+                    out.append(subst.get(''.join(name_chars), ''.join(name_chars)))
+                    if k < nb:
+                        k += 1
+                elif ch == '{' and k+1 < nb and body[k+1] == '{':
+                    out.append('{')
+                    k += 2
                 else:
-                    result += template[i]
-                    i += 1
-            return result
-
-        # Expand ~$i"...":{...} expressions first -- i-string codification.
-        # These must be evaluated (array subscripts, locals) before any text substitution.
-        text = re.sub(r'~\$i"([^"]*)":\{([^}]*)\}', expand_codify_istr, source_text)
-
-        # Expand ~$f"..." expressions
-        def expand_codify_fstr(m):
-            fstr_body = m.group(1)
-            # Replace {name} placeholders inside the f-string body
-            def replace_placeholder(pm):
-                pname = pm.group(1)
-                return subst.get(pname, pname)
-            expanded = re.sub(r'\{(\w+)\}', replace_placeholder, fstr_body)
-            return expanded  # result is the bare identifier text
-
-        text = re.sub(r'~\$f"([^"]*)"', expand_codify_fstr, text)
-
-        # Replace whole-word variable names with their values,
-        # but only outside of string literals (single- or double-quoted).
-        # Inside f-strings, {name} interpolation placeholders are substituted;
-        # the surrounding quoted text is left verbatim.
-        # Plain (non-f) strings are never touched.
-        def _subst_outside_strings(src: str, substitutions: dict) -> str:
-            """
-            Single-pass character scanner over emitted Flux source text.
-
-            Code regions (outside all string literals):
-              Whole-word substitution for every name in `substitutions`.
-
-            f-string regions (f"..." or f'...'):
-              The quoted body is kept verbatim EXCEPT that {name} slots whose
-              name is a key in `substitutions` are replaced with the value.
-              This lets  f"...{T}..."  resolve to e.g. "...int..."  when T="int".
-
-            Plain string regions ("..." or '...'):
-              Passed through completely unchanged.  A bare `T` inside a plain
-              string is NOT substituted — the user must use an f-string for that.
-
-            Backslash escapes inside strings are honoured so that \\" never
-            prematurely closes a double-quoted literal.
-            """
-
-            def _is_ident_char(c: str) -> bool:
-                return c.isalnum() or c == '_'
-
-            def _apply_subst(piece: str) -> str:
-                """Whole-word substitution on a code-region piece."""
-                for nm, vs in substitutions.items():
-                    nm_len = len(nm)
-                    result = []
-                    j = 0
-                    while j < len(piece):
-                        if (piece[j:j + nm_len] == nm
-                                and (j == 0 or not _is_ident_char(piece[j - 1]))
-                                and (j + nm_len == len(piece)
-                                     or not _is_ident_char(piece[j + nm_len]))):
-                            result.append(vs)
-                            j += nm_len
-                        else:
-                            result.append(piece[j])
-                            j += 1
-                    piece = ''.join(result)
-                return piece
-
-            def _subst_fstring_body(body: str, quote: str) -> str:
-                """
-                Walk the content of an f-string (between the quotes, not
-                including f" prefix or closing ") and substitute {name} slots.
-                Returns the rewritten body (without surrounding quotes).
-                """
-                out = []
-                k   = 0
-                n   = len(body)
-                while k < n:
-                    ch = body[k]
-                    if ch == '{':
-                        if k + 1 < n and body[k + 1] == '{':
-                            # Escaped {{ — pass through
-                            out.append('{{')
-                            k += 2
-                            continue
-                        # Interpolation slot: collect until matching '}'
-                        k += 1
-                        slot_chars = []
-                        while k < n and body[k] != '}':
-                            slot_chars.append(body[k])
-                            k += 1
-                        slot_name = ''.join(slot_chars)
-                        if slot_name in substitutions:
-                            out.append(substitutions[slot_name])
-                        else:
-                            out.append('{')
-                            out.append(slot_name)
-                            out.append('}')
-                        if k < n:   # skip closing '}'
-                            k += 1
-                    else:
-                        out.append(ch)
-                        k += 1
-                return ''.join(out)
-
-            out      = []
-            code_buf = []
-            i        = 0
-            n        = len(src)
-
-            def flush_code():
-                if code_buf:
-                    out.append(_apply_subst(''.join(code_buf)))
-                    code_buf.clear()
-
-            while i < n:
-                ch = src[i]
-
-                # f-string opener: f" or f\'
-                # The 'f' must not be preceded by an identifier character
-                # (e.g. 'stuff_f"' is not an f-string).
-                if (ch == 'f'
-                        and i + 1 < n and src[i + 1] in ('"', "'")
-                        and (i == 0 or not _is_ident_char(src[i - 1]))):
-                    quote     = src[i + 1]
-                    i        += 2          # skip 'f' and opening quote
-                    body_chars = []
-                    while i < n:
-                        c = src[i]
-                        if c == '\\':
-                            body_chars.append(src[i:i + 2])
-                            i += 2
-                            continue
-                        if c == quote:
-                            i += 1
-                            break
-                        body_chars.append(c)
-                        i += 1
-                    flush_code()
-                    body = ''.join(body_chars)
-                    out.append('f' + quote + _subst_fstring_body(body, quote) + quote)
-                    continue
-
-                # Plain string opener: " or '
-                if ch in ('"', "'"):
-                    flush_code()
-                    quote     = ch
-                    str_start = i
-                    i        += 1
-                    while i < n:
-                        c = src[i]
-                        if c == '\\':
-                            i += 2
-                            continue
-                        if c == quote:
-                            i += 1
-                            break
-                        i += 1
-                    out.append(src[str_start:i])   # verbatim, no substitution
-                    continue
-
-                # Ordinary code character
-                code_buf.append(ch)
-                i += 1
-
-            flush_code()
+                    out.append(ch)
+                    k += 1
             return ''.join(out)
 
-        text = _subst_outside_strings(text, subst)
+        def _expand_istr(template: str, exprs: list) -> str:
+            """Fill {} slots in a ~$i template with evaluated positional exprs."""
+            out  = []
+            slot = 0
+            k    = 0
+            while k < len(template):
+                if template[k] == '{' and k+1 < len(template) and template[k+1] == '}':
+                    if slot < len(exprs):
+                        out.append(_eval_istr_expr(exprs[slot]))
+                        slot += 1
+                    k += 2
+                else:
+                    out.append(template[k])
+                    k += 1
+            return ''.join(out)
 
-        self.emit_results.append(('flux', text))
+        # Single-pass scan: expand ~$f/~$i tokens; copy everything else verbatim.
+        out_parts = []
+        i         = 0
+        src       = source_text
+        n         = len(src)
+
+        while i < n:
+            ch = src[i]
+            if ch == '~' and i+1 < n and src[i+1] == '$':
+                tok = _scan_codify_token(src, i)
+                if tok is not None:
+                    kind, body, exprs, new_i = tok
+                    if kind == 'f':
+                        out_parts.append(_expand_fstr_body(body))
+                    elif kind == 'i':
+                        out_parts.append(_expand_istr(body, exprs))
+                    else:  # 'v' -- bare ~$IDENT
+                        out_parts.append(subst.get(body, body))
+                    i = new_i
+                    continue
+            out_parts.append(ch)
+            i += 1
+
+        self.emit_results.append(('flux', ''.join(out_parts)))
 
     # ------------------------------------------------------------------
     # Helpers

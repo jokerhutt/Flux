@@ -8494,6 +8494,8 @@ class CodegenVisitor:
 
         # Build a captured scope: module-level constants + previously persisted comptime locals
         captured_scope: dict = dict(self._comptime_locals)
+        if self._comptime_vm is not None:
+            captured_scope.update(self._comptime_vm._globals)
         if module is not None:
             for name, gv in module.globals.items():
                 try:
@@ -8667,7 +8669,7 @@ class CodegenVisitor:
             if not (isinstance(entry, tuple) and len(entry) >= 2 and entry[0] == 'flux'):
                 continue
             flux_text = entry[1]
-            #print(f"DEBUG flux_text: {flux_text[:300]!r}", flush=True)
+            #print(f"DEBUG flux_text: {flux_text!r}", flush=True)
             # Re-lex and re-parse the emitted text
             try:
                 sub_lexer = FluxLexer(flux_text)
