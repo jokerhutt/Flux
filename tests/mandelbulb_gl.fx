@@ -1,7 +1,8 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <opengl.fx>;
 
-using standard::system::windows;
-using standard::math;
+using standard::system::windows,
+      standard::math,
+      OpenGL;
 
 // ============================================================================
 // Mandelbulb - GPU Raymarched 3D Fractal
@@ -13,15 +14,14 @@ using standard::math;
 //   Left / Right  = spin faster / slower
 // ============================================================================
 
-const int WIN_W = 900;
-const int WIN_H = 900;
-
-const int VK_W     = 0x57;
-const int VK_S     = 0x53;
-const int VK_UP    = 0x26;
-const int VK_DOWN  = 0x28;
-const int VK_LEFT  = 0x25;
-const int VK_RIGHT = 0x27;
+const int WIN_W    = 900,
+          WIN_H    = 900,
+          VK_W     = 0x57,
+          VK_S     = 0x53,
+          VK_UP    = 0x26,
+          VK_DOWN  = 0x28,
+          VK_LEFT  = 0x25,
+          VK_RIGHT = 0x27;
 
 // ============================================================================
 // GLSL shader sources.

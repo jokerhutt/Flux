@@ -2451,9 +2451,154 @@ class FluxVM:
 
         text = re.sub(r'~\$f"([^"]*)"', expand_codify_fstr, text)
 
-        # Replace whole-word variable names with their values
-        for name, value_str in subst.items():
-            text = re.sub(r'\b' + re.escape(name) + r'\b', value_str, text)
+        # Replace whole-word variable names with their values,
+        # but only outside of string literals (single- or double-quoted).
+        # Inside f-strings, {name} interpolation placeholders are substituted;
+        # the surrounding quoted text is left verbatim.
+        # Plain (non-f) strings are never touched.
+        def _subst_outside_strings(src: str, substitutions: dict) -> str:
+            """
+            Single-pass character scanner over emitted Flux source text.
+
+            Code regions (outside all string literals):
+              Whole-word substitution for every name in `substitutions`.
+
+            f-string regions (f"..." or f'...'):
+              The quoted body is kept verbatim EXCEPT that {name} slots whose
+              name is a key in `substitutions` are replaced with the value.
+              This lets  f"...{T}..."  resolve to e.g. "...int..."  when T="int".
+
+            Plain string regions ("..." or '...'):
+              Passed through completely unchanged.  A bare `T` inside a plain
+              string is NOT substituted — the user must use an f-string for that.
+
+            Backslash escapes inside strings are honoured so that \\" never
+            prematurely closes a double-quoted literal.
+            """
+
+            def _is_ident_char(c: str) -> bool:
+                return c.isalnum() or c == '_'
+
+            def _apply_subst(piece: str) -> str:
+                """Whole-word substitution on a code-region piece."""
+                for nm, vs in substitutions.items():
+                    nm_len = len(nm)
+                    result = []
+                    j = 0
+                    while j < len(piece):
+                        if (piece[j:j + nm_len] == nm
+                                and (j == 0 or not _is_ident_char(piece[j - 1]))
+                                and (j + nm_len == len(piece)
+                                     or not _is_ident_char(piece[j + nm_len]))):
+                            result.append(vs)
+                            j += nm_len
+                        else:
+                            result.append(piece[j])
+                            j += 1
+                    piece = ''.join(result)
+                return piece
+
+            def _subst_fstring_body(body: str, quote: str) -> str:
+                """
+                Walk the content of an f-string (between the quotes, not
+                including f" prefix or closing ") and substitute {name} slots.
+                Returns the rewritten body (without surrounding quotes).
+                """
+                out = []
+                k   = 0
+                n   = len(body)
+                while k < n:
+                    ch = body[k]
+                    if ch == '{':
+                        if k + 1 < n and body[k + 1] == '{':
+                            # Escaped {{ — pass through
+                            out.append('{{')
+                            k += 2
+                            continue
+                        # Interpolation slot: collect until matching '}'
+                        k += 1
+                        slot_chars = []
+                        while k < n and body[k] != '}':
+                            slot_chars.append(body[k])
+                            k += 1
+                        slot_name = ''.join(slot_chars)
+                        if slot_name in substitutions:
+                            out.append(substitutions[slot_name])
+                        else:
+                            out.append('{')
+                            out.append(slot_name)
+                            out.append('}')
+                        if k < n:   # skip closing '}'
+                            k += 1
+                    else:
+                        out.append(ch)
+                        k += 1
+                return ''.join(out)
+
+            out      = []
+            code_buf = []
+            i        = 0
+            n        = len(src)
+
+            def flush_code():
+                if code_buf:
+                    out.append(_apply_subst(''.join(code_buf)))
+                    code_buf.clear()
+
+            while i < n:
+                ch = src[i]
+
+                # f-string opener: f" or f\'
+                # The 'f' must not be preceded by an identifier character
+                # (e.g. 'stuff_f"' is not an f-string).
+                if (ch == 'f'
+                        and i + 1 < n and src[i + 1] in ('"', "'")
+                        and (i == 0 or not _is_ident_char(src[i - 1]))):
+                    quote     = src[i + 1]
+                    i        += 2          # skip 'f' and opening quote
+                    body_chars = []
+                    while i < n:
+                        c = src[i]
+                        if c == '\\':
+                            body_chars.append(src[i:i + 2])
+                            i += 2
+                            continue
+                        if c == quote:
+                            i += 1
+                            break
+                        body_chars.append(c)
+                        i += 1
+                    flush_code()
+                    body = ''.join(body_chars)
+                    out.append('f' + quote + _subst_fstring_body(body, quote) + quote)
+                    continue
+
+                # Plain string opener: " or '
+                if ch in ('"', "'"):
+                    flush_code()
+                    quote     = ch
+                    str_start = i
+                    i        += 1
+                    while i < n:
+                        c = src[i]
+                        if c == '\\':
+                            i += 2
+                            continue
+                        if c == quote:
+                            i += 1
+                            break
+                        i += 1
+                    out.append(src[str_start:i])   # verbatim, no substitution
+                    continue
+
+                # Ordinary code character
+                code_buf.append(ch)
+                i += 1
+
+            flush_code()
+            return ''.join(out)
+
+        text = _subst_outside_strings(text, subst)
 
         self.emit_results.append(('flux', text))
 

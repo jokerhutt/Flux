@@ -4,10 +4,9 @@ using standard::io::console;
 
 def main() -> int
 {
-label a1:
-	int x = 5;
-label a2:
-	print(x); print();
-    goto a1;
+	for (int x = 1; x < 100; x *= 2)
+	{
+		println(x);
+	};
 	return 0;
 };

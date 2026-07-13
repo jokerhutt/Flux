@@ -1,8 +1,8 @@
-#import "redstandard.fx", "redmath.fx", "redformat.fx";
+#import <standard.fx>, <math.fx>, <format.fx>;
 
-using standard::io::console;
-using standard::format;
-using standard::math;
+using standard::io::console,
+      standard::format,
+      standard::math;
 
 def mandelbrot(float x0, float y0, int max_iter) -> int
 {

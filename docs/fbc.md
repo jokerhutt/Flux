@@ -51,6 +51,12 @@ The Flux Borrow Checker (`fbc.py`) is a standalone static analysis tool that per
 
 - Data races on non-pointer types.
 
+**What it needs to work:**  
+- No changes to your source program  
+- No lifetime annotation  
+- Simply add `--borrowcheck` to the command line (blocking)  
+- Use `--borrowcheck-warn` for non-blocking checks
+
 ---
 
 ## 2. Architecture
@@ -64,7 +70,7 @@ collect_fx_files()
     ▼
 parse_file()  ──────────────────────────────────────────────────────────┐
     │  FXPreprocessor → FluxLexer → FluxParser → fast.Program           │
-    │                                                                    │
+    │                                                                   │
     ▼                                                              line_map[]
 CallGraph.collect()
     │  walks fast.Program, indexes FunctionDef nodes by mangled name

@@ -6349,11 +6349,12 @@ class FluxParser:
             self.advance()  # consume '<-'
             right = self.chain_expression()
             
+
             if isinstance(expr, FunctionCall):
                 expr.arguments.insert(0, right)
                 return expr
             else:
-                self.error("Chain arrow requires function call or acceptor block on left side")
+                self.error("Chain arrow requires function call on left side")
         
         return expr
 

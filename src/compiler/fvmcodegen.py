@@ -1441,6 +1441,21 @@ class FVMCodegen:
         def _emit_part(part):
             if isinstance(part, str):
                 self._emit(_instr(Op.PUSH, Val(TTag.BYTES, part.encode('utf-8'))))
+            elif isinstance(part, Identifier) and not (
+                part.name in self._locals
+                or part.name in self._block_globals
+                or part.name in self._outer_globals
+            ):
+                # The identifier is not defined in this comptime scope.
+                # This happens when an f-string inside an `emitflux { comptime { ... } }`
+                # block references a variable from the *enclosing* comptime loop (e.g. T,
+                # TAG) -- those variables are comptime-local to the outer codegen instance
+                # and won't be in captured_scope.  Emit the placeholder as the literal
+                # text "{name}" so that the outer EMITFLUX opcode can substitute it at
+                # VM execution time, exactly as it would for a plain identifier reference
+                # outside strings.
+                placeholder = '{' + part.name + '}'
+                self._emit(_instr(Op.PUSH, Val(TTag.BYTES, placeholder.encode('utf-8'))))
             else:
                 self._visit_expr(part)
                 self._emit(_instr(Op.INT_TO_STR))

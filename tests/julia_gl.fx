@@ -1,7 +1,8 @@
-#import "standard.fx", "redmath.fx", "redwindows.fx", "redopengl.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>;
 
-using standard::system::windows;
-using standard::math;
+using standard::system::windows,
+      standard::math,
+      OpenGL;
 
 // ============================================================================
 // Julia Set - OpenGL Viewer

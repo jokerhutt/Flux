@@ -8685,9 +8685,7 @@ class CodegenVisitor:
                         sub_stmts.append(stmt)
             except Exception as e:
                 raise FluxCodegenError(
-                    f'comptime emitflux parse failed: {e}\n  emitted text: {flux_text!r}',
-                    node, module
-                )
+                    f'comptime emitflux parse failed: {e}\n  emitted text: {flux_text!r}', node, module)
             # Visit each emitted statement
             for stmt in sub_stmts:
                 #print(f"DEBUG visiting emitted stmt: {type(stmt).__name__}", flush=True)
