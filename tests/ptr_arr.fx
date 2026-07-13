@@ -1,8 +1,8 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
-int a, b, c = 5, 10, 20;
+int a = 5, b = 10, c = 20;
 
 def main() -> int
 {
@@ -14,15 +14,12 @@ def main() -> int
 
     int*[] piarr = [pa, pb, pc];
 
-    print
-    (
-    i"{} {} {}"
+    print(i"{} {} {}"
     :{
-        (piarr[0] + 4);
-        piarr[1];
-        piarr[2];
-    }
-    );
+        *piarr[0];
+        *piarr[1];
+        *piarr[2];
+    });
 
 	return 0;
 };

@@ -1,4 +1,6 @@
-#import "standard.fx";
+#import <standard.fx>;
+
+using standard::io::console;
 
 unsigned data{7} as i7;
 unsigned data{21} as i21;
@@ -9,7 +11,7 @@ i7 b = 8;
 i7 c = 16;
 i21 test = [a, b, c];
 
-bit a2, b2, c2 = 1, 0, 1;
+bit a2 = 1, b2 = 0, c2 = 1;
 i3 test2 = [a2, b2, c2];
 
 def main() -> int

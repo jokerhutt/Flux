@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 //!using standard::io::console;
 !using standard::io::file;
@@ -6,6 +6,5 @@
 
 def main() -> int
 {
-    print("\0");
 	return 0;
 };

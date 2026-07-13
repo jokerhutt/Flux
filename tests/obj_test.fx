@@ -1,8 +1,15 @@
-#import "standard.fx";
+#import <standard.fx>;
+
+using standard::io::console;
 
 object test
 {
     def __init() -> this
+    {
+        return this;
+    };
+
+    def __expr() -> test*
     {
         return this;
     };
@@ -18,6 +25,6 @@ def main() -> int
 
     t.__exit();
 
-    t.pv();
+    t.pv();    // ERROR
     return 0;
 };

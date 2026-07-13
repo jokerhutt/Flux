@@ -9,8 +9,7 @@
 //   - Impulse kick applied to a body
 //
 
-#import "standard.fx";
-#import "physics.fx";
+#import <standard.fx>, <physics.fx>;
 
 using standard::io::console;
 using standard::vectors;

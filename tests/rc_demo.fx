@@ -17,14 +17,11 @@
 //   ESC           - Quit
 //
 
-#import "standard.fx", "windows.fx", "opengl.fx", "threading.fx", "atomics.fx", "raycasting.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <raycasting.fx>;
 
-using standard::system::windows;
-using standard::math;
-using standard::memory::allocators::stdheap;
-using standard::threading;
-using standard::atomic;
-using raycaster;
+using standard::system::windows,
+      standard::atomic,
+      raycaster;
 
 // ============================================================================
 // CONSTANTS
@@ -53,7 +50,7 @@ global RCWorkOrder g_work;
 def rc_worker(void* arg) -> void*
 {
     rc_camera_sync(g_work.scene.cam, g_work.scene.player);
-    rc_render(g_work.scene, g_work.pixels);
+    rc_render(g_work.scene, (ulong*)g_work.pixels, (@)0d);
     store32(@g_work.done, 1);
     return (void*)0;
 };
@@ -344,23 +341,23 @@ def build_scene_castle(RCMap*            m,
     // ---- Textures ----
     // Slot 1: stone
     tex_px = gen_tex_stone(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 2: wood
     tex_px = gen_tex_wood(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 3: grass floor
     tex_px = gen_tex_grass(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 4: pillar sprite
     tex_px = gen_tex_pillar(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 5: torch sprite
     tex_px = gen_tex_torch(32, 64);
-    rc_palette_add(pal, tex_px, 32, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 32, 64);
 
     // ---- Map ----
     m.floor_color = (u32)0xFF304020;
@@ -480,11 +477,11 @@ def build_scene_neon(RCMap*            m,
 
     // Slot 1: neon grid
     tex_px = gen_tex_neon(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 2: pillar (reused)
     tex_px = gen_tex_pillar(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     m.floor_color = (u32)0xFF080810;
     m.ceil_color  = (u32)0xFF080810;
@@ -583,19 +580,19 @@ def build_scene_arena(RCMap*            m,
 
     // Slot 1: stone wall
     tex_px = gen_tex_stone(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 2: grass floor
     tex_px = gen_tex_grass(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 3: pillar
     tex_px = gen_tex_pillar(64, 64);
-    rc_palette_add(pal, tex_px, 64, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 64, 64);
 
     // Slot 4: torch
     tex_px = gen_tex_torch(32, 64);
-    rc_palette_add(pal, tex_px, 32, 64);
+    rc_palette_add(pal, (ulong*)tex_px, 32, 64);
 
     m.floor_color = (u32)0xFF304020;
     m.ceil_color  = (u32)0xFF87CEEB;

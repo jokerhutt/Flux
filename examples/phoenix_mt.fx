@@ -1,10 +1,11 @@
-#import "standard.fx", "math.fx", "windows.fx", "opengl.fx", "threading.fx";
+#import <standard.fx>, <math.fx>, <windows.fx>, <opengl.fx>, <threading.fx>;
 
 using standard::system::windows,
       standard::math,
       standard::atomic,
       standard::threading,
-      standard::io::console;
+      standard::io::console,
+      OpenGL;
 
 // ============================================================================
 // Phoenix Fractal - OpenGL Viewer

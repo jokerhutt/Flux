@@ -9,7 +9,7 @@
 // The 16 panels use: plot_line3d, plot_scatter3d, plot_scatter3d_circles,
 // plot_bars3d, and combinations thereof.
 
-#import "standard.fx", "opengl.fx", "oglgraphing.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <oglgraphing.fx>;
 
 using standard::system::windows,
       standard::math,
@@ -21,8 +21,6 @@ const int COLS    = 4,
           ROWS    = 4,
           CURVE_N = 80,
           BAR_N   = 5;
-
-extern { def !! GetClientRect(HWND hwnd, RECT* r) -> bool; };
 
 // ============================================================================
 // Panel setup: divides the client area into a COLS x ROWS grid

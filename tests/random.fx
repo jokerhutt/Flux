@@ -1,6 +1,4 @@
-#import "redstandard.fx";
-#import "redformat.fx";
-#import "redrandom.fx";
+#import <standard.fx>, <format.fx>, <random.fx>;
 
 using standard::format,
       standard::format::colors,
@@ -128,7 +126,10 @@ def main() -> int
     print_banner("RANDOM BYTES\0", 70);
     print("\n\0");
     
-    byte[16] byte_buffer;
+    byte[16] byte_buffer,
+             hex_chars = ['0', '1', '2', '3', '4', '5', '6', '7',
+                          '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
+    byte[3] hex_out;
     
     print("Random 16-byte sequences (hex):\n\0");
     for (int i = 0; i < 3; i++)
@@ -136,15 +137,10 @@ def main() -> int
         random_bytes(@rng, byte_buffer, (u64)16);
         
         print("  \0");
-        byte[3] hex_out;
-        hex_out[2] = (byte)0;
+        hex_out[2] = void;
         
         for (int j = 0; j < 16; j++)
         {
-            byte[16] hex_chars = [
-                '0', '1', '2', '3', '4', '5', '6', '7',
-                '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'
-            ];
             
             hex_out[0] = hex_chars[(byte_buffer[j] >> 4) & 0x0F];
             hex_out[1] = hex_chars[byte_buffer[j] & 0x0F];

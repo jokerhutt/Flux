@@ -1,27 +1,24 @@
-#import "standard.fx";
+#import <standard.fx>, <math.fx>;
 
-#import "redmath.fx";
+using standard::io::console,
+      standard::math;
 
 def main() -> int
 {
-    i32 r = reverse_bits(1);
-    i32 p = popcount(67);
+    i32 r = 1;
+    r[0``31] = r[31``0];
     i32 l = log(100.0);
     i32 f = factorial(5);
     i32 k = sqrt(64);
     i32 x;
     i32 y;
     i32 z;
-    x = 0;
     y = 100;
+    println(r);
     z = max(x,y);
     if (r == 0b10000000000000000000000000000000)
     {
-        print("32-bit reverse_bits() success!\n\0");
-    };
-    if (p == 3)
-    {
-        print("32-bit popcount() success!\n\0");
+        print("32-bit [``] reversal success!\n\0");
     };
     if (l == 3)
     {
@@ -31,6 +28,7 @@ def main() -> int
     {
         print("32-bit factorial() success!\n\0");
     };
+    println(f"k = {k}");
     if (k == 8)
     {
         print("32-bit sqrt() success!\n\0");

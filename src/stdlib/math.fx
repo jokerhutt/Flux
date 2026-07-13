@@ -122,7 +122,11 @@ namespace standard
         def sqrt(i8 x) -> i8
         {
             if (x <= 0) { return 0; };
-            i8 y = x / 2, prev_y = 0;
+            if (x == 1) { return 1; };  // Avoid division by zero issues
+            
+            i8 y = x / 2,
+               prev_y = x;  // Start with prev_y > y
+            
             while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
@@ -133,7 +137,11 @@ namespace standard
         def sqrt(i16 x) -> i16
         {
             if (x <= 0) { return 0; };
-            i16 y = x / 2, prev_y = 0;
+            if (x == 1) { return 1; };
+            
+            i16 y = x / 2,
+                prev_y = x;  // Start with prev_y > y
+            
             while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
@@ -144,7 +152,10 @@ namespace standard
         def sqrt(i32 x) -> i32
         {
             if (x <= 0) { return 0; };
-            i32 y = x / 2, prev_y = 0;
+            
+            i32 y = x / 2,
+                prev_y = x;
+            
             while (y != prev_y & y < prev_y)
             {
                 prev_y = y;
@@ -155,8 +166,68 @@ namespace standard
         def sqrt(i64 x) -> i64
         {
             if (x <= 0) { return 0; };
-            i64 y = x / 2, prev_y = 0;
+            if (x == 1) { return 1; };
+            
+            i64 y = x / 2,
+                prev_y = x;  // Start with prev_y > y
+            
             while (y != prev_y & y < prev_y)
+            {
+                prev_y = y;
+                y = (y + x / y) / 2;
+            };
+            return y;
+        };
+        def sqrt(byte x) -> byte
+        {
+            if (x <= 0) { return 0; };
+            
+            byte y = x,
+                 prev_y;
+            
+            while (y != prev_y)
+            {
+                prev_y = y;
+                y = (y + x / y) / 2;
+            };
+            return y;
+        };
+        def sqrt(u16 x) -> u16
+        {
+            if (x <= 0) { return 0; };
+            
+            u16 y = x,
+                prev_y;
+            
+            while (y != prev_y)
+            {
+                prev_y = y;
+                y = (y + x / y) / 2;
+            };
+            return y;
+        };
+        def sqrt(u32 x) -> u32
+        {
+            if (x <= 0) { return 0; };
+            
+            u32 y = x,
+                prev_y;
+            
+            while (y != prev_y)
+            {
+                prev_y = y;
+                y = (y + x / y) / 2;
+            };
+            return y;
+        };
+        def sqrt(u64 x) -> u64
+        {
+            if (x <= 0) { return 0; };
+            
+            u64 y = x,
+                prev_y;
+            
+            while (y != prev_y)
             {
                 prev_y = y;
                 y = (y + x / y) / 2;

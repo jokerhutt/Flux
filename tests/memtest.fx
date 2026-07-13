@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 namespace standard
 {
@@ -26,6 +26,11 @@ namespace standard
                 this.block_count = (size_t)0;
                 return this;
             };
+
+            def __expr() -> HeapAllocator*
+            {
+                return this;
+            };
             
             def __exit() -> void
             {
@@ -49,7 +54,7 @@ namespace standard
                         current.is_free = false;
                         return (void*)(current + (size_t)1);
                     };
-                    current = current.next;
+                    current = current.next; // cant find current for some fucking reason
                 };
                 
                 // No suitable block found, allocate new one

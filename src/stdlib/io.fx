@@ -573,7 +573,17 @@ namespace standard
                 standard::io::console::print(x);
                 standard::io::console::print();
             };
+            def println(i32 x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
             def println(uint x) -> void
+            {
+                standard::io::console::print(x);
+                standard::io::console::print();
+            };
+            def println(u32 x) -> void
             {
                 standard::io::console::print(x);
                 standard::io::console::print();

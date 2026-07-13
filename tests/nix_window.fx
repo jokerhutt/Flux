@@ -1,7 +1,7 @@
 // Flux Wayland Window Demo
 // 800x600 black background, title "Flux Window"
 
-#import "standard.fx", "redwayland.fx";
+#import <standard.fx>, <wayland.fx>;
 
 using standard::strings,
       standard::system::wayland,

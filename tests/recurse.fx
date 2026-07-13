@@ -1,14 +1,16 @@
-#import "standard.fx";
+#import <standard.fx>;
 
-u64 c = 0;
+using standard::io::console;
 
 def recurse(int c) -> void
 {
-    recurse(++c);
+    if (--c == 0) { return 0; };
+    println(f"Recurse {c}");
+    recurse(c);
 };
 
 def main() -> int
 {
-    recurse(c);
+    recurse(1000);
     return 0;
 };

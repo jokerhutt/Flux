@@ -1,6 +1,7 @@
-#import "standard.fx", "redrandom.fx";
+#import <standard.fx>, <random.fx>;
 
-using standard::random;
+using standard::io::console,
+      standard::random;
 
 // ============================================================================
 // Blackjack - OOP style
@@ -22,6 +23,11 @@ object Hand
     def __init() -> this
     {
         this.count = 0;
+        return this;
+    };
+
+    def __expr() -> Hand*
+    {
         return this;
     };
 
@@ -142,6 +148,11 @@ object Deck
         return this;
     };
 
+    def __expr() -> Deck*
+    {
+        return this;
+    };
+
     def __exit() -> void
     {
         return;
@@ -188,8 +199,14 @@ object Game
     def __init() -> this
     {
         pcg32_init(@this.rng);
-        this.deck  = Deck(@this.rng);
+        Deck d(@this.rng);
+        this.deck  = d;
         this.chips = 100;
+        return this;
+    };
+
+    def __expr() -> Game*
+    {
         return this;
     };
 

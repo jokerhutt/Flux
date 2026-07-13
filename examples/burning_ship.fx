@@ -1,4 +1,4 @@
-#import "standard.fx", "math.fx", "vectors.fx", "windows.fx", "opengl.fx", "threading.fx", "decimal.fx";
+#import <standard.fx>, <vectors.fx>, <windows.fx>, <opengl.fx>, <threading.fx>, <decimal.fx>;
 
 using standard::io::console,
       standard::system::windows,
@@ -6,7 +6,8 @@ using standard::io::console,
       standard::vectors,
       standard::atomic,
       standard::threading,
-      math::decimal;
+      math::decimal,
+      OpenGL;
 
 // ============================================================================
 // Burning Ship Fractal - OpenGL Viewer

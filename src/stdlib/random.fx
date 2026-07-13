@@ -306,7 +306,7 @@ namespace standard
         {
             u32 i = length - 1,
                 j,
-                tmp;
+                temp;
             
             while (i > 0u)
             {
