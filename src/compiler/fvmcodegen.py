@@ -66,6 +66,7 @@ from fast import (
     UsingStatement, NotUsingStatement,
     InlineAsm,
     TernaryOp,
+    Stringify,
 )
 from ftypesys import DataType, Operator
 
@@ -1387,6 +1388,7 @@ class FVMCodegen:
         elif t is TypeConvertExpression: return self._visit_cast(node)
         elif t is InlineAsm:           return self._visit_inline_asm(node)
         elif t is TernaryOp:           return self._visit_ternary_op(node)
+        elif t is Stringify:           return self._visit_stringify(node)
         else:
             raise FVMCodegenError(
                 f'fvmcodegen: unsupported expression in comptime: {type(node).__name__}',
@@ -1446,19 +1448,14 @@ class FVMCodegen:
                 or part.name in self._block_globals
                 or part.name in self._outer_globals
             ):
-                # The identifier is not defined in this comptime scope.
-                # This happens when an f-string inside an `emitflux { comptime { ... } }`
-                # block references a variable from the *enclosing* comptime loop (e.g. T,
-                # TAG) -- those variables are comptime-local to the outer codegen instance
-                # and won't be in captured_scope.  Emit the placeholder as the literal
-                # text "{name}" so that the outer EMITFLUX opcode can substitute it at
-                # VM execution time, exactly as it would for a plain identifier reference
-                # outside strings.
+                # Identifier not in scope — emit as "{name}" placeholder.
                 placeholder = '{' + part.name + '}'
                 self._emit(_instr(Op.PUSH, Val(TTag.BYTES, placeholder.encode('utf-8'))))
             else:
                 self._visit_expr(part)
-                self._emit(_instr(Op.INT_TO_STR))
+                # FStringLiteral/StringLiteral already push BYTES; skip INT_TO_STR.
+                if not isinstance(part, (FStringLiteral, StringLiteral)):
+                    self._emit(_instr(Op.INT_TO_STR))
 
         _emit_part(parts[0])
         for part in parts[1:]:
@@ -1528,6 +1525,30 @@ class FVMCodegen:
             return True
         loc = f' [{node.source_line}:{node.source_col}]' if node.source_line else ''
         raise NameError(f'fvmcodegen: undefined comptime variable {name!r}{loc}')
+
+    def _visit_stringify(self, node: Stringify):
+        """
+        Stringify operator $name in a comptime context.
+        Look up the name in comptime locals/globals and push its string
+        representation as BYTES.  If the name is not found, push the name
+        itself as a string (so $int -> "int" after the parser converts
+        keyword tokens to StringLiteral).
+        """
+        name = node.name
+        # Resolve from locals first, then block globals, then outer globals
+        val = None
+        if name in self._locals:
+            slot = self._locals[name]
+            self._emit(_instr(Op.LOCAL_GET, slot))
+            self._emit(_instr(Op.INT_TO_STR))
+            return True
+        if name in self._block_globals or name in self._outer_globals:
+            self._emit(_instr(Op.GLOBAL_GET, name))
+            self._emit(_instr(Op.INT_TO_STR))
+            return True
+        # Not found — push the name itself as a string literal
+        self._emit(_instr(Op.PUSH, Val(TTag.BYTES, name.encode("utf-8"))))
+        return True
 
     def _visit_binary_op(self, node: BinaryOp):
         op = node.operator
