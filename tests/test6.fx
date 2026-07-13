@@ -4,7 +4,7 @@
  
 using standard::io::console;
 
-trait TR<X>
+trait TR
 {
 	def foo<X>(X x) -> X;
 };

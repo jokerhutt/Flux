@@ -1,5 +1,4 @@
-#import "standard.fx";
-#import "cryptography.fx";
+#import <standard.fx>, <cryptography.fx>;
 
 using standard::crypto::hashing::SHA256,
       standard::io::console;

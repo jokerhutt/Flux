@@ -3005,7 +3005,7 @@ func standard__datetime___fmt_pad__$byteptr_intptr_int_int
     JNF 42
     LOCAL_GET 6
     LOCAL_GET 5
-    PUSH char:0
+    PUSH char:48
     LOCAL_GET 2
     PUSH int:10
     MOD
@@ -3079,7 +3079,7 @@ func standard__datetime___fmt_pad
     JNF 42
     LOCAL_GET 6
     LOCAL_GET 5
-    PUSH char:0
+    PUSH char:48
     LOCAL_GET 2
     PUSH int:10
     MOD
@@ -3153,7 +3153,7 @@ func _fmt_pad
     JNF 42
     LOCAL_GET 6
     LOCAL_GET 5
-    PUSH char:0
+    PUSH char:48
     LOCAL_GET 2
     PUSH int:10
     MOD
@@ -4848,13 +4848,13 @@ func standard__datetime___parse_digits__$byteptr_intptr_int_intptr
     ARRAY_LOAD
     GLOBAL_SET c
     GLOBAL_GET c
-    PUSH char:0
+    PUSH char:48
     CMP_LT
     DUP
     JIF 30
     POP
     GLOBAL_GET c
-    PUSH char:9
+    PUSH char:57
     CMP_GT
     JNF 34
     PUSH bool:false
@@ -4864,7 +4864,7 @@ func standard__datetime___parse_digits__$byteptr_intptr_int_intptr
     PUSH int:10
     MUL
     GLOBAL_GET c
-    PUSH char:0
+    PUSH char:48
     SUB
     CAST int
     ADD
@@ -4914,13 +4914,13 @@ func standard__datetime___parse_digits
     ARRAY_LOAD
     GLOBAL_SET c
     GLOBAL_GET c
-    PUSH char:0
+    PUSH char:48
     CMP_LT
     DUP
     JIF 30
     POP
     GLOBAL_GET c
-    PUSH char:9
+    PUSH char:57
     CMP_GT
     JNF 34
     PUSH bool:false
@@ -4930,7 +4930,7 @@ func standard__datetime___parse_digits
     PUSH int:10
     MUL
     GLOBAL_GET c
-    PUSH char:0
+    PUSH char:48
     SUB
     CAST int
     ADD
@@ -4980,13 +4980,13 @@ func _parse_digits
     ARRAY_LOAD
     GLOBAL_SET c
     GLOBAL_GET c
-    PUSH char:0
+    PUSH char:48
     CMP_LT
     DUP
     JIF 30
     POP
     GLOBAL_GET c
-    PUSH char:9
+    PUSH char:57
     CMP_GT
     JNF 34
     PUSH bool:false
@@ -4996,7 +4996,7 @@ func _parse_digits
     PUSH int:10
     MUL
     GLOBAL_GET c
-    PUSH char:0
+    PUSH char:48
     SUB
     CAST int
     ADD
@@ -9276,7 +9276,7 @@ PUSH int:0
 LOCAL_SET 95
 PUSH int:0
 LOCAL_SET 96
-PUSH ptr:2467535595248
+PUSH ptr:1925390739184
 LOCAL_SET 97
 PUSH int:69
 LOCAL_SET 98
@@ -9551,7 +9551,7 @@ PUSH int:0
 LOCAL_SET 95
 PUSH int:0
 LOCAL_SET 96
-PUSH ptr:2467535595248
+PUSH ptr:1925390739184
 LOCAL_SET 97
 PUSH int:69
 LOCAL_SET 98

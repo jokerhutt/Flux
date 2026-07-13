@@ -20,14 +20,13 @@
 // Expected: loss below 0.001 by ~3000 steps, test predictions visually match
 // the sine curve.
 
-#import "standard.fx";
-#import "neuralnet.fx";
+#import <standard.fx>, <neuralnet.fx>;
 
-using standard::autograd;
-using standard::neuralnet;
-using standard::random;
-using standard::math;
-using standard::io::console;
+using standard::autograd,
+      standard::neuralnet,
+      standard::random,
+      standard::math,
+      standard::io::console;
 
 // Number of training and test samples.
 #def N_TRAIN 32;

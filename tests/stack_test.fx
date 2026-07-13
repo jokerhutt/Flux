@@ -1,4 +1,4 @@
-#import "standard.fx", "redallocators.fx";
+#import <standard.fx>, <allocators.fx>;
 
 using standard::memory::allocators::stdstack,
       standard::io::console;

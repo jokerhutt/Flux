@@ -21,8 +21,7 @@
 // SGD with momentum converges more slowly than Adam on this problem
 // but should reach the same solution.
 
-#import "standard.fx";
-#import "neuralnet.fx";
+#import <standard.fx>, <neuralnet.fx>;
 
 using standard::autograd,
       standard::neuralnet,

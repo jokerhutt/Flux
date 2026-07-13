@@ -1,4 +1,4 @@
-#import "standard.fx", "math.fx", "format.fx";
+#import <standard.fx>, <math.fx>, <format.fx>;
 
 using standard::io::console,
       standard::format;

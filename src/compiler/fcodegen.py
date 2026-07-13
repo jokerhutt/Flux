@@ -1306,9 +1306,7 @@ class CodegenVisitor:
                     _pts = [p.type for p in _func.args]
                     if len(_pts) != 2:
                         continue
-                    if all(isinstance(pt, ir.PointerType) and
-                           not isinstance(pt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType))
-                           for pt in _pts):
+                    if all(isinstance(pt, ir.PointerType) for pt in _pts):
                         _ptr_overload_func = _func
                         break
 
@@ -1385,8 +1383,8 @@ class CodegenVisitor:
                         if rt == pt:
                             continue
                         if (isinstance(rt, ir.PointerType) and
-                                not isinstance(rt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)) and
-                                rt.pointee == pt):
+                                isinstance(pt, ir.PointerType) and
+                                rt.pointee == pt.pointee):
                             continue
                         if (isinstance(rt, ir.PointerType) and
                                 isinstance(rt.pointee, ir.ArrayType) and
@@ -1402,7 +1400,13 @@ class CodegenVisitor:
                     adapted = []
                     for i, (av, pt) in enumerate(zip([lhs, rhs], [p.type for p in overload_func.args])):
                         rt = av.type
-                        if (isinstance(rt, ir.PointerType) and
+                        if rt == pt:
+                            pass
+                        elif (isinstance(rt, ir.PointerType) and
+                                isinstance(pt, ir.PointerType) and
+                                rt.pointee == pt.pointee):
+                            pass  # pointer-to-same-struct, use as-is
+                        elif (isinstance(rt, ir.PointerType) and
                                 not isinstance(rt.pointee, (ir.ArrayType, ir.LiteralStructType, ir.IdentifiedStructType)) and
                                 rt.pointee == pt):
                             av = builder.load(av, name=f"op_deref_{i}")
@@ -1616,6 +1620,10 @@ class CodegenVisitor:
 
         # Shifts
         if node.operator in (Operator.BITSHIFT_LEFT, Operator.BITSHIFT_RIGHT):
+            if isinstance(lhs.type, ir.PointerType) or isinstance(rhs.type, ir.PointerType):
+                raise FluxCodegenError(
+                    f"Operator '{node.operator.value}' on pointer type has no matching overload",
+                    node, module)
             if lhs.type.width != rhs.type.width:
                 if rhs.type.width < lhs.type.width:
                     rhs = builder.zext(rhs, lhs.type)
@@ -2540,6 +2548,24 @@ class CodegenVisitor:
             if clobber_part:
                 clobber_list = re.findall(r'"([^"]+)"', clobber_part)
         final_input_operands = input_operands[:]
+        # Translate single-letter x86 register constraints to explicit llc-accepted form.
+        # llc rejects e.g. "=a" but accepts "={rax}".
+        _reg_constraint_map = {
+            'a': 'rax', 'b': 'rbx', 'c': 'rcx', 'd': 'rdx',
+            'S': 'rsi', 'D': 'rdi',
+        }
+        def _translate_reg_constraint(c):
+            prefix = ''
+            rest = c
+            if rest.startswith(('=', '+')):
+                prefix = rest[0]
+                rest = rest[1:]
+            mapped = _reg_constraint_map.get(rest)
+            if mapped is not None:
+                return f'{prefix}{{{mapped}}}'
+            return c
+        output_constraints = [_translate_reg_constraint(c) for c in output_constraints]
+
         final_constraints    = input_constraints[:]
         # Reg outputs go first in constraint string; returned as asm call value.
         # Memory outputs (=m/+m) are passed as pointer args.
@@ -8100,6 +8126,9 @@ class CodegenVisitor:
                        StructDefStatement, ObjectDef, ObjectDefStatement, _ContractDef)
         _tmpl_instances = [s for s in node.statements
                            if isinstance(s, _FunctionDef) and hasattr(s, '_source_namespace')]
+        #import sys as _sys
+        #_sys.stderr.write(f'[DEBUG pass3] len(node.statements)={len(node.statements)} _tmpl_instances={[(s.name, getattr(s,"_source_namespace","MISSING")) for s in _tmpl_instances]}\n')
+        #_sys.stderr.flush()
         _tmpl_emitted = set()
         # Find the index of the last NamespaceDef in node.statements so we know
         # when it is safe to flush template instantiations (all namespace functions
@@ -8108,18 +8137,34 @@ class CodegenVisitor:
         for _i, _s in enumerate(node.statements):
             if isinstance(_s, (NamespaceDef, NamespaceDefStatement)):
                 _last_ns_idx = _i
+        _namespaces_done = (_last_ns_idx == -1)
         for _stmt_idx, stmt in enumerate(node.statements):
             if isinstance(stmt, _skip_types):
                 continue
             if isinstance(stmt, _FunctionDef) and hasattr(stmt, '_source_namespace'):
                 continue  # template instantiation - emitted after last namespace
+            # Flush template instantiations once all namespaces have been processed.
+            if not _namespaces_done and (not isinstance(stmt, (NamespaceDef, NamespaceDefStatement))):
+                _namespaces_done = True
+                for _t in _tmpl_instances:
+                    if id(_t) not in _tmpl_emitted:
+                        _tmpl_emitted.add(id(_t))
+                        self.visit(_t, builder, module)
             self.visit(stmt, builder, module)
-            # After processing the last namespace, flush all template instantiations.
+            # Also flush after the last namespace in case all statements are namespaces.
             if _stmt_idx == _last_ns_idx:
                 for _t in _tmpl_instances:
                     if id(_t) not in _tmpl_emitted:
                         _tmpl_emitted.add(id(_t))
                         self.visit(_t, builder, module)
+
+        # Flush any template instantiations not yet emitted (e.g. when there are
+        # no namespaces so _last_ns_idx == -1, or operator templates registered
+        # after the last namespace was processed).
+        for _t in _tmpl_instances:
+            if id(_t) not in _tmpl_emitted:
+                _tmpl_emitted.add(id(_t))
+                self.visit(_t, builder, module)
 
         # Pass 3.5: Verify trait compliance now that all TraitDefs are registered.
         from fast import ObjectDef as _ObjectDef, ObjectDefStatement as _ObjectDefStatement

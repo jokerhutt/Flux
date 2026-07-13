@@ -18,14 +18,13 @@
 // Expected: loss below 0.0005 by ~2000 steps.
 // ASCII plot of predicted vs true |x| at the end.
 
-#import "standard.fx";
-#import "neuralnet.fx";
+#import <standard.fx>, <neuralnet.fx>;
 
-using standard::autograd;
-using standard::neuralnet;
-using standard::random;
-using standard::math;
-using standard::io::console;
+using standard::autograd,
+      standard::neuralnet,
+      standard::random,
+      standard::math,
+      standard::io::console;
 
 #def N_TRAIN 40;
 #def N_TEST  20;

@@ -98,7 +98,7 @@ extern
 {
 #ifdef __WINDOWS__
     stdcall !!
-        GetStdHandle(int nStdHandle) -> i64;
+            GetStdHandle(int nStdHandle) -> i64;
     def !!
         GetCommandLineW() -> wchar*,
         LocalFree(void* x) -> void*,

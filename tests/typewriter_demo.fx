@@ -6,8 +6,7 @@
 //   4. operator overload with contracts
 //   5. def main() usage example
 
-#import "standard.fx";
-#import "console.fx";
+#import <standard.fx>, <console.fx>;
 
 using standard::io::console;
 
@@ -19,8 +18,8 @@ def type_char(Console* con, i16* x, i16* y, byte ch, i16 attr, i16 w) -> void
 {
     if (ch == (byte)'\n')
     {
-        *x = (i16)0;
-        *y = (i16)(*y + (i16)1);
+        *x = 0;
+        *y = (*y + 1);
         Sleep(20);
         return;
     };
@@ -30,11 +29,11 @@ def type_char(Console* con, i16* x, i16* y, byte ch, i16 attr, i16 w) -> void
     buf[1] = (byte)0;
     con.write_at_colored(*x, *y, attr, @buf[0]);
 
-    *x = (i16)(*x + (i16)1);
+    *x = (*x + 1);
     if (*x >= w)
     {
-        *x = (i16)0;
-        *y = (i16)(*y + (i16)1);
+        *x = 0;
+        *y = (*y + 1);
     };
 
     Sleep(38);
@@ -60,11 +59,11 @@ def type_str(Console* con, i16* x, i16* y, byte* src, i16 attr, i16 w) -> void
 
 def wait_key(Console* con, i16* cx, i16* cy) -> void
 {
-    i16 hint_y = (i16)(*cy + (i16)1);
-    con.write_at_colored((i16)0, hint_y, (i16)0x0008, "  [press any key]");
-    con.cursor_set((i16)0, hint_y);
+    i16 hint_y = (*cy + 1);
+    con.write_at_colored(0, hint_y, 0x0008, "  [press any key]");
+    con.cursor_set(0, hint_y);
     con.cursor_visible(true);
-    con.set_attr((i16)0x0007);
+    con.set_attr(0x0007);
 
     system("pause > nul");
 
@@ -72,8 +71,8 @@ def wait_key(Console* con, i16* cx, i16* cy) -> void
     con.clear_line(hint_y);
 
     // blank separator line before next block
-    *cy = (i16)(*cy + (i16)1);
-    *cx = (i16)0;
+    *cy = (*cy + 1);
+    *cx = 0;
 };
 
 // ============================================================================
@@ -94,17 +93,17 @@ def main() -> int
     con.cursor_visible(false);
     con.clear_screen();
 
-    i16 COL_KEYWORD = (i16)0x000B;  // cyan
-    i16 COL_NAME    = (i16)0x000E;  // yellow
-    i16 COL_PUNCT   = (i16)0x000F;  // white
-    i16 COL_STRING  = (i16)0x000A;  // green
-    i16 COL_PARAM   = (i16)0x000D;  // magenta
-    i16 COL_COMMENT = (i16)0x0008;  // dark gray
-    i16 COL_TYPE    = (i16)0x000C;  // red
-    i16 COL_DEFAULT = (i16)0x0007;  // gray
+    i16 COL_KEYWORD = 0x000B;  // cyan
+    i16 COL_NAME    = 0x000E;  // yellow
+    i16 COL_PUNCT   = 0x000F;  // white
+    i16 COL_STRING  = 0x000A;  // green
+    i16 COL_PARAM   = 0x000D;  // magenta
+    i16 COL_COMMENT = 0x0008;  // dark gray
+    i16 COL_TYPE    = 0x000C;  // red
+    i16 COL_DEFAULT = 0x0007;  // gray
 
-    i16 cx = (i16)0,
-        cy = (i16)0;
+    i16 cx = 0,
+        cy = 0;
 
     // =========================================================================
     // Phase 1: macro macNZ(x) { x != 0 };
@@ -322,7 +321,7 @@ def main() -> int
     // Done
     // =========================================================================
 
-    con.set_attr((i16)0x0007);
+    con.set_attr(0x0007);
     con.cursor_set(cx, cy);
     con.cursor_visible(true);
 

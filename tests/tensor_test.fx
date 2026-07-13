@@ -15,8 +15,7 @@
 //   Linear algebra: tensor_matmul_f, tensor_dot_f, tensor_outer_f
 //   Equality      : tensor_equal
 
-#import "standard.fx";
-#import "tensors.fx";
+#import <standard.fx>, <tensors.fx>;
 
 using standard::io::console,
       standard::tensors;

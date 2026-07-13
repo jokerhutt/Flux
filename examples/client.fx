@@ -1,8 +1,7 @@
 // TCP Echo Client
 // Connects to server at 127.0.0.1:8080 and sends messages
 
-#import "standard.fx";
-#import "socket_object_raw.fx";
+#import <standard.fx>, <socket_object_raw.fx>;
 
 using standard::io::console,
       standard::io::sockets,
@@ -11,7 +10,7 @@ using standard::io::console,
 def main() -> int
 {
     // Initialize Winsock
-    int init_result = init();
+    int init_result = sockets::init();
     if (init_result != 0)
     {
         print("Failed to initialize Winsock\n\0");

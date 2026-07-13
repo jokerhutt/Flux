@@ -1,6 +1,6 @@
 // smart_ptr.fx - OOP Smart Pointer for Flux
 
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -14,6 +14,11 @@ object smartptr
     {
         this.raw       = (void*)val;
         this.ref_count = (size_t)1;
+        return this;
+    };
+
+    def __expr() -> smartptr*
+    {
         return this;
     };
 

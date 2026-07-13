@@ -21,8 +21,7 @@
 // Expected: loss falls below 0.01 by ~2500 steps.
 // Final table shows all three function outputs side by side.
 
-#import "standard.fx";
-#import "neuralnet.fx";
+#import <standard.fx>, <neuralnet.fx>;
 
 using standard::autograd,
       standard::neuralnet,

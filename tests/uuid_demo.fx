@@ -1,4 +1,4 @@
-#import "standard.fx", "format.fx", "random.fx", "uuid.fx";
+#import <standard.fx>, <format.fx>, <uuid.fx>;
 
 using standard::format,
       standard::format::colors,

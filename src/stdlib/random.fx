@@ -11,7 +11,7 @@
 #def FLUX_STANDARD_RANDOM 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 struct PCG32
@@ -31,24 +31,22 @@ namespace standard
         // Get entropy from RDTSC (CPU timestamp counter)
         def get_rdtsc() -> u64
         {
-            u64 result = (u64)0;
+            u64 result = 0;
             
             #ifdef __ARCH_X86_64__
             volatile asm
             {
                 rdtsc                    // Read timestamp counter into EDX:EAX
                 shlq $$32, %rdx          // Shift EDX left by 32 bits
-                orq %rdx, %rax           // Combine into single 64-bit value
-                movq %rax, $0            // Store result
-            } : : "m"(result) : "rax", "rdx";
+                orq %rdx, %rax           // Combine into RAX
+            } : "=a"(result) : : "rdx";
             #endif;
             
             #ifdef __ARCH_ARM64__
             volatile asm
             {
                 mrs x0, cntvct_el0       // Read virtual count register
-                str x0, $0               // Store result
-            } : : "m"(result) : "x0";
+            } : "=r"(result) : : "x0";
             #endif;
             
             return result;
@@ -77,9 +75,9 @@ namespace standard
         def xorshift64_seed(XorShift64* rng, u64 seed) -> void
         {
             // Ensure state is never zero
-            if (seed == (u64)0)
+            if (seed == 0)
             {
-                seed = (u64)0xDEADBEEFCAFEBABE;
+                seed = 0xDEADBEEFCAFEBABE;
             };
             rng.state = seed;
         };
@@ -113,13 +111,13 @@ namespace standard
         def xorshift128_seed(XorShift128* rng, u64 seed1, u64 seed2) -> void
         {
             // Ensure states are never zero
-            if (seed1 == (u64)0)
+            if (seed1 == 0)
             {
-                seed1 = (u64)0xDEADBEEFCAFEBABE;
+                seed1 = 0xDEADBEEFCAFEBABE;
             };
-            if (seed2 == (u64)0)
+            if (seed2 == 0)
             {
-                seed2 = (u64)0xFEEDFACEBAADF00D;
+                seed2 = 0xFEEDFACEBAADF00D;
             };
             
             rng.state[0] = seed1;
@@ -153,14 +151,14 @@ namespace standard
         
         def pcg32_seed(PCG32* rng, u64 seed, u64 seq) -> void
         {
-            rng.state = (u64)0;
-            rng.inc = (seq << 1) | (u64)1;
+            rng.state = 0;
+            rng.inc = (seq << 1) | 1;
             
             // Warm up the generator
-            u64 dummy = (u64)0;
-            rng.state = rng.state * (u64)6364136223846793005 + rng.inc;
+            u64 dummy = 0;
+            rng.state = rng.state * 6364136223846793005 + rng.inc;
             rng.state = rng.state + seed;
-            rng.state = rng.state * (u64)6364136223846793005 + rng.inc;
+            rng.state = rng.state * 6364136223846793005 + rng.inc;
         };
         
         def pcg32_init(PCG32* rng) -> void
@@ -175,13 +173,13 @@ namespace standard
             u64 oldstate = rng.state;
             
             // Advance internal state
-            rng.state = oldstate * (u64)6364136223846793005 + rng.inc;
+            rng.state = oldstate * 6364136223846793005 + rng.inc;
             
             // Calculate output function (XSH RR)
-            u32 xorshifted = (u32)(((oldstate >> 18) ^^ oldstate) >> 27),
-                rot = (u32)(oldstate >> 59);
+            u32 xorshifted = (((oldstate >> 18) ^^ oldstate) >> 27),
+                rot = (oldstate >> 59);
             
-            return (xorshifted >> rot) | (xorshifted << ((u32)0 - rot));
+            return (xorshifted >> rot) | (xorshifted << (0u - rot));
         };
         
         // ============ LCG (Linear Congruential Generator) ============
@@ -206,8 +204,8 @@ namespace standard
         def lcg_next(LCG* rng) -> u32
         {
             // Using parameters from Numerical Recipes
-            rng.state = rng.state * (u64)1664525 + (u64)1013904223;
-            return (u32)(rng.state >> 32);
+            rng.state = rng.state * 1664525 + 1013904223;
+            return (rng.state >> 32);
         };
         
         // ============ UTILITY FUNCTIONS ============
@@ -215,9 +213,9 @@ namespace standard
         // Generate random u64 in range [0, max)
         def random_range_u64(XorShift128* rng, u64 max) -> u64
         {
-            if (max == (u64)0)
+            if (max == 0)
             {
-                return (u64)0;
+                return 0;
             };
             
             u64 val = xorshift128_next(rng);
@@ -227,9 +225,9 @@ namespace standard
         // Generate random u32 in range [0, max)
         def random_range_u32(PCG32* rng, u32 max) -> u32
         {
-            if (max == (u32)0)
+            if (max == 0u)
             {
-                return (u32)0;
+                return 0u;
             };
             
             u32 val = pcg32_next(rng);
@@ -244,8 +242,8 @@ namespace standard
                 return min;
             };
             
-            u32 range = (u32)(max - min + 1);
-            u32 val = random_range_u32(rng, range);
+            u32 range = (max - min + 1),
+                val = random_range_u32(rng, range);
             return min + (int)val;
         };
         
@@ -268,7 +266,7 @@ namespace standard
         // Generate random boolean
         def random_bool(PCG32* rng) -> bool
         {
-            return (pcg32_next(rng) & (u32)1) == (u32)1;
+            return (pcg32_next(rng) & 1) == 1;
         };
         
         // ============ ARRAY/BUFFER FILL ============
@@ -276,23 +274,24 @@ namespace standard
         // Fill buffer with random bytes
         def random_bytes(PCG32* rng, byte* buffer, u64 length) -> void
         {
-            u64 i = (u64)0;
+            u64 i;
+            u32 val;
             
             // Fill 4 bytes at a time
-            while (i + (u64)4 <= length)
+            while (i + 4 <= length)
             {
-                u32 val = pcg32_next(rng);
+                val = pcg32_next(rng);
                 buffer[i + 0] = (byte)(val & 0xFF);
                 buffer[i + 1] = (byte)((val >> 8) & 0xFF);
                 buffer[i + 2] = (byte)((val >> 16) & 0xFF);
                 buffer[i + 3] = (byte)((val >> 24) & 0xFF);
-                i = i + (u64)4;
+                i = i + 4;
             };
             
             // Fill remaining bytes
             if (i < length)
             {
-                u32 val = pcg32_next(rng);
+                val = pcg32_next(rng);
                 while (i < length)
                 {
                     buffer[i] = (byte)(val & 0xFF);
@@ -305,14 +304,16 @@ namespace standard
         // Shuffle an array (Fisher-Yates shuffle)
         def shuffle_u32_array(PCG32* rng, u32* array, u32 length) -> void
         {
-            u32 i = length - (u32)1;
+            u32 i = length - 1,
+                j,
+                tmp;
             
-            while (i > (u32)0)
+            while (i > 0u)
             {
-                u32 j = random_range_u32(rng, i + (u32)1);
+                j = random_range_u32(rng, i + 1);
                 
                 // Swap array[i] and array[j]
-                u32 temp = array[i];
+                temp = array[i];
                 array[i] = array[j];
                 array[j] = temp;
                 
@@ -366,22 +367,23 @@ namespace standard
         def random_string(PCG32* rng, byte* buffer, u32 length, byte* charset) -> void
         {
             // Calculate charset length
-            u32 charset_len = (u32)0;
+            u32 charset_len,
+                idx;
             while (charset[charset_len] != (byte)0)
             {
                 charset_len++;
             };
             
-            if (charset_len == (u32)0)
+            if (charset_len == 0u)
             {
                 buffer[0] = (byte)0;
                 return;
             };
             
             // Generate random characters
-            for (u32 i = (u32)0; i < length; i++)
+            for (u32 i; i < length; i++)
             {
-                u32 idx = random_range_u32(rng, charset_len);
+                idx = random_range_u32(rng, charset_len);
                 buffer[i] = charset[idx];
             };
             

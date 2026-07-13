@@ -1233,7 +1233,7 @@ class TypeSystem:
                 return ir.IntType(_gbw(_cfg))
             elif type_spec == DataType.VOID:
                 return ir.VoidType()
-            elif type_spec == DataType.STRUCT:
+            elif type_spec in (DataType.STRUCT, DataType.OBJECT):
                 return ir.IntType(8)
             elif type_spec == DataType.ENUM:
                 return ir.IntType(32)
@@ -1306,6 +1306,8 @@ class TypeSystem:
             base_type = ir.IntType(byte_width)
         elif type_spec.base_type == DataType.STRUCT:
             base_type = ir.IntType(8)
+        elif type_spec.base_type == DataType.OBJECT:
+            base_type = ir.IntType(8)
         elif type_spec.base_type == DataType.ENUM:
             base_type = ir.IntType(32)
         elif type_spec.base_type == DataType.VOID:
@@ -1347,7 +1349,7 @@ class TypeSystem:
     `---> type_spec: {type_spec}")
 
         if type_spec.is_pointer:
-            if type_spec.base_type == DataType.VOID or type_spec.base_type == DataType.STRUCT:
+            if type_spec.base_type in (DataType.VOID, DataType.STRUCT, DataType.OBJECT):
                 # Start from i8 and apply pointer_depth wraps so void* = i8*, void** = i8**, etc.
                 depth = type_spec.pointer_depth if hasattr(type_spec, "pointer_depth") and type_spec.pointer_depth else 1
                 element_type = ir.IntType(8)
@@ -1748,7 +1750,7 @@ class VariableTypeHandler:
     def create_global_initializer(initial_value, llvm_type: ir.Type, module: ir.Module) -> Optional[ir.Constant]:
         """Create compile-time constant initializer for global variable."""
         # Import here to avoid circular dependency
-        from fast import (Literal, Identifier, BinaryOp, UnaryOp, StringLiteral, ArrayLiteral, ArrayAccess, DataType as FastDataType)
+        from fast import (Literal, Identifier, BinaryOp, UnaryOp, StringLiteral, ArrayLiteral, ArrayAccess, StructLiteral, DataType as FastDataType)
         
         # Handle different expression types
         if isinstance(initial_value, Literal):
@@ -1777,7 +1779,56 @@ class VariableTypeHandler:
         elif isinstance(initial_value, ArrayAccess):
             return VariableTypeHandler._eval_array_access_const(initial_value, module)
         
+        elif isinstance(initial_value, StructLiteral):
+            return VariableTypeHandler._struct_literal_to_constant(initial_value, llvm_type, module)
+        
         return None
+    
+    @staticmethod
+    def _struct_literal_to_constant(struct_lit, llvm_type: ir.Type, module: ir.Module) -> Optional[ir.Constant]:
+        """Convert a StructLiteral to a compile-time ir.Constant for global initialization."""
+        if not isinstance(llvm_type, (ir.LiteralStructType, ir.IdentifiedStructType)):
+            return None
+        
+        struct_type_name = struct_lit.struct_type
+        if not struct_type_name or not hasattr(module, '_struct_vtables'):
+            return None
+        
+        vtable = module._struct_vtables.get(struct_type_name)
+        if not vtable:
+            return None
+        
+        # Resolve named field values to positional, filling missing fields with zero
+        field_values = dict(struct_lit.field_values)
+        if struct_lit.positional_values:
+            for i, val in enumerate(struct_lit.positional_values):
+                field_values[vtable.fields[i][0]] = val
+        
+        const_elements = []
+        for i, (field_name, _, _, _) in enumerate(vtable.fields):
+            field_llvm_type = llvm_type.elements[i]
+            if field_name in field_values:
+                field_const = VariableTypeHandler.create_global_initializer(
+                    field_values[field_name], field_llvm_type, module)
+                if field_const is None:
+                    return None
+                # Cast to exact field type if needed (e.g. i32 literal into [16 x i8])
+                if isinstance(field_const, ir.Constant) and field_const.type != field_llvm_type:
+                    if isinstance(field_const.type, ir.IntType) and isinstance(field_llvm_type, ir.IntType):
+                        field_const = ir.Constant(field_llvm_type, field_const.constant)
+                    else:
+                        return None
+                const_elements.append(field_const)
+            else:
+                # Zero-initialize missing field
+                zero_init = ir.Constant(field_llvm_type,
+                                        0 if isinstance(field_llvm_type, ir.IntType)
+                                        else [ir.Constant(field_llvm_type.element, 0)] * field_llvm_type.count
+                                        if isinstance(field_llvm_type, ir.ArrayType)
+                                        else ir.Undefined(field_llvm_type))
+                const_elements.append(zero_init)
+        
+        return ir.Constant(llvm_type, const_elements)
     
     @staticmethod
     def _eval_array_access_const(array_access, module: ir.Module) -> Optional[ir.Constant]:

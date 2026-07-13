@@ -55,6 +55,7 @@ _PRIMITIVE_TYPES: frozenset = frozenset({
 _ALWAYS_KEEP: frozenset = frozenset({
     'main',
     'FRTStartup', 'frt_startup',
+    'fstr_append',
 })
 
 # ---------------------------------------------------------------------------
@@ -386,6 +387,41 @@ def _compute_live_functions(program, ns_func_index: Dict[str, List[Any]],
         if ns is not None:
             _index_obj_methods(ns, '')
 
+    # Step 3b(ii): Seed all methods of trait-implementing objects into the frontier.
+    # These objects are preserved in full (not DCE'd), so their method bodies must
+    # be walked to keep any namespace functions they call alive. Without this, a
+    # trait method calling helpers::compare_ignore_case would cause that function
+    # to be eliminated even though the method that calls it is kept.
+    def _seed_trait_obj_methods(ns: Any, full_prefix: str) -> None:
+        ns_name = getattr(ns, 'name', '') or ''
+        cur_prefix = (full_prefix + '__' + ns_name) if full_prefix else ns_name
+        for obj in getattr(ns, 'objects', []):
+            if not isinstance(obj, ObjectDef):
+                continue
+            if not getattr(obj, 'traits', None):
+                continue
+            obj_name = getattr(obj, 'name', '') or ''
+            for method in getattr(obj, 'methods', []):
+                method_name = getattr(method, 'name', None)
+                if not isinstance(method_name, str):
+                    continue
+                full_method = (cur_prefix + '__' + obj_name + '__' + method_name
+                               if cur_prefix else obj_name + '__' + method_name)
+                for variant in _all_suffixes(full_method):
+                    if variant:
+                        seed.add(variant)
+        for nested in getattr(ns, 'nested_namespaces', []):
+            _seed_trait_obj_methods(nested, cur_prefix)
+
+    for stmt in program.statements:
+        ns = None
+        if isinstance(stmt, NamespaceDef):
+            ns = stmt
+        elif isinstance(stmt, NamespaceDefStatement):
+            ns = getattr(stmt, 'namespace_def', None)
+        if ns is not None:
+            _seed_trait_obj_methods(ns, '')
+
     # Step 4: Fixed-point expansion.
     #
     # For each newly-live name we walk two indexes:
@@ -504,6 +540,13 @@ def _prune_namespace(ns_node: Any, live: Set[str], full_prefix: str,
                 continue
 
             obj_name = getattr(obj, 'name', '') or ''
+
+            # Objects that implement traits are part of a public interface contract.
+            # Their methods cannot be DCE'd because they may be called through the
+            # trait interface at any call site the DCE collector cannot see.
+            if getattr(obj, 'traits', None):
+                kept_objs.append(obj)
+                continue
 
             # First pass: determine which methods are live.
             kept_methods = []

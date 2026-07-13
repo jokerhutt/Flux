@@ -14,9 +14,7 @@
 //  10. sort_merge_cmp          - descending comparator
 //  11. is_sorted / is_sorted_cmp
 
-#import <standard.fx>;
-#import <standard.fx>;
-#import <sorting.fx>;
+#import <standard.fx>, <standard.fx>, <sorting.fx>;
 
 using standard::io::console,
       standard::sorting;

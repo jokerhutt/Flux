@@ -830,14 +830,19 @@ class FluxLexer:
                     result += self.current_char()
                     self.advance()
                 
-                # Check for unsigned suffix (lowercase 'u' only)
+                # Check for ul (unsigned long) or u (unsigned) suffix
                 if self.current_char() and self.current_char() == 'u':
-                    is_unsigned = True
-                    result += self.current_char()
-                    self.advance()
+                    self.advance()  # consume 'u'
+                    if self.current_char() and self.current_char() == 'l':
+                        self.advance()  # consume 'l'
+                        return Token(TokenType.ULONG_LITERAL, result, start_pos[0], start_pos[1])
+                    return Token(TokenType.UINT_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for l (long) suffix
+                if self.current_char() and self.current_char() == 'l':
+                    self.advance()  # consume 'l'
+                    return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
                 
-                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
-                           result.replace("u",""), start_pos[0], start_pos[1])
+                return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
             
             if self.current_char() and self.current_char().lower() == 'x':
                 # Hexadecimal
@@ -847,14 +852,19 @@ class FluxLexer:
                     result += self.current_char()
                     self.advance()
                 
-                # Check for unsigned suffix (lowercase 'u' only)
+                # Check for ul (unsigned long) or u (unsigned) suffix
                 if self.current_char() and self.current_char() == 'u':
-                    is_unsigned = True
-                    result += self.current_char()
-                    self.advance()
+                    self.advance()  # consume 'u'
+                    if self.current_char() and self.current_char() == 'l':
+                        self.advance()  # consume 'l'
+                        return Token(TokenType.ULONG_LITERAL, result, start_pos[0], start_pos[1])
+                    return Token(TokenType.UINT_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for l (long) suffix
+                if self.current_char() and self.current_char() == 'l':
+                    self.advance()  # consume 'l'
+                    return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
                 
-                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
-                           result.replace("u",""), start_pos[0], start_pos[1])
+                return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
 
             if self.current_char() and self.current_char().lower() == 'o':
                 # Octal
@@ -864,14 +874,19 @@ class FluxLexer:
                     result += self.current_char()
                     self.advance()
                 
-                # Check for unsigned suffix (lowercase 'u' only)
+                # Check for ul (unsigned long) or u (unsigned) suffix
                 if self.current_char() and self.current_char() == 'u':
-                    is_unsigned = True
-                    result += self.current_char()
-                    self.advance()
+                    self.advance()  # consume 'u'
+                    if self.current_char() and self.current_char() == 'l':
+                        self.advance()  # consume 'l'
+                        return Token(TokenType.ULONG_LITERAL, result, start_pos[0], start_pos[1])
+                    return Token(TokenType.UINT_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for l (long) suffix
+                if self.current_char() and self.current_char() == 'l':
+                    self.advance()  # consume 'l'
+                    return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
                 
-                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
-                           result.replace("u",""), start_pos[0], start_pos[1])
+                return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
             
             elif self.current_char() and self.current_char().lower() == 'b':
                 # Binary
@@ -881,14 +896,19 @@ class FluxLexer:
                     result += self.current_char()
                     self.advance()
                 
-                # Check for unsigned suffix (lowercase 'u' only)
+                # Check for ul (unsigned long) or u (unsigned) suffix
                 if self.current_char() and self.current_char() == 'u':
-                    is_unsigned = True
-                    result += self.current_char()
-                    self.advance()
+                    self.advance()  # consume 'u'
+                    if self.current_char() and self.current_char() == 'l':
+                        self.advance()  # consume 'l'
+                        return Token(TokenType.ULONG_LITERAL, result, start_pos[0], start_pos[1])
+                    return Token(TokenType.UINT_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for l (long) suffix
+                if self.current_char() and self.current_char() == 'l':
+                    self.advance()  # consume 'l'
+                    return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
                 
-                return Token(TokenType.UINT_LITERAL if is_unsigned else TokenType.SINT_LITERAL, 
-                           result.replace("u",""), start_pos[0], start_pos[1])
+                return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
         
         # Read decimal digits
         while self.current_char() and self.current_char().isdigit():
@@ -1000,9 +1020,13 @@ class FluxLexer:
             token_type = TokenType.BYTE_LITERAL
             self.advance()  # consume 'b'
         # Check for char suffix (lowercase 'c' only) -- e.g. 97c -> unsigned char literal
+        # Store the value as an int so the parser can distinguish a numeric char literal
+        # (value is already the codepoint) from a quoted char literal (value is the character
+        # and needs ord() applied). The Token.value field accepts any Python type.
         elif not is_float and self.current_char() and self.current_char() == 'c':
             token_type = TokenType.CHAR
             self.advance()  # consume 'c'
+            return Token(token_type, int(result), start_pos[0], start_pos[1])
         # If we have a decimal point but no 'f' suffix, it's still a float
         if is_float and dc <= 5:
             token_type = TokenType.FLOAT

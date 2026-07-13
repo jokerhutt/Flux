@@ -19,7 +19,7 @@
 //   con.reset_color();
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_CONSOLE
@@ -30,7 +30,6 @@
 extern
 {
     def !!
-        GetStdHandle(i32)                                              -> i64,
         GetConsoleScreenBufferInfo(i64, void*)                         -> bool,
         SetConsoleCursorPosition(i64, i32)                             -> bool,
         SetConsoleTextAttribute(i64, i16)                              -> bool,
@@ -60,52 +59,52 @@ namespace standard
             // ============================================================================
 
             // Foreground colors
-            global i16 CON_FG_BLACK        = (i16)0x0000,
-                       CON_FG_DARK_BLUE    = (i16)0x0001,
-                       CON_FG_DARK_GREEN   = (i16)0x0002,
-                       CON_FG_DARK_CYAN    = (i16)0x0003,
-                       CON_FG_DARK_RED     = (i16)0x0004,
-                       CON_FG_DARK_MAGENTA = (i16)0x0005,
-                       CON_FG_DARK_YELLOW  = (i16)0x0006,
-                       CON_FG_GRAY         = (i16)0x0007,
-                       CON_FG_DARK_GRAY    = (i16)0x0008,
-                       CON_FG_BLUE         = (i16)0x0009,
-                       CON_FG_GREEN        = (i16)0x000A,
-                       CON_FG_CYAN         = (i16)0x000B,
-                       CON_FG_RED          = (i16)0x000C,
-                       CON_FG_MAGENTA      = (i16)0x000D,
-                       CON_FG_YELLOW       = (i16)0x000E,
-                       CON_FG_WHITE        = (i16)0x000F;
+            global i16 CON_FG_BLACK        = 0x0000,
+                       CON_FG_DARK_BLUE    = 0x0001,
+                       CON_FG_DARK_GREEN   = 0x0002,
+                       CON_FG_DARK_CYAN    = 0x0003,
+                       CON_FG_DARK_RED     = 0x0004,
+                       CON_FG_DARK_MAGENTA = 0x0005,
+                       CON_FG_DARK_YELLOW  = 0x0006,
+                       CON_FG_GRAY         = 0x0007,
+                       CON_FG_DARK_GRAY    = 0x0008,
+                       CON_FG_BLUE         = 0x0009,
+                       CON_FG_GREEN        = 0x000A,
+                       CON_FG_CYAN         = 0x000B,
+                       CON_FG_RED          = 0x000C,
+                       CON_FG_MAGENTA      = 0x000D,
+                       CON_FG_YELLOW       = 0x000E,
+                       CON_FG_WHITE        = 0x000F;
 
             // Background colors
-            global i16 CON_BG_BLACK        = (i16)0x0000,
-                       CON_BG_DARK_BLUE    = (i16)0x0010,
-                       CON_BG_DARK_GREEN   = (i16)0x0020,
-                       CON_BG_DARK_CYAN    = (i16)0x0030,
-                       CON_BG_DARK_RED     = (i16)0x0040,
-                       CON_BG_DARK_MAGENTA = (i16)0x0050,
-                       CON_BG_DARK_YELLOW  = (i16)0x0060,
-                       CON_BG_GRAY         = (i16)0x0070,
-                       CON_BG_DARK_GRAY    = (i16)0x0080,
-                       CON_BG_BLUE         = (i16)0x0090,
-                       CON_BG_GREEN        = (i16)0x00A0,
-                       CON_BG_CYAN         = (i16)0x00B0,
-                       CON_BG_RED          = (i16)0x00C0,
-                       CON_BG_MAGENTA      = (i16)0x00D0,
-                       CON_BG_YELLOW       = (i16)0x00E0,
-                       CON_BG_WHITE        = (i16)0x00F0;
+            global i16 CON_BG_BLACK        = 0x0000,
+                       CON_BG_DARK_BLUE    = 0x0010,
+                       CON_BG_DARK_GREEN   = 0x0020,
+                       CON_BG_DARK_CYAN    = 0x0030,
+                       CON_BG_DARK_RED     = 0x0040,
+                       CON_BG_DARK_MAGENTA = 0x0050,
+                       CON_BG_DARK_YELLOW  = 0x0060,
+                       CON_BG_GRAY         = 0x0070,
+                       CON_BG_DARK_GRAY    = 0x0080,
+                       CON_BG_BLUE         = 0x0090,
+                       CON_BG_GREEN        = 0x00A0,
+                       CON_BG_CYAN         = 0x00B0,
+                       CON_BG_RED          = 0x00C0,
+                       CON_BG_MAGENTA      = 0x00D0,
+                       CON_BG_YELLOW       = 0x00E0,
+                       CON_BG_WHITE        = 0x00F0;
 
             // Attribute flags
-            global i16 CON_ATTR_BOLD       = (i16)0x0008,  // Bright/intense foreground
-                       CON_ATTR_UNDERLINE  = (i16)0x8000;  // Leading bit - underline on some terminals
+            global i16 CON_ATTR_BOLD       = 0x0008,  // Bright/intense foreground
+                       CON_ATTR_UNDERLINE  = 0x8000;  // Leading bit - underline on some terminals
 
             // STD handle IDs
-            global i32 CON_STDIN  = (i32)-10,
-                       CON_STDOUT = (i32)-11,
-                       CON_STDERR = (i32)-12;
+            global i32 CON_STDIN  = -10,
+                       CON_STDOUT = -11,
+                       CON_STDERR = -12;
 
             // Default attribute: gray on black (the classic)
-            global i16 CON_DEFAULT_ATTR = (i16)0x0007;
+            global i16 CON_DEFAULT_ATTR = 0x0007;
 
             // ============================================================================
             // COORD / SMALL_RECT helpers
@@ -118,35 +117,35 @@ namespace standard
 
             def make_coord(i16 x, i16 y) -> i32
             {
-                return (i32)x | ((i32)y << 16);
+                return x | (y << 16);
             };
 
             def coord_x(i32 coord) -> i16
             {
-                return (i16)(coord & (i32)0xFFFF);
+                return (coord & 0xFFFF);
             };
 
             def coord_y(i32 coord) -> i16
             {
-                return (i16)((coord >> 16) & (i32)0xFFFF);
+                return ((coord >> 16) & 0xFFFF);
             };
 
             // ============================================================================
             // CONSOLE SCREEN BUFFER INFO
             //
             // CONSOLE_SCREEN_BUFFER_INFO layout (22 bytes, but we store as padded struct):
-            //   COORD      dwSize              (i32)  offset 0
-            //   COORD      dwCursorPosition    (i32)  offset 4
-            //   WORD       wAttributes         (i16)  offset 8
+            //   COORD      dwSize                offset 0
+            //   COORD      dwCursorPosition      offset 4
+            //   WORD       wAttributes           offset 8
             //   SMALL_RECT srWindow            (8 b)  offset 10
-            //   COORD      dwMaximumWindowSize (i32)  offset 18
+            //   COORD      dwMaximumWindowSize   offset 18
             // We store as byte[22] and extract manually.
             // ============================================================================
 
             // ============================================================================
             // CONSOLE_CURSOR_INFO layout (8 bytes):
-            //   DWORD  dwSize     (i32) offset 0  — cursor height as % of cell (1-100)
-            //   BOOL   bVisible   (i32) offset 4
+            //   DWORD  dwSize      offset 0  — cursor height as % of cell (1-100)
+            //   BOOL   bVisible    offset 4
             // ============================================================================
 
             // ============================================================================
@@ -168,10 +167,15 @@ namespace standard
                     this.out_handle  = GetStdHandle(CON_STDOUT);
                     this.in_handle   = GetStdHandle(CON_STDIN);
                     this.saved_attr  = CON_DEFAULT_ATTR;
-                    this.saved_cursor = make_coord((i16)0, (i16)0);
-                    this.width       = (i16)80;
-                    this.height      = (i16)24;
+                    this.saved_cursor = make_coord(0, 0);
+                    this.width       = 80;
+                    this.height      = 24;
                     this.refresh_size();
+                    return this;
+                };
+
+                def __expr() -> Console*
+                {
                     return this;
                 };
 
@@ -234,7 +238,7 @@ namespace standard
                         }
                         default {};
                     };
-                    return make_coord((i16)0, (i16)0);
+                    return make_coord(0, 0);
                 };
 
                 // Save current cursor position into this.saved_cursor.
@@ -252,10 +256,10 @@ namespace standard
                 // Show or hide the cursor. visible=1 shows, visible=0 hides.
                 def cursor_visible(bool visible) -> void
                 {
-                    // CONSOLE_CURSOR_INFO: dwSize (i32) + bVisible (i32)
+                    // CONSOLE_CURSOR_INFO: dwSize  + bVisible 
                     i32[2] ci;
                     GetConsoleCursorInfo(this.out_handle, (void*)@ci[0]);
-                    ci[1] = (i32)visible;
+                    ci[1] = visible;
                     SetConsoleCursorInfo(this.out_handle, (void*)@ci[0]);
                 };
 
@@ -306,15 +310,15 @@ namespace standard
                 // Uses the existing print mechanism so formatting stays consistent.
                 def write(byte* msg) -> void
                 {
-                    int len = 0;
+                    int len, written, cur;
+                    i16 nx, ny;
                     while (msg[len] != (byte)0) { len = len + 1; };
-                    i32 written = 0;
-                    WriteConsoleOutputCharacterA(this.out_handle, @msg[0], (i32)len,
+                    WriteConsoleOutputCharacterA(this.out_handle, @msg[0], len,
                                                  this.cursor_get(), @written);
                     // Advance cursor manually by written columns (same row)
-                    i32 cur   = this.cursor_get();
-                    i16 nx    = (i16)(coord_x(cur) + (i16)written);
-                    i16 ny    = coord_y(cur);
+                    cur   = this.cursor_get();
+                    nx    = (coord_x(cur) + written);
+                    ny    = coord_y(cur);
                     this.cursor_set(nx, ny);
                 };
 
@@ -322,12 +326,12 @@ namespace standard
                 // disturbing the logical cursor position.
                 def write_at(i16 x, i16 y, byte* msg) -> void
                 {
-                    i32 saved = this.cursor_get();
-                    int len   = 0;
+                    int saved = this.cursor_get(),
+                        len, coord, written;
                     while (msg[len] != (byte)0) { len = len + 1; };
-                    i32 coord  = make_coord(x, y);
-                    i32 written = 0;
-                    WriteConsoleOutputCharacterA(this.out_handle, @msg[0], (i32)len,
+                    coord  = make_coord(x, y);
+                    written = 0;
+                    WriteConsoleOutputCharacterA(this.out_handle, @msg[0], len,
                                                  coord, @written);
                     SetConsoleCursorPosition(this.out_handle, saved);
                 };
@@ -336,16 +340,16 @@ namespace standard
                 // then restore the original attribute and cursor. Good for status lines.
                 def write_at_colored(i16 x, i16 y, i16 attr, byte* msg) -> void
                 {
-                    i32 saved_pos  = this.cursor_get();
+                    i32 saved_pos  = this.cursor_get(),
+                        len, coord, written;
                     this.save_attr();
-                    int len = 0;
                     while (msg[len] != (byte)0) { len = len + 1; };
-                    i32 coord   = make_coord(x, y);
-                    i32 written = 0;
+                    coord   = make_coord(x, y);
+                    written = 0;
                     // Paint attributes first
-                    FillConsoleOutputAttribute(this.out_handle, attr, (i32)len, coord, @written);
+                    FillConsoleOutputAttribute(this.out_handle, attr, len, coord, @written);
                     // Then write characters
-                    WriteConsoleOutputCharacterA(this.out_handle, @msg[0], (i32)len,
+                    WriteConsoleOutputCharacterA(this.out_handle, @msg[0], len,
                                                  coord, @written);
                     this.restore_attr();
                     SetConsoleCursorPosition(this.out_handle, saved_pos);
@@ -359,46 +363,46 @@ namespace standard
                 // Does not move the logical cursor.
                 def clear_line(i16 y) -> void
                 {
-                    i32 coord   = make_coord((i16)0, y);
-                    i32 written = 0;
+                    i32 coord   = make_coord(0, y),
+                        written;
                     FillConsoleOutputCharacterA(this.out_handle, (byte)' ',
-                                                (i32)this.width, coord, @written);
+                                                this.width, coord, @written);
                     FillConsoleOutputAttribute(this.out_handle, CON_DEFAULT_ATTR,
-                                               (i32)this.width, coord, @written);
+                                               this.width, coord, @written);
                 };
 
                 // Clear a single line at row y with a specific attribute.
                 def clear_line_attr(i16 y, i16 attr) -> void
                 {
-                    i32 coord   = make_coord((i16)0, y);
+                    i32 coord   = make_coord(0, y);
                     i32 written = 0;
                     FillConsoleOutputCharacterA(this.out_handle, (byte)' ',
-                                                (i32)this.width, coord, @written);
+                                                this.width, coord, @written);
                     FillConsoleOutputAttribute(this.out_handle, attr,
-                                               (i32)this.width, coord, @written);
+                                               this.width, coord, @written);
                 };
 
                 // Clear a rectangular region. All coordinates zero-based.
                 def clear_region(i16 x, i16 y, i16 w, i16 h) -> void
                 {
                     i16 row = y;
-                    while (row < (i16)(y + h))
+                    while (row < (y + h))
                     {
                         i32 coord   = make_coord(x, row);
                         i32 written = 0;
                         FillConsoleOutputCharacterA(this.out_handle, (byte)' ',
-                                                    (i32)w, coord, @written);
+                                                    w, coord, @written);
                         FillConsoleOutputAttribute(this.out_handle, CON_DEFAULT_ATTR,
-                                                   (i32)w, coord, @written);
-                        row = row + (i16)1;
+                                                   w, coord, @written);
+                        row = row + 1;
                     };
                 };
 
                 // Clear the entire screen and home the cursor.
                 def clear_screen() -> void
                 {
-                    i32 coord   = make_coord((i16)0, (i16)0);
-                    i32 cells   = (i32)this.width * (i32)this.height;
+                    i32 coord   = make_coord(0, 0);
+                    i32 cells   = this.width * this.height;
                     i32 written = 0;
                     FillConsoleOutputCharacterA(this.out_handle, (byte)' ',
                                                 cells, coord, @written);
@@ -421,14 +425,14 @@ namespace standard
                     // Packed as two i32s for the FFI.
                     // Layout: word0 = (Top<<16 | Left), word1 = (Bottom<<16 | Right)
                     i32[2] scroll_rect;
-                    scroll_rect[0] = (i32)0 | ((i32)top_row << 16);
-                    scroll_rect[1] = ((i32)(this.width - (i16)1)) | ((i32)bottom_row << 16);
+                    scroll_rect[0] = 0 | (top_row << 16);
+                    scroll_rect[1] = ((this.width - 1)) | (bottom_row << 16);
 
                     // dwDestinationOrigin COORD: scroll up = new top starts at top_row - lines
-                    i32 dest = make_coord((i16)0, (i16)(top_row - lines));
+                    i32 dest = make_coord(0, (top_row - lines));
 
                     // CHAR_INFO fill: character + attribute (4 bytes: i16 char, i16 attr)
-                    i32 fill = (i32)' ' | ((i32)CON_DEFAULT_ATTR << 16);
+                    i32 fill = ' ' | (CON_DEFAULT_ATTR << 16);
 
                     ScrollConsoleScreenBufferA(this.out_handle,
                                                (void*)@scroll_rect[0],
@@ -451,9 +455,9 @@ namespace standard
                 def progress_bar(i16 row, byte* labelx, i32 done, i32 total) -> void
                 {
                     // Clamp
-                    switch (total <= (i32)0) { case (1) { total = (i32)1; } default {}; };
+                    switch (total <= 0) { case (1) { total = 1; } default {}; };
                     switch (done > total)    { case (1) { done  = total;  } default {}; };
-                    switch (done < (i32)0)   { case (1) { done  = (i32)0; } default {}; };
+                    switch (done < 0)   { case (1) { done  = 0; } default {}; };
 
                     // Measure labelx length
                     int llen = 0;
@@ -533,8 +537,8 @@ namespace standard
 
                     // Write at the pinned row without disturbing cursor
                     this.write_at_colored(
-                        (i16)0, row,
-                        (i16)(CON_FG_GREEN | CON_BG_BLACK),
+                        0, row,
+                        (CON_FG_GREEN | CON_BG_BLACK),
                         @buf[0]
                     );
                 };
@@ -554,7 +558,7 @@ namespace standard
                     frames[2] = (byte)'|';
                     frames[3] = (byte)'/';
                     frames[4] = (byte)0;
-                    byte ch = frames[tick & (i32)3];
+                    byte ch = frames[tick & 3];
                     byte[2] buf;
                     buf[0] = ch;
                     buf[1] = (byte)0;

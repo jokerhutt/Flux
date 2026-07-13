@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 enum mye1, mye2, mye3;
 

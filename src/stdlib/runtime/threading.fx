@@ -21,11 +21,11 @@
 #endif;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_ATOMICS
-#import "atomics.fx";
+#import <atomics.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_THREADING

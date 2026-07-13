@@ -9,11 +9,10 @@
 //   4. Tag verification returns 1 on valid data
 //   5. Tag verification returns 0 when tag is tampered
 
-#import "standard.fx";
-#import "cryptography.fx";
+#import <standard.fx>, <cryptography.fx>;
 
-using standard::io::console;
-using standard::crypto::encryption::AES;
+using standard::io::console,
+      standard::crypto::encryption::AES;
 
 // Compare two byte buffers, return 1 if equal, 0 if not
 def bytes_equal(byte* a, byte* b, int len) -> int

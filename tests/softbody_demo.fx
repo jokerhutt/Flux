@@ -10,7 +10,7 @@
 //   - Rigid sphere rolling into the cloth from the side
 //
 
-#import "standard.fx", "timing.fx", "windows.fx", "opengl.fx", "physics.fx";
+#import <standard.fx>, <timing.fx>, <windows.fx>, <opengl.fx>, <physics.fx>;
 
 using standard::io::console,
       standard::system::windows,

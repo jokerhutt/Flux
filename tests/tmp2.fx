@@ -1,18 +1,19 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
 def main() -> int
 {
-    uint x, y = 10, 0;
+    uint x = 10, y = 0;
 
-    uint* px, py = @x, @y;
+    uint* px @= x,
+          py @= y;
 
     // A pointer is simply a variable and its value is an address
     // An address is a number.
     // Therefore, we can store that address
     // 
-    uint kx = px;
+    ulong kx = px;
 
     // (@) is address-cast. It reinterprets the number as an address
     // When we treat a number as an address, we call that a pointer.

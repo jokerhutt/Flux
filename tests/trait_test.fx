@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 trait Trait1
 {
@@ -13,6 +13,11 @@ trait Trait2
 Trait1 Trait2 object MyObj
 {
     def __init() -> this
+    {
+        return this;
+    };
+
+    def __expr() -> MyObj*
     {
         return this;
     };

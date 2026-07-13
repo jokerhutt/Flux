@@ -13,40 +13,40 @@
 //   - Spinlock (re-exported from atomics)
 //   - thread_id / thread_yield / thread_sleep_ms
 
-#import "standard.fx", "threading.fx";
+#import <standard.fx>, <threading.fx>;
 
-using standard::io::console;
-using standard::threading;
+using standard::io::console,
+      standard::threading;
 
 // ─────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────
 
-def print_result(byte* label, int value) -> void
+def print_result(byte* xl, int value) -> void
 {
-    print(label);
+    print(xl);
     print(value);
-    print("\n\0");
+    print("\n");
 };
 
-def print_bool(byte* label, bool value) -> void
+def print_bool(byte* xl, bool value) -> void
 {
-    print(label);
+    print(xl);
     if (value)
     {
-        print("true\n\0");
+        print("true\n");
     }
     else
     {
-        print("false\n\0");
+        print("false\n");
     };
 };
 
 def print_sep(byte* title) -> void
 {
-    print("\n-- \0");
+    print("\n-- ");
     print(title);
-    print(" --\n\0");
+    print(" --\n");
 };
 
 // ─────────────────────────────────────────────
@@ -132,26 +132,26 @@ def thread_barrier_worker(void* arg) -> void*
 
 def demo_thread_basics() -> void
 {
-    print_sep("Thread Create / Join\0");
+    print_sep("Thread Create / Join");
 
     Thread t;
     g_counter = 0;
     mutex_init(@g_mutex);
 
     int rc = thread_create(@thread_mutex_worker, (void*)0, @t);
-    print_bool("thread_create ok: \0", rc == THREAD_OK);
+    print_bool("thread_create ok: ", rc == THREAD_OK);
 
     rc = thread_join(@t);
-    print_bool("thread_join  ok: \0", rc == THREAD_OK);
+    print_bool("thread_join  ok: ", rc == THREAD_OK);
 
     // Worker added 10 to g_counter
-    print_result("g_counter after worker (expect 10): \0", g_counter);
+    print_result("g_counter after worker (expect 10): ", g_counter);
 
-    print_result("thread_id (main): \0", (int)thread_id());
-    print("thread_yield() called - OK\n\0");
+    print_result("thread_id (main): ", (int)thread_id());
+    print("thread_yield() called - OK\n");
     thread_yield();
 
-    print("thread_sleep_ms(1) called - OK\n\0");
+    print("thread_sleep_ms(1) called - OK\n");
     thread_sleep_ms((u32)1);
 
     mutex_destroy(@g_mutex);
@@ -159,7 +159,7 @@ def demo_thread_basics() -> void
 
 def demo_mutex() -> void
 {
-    print_sep("Mutex\0");
+    print_sep("Mutex");
 
     mutex_init(@g_mutex);
     g_counter = 0;
@@ -171,16 +171,16 @@ def demo_mutex() -> void
     thread_join(@t1);
     thread_join(@t2);
 
-    print_result("g_counter after 2 workers (expect 20): \0", g_counter);
+    print_result("g_counter after 2 workers (expect 20): ", g_counter);
 
     // trylock demo
     bool got = mutex_trylock(@g_mutex);
-    print_bool("mutex_trylock (unlocked): \0", got);   // true
+    print_bool("mutex_trylock (unlocked): ", got);   // true
     // Note: on Windows, CRITICAL_SECTION is a recursive mutex.
     // TryEnterCriticalSection always succeeds for the owning thread,
     // so we unlock twice to match the two successful acquires.
     bool again = mutex_trylock(@g_mutex);
-    print_bool("mutex_trylock (locked):   \0", again); // true on Windows (recursive), false on POSIX
+    print_bool("mutex_trylock (locked):   ", again); // true on Windows (recursive), false on POSIX
     mutex_unlock(@g_mutex);
     mutex_unlock(@g_mutex);
 
@@ -189,7 +189,7 @@ def demo_mutex() -> void
 
 def demo_rwlock() -> void
 {
-    print_sep("Reader/Writer Lock\0");
+    print_sep("Reader/Writer Lock");
 
     rwlock_init(@g_rwlock);
     g_counter = 42;
@@ -202,8 +202,8 @@ def demo_rwlock() -> void
     thread_join(@r1);
     thread_join(@r2);
 
-    print_result("reader 1 saw (expect 42): \0", (int)read1);
-    print_result("reader 2 saw (expect 42): \0", (int)read2);
+    print_result("reader 1 saw (expect 42): ", (int)read1);
+    print_result("reader 2 saw (expect 42): ", (int)read2);
 
     // One writer adds 8 under exclusive lock.
     Thread w;
@@ -211,15 +211,15 @@ def demo_rwlock() -> void
     thread_create(@thread_rwlock_writer, (void*)@delta, @w);
     thread_join(@w);
 
-    print_result("g_counter after writer (expect 50): \0", g_counter);
+    print_result("g_counter after writer (expect 50): ", g_counter);
 
     // trylock variants
     bool rd = rwlock_try_read_lock(@g_rwlock);
-    print_bool("try_read_lock (unlocked):  \0", rd);  // true
+    print_bool("try_read_lock (unlocked):  ", rd);  // true
     rwlock_read_unlock(@g_rwlock);
 
     bool wr = rwlock_try_write_lock(@g_rwlock);
-    print_bool("try_write_lock (unlocked): \0", wr);  // true
+    print_bool("try_write_lock (unlocked): ", wr);  // true
     rwlock_write_unlock(@g_rwlock);
 
     rwlock_destroy(@g_rwlock);
@@ -227,7 +227,7 @@ def demo_rwlock() -> void
 
 def demo_condvar() -> void
 {
-    print_sep("Condition Variable\0");
+    print_sep("Condition Variable");
 
     mutex_init(@g_mutex);
     condvar_init(@g_condvar);
@@ -248,7 +248,7 @@ def demo_condvar() -> void
     mutex_unlock(@g_mutex);
 
     thread_join(@waiter);
-    print_result("g_counter after condvar signal (expect 1): \0", g_counter);
+    print_result("g_counter after condvar signal (expect 1): ", g_counter);
 
     // Broadcast demo: two waiters, one broadcast.
     g_counter = 0;
@@ -267,7 +267,7 @@ def demo_condvar() -> void
 
     thread_join(@w1);
     thread_join(@w2);
-    print_result("g_counter after condvar broadcast (expect 2): \0", g_counter);
+    print_result("g_counter after condvar broadcast (expect 2): ", g_counter);
 
     // Timed wait that expires immediately (timeout = 1 ms).
     mutex_lock(@g_mutex);
@@ -275,7 +275,7 @@ def demo_condvar() -> void
     condvar_init(@cv_temp);
     int trc = condvar_wait_ms(@cv_temp, @g_mutex, (u32)1);
     mutex_unlock(@g_mutex);
-    print_bool("condvar_wait_ms timeout: \0", trc == THREAD_TIMEOUT);
+    print_bool("condvar_wait_ms timeout: ", trc == THREAD_TIMEOUT);
 
     condvar_destroy(@cv_temp);
     condvar_destroy(@g_condvar);
@@ -284,7 +284,7 @@ def demo_condvar() -> void
 
 def demo_semaphore() -> void
 {
-    print_sep("Semaphore\0");
+    print_sep("Semaphore");
 
     Semaphore sem;
     semaphore_init(@sem, 2);   // Two permits available initially.
@@ -295,21 +295,21 @@ def demo_semaphore() -> void
 
     // Non-blocking attempt should fail (count == 0).
     bool got = semaphore_trywait(@sem);
-    print_bool("trywait on empty semaphore (expect false): \0", !got);
+    print_bool("trywait on empty semaphore (expect false): ", !got);
 
     // Release one permit.
     semaphore_post(@sem);
 
     // Now trywait should succeed.
     got = semaphore_trywait(@sem);
-    print_bool("trywait after post (expect true): \0", got);
+    print_bool("trywait after post (expect true): ", got);
 
     semaphore_destroy(@sem);
 };
 
 def demo_barrier() -> void
 {
-    print_sep("Barrier\0");
+    print_sep("Barrier");
 
     int n = 4;
     barrier_init(@g_barrier, n);
@@ -339,16 +339,16 @@ def demo_barrier() -> void
     };
 
     // Exactly one thread should have been the last arrival.
-    print_result("barrier last-arrival count (expect 1): \0", (int)load32(@g_barrier_hits));
+    print_result("barrier last-arrival count (expect 1): ", (int)load32(@g_barrier_hits));
 };
 
 def demo_tls() -> void
 {
-    print_sep("Thread-Local Storage\0");
+    print_sep("Thread-Local Storage");
 
     TLSKey key;
     int rc = tls_key_create(@key);
-    print_bool("tls_key_create ok: \0", rc == THREAD_OK);
+    print_bool("tls_key_create ok: ", rc == THREAD_OK);
 
     // Store and retrieve a value in the main thread's slot.
     i32 sentinel = 0xDEAD;
@@ -356,16 +356,16 @@ def demo_tls() -> void
     void* got = tls_get(@key);
     i32 retrieved = *(i32*)got;
 
-    print_bool("tls round-trip ok (expect 0xDEAD == 57005): \0",
+    print_bool("tls round-trip ok (expect 0xDEAD == 57005): ",
                retrieved == (i32)0xDEAD);
-    print_result("tls value: \0", (int)retrieved);
+    print_result("tls value: ", (int)retrieved);
 
     tls_key_destroy(@key);
 };
 
 def demo_spinlock() -> void
 {
-    print_sep("Spinlock (re-exported)\0");
+    print_sep("Spinlock (re-exported)");
 
     g_spin_counter = 0;
     g_spinlock     = 0;
@@ -380,12 +380,12 @@ def demo_spinlock() -> void
         i = i + 1;
     };
 
-    print_result("spin_counter after 10 increments (expect 10): \0", g_spin_counter);
+    print_result("spin_counter after 10 increments (expect 10): ", g_spin_counter);
 
     bool got = spinlock_trylock(@g_spinlock);
-    print_bool("spinlock_trylock (unlocked): \0", got);   // true
+    print_bool("spinlock_trylock (unlocked): ", got);   // true
     bool again = spinlock_trylock(@g_spinlock);
-    print_bool("spinlock_trylock (locked):   \0", again); // false
+    print_bool("spinlock_trylock (locked):   ", again); // false
     spinlock_unlock(@g_spinlock);
 };
 
@@ -395,7 +395,7 @@ def demo_spinlock() -> void
 
 def main() -> int
 {
-    print("=== threading.fx demo ===\n\0");
+    print("=== threading.fx demo ===\n");
 
     demo_thread_basics();
     demo_mutex();
@@ -406,6 +406,6 @@ def main() -> int
     demo_tls();
     demo_spinlock();
 
-    print("\n=== all threading demos complete ===\n\0");
+    print("\n=== all threading demos complete ===\n");
     return 0;
 };

@@ -2,12 +2,11 @@
 //  A small 2D physics particle simulation in Flux
 // ============================================================
 
-#import "standard.fx";
+#import <standard.fx>;
 
-using standard::io::console;
-using standard::math;
-using standard::memory::allocators::stdheap;
-using standard::memory::allocators::stdarena;
+using standard::io::console,
+      standard::math,
+      standard::memory::allocators::stdarena;
 
 signed data{16} as fixed8_8;
 
@@ -140,7 +139,7 @@ def merge_nearby(ParticlePool* pool) -> void
         {
             b = pool.particles + j;
 
-            if (b.age >= (byte)10 & a NEAR b)
+            if (b.age >= (byte)10 & (a NEAR b))
             {
                 a.r = clamp_byte(int(a.r) + int(b.r) / 2);
                 a.g = clamp_byte(int(a.g) + int(b.g) / 2);

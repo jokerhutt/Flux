@@ -39,36 +39,36 @@
 //
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MATH
-#import "math.fx";
+#import <math.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_VECTORS
-#import "vectors.fx";
+#import <vectors.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_MEMORY
-#import "memory.fx";
+#import <memory.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_ALLOCATORS
-#import "allocators.fx";
+#import <allocators.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_RANDOM
-#import "random.fx";
+#import <random.fx>;
 #endif;
 
 #ifndef FLUX_RAYTRACING
 #def FLUX_RAYTRACING 1;
 
-using standard::vectors;
-using standard::math;
-using standard::memory::allocators::stdheap;
-using standard::random;
+using standard::vectors,
+      standard::math,
+      standard::memory::allocators::stdheap,
+      standard::random;
 
 // ============================================================================
 // CONSTANTS

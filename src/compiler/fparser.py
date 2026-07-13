@@ -820,6 +820,8 @@ class FluxParser:
                 self.consume(TokenType.GREATER_THAN)
 
         self.consume(TokenType.LEFT_PAREN)
+        _tmpl_scope_ctx = self._template_scope(template_params if template_params else [])
+        _tmpl_scope_ctx.__enter__()
         params = self.parameter_list()
         self.consume(TokenType.RIGHT_PAREN)
 
@@ -892,6 +894,7 @@ class FluxParser:
         # must NOT be added here, because custom_op_expression would then rewrite every
         # use of that operator into a FunctionCall regardless of operand types.
         # Built-in operator overloads are resolved at codegen time inside BinaryOp.codegen.
+        _tmpl_scope_ctx.__exit__(None, None, None)
         from ftypesys import Operator as _Operator
         _builtin_op_values = {op.value for op in _Operator}
         if symbol in _builtin_op_values:
@@ -1129,7 +1132,11 @@ class FluxParser:
             else:
                 return self.struct_def()
         elif self.expect(TokenType.OBJECT):
-            return self.object_def()
+            if self.peek() and self.peek().type == TokenType.MULTIPLY:
+                # object pointer variable declaration: object* or object*[]
+                return self.variable_declaration_statement()
+            else:
+                return self.object_def()
         elif self.expect(TokenType.TRAIT):
             return self.trait_def()
         elif self.expect(TokenType.INTERFACE):
@@ -4326,7 +4333,8 @@ class FluxParser:
             self.advance()
             return [DataType.BYTE, '__string__']
         elif self.expect(TokenType.OBJECT):
-            self.error("Objects cannot be used as types in struct members.", TokenType.IDENTIFIER)
+            self.advance()
+            return DataType.OBJECT
         elif self.expect(TokenType.IDENTIFIER):
             # Custom type - return [DataType.DATA, typename]
             # Consume namespace-qualified names: A::B::C
@@ -4378,7 +4386,7 @@ class FluxParser:
             if not self.expect(TokenType.SINT, TokenType.UINT, TokenType.FLOAT_KW, TokenType.DOUBLE_KW,
                              TokenType.CHAR,  TokenType.BOOL_KW, TokenType.BYTE, TokenType.DATA, TokenType.VOID, 
                              TokenType.SLONG, TokenType.ULONG,
-                             TokenType.STRUCT, TokenType.IDENTIFIER):
+                             TokenType.STRUCT, TokenType.OBJECT, TokenType.IDENTIFIER):
                 return False
             
             self.advance()
@@ -6496,10 +6504,17 @@ class FluxParser:
         # operator position, there's a spurious token or a missing operator here.
         if (self.current_token is not None
                 and self.current_token.type in _EXPRESSION_START_TOKENS):
-            self.error(
-                f"Unexpected '{self.current_token.value}' in expression"
-                f" - missing operator before this token?"
+            # Don't fire if the identifier is a registered custom operator --
+            # custom_op_expression (our caller) will consume it as an infix op.
+            _is_custom_op_ident = (
+                self.current_token.type == TokenType.IDENTIFIER
+                and self._match_custom_op()[0] is not None
             )
+            if not _is_custom_op_ident:
+                self.error(
+                    f"Unexpected '{self.current_token.value}' in expression"
+                    f" - missing operator before this token?"
+                )
         
         return expr
     
@@ -6528,11 +6543,17 @@ class FluxParser:
         
         if (self.current_token is not None
                 and self.current_token.type in _EXPRESSION_START_TOKENS):
-            self.error(
-                f"Unexpected '{self.current_token.value}' in expression"
-                f" - missing operator before this token?"
+            # Don't fire if the identifier is a registered custom operator --
+            # custom_op_expression (our caller) will consume it as an infix op.
+            _is_custom_op_ident = (
+                self.current_token.type == TokenType.IDENTIFIER
+                and self._match_custom_op()[0] is not None
             )
-        
+            if not _is_custom_op_ident:
+                self.error(
+                    f"Unexpected '{self.current_token.value}' in expression"
+                    f" - missing operator before this token?"
+                )
         return expr
     
     def cast_expression(self) -> Expression:
@@ -7007,6 +7028,12 @@ class FluxParser:
                 # Check if concrete_ts matches any allowed spec
                 def _ts_matches(concrete, allowed):
                     """Return True if concrete TypeSystem matches the allowed TypeSystem."""
+                    # object* is the erasure type for all object pointers -- it satisfies
+                    # any constraint whose allowed type is a named object (DataType.DATA).
+                    if (concrete.base_type == DataType.OBJECT and
+                            allowed.base_type == DataType.DATA and
+                            allowed.custom_typename is not None):
+                        return True
                     # Compare structural identity on the fields that define a type
                     if concrete.base_type != allowed.base_type:
                         return False
@@ -7541,8 +7568,82 @@ class FluxParser:
             return
         template_params = entry.params
         template_func = entry.node
+        #import sys as _sys
+        #_sys.stderr.write(f'[DEBUG _resolve_template_operator] op={op_symbol!r} template_params={template_params} arg_type_specs=[{", ".join(str(t) for t in arg_type_specs)}]\n')
+        #_sys.stderr.write(f'[DEBUG _resolve_template_operator] func.params=[{", ".join(str(p.type_spec) for p in template_func.parameters)}]\n')
+        #_sys.stderr.flush()
+        # less than the number of operands (2 for a binary operator). Infer the
+        # template param bindings by matching the function's declared parameter
+        # typespecs against the concrete operand typespecs from the call site.
+        # e.g. operator<T>(Ring<T>* dst, Ring<T>* src): T is inferred from dst/src.
+        if len(arg_type_specs) != len(template_func.parameters):
+            #import sys as _sys; _sys.stderr.write(f'[DEBUG rto] bail operand count {len(arg_type_specs)} != param count {len(template_func.parameters)}\n'); _sys.stderr.flush()
+            return  # Wrong number of operands entirely - cannot instantiate
+
+        # Keep the original call-site operand types for the primitive guard below.
+        # After inference, arg_type_specs becomes the inferred template params (e.g. [int])
+        # which may look primitive even when the operands themselves are struct pointers.
+        _original_operand_specs = list(arg_type_specs)
+
         if len(template_params) != len(arg_type_specs):
-            return  # Arity mismatch - cannot instantiate
+            # Infer: build mapping from template param names -> concrete TypeSystems
+            # by unifying each function parameter's declared typespec with the
+            # corresponding concrete operand typespec from the call site.
+            inferred: dict = {}
+            for func_param, concrete_ts in zip(template_func.parameters, arg_type_specs):
+                decl_ts = func_param.type_spec
+                if decl_ts is None:
+                    continue
+                decl_name = decl_ts.custom_typename
+                if not decl_name:
+                    continue
+                # Case 1: the declared type IS a bare template param name, e.g. T
+                if decl_name in template_params:
+                    # Strip pointer depth from concrete to get the plain type
+                    concrete_inner = concrete_ts
+                    if concrete_ts.is_pointer and decl_ts.is_pointer:
+                        import copy as _cp
+                        concrete_inner = _cp.copy(concrete_ts)
+                        concrete_inner.is_pointer = False
+                        concrete_inner.pointer_depth = max(0, (concrete_ts.pointer_depth or 1) - (decl_ts.pointer_depth or 1))
+                        if concrete_inner.pointer_depth == 0:
+                            concrete_inner.is_pointer = False
+                    if decl_name not in inferred:
+                        inferred[decl_name] = concrete_inner
+                    continue
+                # Case 2: declared type is a parameterised name like "Ring<T>"
+                if '<' in decl_name and '>' in decl_name:
+                    bracket = decl_name.index('<')
+                    _base = decl_name[:bracket]
+                    _raw_params = [s.strip() for s in decl_name[bracket + 1:-1].split(',')]
+                    # concrete_ts.custom_typename should be the mangled form e.g. "Ring__int"
+                    conc_name = concrete_ts.custom_typename if concrete_ts.custom_typename else ''
+                    # The mangled name is struct_base + "__" + "_".join(type_names)
+                    # Try to recover the concrete type names by resolving the mangled struct
+                    if conc_name.startswith(_base + '__'):
+                        remainder = conc_name[len(_base) + 2:]  # e.g. "int" or "int_float"
+                        # We only handle the single-param case robustly here
+                        if len(_raw_params) == 1 and _raw_params[0] in template_params:
+                            pname = _raw_params[0]
+                            if pname not in inferred:
+                                # Look up the concrete TypeSystem from the symbol table
+                                resolved = self.symbol_table.get_type_spec(remainder)
+                                if resolved is not None:
+                                    inferred[pname] = resolved
+                                else:
+                                    # Fallback: construct a DATA type from the remainder name
+                                    from ftypesys import DataType as _DT
+                                    _dt_by_val = {dt.value: dt for dt in _DT}
+                                    if remainder in _dt_by_val:
+                                        inferred[pname] = TypeSystem(base_type=_dt_by_val[remainder])
+                                    else:
+                                        inferred[pname] = TypeSystem(base_type=_DT.DATA, custom_typename=remainder)
+            # Verify all template params are accounted for
+            if not all(p in inferred for p in template_params):
+                #import sys as _sys; _sys.stderr.write(f'[DEBUG rto] bail could not infer\n'); _sys.stderr.flush()
+                return  # Could not infer all template params - skip instantiation
+            # Replace arg_type_specs with the inferred single-param list
+            arg_type_specs = [inferred[p] for p in template_params]
 
         # Mirror the parser's non-builtin guard for concrete operator overloads:
         # refuse to instantiate when all operand types are plain primitives.
@@ -7558,7 +7659,8 @@ class FluxParser:
                 return (ts.custom_typename is not None or
                         ts.base_type in (DataType.STRUCT, DataType.OBJECT) or
                         ts.is_pointer)
-            if not any(_is_non_builtin(ts) for ts in arg_type_specs):
+            if not any(_is_non_builtin(ts) for ts in _original_operand_specs):
+                #import sys as _sys; _sys.stderr.write(f'[DEBUG rto] bail all-primitive\n'); _sys.stderr.flush()
                 return  # All-primitive instantiation - skip to avoid overriding builtins
 
         # Build a stable mangle key so each unique pair of concrete types is only
@@ -7578,6 +7680,11 @@ class FluxParser:
         # LLVM-level overload uniqueness comes from distinct parameter types.
         concrete_func.name = template_func.name
         concrete_func.no_mangle = False
+        # Tag with _source_namespace so pass 3 in fcodegen picks it up as a
+        # template instantiation and emits it after all namespace functions are
+        # registered. Without this attribute the pass 3 filter silently skips it.
+        concrete_func._source_namespace = ''
+        #import sys as _sys; _sys.stderr.write(f'[DEBUG op_inst] appending {concrete_func.name} to _template_instantiations (id={id(concrete_func)})\n'); _sys.stderr.flush()
         self._template_instantiations.append(concrete_func)
 
     def _infer_type_from_expr(self, expr) -> 'TypeSystem | None':
@@ -8355,16 +8462,12 @@ class FluxParser:
             return Literal(value, DataType.DOUBLE).set_location(tok.line, tok.column)
         elif self.expect(TokenType.CHAR):
             tok = self.current_token
-            # A quoted char literal ('a') has tok.value as the literal character itself.
-            # A numeric char literal (97c) has tok.value as a digit string from the lexer's
-            # suffix handling -- convert it to an int so normalize_char_value doesn't take
-            # ord() of the first digit by mistake.
-            if tok.value.isdigit():
-                value = int(tok.value)
-            else:
-                value = tok.value
+            # A quoted char literal ('a') has tok.value as the literal character string.
+            # normalize_char_value will call ord() on it.
+            # A numeric char literal (97c) has tok.value as an int (the codepoint directly)
+            # set by the lexer. normalize_char_value returns it as-is.
             self.advance()
-            return Literal(value, DataType.CHAR).set_location(tok.line, tok.column)
+            return Literal(tok.value, DataType.CHAR).set_location(tok.line, tok.column)
         elif self.expect(TokenType.BYTE_LITERAL):
             tok = self.current_token
             value = int(tok.value)

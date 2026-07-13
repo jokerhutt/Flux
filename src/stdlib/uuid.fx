@@ -11,11 +11,11 @@
 #def FLUX_STANDARD_UUID 1;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifndef FLUX_STANDARD_RANDOM
-#import "random.fx";
+#import <random.fx>;
 #endif;
 
 struct UUID

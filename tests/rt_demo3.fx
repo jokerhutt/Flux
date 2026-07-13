@@ -13,14 +13,13 @@
 //   ESC - Quit
 //
 
-#import "standard.fx", "windows.fx", "opengl.fx", "threading.fx", "atomics.fx", "raytracing.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>, <threading.fx>, <matrices.fx>, <raytracing.fx>;
 
-using standard::system::windows;
-using standard::math;
-using standard::memory::allocators::stdheap;
-using standard::threading;
-using standard::atomic;
-using raytracer;
+using standard::system::windows,
+      standard::threading,
+      standard::atomic,
+      standard::matrices,
+      raytracer;
 
 extern def !!glPixelStorei(int, int) -> void;
 
@@ -294,7 +293,7 @@ def main() -> int
     // ---- Frame loop vars ----
     RECT    client_rect;
     int     cur_w, cur_h;
-    Matrix4 ortho;
+    Mat4    ortho;
     bool    key1_prev, key2_prev, key3_prev,
             key1_now,  key2_now,  key3_now;
     i32     new_scene, current_scene;

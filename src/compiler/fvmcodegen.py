@@ -171,6 +171,12 @@ class FVMCodegen:
         # namespace marked with `deprecate`, mirroring fcodegen.py's
         # visit_DeprecateStatement.
         self._program_statements: list = program_statements or []
+        # Statements from the comptime body currently being compiled.
+        # Set by compile() so _visit_object_def can scan sibling definitions
+        # (e.g. forward-declared objects whose full definitions appear later in
+        # the same comptime block) without reaching into _program_statements,
+        # which only holds top-level module statements.
+        self._comptime_body_stmts: list = []
         # Maps variable name -> local slot index
         self._locals: Dict[str, int] = {}
         self._local_count: int = 0
@@ -283,7 +289,24 @@ class FVMCodegen:
             self._emit(_instr(Op.LOCAL_SET, slot))
 
         # Compile the body
-        self._visit_body(node.body)
+        _body = node.body
+        if hasattr(_body, 'statements'):
+            self._comptime_body_stmts = _body.statements
+        elif isinstance(_body, list):
+            self._comptime_body_stmts = _body
+        # Pre-pass: register all traits and interfaces visible in this comptime
+        # body so that forward-referenced names (e.g. an object defined before
+        # the trait it implements) are already present in the registries when
+        # _visit_object_def runs. Mirrors fcodegen's pre-pass ordering.
+        from fast import TraitDef as _TraitDef, InterfaceDef as _InterfaceDef
+        for _pre_stmt in self._comptime_body_stmts:
+            if isinstance(_pre_stmt, _TraitDef):
+                if _pre_stmt.name not in self._trait_registry:
+                    self._trait_registry[_pre_stmt.name] = _pre_stmt.prototypes
+            elif isinstance(_pre_stmt, _InterfaceDef):
+                if _pre_stmt.name not in self._interface_registry:
+                    self._interface_registry[_pre_stmt.name] = _pre_stmt
+        self._visit_body(_body)
 
         # Resolve any remaining forward goto patches
         self._resolve_goto_patches()
@@ -451,7 +474,7 @@ class FVMCodegen:
             # be checked regardless of source order.
             from fast import ObjectDef as _ObjectDef, ObjectDefStatement as _ObjectDefStatement
             _all_obj_defs = {}
-            for _stmt in self._program_statements:
+            for _stmt in self._program_statements + self._comptime_body_stmts:
                 _od = None
                 if isinstance(_stmt, _ObjectDef):
                     _od = _stmt
@@ -2040,6 +2063,22 @@ class FVMCodegen:
         For functions: allocate a slot holding Val(BYTES, func_name), push PTR to it.
         @arr[idx] — evaluate arr[idx], store result in a temp slot, push PTR to that slot.
         """
+        if isinstance(node.expression, PointerDeref):
+            # @(*ptr) -- fcodegen visits the inner pointer directly, not the deref.
+            # The VM mirrors this: just visit the pointer expression to get the PTR value.
+            self._visit_expr(node.expression.pointer)
+            return True
+        if isinstance(node.expression, (Literal, FunctionCall,
+                                         StringLiteral, FStringLiteral, ArrayLiteral,
+                                         MemberAccess)):
+            # Evaluate the expression (pushes a value), store in a temp slot,
+            # push PTR to that slot -- mirrors fcodegen's alloca+store pattern.
+            tmp_name = self._fresh_tmp()
+            tmp_slot = self._alloc_local(tmp_name)
+            self._visit_expr(node.expression)
+            self._emit(_instr(Op.LOCAL_SET, tmp_slot))
+            self._emit(_instr(Op.PUSH, Val(TTag.PTR, tmp_slot)))
+            return True
         if isinstance(node.expression, ArrayAccess):
             # Evaluate the subscript expression to get the element value, then
             # store it in a fresh temp slot and return a PTR to that slot.
@@ -2052,7 +2091,7 @@ class FVMCodegen:
             return True
         if not isinstance(node.expression, Identifier):
             raise FVMCodegenError(
-                'fvmcodegen: address-of only supported on simple identifiers in comptime',
+                f'fvmcodegen: address-of unsupported on {type(node.expression).__name__} in comptime',
                 node
             )
         name = node.expression.name

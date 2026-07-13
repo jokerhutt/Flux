@@ -1,6 +1,6 @@
 // x25519_test.fx - X25519 ECDH test using RFC 7748 vectors
 
-#import "standard.fx", "cryptography.fx";
+#import <standard.fx>, <cryptography.fx>;
 
 using standard::io::console,
       standard::strings,

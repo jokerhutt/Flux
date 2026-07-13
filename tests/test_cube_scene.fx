@@ -21,11 +21,10 @@
 //      confirming the sky pass ran.
 //   6. The depth buffer centre value is less than RC_INF (cube was hit).
 
-#import "standard.fx";
-#import "raycasting.fx";
+#import <standard.fx>, <raycasting.fx>;
 
-using standard::io::console;
-using raycaster;
+using standard::io::console,
+      raycaster;
 
 // ---------------------------------------------------------------------------
 // Screen constants

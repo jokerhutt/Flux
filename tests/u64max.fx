@@ -1,9 +1,9 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
 def main() -> int
 {
-	print(0xFFFFFFFFFFFFFFFFu);
+	print(0xFFFFFFFFFFFFFFFFul);
 	return 0;
 };

@@ -1,4 +1,3 @@
-///
 comptime
 {
 	compiler.fvm.loadlib("kernel32","dll");
@@ -31,7 +30,7 @@ comptime
 comptime
 {
 	object MyObj1, MyObj2;
-	trait Trai1
+	trait Trait1
 	{
 		def bar() -> void;
 	};
@@ -121,6 +120,7 @@ comptime
 	//TNS::tar(); // working
 };
 
+///
 comptime ZaZa
 {
 	compiler.io.console.print("ZaZa\n");
@@ -132,6 +132,7 @@ comptime BoZo
 	compiler.io.console.print("BoZo\n");
 	goto ZaZa;
 };
+///
 
 comptime
 {
@@ -139,13 +140,13 @@ comptime
 
 	compiler.io.console.print(endianof(lebyte));
 };
-///
 
 comptime
 {
 	int x = (int)10ul;
 
 	compiler.io.console.print(x);
+	compiler.io.console.print('\n');
 };
 
 def !!FRTStartup() -> int { return 0; };

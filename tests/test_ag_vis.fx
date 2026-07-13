@@ -17,12 +17,11 @@
 // The simulation runs for 10 seconds (~600 steps at ~60 steps/sec),
 // then keeps the window open until the user closes it.
 
-#import "standard.fx";
-#import "autograd_vis.fx";
+#import <standard.fx>, <autograd_vis.fx>;
 
-using standard::autograd;
-using standard::autograd_vis;
-using standard::time;
+using standard::autograd,
+      standard::autograd_vis,
+      standard::time;
 
 // SGD step: w[i] -= lr * grad[i]
 def sgd_step(float* vals, float* grad, size_t n, float lr) -> void

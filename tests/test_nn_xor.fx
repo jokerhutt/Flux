@@ -16,8 +16,7 @@
 // Expected: loss starts ~0.25, falls below 0.01 within ~1000 steps.
 // Prints loss every 100 steps and final predictions.
 
-#import "standard.fx";
-#import "neuralnet.fx";
+#import <standard.fx>, <neuralnet.fx>;
 
 using standard::autograd,
       standard::neuralnet,

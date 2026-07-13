@@ -18,16 +18,14 @@
 // Expected: loss below 0.05 by ~6000 steps; accuracy above 90% on train set.
 // Prints a 2D ASCII grid showing the learned decision boundary at the end.
 
-#import "standard.fx";
-#import "neuralnet.fx";
-#import "autograd_vis.fx";
+#import <standard.fx>, <neuralnet.fx>, <autograd_vis.fx>;
 
-using standard::autograd;
-using standard::neuralnet;
-using standard::random;
-using standard::math;
-using standard::io::console;
-using standard::autograd_vis;
+using standard::autograd,
+      standard::neuralnet,
+      standard::random,
+      standard::math,
+      standard::io::console,
+      standard::autograd_vis;
 
 #def N_PER_CLASS 24;
 #def N_TOTAL     48;

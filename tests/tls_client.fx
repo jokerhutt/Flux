@@ -1,9 +1,7 @@
 // TLS Echo Client
 // Connects to server at 127.0.0.1:8443 and sends messages over TLS
 
-#import "standard.fx";
-#import "socket_object_raw.fx";
-#import "tls.fx";
+#import <standard.fx>, <tls.fx>;
 
 using standard::io::console,
       standard::io::sockets,
@@ -14,21 +12,21 @@ using standard::io::console,
 byte[20] SERVER_NAME_W = [
     0x6C,0x00,0x6F,0x00,0x63,0x00,0x61,0x00,  // l o c a
     0x6C,0x00,0x68,0x00,0x6F,0x00,0x73,0x00,  // l h o s
-    0x74,0x00,0x00,0x00                         // t \0
+    0x74,0x00,0x00,0x00                         // t 
 ];
 
 def main() -> int
 {
     // Initialize Winsock
-    int init_result = init();
+    int init_result = sockets::init();
     if (init_result != 0)
     {
-        print("Failed to initialize Winsock\n\0");
+        print("Failed to initialize Winsock\n");
         return 1;
     };
 
-    print("=== TLS Echo Client ===\n\0");
-    print("Connecting to server at 127.0.0.1:8443...\n\0");
+    print("=== TLS Echo Client ===\n");
+    print("Connecting to server at 127.0.0.1:8443...\n");
 
     // Create TCP socket and connect
     socket client_socket(socket_type.TCP);
@@ -36,20 +34,20 @@ def main() -> int
 
     if (!client_socket.is_open())
     {
-        print("Failed to create socket\n\0");
+        print("Failed to create socket\n");
         cleanup();
         return 1;
     };
 
-    if (!client_socket.connect("127.0.0.1\0", (i16)8443))
+    if (!client_socket.connect("127.0.0.1", (i16)8443))
     {
-        print("Failed to connect to server\n\0");
+        print("Failed to connect to server\n");
         client_socket.close();
         cleanup();
         return 1;
     };
 
-    print("TCP connection established\n\0");
+    print("TCP connection established\n");
 
     // Set up TLS connection over the connected socket
     TlsConn tls(client_socket.fd);
@@ -57,28 +55,28 @@ def main() -> int
     // Acquire client credentials (no client certificate — server-auth only)
     if (!conn::client_create_cred(@tls, (void*)0))
     {
-        print("Failed to acquire TLS credentials\n\0");
+        print("Failed to acquire TLS credentials\n");
         client_socket.close();
         cleanup();
         return 1;
     };
 
-    print("Performing TLS handshake...\n\0");
+    print("Performing TLS handshake...\n");
 
     // Perform the TLS handshake
     // Pass server name for SNI and certificate validation
     if (!conn::client_handshake(@tls, @SERVER_NAME_W[0]))
     {
-        print("TLS handshake failed (error \0");
+        print("TLS handshake failed (error ");
         print(tls.error_state);
-        print(")\n\0");
+        print(")\n");
         tls.__exit();
         client_socket.close();
         cleanup();
         return 1;
     };
 
-    print("TLS handshake complete!\n\0");
+    print("TLS handshake complete!\n");
 
     // Buffer for sending and receiving data
     byte* send_buffer = fmalloc(1024);
@@ -93,15 +91,15 @@ def main() -> int
     int msg_len;
 
     byte*[3] messages;
-    messages[0] = "Hello, Server!\0";
-    messages[1] = "This is message 2\0";
-    messages[2] = "Final message from client\0";
+    messages[0] = "Hello, Server!";
+    messages[1] = "This is message 2";
+    messages[2] = "Final message from client";
 
     while (i < message_count)
     {
-        print("\n--- Message \0");
+        print("\n--- Message ");
         print(i + 1);
-        print(" ---\n\0");
+        print(" ---\n");
 
         msg = messages[i];
 
@@ -112,39 +110,39 @@ def main() -> int
             msg_len = msg_len + 1;
         };
 
-        print("Sending: \0");
+        print("Sending: ");
         print(msg);
-        print("\n\0");
+        print("\n");
 
         // Send over TLS
         int bytes_sent = conn::tls_send(@tls, send_buffer, (u32)msg_len);
 
         if (bytes_sent < 0)
         {
-            print("Failed to send message\n\0");
+            print("Failed to send message\n");
             break;
         };
 
-        print("Sent \0");
+        print("Sent ");
         print(bytes_sent);
-        print(" bytes\n\0");
+        print(" bytes\n");
 
         // Receive echo response over TLS
         int bytes_received = conn::tls_recv(@tls, recv_buffer, 1024u);
 
         if (bytes_received <= 0)
         {
-            print("Server disconnected or error occurred\n\0");
+            print("Server disconnected or error occurred\n");
             break;
         };
 
-        recv_buffer[bytes_received] = '\0';
+        recv_buffer[bytes_received] = '';
 
-        print("Received echo (\0");
+        print("Received echo (");
         print(bytes_received);
-        print(" bytes): \0");
+        print(" bytes): ");
         print(recv_buffer);
-        print("\n\0");
+        print("\n");
 
         i = i + 1;
     };
@@ -156,6 +154,6 @@ def main() -> int
     client_socket.close();
     cleanup();
 
-    print("\nClient finished\n\0");
+    print("\nClient finished\n");
     return 0;
 };

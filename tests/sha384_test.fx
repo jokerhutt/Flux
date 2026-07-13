@@ -1,7 +1,7 @@
 // Author: Karac V. Thweatt
 // sha384_test.fx
 
-#import "standard.fx", "cryptography.fx", "datautils.fx";
+#import <standard.fx>, <cryptography.fx>, <datautils.fx>;
 
 using standard::io::console,
       standard::crypto::hashing::SHA384;

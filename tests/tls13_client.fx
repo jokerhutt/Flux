@@ -6,7 +6,7 @@
 //
 // Run tls13_server.fx first.
 
-#import "standard.fx", "tls.fx";
+#import <standard.fx>, <tls.fx>;
 
 using standard::io::console,
       standard::net,
