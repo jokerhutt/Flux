@@ -132,6 +132,7 @@ class Op(Enum):
 
     # compiler.io built-ins
     COMPILER_PRINT      = auto()   # compiler.io.console.print(byte*)
+    COMPILER_PRINTLN    = auto()   # compiler.io.console.println(byte*)
     COMPILER_INPUT      = auto()   # compiler.io.console.input() -> byte*
     COMPILER_READFILE   = auto()   # compiler.io.readfile(path: byte*) -> byte*
     COMPILER_WRITEFILE      = auto()   # compiler.io.writefile(path: byte*, content: byte*, flags: byte*)
@@ -632,6 +633,7 @@ class FluxVM:
 
         # compiler.io built-ins
         elif op == Op.COMPILER_PRINT:     self._op_compiler_print()
+        elif op == Op.COMPILER_PRINTLN:   self._op_compiler_println()
         elif op == Op.COMPILER_INPUT:     self._op_compiler_input()
         elif op == Op.COMPILER_READFILE:  self._op_compiler_readfile()
         elif op == Op.COMPILER_WRITEFILE: self._op_compiler_writefile()
@@ -1826,6 +1828,15 @@ class FluxVM:
         sys.stdout.write(text.replace('\x00', ''))
         sys.stdout.flush()
 
+    def _op_compiler_println(self):
+        val = self._pop()
+        if val.tag in (TTag.BYTES, TTag.PTR, TTag.CHAR) or isinstance(val.data, (str, bytes, bytearray)):
+            text = self._read_vm_string(val)
+        else:
+            text = str(val.data)
+        sys.stdout.write(text.replace('\x00', '') + '\n')
+        sys.stdout.flush()
+
     def _op_compiler_input(self):
         line = sys.stdin.readline()
         raw  = line.encode('utf-8')
@@ -2757,7 +2768,7 @@ def _serialise_instr(instr) -> str:
         Op.TYPEOF,
         Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
         Op.FFI_FREE,
-        Op.COMPILER_PRINT, Op.COMPILER_INPUT,
+        Op.COMPILER_PRINT, Op.COMPILER_PRINTLN, Op.COMPILER_INPUT,
         Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
         Op.COMPILER_LOADLIB,
         Op.STR_LEN, Op.STR_CAT, Op.STR_SLICE, Op.STR_EQ, Op.STR_FIND,
@@ -3248,7 +3259,7 @@ def _parse_operands(op: Op, raw_tokens: List[str], lineno: int) -> list:
         Op.TYPEOF,
         Op.IO_OPEN, Op.IO_READ, Op.IO_WRITE, Op.IO_CLOSE,
         Op.FFI_FREE,
-        Op.COMPILER_PRINT, Op.COMPILER_INPUT,
+        Op.COMPILER_PRINT, Op.COMPILER_PRINTLN, Op.COMPILER_INPUT,
         Op.COMPILER_READFILE, Op.COMPILER_WRITEFILE,
         Op.COMPILER_FVM_DUMP,
         Op.COMPILER_LOADLIB,

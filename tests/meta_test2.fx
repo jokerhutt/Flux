@@ -4,7 +4,7 @@ using standard::io::console;
 
 comptime
 {
-    compiler.io.console.print("Stage 1: deciding types\n");
+    compiler.io.console.println("Stage 1: deciding types");
 
     byte*[] types = ["int", "float"],
             tags  = ["INT", "FLOAT"];
@@ -20,7 +20,7 @@ comptime
         {
             comptime
             {
-                compiler.io.console.print(f"Stage 2: generating for type {$~$T}, tag {$~$TAG}\n");
+                compiler.io.console.println(f"Stage 2: generating for type {$~$T}, tag {$~$TAG}");
                 emitflux
                 {
                     def ~$f"clamp_{T}"(~$T val, ~$T lo, ~$T hi) -> ~$T
@@ -38,11 +38,14 @@ comptime
             };
         };
     };
-};
 
-def main() -> int
-{
-    println(f"{clamp_int(15, 0, 10)}");
-    println(f"{clamp_float(0.3f, 0.5f, 1.0f)}");
-    return 0;
+    emitflux
+    {
+        def main() -> int
+        {
+            println(f"{clamp_int(15, 0, 10)}");
+            println(f"{clamp_float(0.3f, 0.5f, 1.0f)}");
+            return 0;
+        };
+    };
 };

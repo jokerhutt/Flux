@@ -2294,6 +2294,8 @@ class FVMCodegen:
         _COMPILER_IO = {
             'compiler__io__console__print':  Op.COMPILER_PRINT,
             'compiler.io.console.print':     Op.COMPILER_PRINT,
+            'compiler__io__console__println': Op.COMPILER_PRINTLN,
+            'compiler.io.console.println':    Op.COMPILER_PRINTLN,
             'compiler__io__console__input':  Op.COMPILER_INPUT,
             'compiler.io.console.input':     Op.COMPILER_INPUT,
             'compiler__io__readfile':        Op.COMPILER_READFILE,
@@ -2368,8 +2370,9 @@ class FVMCodegen:
         to dedicated VM opcodes; falls back to a generic CALL for others.
         """
         _COMPILER_IO_OPCODES = {
-            'compiler.io.console.print':  Op.COMPILER_PRINT,
-            'compiler.io.console.input':  Op.COMPILER_INPUT,
+            'compiler.io.console.print':    Op.COMPILER_PRINT,
+            'compiler.io.console.println':  Op.COMPILER_PRINTLN,
+            'compiler.io.console.input':    Op.COMPILER_INPUT,
             'compiler.io.readfile':       Op.COMPILER_READFILE,
             'compiler.io.writefile':      Op.COMPILER_WRITEFILE,
             'compiler.fvm.dump':          Op.COMPILER_FVM_DUMP,
