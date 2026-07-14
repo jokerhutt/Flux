@@ -66,6 +66,7 @@ from fast import (
     UsingStatement, NotUsingStatement,
     InlineAsm,
     TernaryOp,
+    IfExpression,
     Stringify,
 )
 from ftypesys import DataType, Operator
@@ -214,6 +215,9 @@ class FVMCodegen:
         self._current_src_line: int = 0
         # Expression macro definitions registered at comptime codegen time
         self._macro_table: dict = {}
+        # Names of macros currently being compiled into FVM functions, used to
+        # detect self-referential macros and emit CALL instead of re-expanding.
+        self._macros_compiling: set = set()
         # Names declared with `local` storage class - cannot escape scope
         self._local_vars: set = set()
         # Full TypeSystem for declared locals, for sizeof/typeof resolution
@@ -579,6 +583,7 @@ class FVMCodegen:
             fn_cg._struct_layouts   = dict(self._struct_layouts)
             fn_cg._enum_names       = set(self._enum_names)
             fn_cg._macro_table      = dict(self._macro_table)
+            fn_cg._macros_compiling = set(self._macros_compiling)
             fn_cg._local_types      = dict(self._local_types)
             fn_cg._local_typespecs  = dict(self._local_typespecs)
             fn_cg.compiled_functions = dict(self.compiled_functions)
@@ -1388,6 +1393,7 @@ class FVMCodegen:
         elif t is TypeConvertExpression: return self._visit_cast(node)
         elif t is InlineAsm:           return self._visit_inline_asm(node)
         elif t is TernaryOp:           return self._visit_ternary_op(node)
+        elif t is IfExpression:        return self._visit_if_expression(node)
         elif t is Stringify:           return self._visit_stringify(node)
         else:
             raise FVMCodegenError(
@@ -2175,6 +2181,27 @@ class FVMCodegen:
         self._patch_at(jmp_patch, Op.JMP, self._current_ip())
         return True
 
+    def _visit_if_expression(self, node) -> bool:
+        """
+        Compile an if-expression: value_expr if (condition) [else else_expr]
+
+        Mirrors fcodegen.visit_IfExpression.
+        Emits: eval condition, JNF to else branch, eval value_expr, JMP to merge,
+               else branch: eval else_expr (or push 0 if absent), merge.
+        """
+        self._visit_expr(node.condition)
+        jnf_patch = self._emit(_instr(Op.JNF, 0))
+        self._visit_expr(node.value_expr)
+        jmp_patch = self._emit(_instr(Op.JMP, 0))
+        self._patch_at(jnf_patch, Op.JNF, self._current_ip())
+        if node.else_expr is not None:
+            self._visit_expr(node.else_expr)
+        else:
+            # No else clause: default value is zero/void
+            self._emit(_instr(Op.PUSH, Val(TTag.INT, 0)))
+        self._patch_at(jmp_patch, Op.JMP, self._current_ip())
+        return True
+
     def _visit_inline_asm(self, node: InlineAsm) -> bool:
         """
         Emit an INLINE_ASM instruction for an inline asm block.
@@ -2505,8 +2532,16 @@ class FVMCodegen:
         """
         Expand an expression macro call inline, mirroring CodegenVisitor.visit_macroCall.
         Looks up the macroDef, substitutes arguments, and visits the expanded body.
+
+        Self-referential macros (where the body contains a call back to the same macro)
+        cannot be expanded by pure AST substitution -- that would recurse infinitely at
+        compile time before any condition is ever evaluated. Instead, the first time a
+        self-referential macro is encountered it is compiled into a named FVM function
+        (keyed as '__macro__<name>') stored in compiled_functions, and every call site
+        (including the recursive one inside the body) emits CALL to that function.
         """
         import copy
+
         macro_def = self._macro_table.get(node.name)
         if macro_def is None:
             raise FVMCodegenError(
@@ -2515,11 +2550,56 @@ class FVMCodegen:
             raise FVMCodegenError(
                 f"fvmcodegen: macro '{node.name}' expects {len(macro_def.params)} "
                 f"argument(s), got {len(node.arguments)}", node)
-        subst = {param: copy.deepcopy(arg)
-                 for param, arg in zip(macro_def.params, node.arguments)}
+
+        fn_key = f"__macro__{node.name}"
+
+        # If this macro is currently being compiled into an FVM function (recursive
+        # re-entry), or has already been compiled, emit a CALL to the function.
+        if node.name in self._macros_compiling or fn_key in self.compiled_functions or fn_key in self._known_functions:
+            for arg in node.arguments:
+                self._visit_expr(arg)
+            self._emit(_instr(Op.CALL, fn_key, len(node.arguments)))
+            return True
+
+        # First encounter: compile the macro body as an FVM function.
+        self._macros_compiling.add(node.name)
+
+        fn_cg = FVMCodegen(
+            known_functions=dict(self._known_functions),
+            program_statements=self._program_statements)
+        fn_cg._outer_globals      = set(self._block_globals)
+        fn_cg._is_function_body   = True
+        fn_cg._using_namespaces   = list(self._using_namespaces)
+        fn_cg._struct_layouts     = dict(self._struct_layouts)
+        fn_cg._enum_names         = set(self._enum_names)
+        fn_cg._macro_table        = dict(self._macro_table)
+        fn_cg._macros_compiling   = set(self._macros_compiling)
+        fn_cg._local_types        = dict(self._local_types)
+        fn_cg._local_typespecs    = dict(self._local_typespecs)
+        fn_cg.compiled_functions  = dict(self.compiled_functions)
+
+        # Allocate a local slot per parameter -- the VM _call() loads args into slots.
+        for param_name in macro_def.params:
+            fn_cg._alloc_local(param_name)
+
+        # Compile the body expression and cap it with RET.
         body_copy = copy.deepcopy(macro_def.body)
-        expanded = self._macro_substitute(body_copy, subst)
-        return self._visit_expr(expanded)
+        fn_cg._visit_expr(body_copy)
+        fn_cg._emit(_instr(Op.RET))
+
+        # Register the compiled function so recursive calls and future call sites find it.
+        self.compiled_functions[fn_key] = fn_cg._instructions
+        for _k, _v in fn_cg.compiled_functions.items():
+            if _k not in self.compiled_functions:
+                self.compiled_functions[_k] = _v
+
+        self._macros_compiling.discard(node.name)
+
+        # Now emit a call for this (the first) call site.
+        for arg in node.arguments:
+            self._visit_expr(arg)
+        self._emit(_instr(Op.CALL, fn_key, len(node.arguments)))
+        return True
 
     @staticmethod
     def _macro_substitute(node, subst: dict):
@@ -2763,6 +2843,7 @@ class FVMCodegen:
         fn_cg._struct_layouts = dict(self._struct_layouts)
         fn_cg._enum_names = set(self._enum_names)
         fn_cg._macro_table = dict(self._macro_table)
+        fn_cg._macros_compiling = set(self._macros_compiling)
         fn_cg._local_types = dict(self._local_types)
         fn_cg._local_typespecs = dict(self._local_typespecs)
         # Allocate a slot for each parameter so LOCAL_GET/SET work by name
@@ -2829,6 +2910,7 @@ class FVMCodegen:
         fn_cg._struct_layouts = dict(self._struct_layouts)
         fn_cg._enum_names = set(self._enum_names)
         fn_cg._macro_table = dict(self._macro_table)
+        fn_cg._macros_compiling = set(self._macros_compiling)
         fn_cg._local_types = dict(self._local_types)
         fn_cg._local_typespecs = dict(self._local_typespecs)
         # Slot 0: implicit receiver '_'
@@ -3181,6 +3263,7 @@ class FVMCodegen:
             fn_cg._struct_layouts = dict(self._struct_layouts)
             fn_cg._enum_names = set(self._enum_names)
             fn_cg._macro_table = dict(self._macro_table)
+            fn_cg._macros_compiling = set(self._macros_compiling)
             fn_cg._local_types = dict(self._local_types)
             fn_cg._local_typespecs = dict(self._local_typespecs)
             for param in func.parameters:
@@ -3443,6 +3526,7 @@ class FVMCodegen:
                     fn_cg._struct_layouts     = dict(self._struct_layouts)
                     fn_cg._enum_names         = set(self._enum_names)
                     fn_cg._macro_table        = dict(self._macro_table)
+                    fn_cg._macros_compiling   = set(self._macros_compiling)
                     fn_cg._local_types        = dict(self._local_types)
                     fn_cg._local_typespecs    = dict(self._local_typespecs)
                     fn_cg._interface_registry = self._interface_registry

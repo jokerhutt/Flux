@@ -30,9 +30,22 @@ unsigned data{32} as u32;
 ---
 
 **`asm`**
-Inline assembly block.
+Inline assembly block. Use `volatile` to instruct the compiler to not touch your assembly or attempt to optimize it. Flux uses AT&T style ASM and blocks are followed by `inputs : outputs : clobbers`, 
 ```
-asm { movq $$0, %rax };
+#ifdef __ARCH_ARM64__
+            def mac_print(byte* msg, int x) -> void
+            {
+                volatile asm
+                {
+                    mov x0, #1
+                    mov x1, $0
+                    mov x2, $1
+                    movz x16, #0x4
+                    svc #0x80
+                } : : "r"(msg), "r"(count) : "x0","x1","x2","x16","memory";
+                return;
+            };
+#endif; // ARCH ARM
 ```
 
 ---
@@ -110,6 +123,104 @@ cdecl foo(int x) -> int { return x; };
 Character type. Guaranteed 8 bits.
 ```
 char c = 'H';
+```
+
+---
+
+**`comptime`**  
+Compile-time programming is done in `comptime` blocks.  
+Everything inside is evaluated by the Flux Virtual Machine (FVM).  
+
+You can write any Flux code inside a `comptime` block. There are no restrictions on I/O. You may even perform networking if you really wished.  
+FFI is also possible, as well as inline ASM execution supported by [Keystone Engine](https://github.com/keystone-engine/keystone) (x86-64 only for now). 
+
+The FVM has its own pseudo assembly language. All Flux inside turns into FVM assembly, which it then executes.  You can dump your `comptime` assembly to a file using `compiler.fvm.dump("path/to/yourdump.fvm);`  
+It is plaintext, not bytecode, so you can read and inspect it.  
+It can then independently be ran with `fvm.py yourdump.fvm`
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+enum AnyTag { INT, FLOAT, LONG, BOOL };
+
+union Any
+{
+    int   ival;
+    float fval;
+    long  lval;
+    bool  bval;
+} # AnyTag;
+
+comptime
+{
+    byte*[] types  = ["int", "float", "long", "bool"],
+            tags   = ["INT", "FLOAT", "LONG", "BOOL"],
+            fields = ["ival", "fval", "lval", "bval"];
+    int     count  = 4;
+    byte* T,
+          TAG,
+          FIELD;
+
+    for (int idx = 0; idx < count; idx++)
+    {
+        T     = types[idx];
+        TAG   = tags[idx];
+        FIELD = fields[idx];
+
+        emitflux
+        {
+            def ~$f"wrap_{T}"(~$f"{T}" x) -> Any
+            {
+                Any a;
+                a.# = AnyTag.~$f"{TAG}";
+                a.~$f"{FIELD}" = x;
+                return a;
+            };
+
+            def ~$f"unwrap_{T}"(Any a) -> ~$f"{T}"
+            {
+                return a.~$f"{FIELD}";
+            };
+
+            def ~$f"is_{T}"(Any a) -> bool
+            {
+                return a.# == AnyTag.~$f"{TAG}";
+            };
+        };
+    };
+};
+
+def main() -> int
+{
+    Any a = wrap_int(42);
+    Any b = wrap_float(3.14f);
+    Any c = wrap_long(9999999l);
+
+    if (is_int(a))   { println(f"int:   {unwrap_int(a)}"); };
+    if (is_float(b)) { println(f"float: {unwrap_float(b)}"); };
+    if (is_long(c))  { println(f"long:  {unwrap_long(c)}"); };
+
+    return 0;
+};
+
+```
+
+You can also use FVM assembly directly inside `comptime` blocks with `fluxvm {}`.
+
+`comptime` blocks can also be named, and jumped to with `goto` like a `label`, allowing for loop behavior:
+```
+comptime ABC
+{
+    compiler.io.console.println("ABC");
+    goto XYZ;
+};
+
+comptime XYZ
+{
+    compiler.io.console.println("XYZ");
+    goto ABC;
+};
 ```
 
 ---
@@ -202,10 +313,95 @@ if (x > 0) { ... } else { ... };
 
 ---
 
+**`emitflux`**  
+Emit Flux source code at the scope of the `comptime` block this `emitflux` is found in.  
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+enum State { Idle, Running, Paused, Stopped };
+
+comptime
+{
+    int[] trans_from = [0, 1, 2, 1];
+    int[] trans_to   = [1, 2, 1, 3];
+    int   tcount     = 4;
+
+    emitflux
+    {
+        def state_name(int s) -> byte*
+        {
+            if (s == 0) { return "Idle"; };
+            if (s == 1) { return "Running"; };
+            if (s == 2) { return "Paused"; };
+            if (s == 3) { return "Stopped"; };
+            return "Unknown";
+        };
+    };
+
+    for (int tidx = 0; tidx < tcount; tidx++)
+    {
+        emitflux
+        {
+            comptime
+            {
+                emitflux
+                {
+                    def ~$i"can_trans_{}_{}":{trans_from[tidx];trans_to[tidx];}() -> bool { return true; };
+                };
+            };
+        };
+    };
+
+    emitflux
+    {
+        def transition(int fx, int to) -> int
+        {
+            if (fx == 0 & to == 1 & can_trans_0_1()) { return to; };
+            if (fx == 1 & to == 2 & can_trans_1_2()) { return to; };
+            if (fx == 2 & to == 1 & can_trans_2_1()) { return to; };
+            if (fx == 1 & to == 3 & can_trans_1_3()) { return to; };
+            println(f"Invalid: {fx}:{state_name(fx)} -> {to}:{state_name(to)}");
+            return fx;
+        };
+    };
+};
+
+def main() -> int
+{
+    int state = 0;
+
+    println(f"Initial: {state_name(state)}");
+
+    state = transition(state, 1);
+    println(f"Start:   {state_name(state)}");
+
+    state = transition(state, 2);
+    println(f"Pause:   {state_name(state)}");
+
+    state = transition(state, 3);
+    println(f"Invalid: {state_name(state)}");
+
+    state = transition(state, 1);
+    println(f"Resume:  {state_name(state)}");
+
+    state = transition(state, 3);
+    println(f"Stop:    {state_name(state)}");
+
+    return 0;
+};
+
+```
+
+---
+
 **`enum`**
 Declares an enumeration of named integer constants.
 ```
 enum Color { RED, GREEN, BLUE };
+
+Color c;
 ```
 
 ---
@@ -230,11 +426,12 @@ export
 
 **`extern`**:
 External FFI - reference a function from a library.
-Only prototypes are used with `extern`.
+Only prototypes and variable declarations are used with `extern`.
 ```
 extern
 {
     def !!foo() -> int;
+    int some_external_int;
 };
 ```
 
@@ -278,6 +475,31 @@ fastcall foo(int x) -> int { return x; };
 64-bit floating point type. Same as `double`.
 ```
 float x = 3.14159;
+```
+
+---
+
+**`fluxvm`**  
+Inline Flux VM assembly can be done at `comptime` and can be exported for standalone execution (so long as any code isn't platform specific).
+```
+comptime
+{
+    int x = 5;
+
+    fluxvm
+    {
+        LOCAL_GET x
+        PUSH 10
+        ADD
+        LOCAL_SET x
+    };
+
+    compiler.io.console.print(f"FluxVM modified int x = {x}\n");
+};
+```
+Result:
+```
+FluxVM modified int x = 15
 ```
 
 ---
@@ -414,6 +636,29 @@ long x = 1000000000000;
 
 ---
 
+**`macro`**
+Macros are named and parameterized expressions that replace themselves with their body in place.  
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+macro factorial(n)
+{
+    n * factorial(--n) if (n > 1) else 1
+};
+
+def main() -> int
+{
+    int x = factorial(5);
+    println(x);
+
+    return 0;
+};
+```
+
+---
+
 **`namespace`**
 Declares a named scope for organizing code.
 ```
@@ -453,7 +698,37 @@ not using standard::math::calculus;
 **`object`**
 Declares an object type with methods and state.
 ```
-object Point { int x, y; def __init(int x, int y) -> this { ... }; ...; };
+object Point
+{
+    int x, y;
+
+    def __init(int x, int y) -> this
+    {
+        this.x = x;
+        this.y = y;
+        return this;
+    };
+    
+    def __expr() -> Point* // or whatever you want Point to represent
+    {
+        return this;
+    };
+
+    def __exit() -> void { (void)this; };
+};
+```
+
+Objects must declare `__init`, `__expr`, and `__exit`.
+
+### `__expr` built in method
+`__init` and `__exit` are obvious ones, they're the constructor and destructor.  
+The job of `__expr` is different. When you want to use an object instance in an expression context, this function lets you define what is returned. Typically a good default is the type itself as a pointer, like `Point*`.  
+You could also do:
+```
+def __expr() -> byte*
+{
+    return f"{this.x},{this.y}";
+};
 ```
 
 ---
@@ -461,7 +736,37 @@ object Point { int x, y; def __init(int x, int y) -> this { ... }; ...; };
 **`operator`**:
 Define a custom infix operator. Can use symbols or an identifier as the operator.  
 To overload a built-in operator, one of the operands **must not** be a built-in type, ie `int`, `float`, `byte`, etc.
-TODO
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+// Custom operator +++
+operator (int L, int R) [+++] -> int
+{
+    return ++L + ++R;
+};
+
+// Overload a built in operator
+operator (int L, i16* R) [+] -> int
+{
+    i32 t = [R[0], R[1]];
+    return L + t;
+};
+
+
+def main() -> int
+{
+    int    x = 12;
+    i16[2] y = [0,55];
+    int    z = x + y;
+    
+    print(z); print(); // 67
+
+    print(5 +++ 3);    // 10
+    return 0;
+};
+```
 
 ---
 
@@ -476,7 +781,13 @@ if (x == 0 or y == 0) { ... };
 **`private`**
 Restricts member access to within the object. Members must be wrapped in a block.
 ```
-object Foo { private { int secret; }; };
+object Foo
+{
+    private
+    {
+        int secret;
+    };
+};
 ```
 
 ---
@@ -484,7 +795,13 @@ object Foo { private { int secret; }; };
 **`public`**
 Explicitly marks a member as externally accessible. Members must be wrapped in a block. Object members are public by default.
 ```
-object Foo { public { int value; }; };
+object Foo
+{
+    public
+    {
+        int value;
+    };
+};
 ```
 
 ---
@@ -514,7 +831,7 @@ signed data{32} as i32;
 ---
 
 **`singinit`**
-Declares a singleton. Function-scoped variable that is initialized only once across all calls.
+Declares a singleton. Function-scoped variable that is initialized only once across all calls. If the compiler warns you of an in-loop allocation and you do not want to hoist it out of the loop, you should make it a singleton so it does not continually allocate stack slots.
 ```
 singinit int count;
 ```

@@ -2900,6 +2900,12 @@ class FluxParser:
                 params.append(self.consume(TokenType.IDENTIFIER).value)
         self.consume(TokenType.RIGHT_PAREN)
 
+        # Pre-register the macro name before parsing the body so that recursive
+        # self-calls inside the body are recognised as macroCall nodes rather
+        # than being treated as ordinary FunctionCall nodes.
+        # We use a sentinel placeholder; the real node replaces it below.
+        self._macros[name] = None
+
         # Body: a single expression wrapped in braces
         self.consume(TokenType.LEFT_BRACE)
         body = self.expression()
@@ -2911,7 +2917,7 @@ class FluxParser:
         self.consume(TokenType.SEMICOLON)
 
         node = macroDef(name=name, params=params, body=body).set_location(tok.line, tok.column)
-        self._macros[name] = node   # register so call sites can be recognised
+        self._macros[name] = node   # replace placeholder with real definition
         return macroDefStatement(macro_def=node).set_location(tok.line, tok.column)
 
     def union_def(self) -> UnionDefStatement:
@@ -5668,15 +5674,46 @@ class FluxParser:
         while depth > 0:
             if self.expect(TokenType.EOF):
                 self.error("Unexpected EOF inside 'emitflux' block")
+            # #}; -- escaped close-brace-semicolon: captured as }; without affecting depth
+            if self.expect(TokenType.TAG):
+                _p1 = self.peek(1)
+                _p2 = self.peek(2)
+                if (_p1 is not None and _p1.type == TokenType.RIGHT_BRACE and
+                        _p2 is not None and _p2.type == TokenType.SEMICOLON):
+                    self.advance()  # past #
+                    parts.append('}')
+                    self.advance()  # past }
+                    parts.append(';')
+                    self.advance()  # past ;
+                    continue
+                else:
+                    parts.append(self._token_to_source(self.current_token))
+                    self.advance()
+                    continue
             if self.expect(TokenType.LEFT_BRACE):
                 depth += 1
                 parts.append('{')
             elif self.expect(TokenType.RIGHT_BRACE):
+                # Check for early-terminator syntax: } # emitflux;
+                # This terminates the emitflux block at any depth.
+                # peek(1) is the token after the closing brace.
+                _peek1 = self.peek(1)
+                _peek2 = self.peek(2)
+                if (_peek1 is not None and _peek1.type == TokenType.TAG and
+                        _peek2 is not None and _peek2.type == TokenType.EMITFLUX):
+                    # The } is the terminator token, not content -- do not append it.
+                    # The open structure is intentionally left unclosed in this emission;
+                    # subsequent emitflux blocks complete it.
+                    # Consume }, #, emitflux -- semicolon consumed below
+                    self.advance()  # past }
+                    self.advance()  # past #
+                    self.advance()  # past emitflux
+                    break
                 depth -= 1
                 if depth > 0:
                     parts.append('}')
                 else:
-                    # Matching close brace — advance past it and stop
+                    # Matching close brace -- advance past it and stop
                     self.advance()
                     break
             else:

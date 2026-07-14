@@ -5,14 +5,14 @@
 #def FLUX_STANDARD 1;
 #endif;
 
-#import "sys.fx";
+#import <sys.fx>;
 
 
 #ifndef FLUX_STANDARD_IO
 #def FLUX_STANDARD_IO;
 
 #ifndef FLUX_STANDARD_TYPES
-#import "types.fx";
+#import <types.fx>;
 #endif;
 
 #ifdef __WINDOWS__

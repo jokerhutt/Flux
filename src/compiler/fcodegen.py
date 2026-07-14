@@ -6860,7 +6860,7 @@ class CodegenVisitor:
         """
         Expand an expression macro call inline.
 
-        Steps:
+        For non-self-referential macros:
           1. Look up the macroDef that was registered at parse time.
           2. Deep-copy the body expression so each call site gets an independent
              AST subtree (important for nested/recursive expansion and for
@@ -6870,6 +6870,13 @@ class CodegenVisitor:
              (also deep-copied so the same argument can appear multiple times).
           4. Codegen the substituted body - it's a plain Expression at this point
              and goes through the normal visitor dispatch.
+
+        For self-referential macros (body contains a macroCall back to the same
+        name), inline substitution would recurse infinitely at compile time before
+        any condition is ever evaluated. These are routed through the FVM instead:
+          1. Wrap the macro call in a minimal ComptimeBlock.
+          2. Compile and execute it via the FVM.
+          3. Return the scalar result as an LLVM constant.
 
         Arity is checked eagerly so the error message points at the call site.
         """
@@ -6890,21 +6897,154 @@ class CodegenVisitor:
         # ── 2. Arity check ────────────────────────────────────────────────────
         if len(node.arguments) != len(macro_def.params):
             raise FluxCodegenError(
-                f"Expression macro '{node.name}' expects {len(macro_def.params, node, module)} "
-                f"argument(s), got {len(node.arguments)} ")
+                f"Expression macro '{node.name}' expects {len(macro_def.params)} "
+                f"argument(s), got {len(node.arguments)} ", node, module)
 
-        # ── 3. Build substitution map: param_name -> deep-copied arg expression
+        # ── 3. Detect self-referential body ───────────────────────────────────
+        if self._macro_body_is_self_referential(macro_def.body, node.name):
+            return self._eval_self_referential_macro(node, macro_def, builder, module)
+
+        # ── 4. Build substitution map: param_name -> deep-copied arg expression
         subst = {
             param: copy.deepcopy(arg)
             for param, arg in zip(macro_def.params, node.arguments)
         }
 
-        # ── 4. Deep-copy the body and substitute ─────────────────────────────
+        # ── 5. Deep-copy the body and substitute ─────────────────────────────
         body_copy = copy.deepcopy(macro_def.body)
         expanded  = self._macro_substitute(body_copy, subst)
 
-        # ── 5. Codegen the expanded expression ───────────────────────────────
+        # ── 6. Codegen the expanded expression ───────────────────────────────
         return self.visit(expanded, builder, module)
+
+    @staticmethod
+    def _macro_body_is_self_referential(body_node, macro_name: str) -> bool:
+        """
+        Return True if the AST subtree body_node contains a macroCall whose
+        name matches macro_name (i.e. the macro calls itself).
+        """
+        from fast import (macroCall, BinaryOp, UnaryOp, TernaryOp, NullCoalesce,
+                          NotNull, CastExpression, TypeConvertExpression,
+                          FunctionCall, ArrayAccess, MemberAccess, MethodCall,
+                          IfExpression, ArrayLiteral, ArrayComprehension)
+        if isinstance(body_node, macroCall):
+            if body_node.name == macro_name:
+                return True
+            for arg in body_node.arguments:
+                if CodegenVisitor._macro_body_is_self_referential(arg, macro_name):
+                    return True
+            return False
+        if isinstance(body_node, BinaryOp):
+            return (CodegenVisitor._macro_body_is_self_referential(body_node.left, macro_name) or
+                    CodegenVisitor._macro_body_is_self_referential(body_node.right, macro_name))
+        if isinstance(body_node, UnaryOp):
+            return CodegenVisitor._macro_body_is_self_referential(body_node.operand, macro_name)
+        if isinstance(body_node, TernaryOp):
+            return (CodegenVisitor._macro_body_is_self_referential(body_node.condition, macro_name) or
+                    CodegenVisitor._macro_body_is_self_referential(body_node.true_expr, macro_name) or
+                    CodegenVisitor._macro_body_is_self_referential(body_node.false_expr, macro_name))
+        if isinstance(body_node, (NullCoalesce,)):
+            return (CodegenVisitor._macro_body_is_self_referential(body_node.left, macro_name) or
+                    CodegenVisitor._macro_body_is_self_referential(body_node.right, macro_name))
+        if isinstance(body_node, NotNull):
+            return CodegenVisitor._macro_body_is_self_referential(body_node.operand, macro_name)
+        if isinstance(body_node, (CastExpression, TypeConvertExpression)):
+            return CodegenVisitor._macro_body_is_self_referential(body_node.expression, macro_name)
+        if isinstance(body_node, FunctionCall):
+            return any(CodegenVisitor._macro_body_is_self_referential(a, macro_name)
+                       for a in body_node.arguments)
+        if isinstance(body_node, ArrayAccess):
+            return (CodegenVisitor._macro_body_is_self_referential(body_node.array, macro_name) or
+                    CodegenVisitor._macro_body_is_self_referential(body_node.index, macro_name))
+        if isinstance(body_node, MemberAccess):
+            return CodegenVisitor._macro_body_is_self_referential(body_node.object, macro_name)
+        if isinstance(body_node, IfExpression):
+            result = CodegenVisitor._macro_body_is_self_referential(body_node.value_expr, macro_name)
+            if not result:
+                result = CodegenVisitor._macro_body_is_self_referential(body_node.condition, macro_name)
+            if not result and body_node.else_expr is not None:
+                result = CodegenVisitor._macro_body_is_self_referential(body_node.else_expr, macro_name)
+            return result
+        return False
+
+    def _eval_self_referential_macro(self, node, macro_def, builder, module):
+        """
+        Evaluate a self-referential expression macro via the FVM and return the
+        result as an LLVM IR constant. Arguments must be constant-foldable.
+        """
+        from fast import ComptimeBlock, ExpressionStatement  # noqa: kept for potential future use
+        from fvmcodegen import FVMCodegen
+        from fvm import FluxVM, TTag, Val
+        from llvmlite import ir
+
+        # Compile the macroCall expression directly -- do NOT wrap it in an
+        # ExpressionStatement inside a ComptimeBlock, because _visit_expr_stmt
+        # emits a POP after the expression leaving the stack empty.
+        # Instead build the bytecode manually: emit the call, then HALT.
+        cg = FVMCodegen(
+            known_functions=dict(self._comptime_functions),
+            program_statements=getattr(module, '_program_statements', []))
+        if hasattr(module, '_macros'):
+            cg._macro_table.update(module._macros)
+        if hasattr(module, '_parser_macros'):
+            cg._macro_table.update(module._parser_macros)
+        cg._struct_layouts.update(self._comptime_struct_layouts)
+
+        from fvmcodegen import Op as _Op, _instr as _fvm_instr, ComptimeBytecode
+        try:
+            cg._visit_macro_call(node)
+        except Exception as e:
+            raise FluxCodegenError(
+                f"comptime codegen for self-referential macro '{node.name}' failed: {e}",
+                node, module)
+        cg._instructions.append(_fvm_instr(_Op.HALT))
+        bc = ComptimeBytecode(cg._instructions, cg._local_count)
+
+        # Set up and run the VM.
+        if self._comptime_vm is None:
+            self._comptime_vm = FluxVM(
+                struct_layouts=dict(self._comptime_struct_layouts),
+                source_file=None)
+            self._comptime_vm._codegen_class = FVMCodegen
+        vm = self._comptime_vm
+        self._comptime_functions.update(cg.compiled_functions)
+        for fn_name, fn_instrs in self._comptime_functions.items():
+            vm.register_function(fn_name, fn_instrs)
+
+        try:
+            result = vm.execute(bc.instructions, bc.local_count)
+        except Exception as e:
+            raise FluxCodegenError(
+                f"comptime execution of self-referential macro '{node.name}' failed: {e}",
+                node, module)
+
+        if result is None:
+            raise FluxCodegenError(
+                f"self-referential macro '{node.name}' produced no value", node, module)
+
+        # Convert the Val result to an LLVM constant.
+        _int_tags  = {TTag.INT, TTag.UINT, TTag.LONG, TTag.ULONG, TTag.BYTE, TTag.CHAR, TTag.BOOL, TTag.DATA}
+        _float_tags = {TTag.FLOAT, TTag.DOUBLE}
+        if result.tag in _int_tags:
+            bit_widths = {
+                TTag.BOOL:  1,
+                TTag.BYTE:  8,
+                TTag.CHAR:  8,
+                TTag.INT:   32,
+                TTag.UINT:  32,
+                TTag.LONG:  64,
+                TTag.ULONG: 64,
+                TTag.DATA:  64,
+            }
+            bits = bit_widths.get(result.tag, 32)
+            return ir.Constant(ir.IntType(bits), int(result.data))
+        if result.tag in _float_tags:
+            if result.tag == TTag.FLOAT:
+                return ir.Constant(ir.FloatType(), float(result.data))
+            return ir.Constant(ir.DoubleType(), float(result.data))
+        raise FluxCodegenError(
+            f"self-referential macro '{node.name}' returned unsupported type {result.tag}",
+            node, module)
 
     @staticmethod
     def _macro_substitute(node, subst: dict):
@@ -6920,8 +7060,31 @@ class CodegenVisitor:
                           TypeConvertExpression, TernaryOp, NullCoalesce,
                           NotNull, AddressOf, PointerDeref, ArrayLiteral,
                           ArrayComprehension, RangeExpression, IfExpression,
-                          macroCall)
+                          macroCall, Stringify, FStringLiteral)
         import copy
+
+        if isinstance(node, Stringify):
+            if node.name in subst:
+                arg = subst[node.name]
+                # Resolve to a Stringify of the argument's identifier name.
+                # If the argument is an Identifier, use its name directly.
+                # Otherwise use a repr of the argument as a best-effort fallback.
+                if isinstance(arg, Identifier):
+                    resolved_name = arg.name
+                else:
+                    resolved_name = repr(arg)
+                import copy as _copy
+                result = _copy.deepcopy(node)
+                result.name = resolved_name
+                return result
+            return node
+
+        if isinstance(node, FStringLiteral):
+            node.parts = [
+                CodegenVisitor._macro_substitute(p, subst) if not isinstance(p, str) else p
+                for p in node.parts
+            ]
+            return node
 
         if isinstance(node, Identifier):
             if node.name in subst:
@@ -8530,6 +8693,10 @@ class CodegenVisitor:
         cg = FVMCodegen(known_functions=self._comptime_functions,
                         known_struct_layouts=self._comptime_struct_layouts,
                         program_statements=getattr(module, '_program_statements', []))
+        if hasattr(module, '_macros'):
+            cg._macro_table.update(module._macros)
+        if hasattr(module, '_parser_macros'):
+            cg._macro_table.update(module._parser_macros)
         try:
             bc = cg.compile(node, captured_scope)
         except Exception as e:
@@ -8665,12 +8832,19 @@ class CodegenVisitor:
 
         # Process emissions
         #print(f"DEBUG comptime_locals keys={list(self._comptime_locals.keys())}", flush=True)
+        # Accumulate all emitted text fragments into one buffer, then parse combined.
+        # Individual emissions may be syntactically incomplete (partial function bodies,
+        # open switch statements, etc.) when emitflux blocks are split across multiple
+        # calls. Joining them produces a well-formed unit.
+        flux_parts = []
         for entry in vm.emit_results[_emit_start:]:
             if not (isinstance(entry, tuple) and len(entry) >= 2 and entry[0] == 'flux'):
                 continue
-            flux_text = entry[1]
-            #print(f"DEBUG flux_text: {flux_text!r}", flush=True)
-            # Re-lex and re-parse the emitted text
+            flux_parts.append(entry[1])
+            #print(f"DEBUG flux_text: {entry[1]!r}", flush=True)
+        if flux_parts:
+            flux_text = ' '.join(flux_parts)
+            #print(f"DEBUG combined flux_text: {flux_text!r}", flush=True)
             try:
                 sub_lexer = FluxLexer(flux_text)
                 sub_tokens = sub_lexer.tokenize()

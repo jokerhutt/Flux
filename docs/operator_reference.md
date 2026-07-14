@@ -7,44 +7,44 @@ For keyword operators (`and`, `or`, `not`, `is`, `xor`), see also the Keyword Re
 
 ## Arithmetic
 
-**`+`** — Addition
+**`+`** - Addition
 ```
 int z = x + y;
 ```
 
-**`-`** — Subtraction
+**`-`** - Subtraction
 ```
 int z = x - y;
 ```
 
-**`*`** — Multiplication
+**`*`** - Multiplication
 ```
 int z = x * y;
 ```
 
-**`/`** — Division
+**`/`** - Division
 ```
 int z = x / y;
 ```
 
-**`%`** — Modulo
+**`%`** - Modulo
 ```
 int z = x % y;
 ```
 
-**`^`** — Exponentiation
+**`^`** - Exponentiation
 Note: `^` is **not** XOR. Use `^^` or the `xor` keyword for XOR.
 ```
 float z = 2.0 ^ 10.0;   // 1024.0
 ```
 
-**`++`** — Increment (prefix and postfix)
+**`++`** - Increment (prefix and postfix)
 ```
 x++;    // postfix: use then increment
 ++x;    // prefix: increment then use
 ```
 
-**`--`** — Decrement (prefix and postfix)
+**`--`** - Decrement (prefix and postfix)
 ```
 x--;    // postfix: use then decrement
 --x;    // prefix: decrement then use
@@ -54,86 +54,86 @@ x--;    // postfix: use then decrement
 
 ## Assignment
 
-**`=`** — Assign
+**`=`** - Assign
 ```
 int x = 10;
 ```
 
-**`+=`** — Add and assign
+**`+=`** - Add and assign
 ```
 x += 5;   // x = x + 5
 ```
 
-**`-=`** — Subtract and assign
+**`-=`** - Subtract and assign
 ```
 x -= 3;
 ```
 
-**`*=`** — Multiply and assign
+**`*=`** - Multiply and assign
 ```
 x *= 2;
 ```
 
-**`/=`** — Divide and assign
+**`/=`** - Divide and assign
 ```
 x /= 4;
 ```
 
-**`%=`** — Modulo and assign
+**`%=`** - Modulo and assign
 ```
 x %= 7;
 ```
 
-**`^=`** — Exponentiate and assign
+**`^=`** - Exponentiate and assign
 ```
 x ^= 2;   // x = x ^ 2
 ```
 
-**`?=`** — Conditional assign (assign only if target is zero/null)
+**`?=`** - Conditional assign (assign only if target is zero/null)
 Assigns the right-hand value to the left-hand target only if the target is currently zero or null. The target is left unchanged if it already holds a non-zero value.
 ```
 int x = 10,
     y;
 
-x ?= 50;   // x stays 10 — already non-zero
-y ?= x;    // y becomes 10 — was zero
+x ?= 50;   // x stays 10 - already non-zero
+y ?= x;    // y becomes 10 - was zero
 ```
 
 ---
 
 ## Comparison
 
-**`==`** — Equal
+**`==`** - Equal
 ```
 if (x == y) { ... };
 ```
 
-**`!=`** — Not equal
+**`!=`** - Not equal
 ```
 if (x != y) { ... };
 ```
 
-**`<`** — Less than
+**`<`** - Less than
 ```
 if (x < y) { ... };
 ```
 
-**`<=`** — Less than or equal
+**`<=`** - Less than or equal
 ```
 if (x <= y) { ... };
 ```
 
-**`>`** — Greater than
+**`>`** - Greater than
 ```
 if (x > y) { ... };
 ```
 
-**`>=`** — Greater than or equal
+**`>=`** - Greater than or equal
 ```
 if (x >= y) { ... };
 ```
 
-**`is`** — Equality (keyword alias for `==`)
+**`is`** - Equality (keyword alias for `==`)
 Preferred for enum, state, and type comparisons where it reads naturally.
 ```
 if (x is 5) { ... };
@@ -146,52 +146,52 @@ if (tok.kind is kinds.TOK_END) { ... };
 
 Logical operators work on boolean truth values. Short-circuit evaluation applies.
 
-**`&`** — Logical AND
+**`&`** - Logical AND
 ```
 if (x > 0 & y > 0) { ... };
 ```
 
-**`|`** — Logical OR
+**`|`** - Logical OR
 ```
 if (x == 0 | y == 0) { ... };
 ```
 
-**`!`** — Logical NOT
+**`!`** - Logical NOT
 ```
 if (!flag) { ... };
 ```
 
-**`!&`** — Logical NAND
+**`!&`** - Logical NAND
 ```
 if (x !& y) { ... };   // true unless both are true
 ```
 
-**`!|`** — Logical NOR
+**`!|`** - Logical NOR
 ```
 if (x !| y) { ... };   // true only if both are false
 ```
 
-**`^^`** — Logical XOR
+**`^^`** - Logical XOR
 ```
 if (x ^^ y) { ... };   // true if exactly one is true
 ```
 
-**`and`** — Logical AND (keyword alias for `&`)
+**`and`** - Logical AND (keyword alias for `&`)
 ```
 if (x > 0 and y > 0) { ... };
 ```
 
-**`or`** — Logical OR (keyword alias for `|`)
+**`or`** - Logical OR (keyword alias for `|`)
 ```
 if (x == 0 or y == 0) { ... };
 ```
 
-**`not`** — Logical NOT (keyword alias for `!`)
+**`not`** - Logical NOT (keyword alias for `!`)
 ```
 if (not flag) { ... };
 ```
 
-**`xor`** — Bitwise XOR (keyword form)
+**`xor`** - Bitwise XOR (keyword form)
 Note: `xor` operates on integer values as bitwise XOR. `^^` is its symbolic equivalent in logical context.
 ```
 int result = a xor b;
@@ -202,17 +202,17 @@ byte k = ipad_key[i] xor byte(0x36);
 
 ## Logical Assignment
 
-**`&=`** — AND and assign
+**`&=`** - AND and assign
 ```
 x &= mask;
 ```
 
-**`|=`** — OR and assign
+**`|=`** - OR and assign
 ```
 x |= flag;
 ```
 
-**`^^=`** — XOR and assign
+**`^^=`** - XOR and assign
 ```
 x ^^= y;
 ```
@@ -223,47 +223,47 @@ x ^^= y;
 
 Bitwise operators are prefixed with a backtick (`` ` ``) to distinguish them from logical operators.
 
-**`` `! ``** — Bitwise NOT
+**`` `! ``** - Bitwise NOT
 ```
 int inv = `!x;
 ```
 
-**`` `& ``** — Bitwise AND
+**`` `& ``** - Bitwise AND
 ```
 int masked = a `& 0xFF;
 ```
 
-**`` `| ``** — Bitwise OR
+**`` `| ``** - Bitwise OR
 ```
 int flags = a `| b;
 ```
 
-**`` `!& ``** — Bitwise NAND
+**`` `!& ``** - Bitwise NAND
 ```
 int result = a `!& b;
 ```
 
-**`` `!| ``** — Bitwise NOR
+**`` `!| ``** - Bitwise NOR
 ```
 int result = a `!| b;
 ```
 
-**`` `^^ ``** — Bitwise XOR
+**`` `^^ ``** - Bitwise XOR
 ```
 int result = a `^^ b;
 ```
 
-**`` `^^! ``** — Bitwise XNOT (XOR then NOT)
+**`` `^^! ``** - Bitwise XNOT (XOR then NOT)
 ```
 int result = a `^^! b;
 ```
 
-**`` `^^!& ``** — Bitwise XNAND
+**`` `^^!& ``** - Bitwise XNAND
 ```
 int result = a `^^!& b;
 ```
 
-**`` `^^!| ``** — Bitwise XNOR
+**`` `^^!| ``** - Bitwise XNOR
 ```
 int result = a `^^!| b;
 ```
@@ -272,42 +272,42 @@ int result = a `^^!| b;
 
 ## Bitwise Assignment
 
-**`` `&= ``** — Bitwise AND and assign
+**`` `&= ``** - Bitwise AND and assign
 ```
 x `&= 0x0F;
 ```
 
-**`` `|= ``** — Bitwise OR and assign
+**`` `|= ``** - Bitwise OR and assign
 ```
 x `|= 0x80;
 ```
 
-**`` `!&= ``** — Bitwise NAND and assign
+**`` `!&= ``** - Bitwise NAND and assign
 ```
 x `!&= y;
 ```
 
-**`` `!|= ``** — Bitwise NOR and assign
+**`` `!|= ``** - Bitwise NOR and assign
 ```
 x `!|= y;
 ```
 
-**`` `^^= ``** — Bitwise XOR and assign
+**`` `^^= ``** - Bitwise XOR and assign
 ```
 x `^^= y;
 ```
 
-**`` `^^!= ``** — Bitwise XNOT and assign
+**`` `^^!= ``** - Bitwise XNOT and assign
 ```
 x `^^!= y;
 ```
 
-**`` `^^!&= ``** — Bitwise XNAND and assign
+**`` `^^!&= ``** - Bitwise XNAND and assign
 ```
 x `^^!&= y;
 ```
 
-**`` `^^!|= ``** — Bitwise XNOR and assign
+**`` `^^!|= ``** - Bitwise XNOR and assign
 ```
 x `^^!|= y;
 ```
@@ -316,7 +316,7 @@ x `^^!|= y;
 
 ## Shift
 
-**`<<`** — Bit-shift left
+**`<<`** - Bit-shift left
 When used as a postfix with no operand, shifts left by one.
 ```
 int shifted = x << 3;
@@ -325,19 +325,19 @@ b<<;          // shift left by 1 (postfix form)
 byte c = b << 2;
 ```
 
-**`>>`** — Bit-shift right
+**`>>`** - Bit-shift right
 When used as a postfix with no operand, shifts right by one.
 ```
 int shifted = x >> 2;
 b>>;          // shift right by 1 (postfix form)
 ```
 
-**`<<=`** — Shift left and assign
+**`<<=`** - Shift left and assign
 ```
 x <<= 4;
 ```
 
-**`>>=`** — Shift right and assign
+**`>>=`** - Shift right and assign
 ```
 x >>= 1;
 ```
@@ -346,7 +346,7 @@ x >>= 1;
 
 ## Pointer and Address
 
-**`@`** — Address-of
+**`@`** - Address-of
 Returns a pointer to the operand. Used without spaces between the operator and its operand.
 ```
 int x = 10;
@@ -356,14 +356,14 @@ sha256_update(@inner_ctx, @ipad_key[0], 64);
 int* p = @42;   // Address of a literal
 ```
 
-**`*`** — Dereference
+**`*`** - Dereference
 When applied as a prefix to a pointer, yields the value at that address.
 ```
 int val = *p;
 *p = 20;
 ```
 
-**`(@)`** — Address-cast (integer to pointer)
+**`(@)`** - Address-cast (integer to pointer)
 Reinterprets an integer value as a pointer address. The resulting pointer has the width of the configured default pointer width.
 ```
 uint* px = @x;
@@ -373,12 +373,19 @@ uint* py = (@)kx;   // Reinterpret integer as address
 long val = 0x4700FF33324EBA60;
 byte* some_byte = (@)val;
 ```
+**@=** - Address-assign  
+Assign address of RHS to LHS
+```
+int x = 10;
+
+int* px @= x;
+```
 
 ---
 
 ## Ternary and Coalescing
 
-**`? :`** — Ternary conditional
+**`? :`** - Ternary conditional
 Evaluates the condition; yields the first expression if true, the second if false.
 ```
 int z = x < y ? y : 0;
@@ -386,7 +393,7 @@ int y = x if (x > 5) else noinit;   // if-expression form
 int y = x ? (x > 5) : noinit;       // ternary form
 ```
 
-**`??`** — Null coalesce
+**`??`** - Null coalesce
 Returns the left operand if it is non-zero, otherwise returns the right operand.
 ```
 int z = y ?? 0;   // z = y if y != 0, else 0
@@ -396,19 +403,19 @@ int z = y ?? 0;   // z = y if y != 0, else 0
 
 ## Function and Call
 
-**`->`** — Return arrow
+**`->`** - Return arrow
 Separates a function's parameter list from its return type in a signature.
 ```
 def add(int x, int y) -> int { return x + y; };
 ```
 
-**`<-`** — Chain arrow
+**`<-`** - Chain arrow
 Pipes the return value of the right-hand function as the argument to the left-hand function. Equivalent to wrapping a call.
 ```
 int z = foo() <- bar();   // equivalent to: int z = foo(bar());
 ```
 
-**`<~`** — Recurse arrow
+**`<~`** - Recurse arrow
 Used in place of `->` to declare a strictly-recursive (tail-call) function. Every `return` inside such a function re-enters itself. Stack frame never grows. Use `escape` to exit.
 ```
 def factorial <~ int (int n)
@@ -418,14 +425,14 @@ def factorial <~ int (int n)
 };
 ```
 
-**`{}*`** — Function pointer type marker
+**`{}*`** - Function pointer type marker
 Used as part of `def{}*` to declare a function pointer variable. The calling convention keyword precedes it for non-default conventions.
 ```
 def{}* pfoo(int) -> int = @foo;
 vectorcall{}* some_simd_fn() -> u64*;
 ```
 
-**`...`** — Variadic parameter / ellipsis
+**`...`** - Variadic parameter / ellipsis
 Declares that a function accepts a variable number of arguments. Arguments are accessed by indexing `...`.
 ```
 def variadic(...) -> void
@@ -441,13 +448,13 @@ variadic(1, 2, 3, 4);
 
 ## Scope and Member Access
 
-**`::`** — Scope resolution
+**`::`** - Scope resolution
 Accesses a member of a namespace, object, or type.
 ```
 standard::io::console;
 ```
 
-**`.`** — Member access
+**`.`** - Member access
 Accesses a member of a struct, object, enum instance, or union.
 ```
 newStruct.x;
@@ -456,7 +463,7 @@ tok.kind;
 err._;   // Tagged union discriminant
 ```
 
-**`._`** — Tagged union discriminant access
+**`._`** - Tagged union discriminant access
 Accesses or sets the active tag of a tagged union.
 ```
 err._ = ErrorUnionEnum.BOOL_ACTIVE;
@@ -467,32 +474,133 @@ switch (e._) { ... };
 
 ## String and Interpolation
 
-**`$`** — Stringify
+**`$`** - Stringify
 Converts an identifier name to its string representation at compile time.
 ```
 int Hello = 5;
 print($Hello);   // prints the string \"Hello\"
 ```
 
-**`f\"...\"`** — f-string (format string)
+**`f\"...\"`** - f-string (format string)
 Interpolates variable values inline using `{variable}` syntax. Must be null-terminated with `\\0`.
 ```
 string y = f\"{a} {b}\\0\";
 print(f\"Value: {x}\\n\\0\");
 ```
 
-**`i\"...\":{...};`** — i-string (indexed interpolation string)
+**`i\"...\":{...};`** - i-string (indexed interpolation string)
 Interpolates the results of expressions in order. Brackets in the string correspond to statements in the block.
 ```
 print(i\"Hello {} {}\" : { bar() + \"!\\0\"; \"test\\0\"; });
 string x = i\"Bar {}\":{bar();};
 ```
 
+## Codification
+Inverse of stringification, turns a string into source code in-place.
+```
+byte* str = "int x;";
+
+~$str;
+
+x = 25;
+```
+This code becomes:
+```
+byte* str = "int x;";
+
+int x;
+
+x = 25;
+```
+
+Combining stringification and codification at `comptime` with `emitflux` creates a powerful combination:
+```
+comptime
+{
+    compiler.io.console.println("Stage 1: deciding types");
+
+    byte*[] types = ["int", "float"],
+            tags  = ["INT", "FLOAT"];
+    int     count = 2;
+    byte*   T, TAG;
+
+    for (int idx = 0; idx < count; idx++)
+    {
+        T   = types[idx];
+        TAG = tags[idx];
+
+        emitflux
+        {
+            comptime
+            {
+                compiler.io.console.println(f"Stage 2: generating for type {$~$T}, tag {$~$TAG}");
+                emitflux
+                {
+                    def ~$f"clamp_{T}"(~$T val, ~$T lo, ~$T hi) -> ~$T
+                    {
+                        if (val < lo) { return lo; };
+                        if (val > hi) { return hi; };
+                        return val;
+                    };
+
+                    def ~$f"is_{T}"(~$T x) -> bool
+                    {
+                        return true;
+                    };
+                };
+            };
+        };
+    };
+};
+```
+This generates 4 functions at the top level:
+```
+def clamp_int(int val, int lo, int hi) -> int
+{
+    if (val < lo) { return lo; };
+    if (val > hi) { return hi; };
+    return val;
+};
+
+def is_int(int x) -> bool
+{
+    return true;
+};
+
+def clamp_float(float val, float lo, float hi) -> int
+{
+    if (val < lo) { return lo; };
+    if (val > hi) { return hi; };
+    return val;
+};
+
+def is_float(float x) -> bool
+{
+    return true;
+};
+```
+The compile-time execution looks like:
+```
+[INFO] [codegen] ► LLVM IR code generation
+[AST] Begining codegen for Flux program ...
+[AST] Total statements in AST: 81
+[AST] Namespace definitions: 11
+[AST] Pass 1: Processing using statements...
+[AST] Pass 2: Processing not using statements...
+[AST] Pre-pass: Registering all object types and extern blocks...
+[AST] Pass 3: Processing all other statements...
+Stage 1: deciding types
+Stage 2: generating for type int, tag INT
+Stage 2: generating for type float, tag FLOAT
+[AST] Pass 4: Re-emitting pending bodies...
+[INFO] [compiler] ► Compiling to object file (<your OS>)
+```
+
 ---
 
 ## Range
 
-**`..`** — Range
+**`..`** - Range
 Defines an inclusive integer range. Used in for-in loops and array comprehensions.
 ```
 for (int x in 1..10) { ... };
@@ -503,7 +611,7 @@ int[10] squares = [x ^ 2 for (int x in 1..10)];
 
 ## Type System
 
-**`(type)`** — Cast
+**`(type)`** - Cast
 Explicitly reinterprets a value as another type. There is no implicit narrowing conversion.
 ```
 i32 y = (i32)x;
@@ -511,14 +619,14 @@ byte* p = (byte*)patch_page;
 ulong addr = (ulong)@my_function;
 ```
 
-**`(void)`** — Free / deallocate cast
+**`(void)`** - Free / deallocate cast
 Frees the memory occupied by the operand immediately. Works on both stack and heap allocations. After a `(void)` cast, any access to the freed variable is a use-after-free.
 ```
 heap int x = 5;
 (void)x;   // x is now freed
 ```
 
-**`~`** — Tie
+**`~`** - Tie
 Binds a type alias to another alias, chaining type definitions.
 ```
 unsigned data{16} as dbyte;
@@ -527,14 +635,15 @@ xbyte as ybyte;
 ybyte as zbyte = 0xFF;
 ```
 
-**`as`** — Type alias declaration (keyword)
-Gives a `data` type declaration a named alias. See also `~` for chaining aliases.
+**`as`** - Type alias declaration (keyword)
+Gives a `data` type declaration a named alias.
 ```
 unsigned data{32} as u32;
 signed data{64} as i64;
 ```
+You can also alias tied (`~`) types, like so: `~int as tint;` 
 
-**`!!`** — No-mangle
+**`!!`** - No-mangle
 Prevents the compiler from mangling the name of a function declared in an `extern` block. Cascades across comma-separated prototype lists.
 ```
 extern def !!foo() -> void;
@@ -551,7 +660,7 @@ extern
 
 ## Built-in Built-ins
 
-**`sizeof(x)`** — Size in bits
+**`sizeof(x)`** - Size in bits
 Returns the size of a type or value in **bits**, not bytes. Divide by `8` or `sizeof(byte)` to get bytes.
 ```
 sizeof(int)    // 32
@@ -560,20 +669,20 @@ sizeof(byte)   // 8 (default; configurable via __BYTE_WIDTH__)
 size_t n = (size_t)(SIM_W * SIM_H * sizeof(double) / 8);
 ```
 
-**`alignof(x)`** — Alignment in bits
+**`alignof(x)`** - Alignment in bits
 Returns the alignment requirement of a type in bits.
 ```
 alignof(int)      // 32
 alignof(string)   // 8
 ```
 
-**`typeof(x)`** — Type kind constant
+**`typeof(x)`** - Type kind constant
 Resolves a type name to its kind constant at compile time. Useful for type comparisons.
 ```
 if (typeof(x) == typeof(int)) { ... };
 ```
 
-**`endianof(x)`** — Endianness
+**`endianof(x)`** - Endianness
 Returns the endianness of a type. `1` is big-endian (default for `data` types), `0` is little-endian.
 ```
 endianof(string)   // 1
@@ -673,7 +782,8 @@ Higher rows bind more tightly. Within a row, associativity is left-to-right unle
 | `::` | Scope | Namespace/scope resolution |
 | `.` | Member | Member access |
 | `._` | Member | Tagged union discriminant |
-| `$` | String | Stringify identifier |
+| `$` | Stringify | Stringification |
+| `~$` | Codify | Codification |
 | `..` | Range | Inclusive range |
 | `(type)` | Type | Cast |
 | `(void)` | Type | Free / deallocate |
