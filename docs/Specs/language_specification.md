@@ -2203,6 +2203,25 @@ struct.my_struct_func() -> struct
 };
 ```
 
+To forbid a type from having functions, you can declare it with `data!` like so:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+data!{32} as u32i;
+
+u32i.foo() -> u32i { return 0u; };
+
+def main() -> int
+{
+    return 0;
+};
+```
+
+The compiler will error with:  
+`✗ Compilation failed: Type u32i is non-functional (declared with data!) and cannot have type functions defined on it at x:y`
+
 ---
 
 <a id="templates"></a>
