@@ -241,6 +241,15 @@ class SymbolTable:
         self._trait_registry: Dict[str, List] = {}
         self._interface_registry: Dict[str, Any] = {}
         self._interface_whitelist: Dict[tuple, set] = {}
+        self._nofunc_types: set = set()  # type alias names declared with data!{N}
+
+    def mark_nofunc(self, type_name: str) -> None:
+        """Record that *type_name* was declared with data!{N} and cannot have type functions."""
+        self._nofunc_types.add(type_name)
+
+    def is_nofunc(self, type_name: str) -> bool:
+        """Return True if *type_name* is a non-functional type alias (declared with data!{N})."""
+        return type_name in self._nofunc_types
 
     @staticmethod
     def is_macro_defined(module: ir.Module, macro_name: str) -> bool:
@@ -480,7 +489,8 @@ class SymbolTable:
                         is_pointer=param_type.is_pointer,
                         pointer_depth=param_type.pointer_depth,
                         custom_typename=param_type.custom_typename,
-                        storage_class=param_type.storage_class
+                        storage_class=param_type.storage_class,
+                        no_functions=param_type.no_functions
                     )
             resolved_param_types.append(param_type)
         
@@ -1174,6 +1184,7 @@ class TypeSystem:
     is_const_pointer: bool = False
     custom_typename: Optional[str] = None
     storage_class: Optional[StorageClass] = None
+    no_functions: bool = False  # True when declared with data!{N} -- type cannot have type functions
     
     def __repr__(self) -> str:
         if self.custom_typename is not None:
@@ -1530,7 +1541,8 @@ class TypeSystem:
                         base_type=DataType.UINT if is_unsigned_type else DataType.SINT,
                         is_signed=not is_unsigned_type,
                         bit_width=llvm_type.width if hasattr(llvm_type, 'width') else None,
-                        custom_typename=alias_name
+                        custom_typename=alias_name,
+                        no_functions=False
                     )
                     llvm_value._flux_type_spec = type_spec
                     return llvm_value
@@ -1654,7 +1666,8 @@ class VariableTypeHandler:
                     array_dimensions=inferred_dims,
                     is_pointer=type_spec.is_pointer,
                     pointer_depth=getattr(type_spec, 'pointer_depth', 0),
-                    custom_typename=type_spec.custom_typename)
+                    custom_typename=type_spec.custom_typename,
+                    no_functions=type_spec.no_functions)
             return TypeSystem(
                 base_type=type_spec.base_type,
                 is_signed=type_spec.is_signed,
@@ -1668,7 +1681,8 @@ class VariableTypeHandler:
                 array_size=elem_count,
                 is_pointer=type_spec.is_pointer,
                 pointer_depth=getattr(type_spec, 'pointer_depth', 0),
-                custom_typename=type_spec.custom_typename)
+                custom_typename=type_spec.custom_typename,
+                no_functions=type_spec.no_functions)
 
         # Handle ArrayLiteral initializer for pointer types (e.g. noopstr* strarr = [...])
         # When a pointer type is initialized with an array literal, infer the array size
@@ -1694,7 +1708,8 @@ class VariableTypeHandler:
                         array_size=elem_count,
                         is_pointer=new_pointer_depth > 0,
                         pointer_depth=new_pointer_depth,
-                        custom_typename=type_spec.custom_typename)
+                        custom_typename=type_spec.custom_typename,
+                        no_functions=type_spec.no_functions)
             except NameError:
                 pass
 
@@ -1721,7 +1736,8 @@ class VariableTypeHandler:
                 is_array=True,
                 array_size=inferred_size,
                 is_pointer=type_spec.is_pointer,
-                custom_typename=type_spec.custom_typename)
+                custom_typename=type_spec.custom_typename,
+                no_functions=type_spec.no_functions)
         
         # Type alias check
         if type_spec.custom_typename:
@@ -1740,7 +1756,8 @@ class VariableTypeHandler:
                         alignment=type_spec.alignment,
                         is_array=True,
                         array_size=len(initial_value.value),
-                        is_pointer=False)
+                        is_pointer=False,
+                        no_functions=False)
             except (NameError, AttributeError):
                 pass
         

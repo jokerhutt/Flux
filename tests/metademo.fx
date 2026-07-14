@@ -117,8 +117,9 @@ comptime
     // emit the op name and symbol tables as plain arrays
     emitflux
     {
-        byte*[NUM_OPS] g_op_names = [g"add", g"sub", g"mul", g"div"],
-                       g_op_syms  = [g"+",   g"-",   g"*",   g"/"];
+        byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"],
+                       op_syms  = ["+",   "-",   "*",   "/"],
+                       op_exprs = ["a + b", "a - b", "a * b", "a / b"];
     };
 
     int fingerprint = ct_fact(6);

@@ -4112,7 +4112,14 @@ class FluxParser:
         alignment = None
         endianness = 1  # Default is big-endian in Flux. Primary guarantee, second in AST.
 
+        # Track whether this data type was declared non-functional (data!{N})
+        _data_no_functions = False
+
         if base_type == DataType.DATA and custom_typename is None:
+            # Optional '!' before '{' marks the type as non-functional: data!{N}
+            if self.expect(TokenType.NOT):
+                _data_no_functions = True
+                self.advance()  # consume '!'
             if self.expect(TokenType.LEFT_BRACE):
                 self.advance()
                 bit_width = int(self.consume(TokenType.SINT_LITERAL).value)
@@ -4291,7 +4298,8 @@ class FluxParser:
             is_pointer=pointer_depth > 0,
             pointer_depth=pointer_depth,
             custom_typename=custom_typename,
-            storage_class=storage_class
+            storage_class=storage_class,
+            no_functions=_data_no_functions,
         )
 
         #print(f"[TYPE_SPEC DEBUG] Non-alias: custom_typename={custom_typename}, is_array={is_array}, array_size={array_size}, is_pointer={pointer_depth > 0}, pointer_depth={pointer_depth}", file=sys.stdout)
@@ -4741,6 +4749,12 @@ class FluxParser:
         type_name = self._type_func_receiver_type_name(recv_tok)
         if type_name is None:
             self.error("Expected a type keyword, literal, or struct name as type function receiver", TokenType.IDENTIFIER)
+        # Non-functional types (declared with data!{N}) cannot have type functions
+        if self.symbol_table.is_nofunc(type_name):
+            self.error(
+                f"Type {type_name} is non-functional (declared with data!) "
+                f"and cannot have type functions defined on it"
+            )
         self.advance()  # consume receiver token
 
         # Consume any pointer stars after the base type: byte*.func(), int**.func()
@@ -5223,6 +5237,9 @@ class FluxParser:
             type_name = self.consume(TokenType.IDENTIFIER).value
             # Register type alias in current scope
             self.symbol_table.define(type_name, SymbolKind.TYPE, type_spec)
+            # If declared with data!{N}, record this type as non-functional
+            if getattr(type_spec, 'no_functions', False):
+                self.symbol_table.mark_nofunc(type_name)
             
             initial_value = None
             if self.expect(TokenType.ASSIGN):
@@ -5243,6 +5260,8 @@ class FluxParser:
                     self.advance()
                     alias_name = self.consume(TokenType.IDENTIFIER).value
                     self.symbol_table.define(alias_name, SymbolKind.TYPE, type_spec)
+                    if getattr(type_spec, 'no_functions', False):
+                        self.symbol_table.mark_nofunc(alias_name)
                     
                     alias_value = None
                     if self.expect(TokenType.ASSIGN):
