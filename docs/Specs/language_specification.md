@@ -65,6 +65,8 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [Custom infix operators and overloading](#custom-infix-operators-and-overloading)
   - [Functions and `contract`](#functions-and-contract)
   - [Contracts on operators](#contracts-on-operators)
+  - [Type Functions](#defining-type-functions)
+  - [Functionless Types](#functionless-types)
   - [Expression-based macros with `macro`](#expressionbased-macros-with-macro)
   - [Templates](#templates)
   - [Templating operators](#templating-operators)
@@ -1191,6 +1193,8 @@ Data decays to an integer type under the hood. All data is binary, and is theref
 **Example**
 `unsigned data{16::0} as custom_le;   // 16-bit, 16-bit aligned, little endian`
 
+To prevent a custom type from having functions, use `data!`. See [functionless types](#functionless-types)
+
 ---
 
 <a id="mixing-signedunsigned-in-expressions"></a>
@@ -2202,6 +2206,9 @@ struct.my_struct_func() -> struct
     // impl for your arbitrary struct func
 };
 ```
+
+<a id="functionless-types"></a>
+## Functionless Types
 
 To forbid a type from having functions, you can declare it with `data!` like so:
 ```
