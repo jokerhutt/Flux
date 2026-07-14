@@ -42,8 +42,6 @@ If you like Flux, please consider contributing to the language or joining the [F
     - [Mixing Signed/Unsigned in Expressions](#mixing-signedunsigned-in-expressions)
   - [Endianness Handling](#endianness-handling)
   - [Casting](#casting)
-  - [Stringification with `$`](#stringification-with)
-  - [Codification](#codification)
   - [Direct type conversion](#direct-type-conversion)
   - [The `typeof`, `sizeof`, `alignof`, and `endianof` built-ins](#the-typeof-sizeof-alignof-and-endianof-builtins)
   - [`void` as a literal](#void-as-a-literal)
@@ -96,6 +94,8 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [Type System Edge Cases](#type-system-edge-cases)
     - [`void` semantics](#void-semantics)
 - [Calling Conventions](#calling-conventions)
+- [Stringification with `$`](#stringification-with)
+- [Codification](#codification)
 - [Compile Time Execution with `comptime`](#compile-time-execution-with-comptime)
 - [Emitting code back into your source file with `emitflux`](#emitflux)
 - [Keyword list](#keyword-list)
@@ -1310,47 +1310,6 @@ the source and target type pair:
   a struct value to a pointer type takes its address (allocating a temporary stack slot first if
   the value doesn't already live in memory); casting a struct pointer to another pointer type is
   a plain reinterpretation.
-
----
-
-<a id="stringification-with"></a>
-## Stringification with `$`:
-```
-#import <standard.fx>;
-
-using standard::io::console;
-
-def main() -> int
-{
-    int Hello = 5;
-
-    println($Hello);
-    return 0;
-};
-```
-Result:
-`Hello`
-
-<a id="codification"></a>
-## Codification:
-Codification is the inverse of stringification, using the codify operator `~$`
-```
-#import <standard.fx>;
-
-using standard::io::console;
-
-def main() -> int
-{
-    byte* test = "int x = 5;";
-
-    ~$test;
-
-    println(x);
-    
-    return 0;
-};
-```
-Result: `5`
 
 ---
 
@@ -3284,6 +3243,48 @@ You may also create function pointers of different calling conventions:
 ```
 vectorcall{}* someSIMDfunc() -> u64*;
 ```
+
+---
+
+
+<a id="stringification-with"></a>
+## Stringification with `$`:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+def main() -> int
+{
+    int Hello = 5;
+
+    println($Hello);
+    return 0;
+};
+```
+Result:
+`Hello`
+
+<a id="codification"></a>
+## Codification:
+Codification is the inverse of stringification, using the codify operator `~$`
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+def main() -> int
+{
+    byte* test = "int x = 5;";
+
+    ~$test;
+
+    println(x);
+    
+    return 0;
+};
+```
+Result: `5`
 
 ---
 
