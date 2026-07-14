@@ -96,6 +96,8 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [Type System Edge Cases](#type-system-edge-cases)
     - [`void` semantics](#void-semantics)
 - [Calling Conventions](#calling-conventions)
+- [Compile Time Execution with `comptime`](#compile-time-execution-with-comptime)
+- [Emitting code back into your source file with `emitflux`](#emitflux)
 - [Keyword list](#keyword-list)
 - [Operator list](#operator-list)
 - [Operator Precedence and Associativity](#operator-precedence-and-associativity)
@@ -3405,7 +3407,107 @@ Hello from comptime! 17
 You may use any keyword inside `comptime` blocks except for `comptime` itself.  
 Yes, you may write an infinite loop at compile time.  
 
+---
 
+<a id="emitflux"></a>
+# `emitflux` — Compile-Time Code Generation
+
+`emitflux` is used inside a `comptime` block to inject Flux source code into the surrounding scope. The emitted definitions are deferred and finalized during **Pass 4** ("Re-emitting pending bodies"), so they do not need to be written contiguously — you can build up a single logical definition across multiple `emitflux` calls within one or more `comptime` blocks.
+
+Basic usage:
+```
+comptime
+{
+    int x = 42;
+
+    emitflux
+    {
+        def get_x() -> int { return ~$f"{x}"; };
+    };
+};
+
+// get_x() is now available at runtime
+def main() -> int
+{
+    return get_x();   // returns 42
+};
+```
+
+`~$f"..."` and `~$i"..."` expand comptime variables into identifiers or expressions inside an `emitflux` block.
+
+---
+
+## Splice terminators
+
+By default the closing `};` of an `emitflux` block ends emission and returns control to the surrounding `comptime` context. Two special terminators allow you to interleave comptime logic with emitted code — splicing a single logical construct across multiple `emitflux` calls:
+
+### `}#;` — exit emitflux, stay in comptime
+
+`}#;` terminates the current `emitflux` block and returns to the surrounding `comptime` context, leaving the emitted construct open. This lets you run arbitrary comptime code (loops, conditionals, I/O) between emitted chunks.
+
+### `#};` — close a brace inside emitflux without ending it
+
+`#};` emits a closing brace into the generated Flux source without being interpreted as the closing brace of the `emitflux` block itself. Use this to close `switch`, `if`, function bodies, or any other braced construct inside emitted code when the bare `}` would prematurely end the `emitflux`.
+
+---
+
+## Spliced code generation example
+
+The following generates a `dispatch` function whose `switch` body is built case-by-case in a comptime loop:
+
+```
+#def NUM_OPS 4;
+
+comptime
+{
+    byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"];
+
+    // Step 1: open the function and switch, then exit emitflux with }#;
+    emitflux
+    {
+        def dispatch(int id, int a, int b) -> int
+        {
+            switch (id)
+            {
+    }#;
+
+    // Step 2: comptime loop emits one case per op
+    int i = 0;
+    while (i < NUM_OPS)
+    {
+        byte* nm = op_names[i];
+        int   iv = i;
+
+        emitflux
+        {
+                case (~$i"{}":{iv;}) { return ~$i"op_{}":{nm;} (a, b); }
+        };
+
+        i++;
+    };
+
+    // Step 3: close switch and function using #}; to avoid ending emitflux
+    emitflux
+    {
+                default { return -1; };
+           #};   // closes switch body
+       #};       // closes function body
+    };
+};
+```
+
+Pass 4 collects all of the emitted fragments in order and finalizes `dispatch` as a single coherent function. The comptime loop runs during Pass 3 and is never present in the output binary.
+
+---
+
+## Execution order
+
+| Pass | What happens |
+|---|---|
+| Pass 3 | `comptime` blocks execute; `emitflux` fragments are collected |
+| Pass 4 | All collected `emitflux` fragments are finalized into the surrounding scope |
+
+This means emitted definitions are always available to runtime code, but are not visible to other `comptime` blocks that execute before Pass 4.
 
 ---
 
