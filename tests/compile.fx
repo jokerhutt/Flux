@@ -1,4 +1,6 @@
-#import "standard.fx";
+#import <standard.fx>;
+
+using standard::io::console;
 
 def main(int argc, byte** argv) -> int
 {
@@ -7,27 +9,22 @@ def main(int argc, byte** argv) -> int
         print("Too many arguments given.
 Usage: compile program.fx
 
-Invokes Python on the Flux compiler backend on program.fx\0");
+Invokes Python on the Flux compiler backend on program.fx");
         return 0;
     }
     else if (argc == 2)
     {
-        string command("python fc.py \0");
-        if (command.append(argv[1]))
-        {
-            system(command.val());
-        }
-        else
-        {
-            print("Failed to append command line argument.\n\0");
-            return 1;
-        };
+        println(argv[0]);
+        println(argv[1]);
+        byte* command = f"python fxc.py {argv[0]}";
+        println(f"COMMAND: {command}");
+        system(command);
         return 0;
     }
     else if (argc == 0)
     {
         print("Mock Flux Compiler, written in Flux. Calls Python on the Flux compiler.
-Usage: compile program.fx\0");
+Usage: compile program.fx");
         return 0;
     };
 

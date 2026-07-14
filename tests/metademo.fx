@@ -48,18 +48,19 @@ macro named_print(val)
 
 comptime
 {
-    byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"];
-    byte*[NUM_OPS] op_syms  = ["+",   "-",   "*",   "/"];
-    byte*[NUM_OPS] op_exprs = ["a + b", "a - b", "a * b", "a / b"];
+    byte*[NUM_OPS] op_names = ["add", "sub", "mul", "div"],
+                   op_syms  = ["+",   "-",   "*",   "/"],
+                   op_exprs = ["a + b", "a - b", "a * b", "a / b"];
 
     compiler.io.console.println("[comptime] generating op handlers...");
 
     // emit one handler function per op
-    int i = 0;
+    int i;
+    byte* nm, expr;
     while (i < NUM_OPS)
     {
-        byte* nm   = op_names[i];
-        byte* expr = op_exprs[i];
+        nm   = op_names[i];
+        expr = op_exprs[i];
 
         compiler.io.console.println(f"[comptime]   op_{nm}");
 
@@ -88,12 +89,10 @@ comptime
         {
             switch (id)
             {
-    }#emitflux;
+    }#;
 
     // emit one case per op
-    int j = 0;
-    byte* nm;
-    int jv;
+    int j, jv;
     while (j < NUM_OPS)
     {
         nm = op_names[j];
@@ -101,7 +100,7 @@ comptime
 
         emitflux
         {
-                case (~$f"{jv}") { return ~$i"op_{}":{nm;} (a, b); }
+                case (~$i"{}":{jv;}) { return ~$i"op_{}":{nm;} (a, b); }
         };
 
         j++;
@@ -118,8 +117,8 @@ comptime
     // emit the op name and symbol tables as plain arrays
     emitflux
     {
-        byte*[NUM_OPS] g_op_names = [g"add", g"sub", g"mul", g"div"];
-        byte*[NUM_OPS] g_op_syms  = [g"+",   g"-",   g"*",   g"/"];
+        byte*[NUM_OPS] g_op_names = [g"add", g"sub", g"mul", g"div"],
+                       g_op_syms  = [g"+",   g"-",   g"*",   g"/"];
     };
 
     int fingerprint = ct_fact(6);
@@ -152,12 +151,13 @@ def usage(byte* prog) -> void
 
 def find_op(byte* name, int len) -> int
 {
-    int i = 0;
+    int i, j, match;
+    byte* candidate;
     while (i < NUM_OPS)
     {
-        byte* candidate = g_op_names[i];
-        int   j         = 0;
-        int   match     = 1;
+        candidate = g_op_names[i];
+        j         = 0;
+        match     = 1;
 
         while (j < len)
         {
@@ -177,10 +177,10 @@ def main() -> int
     named_print(demo);
 
     byte* prog    = g"metademo";
-    byte* op_name = g"mul";
+    byte* op_name = g"div";
     int   op_len  = 3;
-    int   a       = 7;
-    int   b       = 6;
+    int   a       = 21;
+    int   b       = 3;
 
     int op_id = find_op(op_name, op_len);
 

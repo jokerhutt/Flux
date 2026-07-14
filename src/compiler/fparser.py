@@ -5699,15 +5699,12 @@ class FluxParser:
                 # peek(1) is the token after the closing brace.
                 _peek1 = self.peek(1)
                 _peek2 = self.peek(2)
-                if (_peek1 is not None and _peek1.type == TokenType.TAG and
-                        _peek2 is not None and _peek2.type == TokenType.EMITFLUX):
-                    # The } is the terminator token, not content -- do not append it.
+                if (_peek1 is not None and _peek1.type == TokenType.TAG):
+                    # The }# is the terminator token, not content -- do not append it.
                     # The open structure is intentionally left unclosed in this emission;
-                    # subsequent emitflux blocks complete it.
-                    # Consume }, #, emitflux -- semicolon consumed below
+                    # Consume }, # -- semicolon consumed below
                     self.advance()  # past }
                     self.advance()  # past #
-                    self.advance()  # past emitflux
                     break
                 depth -= 1
                 if depth > 0:
