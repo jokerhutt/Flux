@@ -3127,6 +3127,10 @@ class CodegenVisitor:
         overload_entry = TypeResolver.resolve_overload_entry(
             module, node.name, current_ns, None)  # None → first count-match is fine
 
+        # Warn at call site if the resolved function is deprecated.
+        if overload_entry and overload_entry.get('is_deprecated'):
+            print(f"\n[DEPRECATED] Call to deprecated function '{node.name}' at {node.source_line}:{node.source_col}\n")
+
         for i, arg in enumerate(node.arguments):
             # Existing: block local vars from escaping their scope
             if isinstance(arg, Identifier):
@@ -5844,7 +5848,7 @@ class CodegenVisitor:
                     else:
                         func = ir.Function(module, func_type, disambig_name)
                     base_name = node.name.split('::')[-1] if '::' in node.name else node.name
-                    SymbolTable.register_function_overload(module, base_name, disambig_name, node.parameters, node.return_type, func)
+                    SymbolTable.register_function_overload(module, base_name, disambig_name, node.parameters, node.return_type, func, is_deprecated=node.is_deprecated)
                 else:
                     raise FluxCodegenError(f"Function '{node.name}' with signature '{mangled_name}' redefined", node, module)
             else:
@@ -5856,7 +5860,7 @@ class CodegenVisitor:
             else:
                 base_name = node.name.split('::')[-1] if '::' in node.name else node.name
             #print(f"[FUNC REG] Registering {base_name} (mangled: {mangled_name})", file=sys.stdout)
-            SymbolTable.register_function_overload(module, base_name, mangled_name, node.parameters, node.return_type, func)
+            SymbolTable.register_function_overload(module, base_name, mangled_name, node.parameters, node.return_type, func, is_deprecated=node.is_deprecated)
             # Store default parameter values keyed by mangled name so call sites can inject them.
             defaults = [p.default_value for p in node.parameters]
             if any(d is not None for d in defaults):

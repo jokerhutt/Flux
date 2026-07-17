@@ -47,6 +47,7 @@ class FXPreprocessor:
         self.processed_files: Set[str] = set()
         self.output_lines = []
         self.constants: Dict[str, str] = {}
+        self.macros: Dict[str, tuple] = {}  # name -> (params: List[str], body: str)
         self.lib_dirs: List[str] = []
         # Maps each output line index (0-based) -> (filename, local_line_number 1-based)
         self.line_map: List[tuple] = []
@@ -357,6 +358,38 @@ class FXPreprocessor:
             self.output_lines.append('')
             return i + 1
         
+        # Check for #psub
+        if stripped.startswith("#psub"):
+            # Collect the full definition, supporting # line continuation.
+            # Each line ending with # (after stripping) continues onto the next.
+            collected = stripped[len('#psub'):].strip()
+            while collected.endswith('#'):
+                collected = collected[:-1]  # drop trailing #
+                i += 1
+                if i >= len(lines):
+                    break
+                self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+                self.output_lines.append('')
+                self._current_local_lineno = i + 1
+                collected = collected.rstrip() + ' ' + lines[i].strip()
+            rest = collected.strip()
+            # Must have NAME(params) body form
+            paren_open = rest.find('(')
+            if paren_open == -1:
+                raise SyntaxError(f"[PREPROCESSOR] #psub missing parameter list at line {i + 1}")
+            name = rest[:paren_open].strip()
+            paren_close = rest.find(')', paren_open)
+            if paren_close == -1:
+                raise SyntaxError(f"[PREPROCESSOR] #psub unclosed parameter list at line {i + 1}")
+            raw_params = rest[paren_open + 1:paren_close]
+            params = [p.strip() for p in raw_params.split(',') if p.strip()]
+            body = rest[paren_close + 1:].strip()
+            self.macros[name] = (params, body)
+            print(f"[PREPROCESSOR] Defined macro: {name}({', '.join(params)}) = {body}")
+            self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
+            self.output_lines.append('')
+            return i + 1
+
         # Check for #def
         if stripped.startswith("#def"):
             # Find the semicolon
@@ -383,6 +416,20 @@ class FXPreprocessor:
             self.output_lines.append('')
             return i + 1
         
+        # Check for #ifnpsub (must be checked before #ifpsub to avoid prefix clash)
+        if stripped.startswith("#ifnpsub"):
+            parts = line.split()
+            if len(parts) >= 2:
+                macro_name = parts[1].split('(')[0].strip()
+                return self._process_conditional_block(lines, i, macro_name, True, check_macros=True)
+
+        # Check for #ifpsub
+        if stripped.startswith("#ifpsub"):
+            parts = line.split()
+            if len(parts) >= 2:
+                macro_name = parts[1].split('(')[0].strip()
+                return self._process_conditional_block(lines, i, macro_name, False, check_macros=True)
+
         # Check for #ifdef
         if stripped.startswith("#ifdef"):
             parts = line.split()
@@ -502,97 +549,303 @@ class FXPreprocessor:
         self.output_lines.append(processed_line)
         return i + 1
     
-    def _process_conditional_block(self, lines: List[str], start_i: int, constant_name: str, is_ifndef: bool) -> int:
-        """Process an #ifdef/#ifndef block and return next line index after #endif"""
-        # Get constant value
-        constant_value = self.constants.get(constant_name)
-        
-        # Evaluate condition
-        if is_ifndef:
-            condition_true = constant_value is None or constant_value == '0'
-        else:
-            condition_true = constant_value is not None and constant_value != '0'
-        i = start_i + 1
-        depth = 1
-        in_else = False
-        else_seen = False
-        
-        # Emit a blank entry for the #ifdef/#ifndef line itself so it is accounted for
+    def _process_conditional_block(self, lines: List[str], start_i: int, constant_name: str, is_ifndef: bool, check_macros: bool = False) -> int:
+        """Process an #ifdef/#ifndef block (with optional #elif/#else) and
+        return the next line index after #endif.
+
+        Branch collection pass: walk the block at depth 1, splitting on #elif
+        and #else into a list of (condition_fn, lines, origins) branches.
+        Then evaluate them in order and process the first true branch.
+
+        Each branch is stored as:
+            (condition_fn: callable() -> bool, lines: list[str], origins: list[int])
+        condition_fn is a zero-argument callable so evaluation is deferred until
+        all branches have been collected (important if a branch defines a constant
+        that a later #elif tests -- consistent with standard preprocessor behaviour
+        of evaluating conditions lazily in order).
+        """
+        entry_local_lineno = self._current_local_lineno
+
+        # Emit blank for the opening #ifdef/#ifndef line
         self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
         self.output_lines.append('')
-        
-        # Store lines that should be included, paired with their original local line numbers
-        lines_to_include = []
-        origins_to_include = []  # parallel list: local line number (1-based) for each entry
-        # excluded_origins tracks lines NOT included (for blank line_map entries)
-        excluded_origins = []
-        # Base local lineno at block entry; used to compute correct original line for each
-        # sub-array line when this function is called recursively with a lines_to_include slice.
-        entry_local_lineno = self._current_local_lineno
-        
+
+        # --- Branch collection -------------------------------------------------
+        # Each entry: (condition_fn, [(line_text, original_lineno), ...])
+        branches = []
+
+        def _make_ifdef_cond(cname, invert):
+            def _cond():
+                if check_macros:
+                    defined = cname in self.macros
+                else:
+                    val = self.constants.get(cname)
+                    defined = val is not None and val != '0'
+                return not defined if invert else defined
+            return _cond
+
+        # First branch condition is the opening #ifdef/#ifndef
+        current_cond = _make_ifdef_cond(constant_name, is_ifndef)
+        current_lines = []   # list of (line_text, original_lineno)
+        has_else = False
+
+        i = start_i + 1
+        depth = 1
+
         while i < len(lines):
             line = lines[i]
             stripped = line.strip()
-            
-            # Handle nested conditionals
-            if stripped.startswith("#ifdef") or stripped.startswith("#ifndef"):
+            original_lineno = entry_local_lineno + (i - start_i)
+
+            # Track nesting depth for inner conditionals
+            if (stripped.startswith("#ifdef") or stripped.startswith("#ifndef")
+                    or stripped.startswith("#ifnpsub") or stripped.startswith("#ifpsub")):
                 depth += 1
-            
-            # Check for #else at our depth level
-            if stripped == "#else" and depth == 1:
-                if else_seen:
-                    raise SyntaxError("Multiple #else directives in same conditional block")
-                else_seen = True
-                in_else = True
-                # Emit blank for the #else line
-                self.line_map.append((getattr(self, '_current_file', self.source_file), i + 1))
-                self.output_lines.append('')
-                i += 1
-                continue
-            
-            # Check for #endif
+
+            # #endif always decrements depth; only act on it when it closes OUR block
             if stripped.startswith("#endif;"):
                 depth -= 1
                 if depth == 0:
-                    # Emit blank for excluded lines so line_map stays in sync
+                    # Flush last branch
+                    branches.append((current_cond, current_lines))
+                    # Emit blank for the #endif line
+                    self.line_map.append((getattr(self, '_current_file', self.source_file), original_lineno))
+                    self.output_lines.append('')
+
+                    # --- Branch evaluation ---------------------------------
+                    # Find the first true branch; all others are excluded.
+                    chosen_lines = []
+                    chosen_origins = []
+                    excluded_origins = []
+
+                    branch_taken = False
+                    for cond_fn, blines in branches:
+                        if not branch_taken and cond_fn():
+                            branch_taken = True
+                            for bline, borigin in blines:
+                                chosen_lines.append(bline)
+                                chosen_origins.append(borigin)
+                        else:
+                            for _, borigin in blines:
+                                excluded_origins.append(borigin)
+
+                    # Emit blanks for all excluded lines so line_map stays in sync
                     for orig in excluded_origins:
                         self.line_map.append((getattr(self, '_current_file', self.source_file), orig))
                         self.output_lines.append('')
-                    # Emit blank for the #endif line itself
-                    self.line_map.append((getattr(self, '_current_file', self.source_file), i + 1))
-                    self.output_lines.append('')
-                    # End of our block - process collected lines
-                    if lines_to_include:
+
+                    # Process chosen lines
+                    if chosen_lines:
                         j = 0
-                        while j < len(lines_to_include):
-                            self._current_local_lineno = origins_to_include[j]
-                            j = self._process_line(lines_to_include, j)
+                        while j < len(chosen_lines):
+                            self._current_local_lineno = chosen_origins[j]
+                            j = self._process_line(chosen_lines, j)
+
                     return i + 1
-            
-            # Collect lines based on condition
-            # original_lineno: correct local line in the original file for line i
-            original_lineno = entry_local_lineno + (i - start_i)
-            if depth > 1:
-                # Inside nested block - always include
-                if (condition_true and not in_else) or (not condition_true and in_else):
-                    lines_to_include.append(line)
-                    origins_to_include.append(original_lineno)
                 else:
-                    excluded_origins.append(original_lineno)
-            else:
-                # Our depth level
-                if (condition_true and not in_else) or (not condition_true and in_else):
-                    lines_to_include.append(line)
-                    origins_to_include.append(original_lineno)
-                else:
-                    excluded_origins.append(original_lineno)
-            
+                    # Inner #endif -- collect as content
+                    current_lines.append((line, original_lineno))
+                    i += 1
+                    continue
+
+            if depth == 1:
+                # #elif at our level -- start a new branch
+                if stripped.startswith("#elif"):
+                    if has_else:
+                        raise SyntaxError(f"[PREPROCESSOR] #elif after #else at line {i + 1}")
+                    # Save current branch
+                    branches.append((current_cond, current_lines))
+                    current_lines = []
+                    # Parse condition: #elif SYMBOL  or  #elif defined(SYMBOL)
+                    rest = stripped[len('#elif'):].rstrip(';').strip()
+                    cname, invert = self._parse_ifdef_condition(rest, i + 1)
+                    current_cond = _make_ifdef_cond(cname, invert)
+                    # Emit blank for the #elif line
+                    self.line_map.append((getattr(self, '_current_file', self.source_file), original_lineno))
+                    self.output_lines.append('')
+                    i += 1
+                    continue
+
+                # #else at our level
+                if stripped == "#else" or stripped == "#else;":
+                    if has_else:
+                        raise SyntaxError(f"[PREPROCESSOR] Multiple #else in same conditional block at line {i + 1}")
+                    has_else = True
+                    branches.append((current_cond, current_lines))
+                    current_lines = []
+                    # #else branch always true (first-true-wins logic handles it)
+                    current_cond = lambda: True
+                    # Emit blank for the #else line
+                    self.line_map.append((getattr(self, '_current_file', self.source_file), original_lineno))
+                    self.output_lines.append('')
+                    i += 1
+                    continue
+
+            # Ordinary line (or inner-block directive) -- collect into current branch
+            current_lines.append((line, original_lineno))
             i += 1
-        
+
         raise SyntaxError(f"Unclosed conditional block starting at line {start_i + 1}")
+
+    def _parse_ifdef_condition(self, expr: str, lineno: int):
+        """Parse a condition expression from #ifdef, #ifndef, or #elif.
+
+        Supported forms:
+            SYMBOL              -> (SYMBOL, is_ifndef=False)
+            defined(SYMBOL)     -> (SYMBOL, is_ifndef=False)
+            !defined(SYMBOL)    -> (SYMBOL, is_ifndef=True)
+
+        Returns (constant_name: str, is_ifndef: bool).
+        Raises SyntaxError for unsupported expressions.
+        """
+        import re
+        expr = expr.strip()
+
+        # defined(X)
+        m = re.match(r'^defined\s*\(\s*(\w+)\s*\)$', expr)
+        if m:
+            return m.group(1), False
+
+        # !defined(X)
+        m = re.match(r'^!\s*defined\s*\(\s*(\w+)\s*\)$', expr)
+        if m:
+            return m.group(1), True
+
+        # Plain identifier
+        m = re.match(r'^\w+$', expr)
+        if m:
+            return expr, False
+
+        raise SyntaxError(
+            f"[PREPROCESSOR] Unsupported #elif condition '{expr}' at line {lineno}. "
+            "Only 'SYMBOL', 'defined(SYMBOL)', and '!defined(SYMBOL)' are supported."
+        )
     
+    def _expand_macros(self, line: str, _depth: int = 0) -> str:
+        """Expand #psub parameterized macros in a line.
+
+        Scans the line for NAME(...) call sites where NAME is a known macro,
+        substitutes positional arguments into the body, then recurses to handle
+        macros that expand to other macro calls.  A depth limit guards against
+        infinite recursion.
+        """
+        MAX_DEPTH = 64
+        if _depth > MAX_DEPTH:
+            raise RecursionError(f"[PREPROCESSOR] Macro expansion exceeded depth limit ({MAX_DEPTH}). Possible infinite recursion.")
+
+        if not self.macros:
+            return line
+
+        result = []
+        i = 0
+        n = len(line)
+        changed = False
+
+        while i < n:
+            # Collect an identifier
+            if line[i].isalpha() or line[i] == '_':
+                j = i
+                while j < n and (line[j].isalnum() or line[j] == '_'):
+                    j += 1
+                name = line[i:j]
+
+                if name in self.macros and j < n and line[j] == '(':
+                    # Found a macro call -- extract the argument list
+                    params, body = self.macros[name]
+                    # Find matching closing paren, respecting nesting and strings
+                    k = j + 1  # start after '('
+                    depth = 1
+                    in_str = False
+                    str_char = ''
+                    while k < n and depth > 0:
+                        c = line[k]
+                        if in_str:
+                            if c == '\\':
+                                k += 1  # skip escaped char
+                            elif c == str_char:
+                                in_str = False
+                        else:
+                            if c in ('"', "'"):
+                                in_str = True
+                                str_char = c
+                            elif c == '(':
+                                depth += 1
+                            elif c == ')':
+                                depth -= 1
+                        k += 1
+                    # k now points one past the closing ')'
+                    raw_args = line[j + 1:k - 1]
+
+                    # Split args by top-level commas
+                    args = self._split_macro_args(raw_args)
+
+                    if len(args) != len(params):
+                        raise SyntaxError(
+                            f"[PREPROCESSOR] Macro '{name}' expects {len(params)} argument(s), "
+                            f"got {len(args)}: '{line[i:k]}'"
+                        )
+
+                    # Substitute params into body
+                    expanded = body
+                    for param, arg in zip(params, args):
+                        # Whole-word replacement only
+                        import re
+                        expanded = re.sub(r'\b' + re.escape(param) + r'\b', arg.strip(), expanded)
+
+                    result.append(expanded)
+                    changed = True
+                    i = k
+                else:
+                    result.append(name)
+                    i = j
+            else:
+                result.append(line[i])
+                i += 1
+
+        expanded_line = ''.join(result)
+        # Recurse if anything changed (handles macros expanding to macro calls)
+        if changed:
+            return self._expand_macros(expanded_line, _depth + 1)
+        return expanded_line
+
+    def _split_macro_args(self, raw: str) -> List[str]:
+        """Split a raw argument string by top-level commas (respecting
+        nested parentheses and string literals)."""
+        args = []
+        current = []
+        depth = 0
+        in_str = False
+        str_char = ''
+        for c in raw:
+            if in_str:
+                current.append(c)
+                if c == str_char:
+                    in_str = False
+            elif c in ('"', "'"):
+                in_str = True
+                str_char = c
+                current.append(c)
+            elif c == '(':
+                depth += 1
+                current.append(c)
+            elif c == ')':
+                depth -= 1
+                current.append(c)
+            elif c == ',' and depth == 0:
+                args.append(''.join(current))
+                current = []
+            else:
+                current.append(c)
+        if current or args:
+            args.append(''.join(current))
+        return args
+
     def _substitute_constants(self, line: str) -> str:
-        """Simple constant substitution - replace constant names with their values"""
+        """Expand macros then substitute scalar constants."""
+        # First pass: expand any #psub parameterized macros
+        line = self._expand_macros(line)
+
+        # Second pass: scalar constant substitution
         if not line or line.strip() == ';':
             return line
         

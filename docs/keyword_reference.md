@@ -3,6 +3,10 @@
 Flux keywords are reserved, and cnanot be used as identifiers.  
 This means you cannot do `int data;`, this is illegal.
 
+The goal of this document is to be like an old school language help, which provides a unique example usage of each keyword.  
+
+Not all keywords have examples just yet.
+
 ---
 
 **`alignof`**

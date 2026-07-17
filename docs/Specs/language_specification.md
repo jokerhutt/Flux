@@ -22,7 +22,7 @@ If you like Flux, please consider contributing to the language or joining the [F
   - [Exporting Functions with `export`](#exporting-functions-with-export)
   - [Importing with `#import`](#importing-with-import)
   - [Importing with `#package`](#importing-with-package)
-    - [Very simple preprocessor](#very-simple-preprocessor)
+    - [Very simple preprocessor](#the-preprocessor)
   - [Namespaces](#namespaces)
   - [Structs](#structs)
   - [Struct recast with `from`](#struct-recast-with-from)
@@ -352,17 +352,15 @@ You still need to perform `using` statements unless the package self-uses, meani
 
 ---
 
-<a id="very-simple-preprocessor"></a>
-### Very simple preprocessor
+<a id="the-preprocessor"></a>
+### The Preprocessor
 ```
 #import <standard.fx>;
 
 #ifdef __WINDOWS__
 #def DEFAULT_CONFIG_FLAG 0x4000;
-#else
-#ifdef __LINUX__
+#elif __LINUX__
 #def DEFAULT_CONFIG_FLAG 0x8000;
-#endif;
 #endif;
 
 #warn "This will show a warning message.";
@@ -373,7 +371,48 @@ You still need to perform `using` statements unless the package self-uses, meani
 // Adds a path to the preprocessor's search list
 ```
 
-`#def` defines a preprocessor constant. This is not a functional macro, just a replacement.
+`#def` defines a preprocessor text substitution constant. This is not a macro, just a "dumb" replacement. It is not parameterized, meaning you cannot pass anything in to it.
+
+### Parameterized Substitution:
+To achieve C macro-like behavior, you can use `#psub`.  
+
+Example:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+#psub test(x,y) println(x); #
+                println(y);
+
+def main() -> int
+{
+    test("Hello", "world!");
+
+    return 0;
+};
+```
+
+You can also perform conditional logic with `#ifpsub` and `#ifnpsub`:
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+#psub test(x,y) println(x); #
+                println(y);
+
+#ifnpsub test2(a)
+#warn "[Warning] #psub test2(a) not defined!";
+#endif;
+
+def main() -> int
+{
+    test("Hello", "world!");
+
+    return 0;
+};
+```
 
 ---
 

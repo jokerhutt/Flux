@@ -1,0 +1,17 @@
+#import <standard.fx>;
+
+using standard::io::console;
+
+def foo() -> void # deprecate;
+
+def foo() -> void
+{
+    println("Hello from foo()!");
+    return;
+};
+
+def main() -> int
+{
+    foo();
+    return 0;
+};

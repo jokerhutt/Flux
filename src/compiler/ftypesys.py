@@ -437,7 +437,8 @@ class SymbolTable:
 
     @staticmethod
     def register_function_overload(module: ir.Module, base_name: str, mangled_name: str,
-                                   parameters: List, return_type_spec, func: ir.Function):
+                                   parameters: List, return_type_spec, func: ir.Function,
+                                   is_deprecated: bool = False):
         if not hasattr(module, '_function_overloads'):
             module._function_overloads = {}
         
@@ -499,7 +500,8 @@ class SymbolTable:
             'param_types': resolved_param_types,
             'return_type': return_type_spec,
             'function': func,
-            'param_count': len(parameters)
+            'param_count': len(parameters),
+            'is_deprecated': is_deprecated,
         }
         #print("END OF REGISTER_FUNCTION_OVERLOAD()")
         module._function_overloads[base_name].append(overload_info)

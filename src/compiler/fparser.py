@@ -2506,6 +2506,19 @@ class FluxParser:
             _tmpl_scope_ctx.__exit__(None, None, None)
             # Return the list of prototypes
             return [fd.set_location(tok.line, tok.column) for fd in prototypes]
+        # Parse optional # deprecate annotation on the signature.
+        # Syntax: def foo() -> void # deprecate;
+        #         def foo() -> void # deprecate { ... };
+        #         def foo() -> void # deprecate : ContractName { ... };
+        is_deprecated = False
+        if self.expect(TokenType.TAG):
+            self.advance()
+            if not self.expect(TokenType.DEPRECATE):
+                self.error("Expected 'deprecate' after '#' in function signature")
+            else:
+                self.advance()
+                is_deprecated = True
+
         # Resolve contract(s): def foo(int x) -> int : NonZero, LessThan(y,x) { ... }
         contract_stmts = []
         if self.expect(TokenType.COLON):
@@ -2608,7 +2621,7 @@ class FluxParser:
         if template_params:
             func_def = FunctionDef(name, real_parameters, return_type, body, is_const,
                                    is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                                   is_recursive, is_inline)
+                                   is_recursive, is_inline, is_deprecated)
             if self._in_comptime > 0:
                 func_def._is_comptime_only = True
             self._templates.register(name, 'function', template_params, func_def,
@@ -2624,7 +2637,7 @@ class FluxParser:
 
         return FunctionDef(name, real_parameters, return_type, body, is_const,
                           is_volatile, is_prototype, no_mangle, is_variadic, calling_conv,
-                          is_recursive, is_inline).set_location(tok.line, tok.column)
+                          is_recursive, is_inline, is_deprecated).set_location(tok.line, tok.column)
 
     def _is_function_pointer_declaration(self) -> bool:
         """

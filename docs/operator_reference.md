@@ -1,7 +1,7 @@
 # Flux Operator Reference
 
 This document covers every operator available in Flux, organized by category.
-For keyword operators (`and`, `or`, `not`, `is`, `xor`), see also the Keyword Reference.
+For keyword operators (`and`, `or`, `not`, `is`, `xor`), see also the [Keyword Reference](https://fluxspl.org/docs/keyword_reference.html).
 
 ---
 

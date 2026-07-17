@@ -206,6 +206,24 @@ _RESERVED_RENAME = {
     "from": "frm",
 }
 
+# Macros that expand to nothing in Flux but must remain defined so other
+# headers that reference them resolve. Emitted as `#def NAME 1;` which
+# expands to the no-op expression statement `1;` at every call site.
+_MACRO_DISCARD_STUB = {
+    # Clang diagnostic guards -- no pragma support in Flux, no semantic value.
+    "LLVM_C_STRICT_PROTOTYPES_BEGIN",
+    "LLVM_C_STRICT_PROTOTYPES_END",
+    # extern "C" wrappers -- Flux FFI uses extern{} blocks; these are no-ops.
+    "LLVM_C_EXTERN_C_BEGIN",
+    "LLVM_C_EXTERN_C_END",
+}
+
+# Macros that are purely local stubs with no cross-file use -- silently dropped.
+_MACRO_DISCARD_SILENT = {
+    # __has_feature stub -- always expands to 0 in non-Clang builds; meaningless in Flux.
+    "__has_feature",
+}
+
 def _rename(name):
     """Rename C identifiers that are reserved keywords in Flux."""
     return _RESERVED_RENAME.get(name, name)
@@ -302,13 +320,41 @@ class CTranslator:
         self._emit("// May require manual edits.")
         self._emit("")
 
-        self._emit_toplevel_comments()
         self._collect_typedef_names(self.tu.cursor)
 
+        # Collect the byte offsets of all MACRO_DEFINITION cursors from the
+        # main file so we can skip re-emitting plain #define lines that the
+        # source scan would otherwise duplicate.
+        self._ast_macro_offsets = set()
         for cursor in self.tu.cursor.get_children():
-            if not self._is_from_main_file(cursor):
-                continue
+            if (cursor.kind == CursorKind.MACRO_DEFINITION
+                    and self._is_from_main_file(cursor)):
+                self._ast_macro_offsets.add(cursor.extent.start.offset)
+
+        # Collect preprocessor events (offset, emit_fn) in source order.
+        pp_events = self._collect_pp_events()
+
+        # Collect non-macro AST cursors from the main file, sorted by offset.
+        ast_cursors = [
+            c for c in self.tu.cursor.get_children()
+            if self._is_from_main_file(c)
+            and c.kind != CursorKind.MACRO_DEFINITION
+        ]
+        ast_cursors.sort(key=lambda c: c.extent.start.offset)
+
+        # Merge: emit pp events and AST nodes in source order.
+        pp_idx = 0
+        for cursor in ast_cursors:
+            cursor_offset = cursor.extent.start.offset
+            while pp_idx < len(pp_events) and pp_events[pp_idx][0] <= cursor_offset:
+                pp_events[pp_idx][1]()
+                pp_idx += 1
             self._visit_top(cursor)
+
+        # Flush any remaining preprocessor events after the last AST node.
+        while pp_idx < len(pp_events):
+            pp_events[pp_idx][1]()
+            pp_idx += 1
 
         prefix = []
         if self._need_i128:
@@ -327,6 +373,549 @@ class CTranslator:
             self.lines = prefix + self.lines
 
         return "\n".join(self.lines)
+
+    # -----------------------------------------------------------------------
+    # Preprocessor directive scanner
+    # -----------------------------------------------------------------------
+
+    def _collect_pp_events(self):
+        """Scan the raw source bytes line-by-line and collect (byte_offset, emit_fn)
+        pairs for all preprocessor directives and relevant bare macro invocations.
+
+        Returns a list sorted by byte_offset so translate() can interleave these
+        events with AST cursor emissions in source order.
+
+        This is necessary because libclang's AST flattens conditional blocks --
+        only the branch taken during parsing survives as MACRO_DEFINITION cursors,
+        so the full #if/#elif/#else/#endif structure is invisible to the AST walk.
+
+        Simple object-like and function-like macros that ARE visible in the AST
+        are collected here in source order; the AST walk in translate() skips
+        MACRO_DEFINITION cursors to avoid duplication.
+        """
+        import re
+
+        src = self._src_bytes.decode('utf-8', errors='replace')
+        lines = src.splitlines(keepends=True)
+
+        # Build a table of byte offsets for each line so we can tag each event
+        # with the offset at which it appears in the source.
+        line_offsets = []
+        offset = 0
+        for line in lines:
+            line_offsets.append(offset)
+            offset += len(line.encode('utf-8', errors='replace'))
+
+        # Strip keepends for content matching.
+        raw_lines = [l.rstrip('\r\n') for l in lines]
+
+        # Directive pattern: optional whitespace, #, directive name, rest
+        directive_re = re.compile(
+            r'^\s*#\s*(ifndef|ifdef|if|elif|else|endif|define|undef|include)\b(.*)', re.DOTALL)
+
+        # Bare stub macro invocation -- lines like `LLVM_C_EXTERN_C_BEGIN` that are
+        # not # directives but are known no-op stubs needing a call-site semicolon.
+        stub_invoke_re = re.compile(
+            r'^\s*(' + '|'.join(re.escape(n) for n in _MACRO_DISCARD_STUB) + r')\s*$')
+
+        # Bare macro call-site: WORD(WORD) on its own line -- e.g.
+        # LLVM_FOR_EACH_VALUE_SUBCLASS(LLVM_DECLARE_VALUE_CAST).
+        # These are not #define lines; they are invocations of previously defined
+        # function-like macros that expand to real declarations.
+        macro_call_re = re.compile(r'^\s*(\w+)\((\w+)\)\s*$')
+
+        events = []
+
+        # Build a list of (start, end) byte ranges for every non-macro AST cursor
+        # from the main file.  Comment tokens that fall inside one of these ranges
+        # are inline member comments (e.g. /**< ... */ on enum values) and will be
+        # handled by the per-declaration emitters; they must not be emitted as
+        # standalone events or they'll appear after the closing }; of their parent.
+        main_abs = os.path.abspath(self.filepath)
+        ast_extents = []
+        for cursor in self.tu.cursor.get_children():
+            if not self._is_from_main_file(cursor):
+                continue
+            if cursor.kind == CursorKind.MACRO_DEFINITION:
+                continue
+            ast_extents.append((cursor.extent.start.offset, cursor.extent.end.offset))
+
+        def _inside_ast_extent(offset):
+            for start, end in ast_extents:
+                if start <= offset < end:
+                    return True
+            return False
+
+        # Collect all comment tokens from the main file and add them as events.
+        # libclang gives us exact byte offsets, so they'll interleave correctly
+        # with directive events and AST nodes after sorting.
+        for tok in self.tu.get_tokens(extent=self.tu.cursor.extent):
+            if tok.kind != cx.TokenKind.COMMENT:
+                continue
+            tok_file = tok.location.file
+            if tok_file is None:
+                continue
+            if os.path.abspath(tok_file.name) != main_abs:
+                continue
+            text = tok.spelling
+            tok_offset = tok.extent.start.offset
+
+            # Skip inline comments that live inside a declaration's extent.
+            if _inside_ast_extent(tok_offset):
+                continue
+
+            def make_comment_event(text=text):
+                if text.startswith("/*"):
+                    inner = text[2:]
+                    if inner.endswith("*/"):
+                        inner = inner[:-2]
+                    self._emit("///")
+                    for line in inner.splitlines():
+                        stripped = line.rstrip()
+                        if stripped.startswith("   "):
+                            stripped = stripped[3:]
+                        elif stripped.startswith(" "):
+                            stripped = stripped[1:]
+                        self._emit(stripped)
+                    self._emit("///")
+                    self._emit("")
+                elif text.startswith("//"):
+                    self._emit(text)
+                    self._emit("")
+
+            events.append((tok_offset, make_comment_event))
+
+        i = 0
+        while i < len(raw_lines):
+            raw = raw_lines[i]
+            line_offset = line_offsets[i]
+
+            m = directive_re.match(raw)
+            if not m:
+                # Check for bare stub macro invocations on their own line.
+                sm = stub_invoke_re.match(raw)
+                if sm:
+                    name = sm.group(1)
+                    events.append((line_offset, lambda _n=name: self._emit(f"{_n};")))
+                    i += 1
+                    continue
+
+                # Check for bare macro call-site invocations: OUTER(INNER)
+                cm = macro_call_re.match(raw)
+                if cm:
+                    outer = cm.group(1)
+                    inner = cm.group(2)
+                    events.append((line_offset,
+                                   lambda _o=outer, _i=inner:
+                                       self._emit_macro_call_site(_o, _i)))
+                i += 1
+                continue
+
+            keyword = m.group(1)
+            rest = m.group(2).strip()
+
+            # Handle line continuations (backslash-newline) for multi-line defines.
+            full_rest = rest
+            while full_rest.endswith('\\') and i + 1 < len(raw_lines):
+                full_rest = full_rest[:-1]
+                i += 1
+                full_rest += raw_lines[i].strip()
+
+            # Capture keyword/full_rest for the closure.
+            kw = keyword
+            fr = full_rest
+            lo = line_offset
+
+            def make_event(kw=kw, fr=fr):
+                if kw in ('ifndef', 'ifdef', 'if'):
+                    cond = self._translate_pp_condition(fr)
+                    if kw == 'ifndef':
+                        if self._cond_is_psub_name(cond):
+                            self._emit(f"#ifnpsub {cond};")
+                        else:
+                            self._emit(f"#ifndef {cond};")
+                    elif kw == 'ifdef':
+                        if self._cond_is_psub_name(cond):
+                            self._emit(f"#ifpsub {cond};")
+                        else:
+                            self._emit(f"#ifdef {cond}")
+                    else:
+                        m_call = re.match(r'^(\w+)\s*\(', fr.strip())
+                        if m_call:
+                            macro_name = m_call.group(1)
+                            self._emit(f"// #if {fr}")
+                            self._emit(f"#ifpsub {macro_name};")
+                        else:
+                            self._emit(f"// #if {fr}")
+                            self._emit(f"#ifdef {cond}")
+
+                elif kw == 'elif':
+                    cond = self._translate_pp_condition(fr)
+                    m_neg = re.match(r'^!\s*defined\s*\(?(\w+)\)?$', fr.strip())
+                    m_def = re.match(r'^defined\s*\(?(\w+)\)?$', fr.strip())
+                    m_id  = re.match(r'^\w+$', fr.strip())
+                    if fr.strip():
+                        self._emit(f"// #elif {fr}")
+                    if m_neg:
+                        self._emit(f"#elif !defined({m_neg.group(1)});")
+                    elif m_def or m_id:
+                        self._emit(f"#elif {cond};")
+                    else:
+                        self._emit(f"#else")
+                        self._emit(f"// complex #elif condition above -- manual review needed")
+
+                elif kw == 'else':
+                    self._emit(f"#else")
+
+                elif kw == 'endif':
+                    self._emit(f"#endif;")
+
+                elif kw == 'undef':
+                    self._emit(f"// #undef {fr}")
+
+                elif kw == 'define':
+                    self._emit_pp_define(fr)
+
+                elif kw == 'include':
+                    inc_m = re.match(r'^([<"])(.*?)[>"]', fr)
+                    if inc_m:
+                        bracket = inc_m.group(1)
+                        path = inc_m.group(2)
+                        fx_path = re.sub(r'\.h$', '.fx', path)
+                        close = '"' if bracket == '"' else '>'
+                        self._emit(f'#import {bracket}{fx_path}{close};')
+                    else:
+                        self._emit(f'// #include {fr}  // untranslated')
+
+            events.append((lo, make_event))
+            i += 1
+
+        events.sort(key=lambda e: e[0])
+        return events
+
+    def _emit_macro_call_site(self, outer, inner):
+        """Emit a Flux translation for a bare macro call-site invocation of the
+        form OUTER(INNER) found in the source (not a #define line).
+
+        The strategy is to look up OUTER's #define body in the raw source,
+        substitute every occurrence of OUTER's parameter with INNER, then
+        determine what INNER itself expands to and what each resulting call
+        to INNER(X) should produce.
+
+        If INNER is itself a known function-like macro whose body is a single
+        extern function declaration prototype, we expand the whole thing into
+        an extern block of Flux prototypes.  Otherwise we emit a comptime block
+        that calls the INNER psub for each token produced by OUTER.
+        """
+        import re
+
+        src = self._src_bytes.decode('utf-8', errors='replace')
+
+        # Extract the body of OUTER -- the function-like macro that iterates.
+        # We look for:  #define OUTER(param) <body...with continuations>
+        outer_re = re.compile(
+            r'#\s*define\s+' + re.escape(outer) + r'\s*\((\w+)\)\s*((?:.*\\\n)*.*)',
+            re.MULTILINE)
+        m_outer = outer_re.search(src)
+        if not m_outer:
+            self._emit(f"// {outer}({inner})  // could not resolve -- manual expansion needed")
+            return
+
+        outer_param = m_outer.group(1)
+        # Join continuation lines and strip trailing backslashes.
+        outer_body_raw = m_outer.group(2)
+        outer_body = re.sub(r'\\\n\s*', ' ', outer_body_raw).strip()
+
+        # Collect every token that OUTER passes to its parameter.
+        # OUTER bodies look like:  param(Foo) param(Bar) ...
+        # We want the argument to each call of the parameter macro.
+        call_re = re.compile(re.escape(outer_param) + r'\((\w+)\)')
+        subclass_names = call_re.findall(outer_body)
+
+        if not subclass_names:
+            self._emit(f"// {outer}({inner})  // could not expand -- manual translation needed")
+            return
+
+        # Now determine what each INNER(name) call should produce.
+        # Look up INNER's #define body.
+        inner_re = re.compile(
+            r'#\s*define\s+' + re.escape(inner) + r'\s*\((\w+)\)\s*((?:.*\\\n)*.*)',
+            re.MULTILINE)
+        m_inner = inner_re.search(src)
+
+        if m_inner:
+            inner_param = m_inner.group(1)
+            inner_body_raw = m_inner.group(2)
+            inner_body = re.sub(r'\\\n\s*', ' ', inner_body_raw).strip()
+
+            # Translate the inner body template to Flux, with the parameter
+            # token substituted for each subclass name in turn.
+            # First check if this looks like a function declaration pattern:
+            # something with a return type, function name, and parameter list.
+            fn_decl_re = re.compile(
+                r'(?:LLVM_C_ABI\s+)?(\w[\w\s\*]*)(\w+)\s*\(([^)]*)\)\s*;?\s*$')
+
+            # Substitute the inner param placeholder with a sentinel, translate,
+            # then for each name substitute the sentinel back.
+            sentinel = f"_CFT_PARAM_{inner_param}_"
+            body_with_sentinel = re.sub(
+                r'\b' + re.escape(inner_param) + r'\b', sentinel, inner_body)
+            # Strip leading attribute-like macros (LLVM_C_ABI etc.) for type parsing.
+            body_clean = re.sub(r'\bLLVM_C_ABI\b\s*', '', body_with_sentinel).strip()
+            body_clean = re.sub(r'##', '', body_clean)  # remove token-paste ops
+
+            m_fn = fn_decl_re.match(body_clean)
+            if m_fn:
+                # Looks like a function declaration -- emit as extern block.
+                ret_raw = (m_fn.group(1) or '').strip()
+                name_raw = m_fn.group(2).strip()
+                params_raw = m_fn.group(3).strip()
+
+                # Translate C types to Flux types.
+                ret_type = self._c_type_str_to_flux(ret_raw) if ret_raw else 'void'
+                params_flux = self._translate_param_list_str(params_raw)
+
+                self._emit(f"// {outer}({inner})")
+                self._emit("extern")
+                self._emit("{")
+                for idx, name in enumerate(subclass_names):
+                    flux_fn_name = name_raw.replace(sentinel, name)
+                    comma = ',' if idx < len(subclass_names) - 1 else ';'
+                    self._emit(f"    def !!{flux_fn_name}({params_flux}) -> {ret_type}{comma}")
+                self._emit("};")
+                self._emit("")
+                return
+
+        # Fallback: INNER is not a simple function-decl macro, or we couldn't
+        # parse its body.  Emit a comptime block that calls the INNER psub for
+        # each subclass name so at least the structure is preserved.
+        self._emit(f"// {outer}({inner})")
+        self._emit("comptime")
+        self._emit("{")
+        for name in subclass_names:
+            self._emit(f"    {inner}({name});")
+        self._emit("};")
+        self._emit("")
+
+    def _c_type_str_to_flux(self, c_type_str):
+        """Best-effort translation of a C type string (e.g. 'LLVMValueRef',
+        'unsigned int', 'const char *') to a Flux type string.  Used when
+        translating macro-expanded function declaration bodies."""
+        import re
+        s = c_type_str.strip()
+        # Strip 'const' and 'unsigned'/'signed' qualifiers (handled via type map).
+        s = re.sub(r'\bconst\b', '', s).strip()
+        # Count and strip trailing '*' for pointer depth.
+        ptr_depth = 0
+        while s.endswith('*'):
+            ptr_depth += 1
+            s = s[:-1].strip()
+        s = re.sub(r'\s+', ' ', s).strip()
+        # Look up in typedef map first, then simple name.
+        flux = _TYPEDEF_MAP.get(s, s)
+        return flux + '*' * ptr_depth
+
+    def _translate_param_list_str(self, params_raw):
+        """Translate a C parameter list string (comma-separated C declarations)
+        to a Flux parameter list string.  Used when translating macro-expanded
+        function declarations."""
+        import re
+        if not params_raw or params_raw.strip() in ('void', ''):
+            return ''
+        parts = []
+        for param in params_raw.split(','):
+            param = param.strip()
+            if not param or param == 'void':
+                continue
+            # Split off the last word as the parameter name (may be absent).
+            toks = param.rsplit(None, 1)
+            if len(toks) == 2:
+                type_str, _name = toks
+            else:
+                type_str = toks[0]
+                _name = ''
+            flux_type = self._c_type_str_to_flux(type_str)
+            if _name and re.match(r'^\*?\w+$', _name):
+                # Strip leading '*' from name (absorbed into type).
+                clean_name = _name.lstrip('*')
+                parts.append(f"{flux_type} {clean_name}")
+            else:
+                parts.append(flux_type)
+        return ', '.join(parts)
+
+    def _translate_pp_condition(self, expr):
+        """Translate a C preprocessor condition expression to a Flux symbol name.
+
+        For simple cases like `defined(X)`, `X`, or `!defined(X)` we return the
+        symbol.  For complex expressions we return the expression unchanged and
+        let the caller wrap it in a comment.
+        """
+        import re
+        expr = expr.strip()
+        # defined(X) or defined X
+        m = re.match(r'^defined\s*\(?(\w+)\)?$', expr)
+        if m:
+            return m.group(1)
+        # Plain identifier (e.g. #ifdef __WINDOWS__)
+        if re.match(r'^\w+$', expr):
+            return expr
+        # !defined(X) -- return the identifier (caller must handle negation)
+        m = re.match(r'^!\s*defined\s*\(?(\w+)\)?$', expr)
+        if m:
+            return m.group(1)
+        # Fallback: return as-is (caller will wrap in comment)
+        return expr
+
+    def _cond_is_psub_name(self, name: str) -> bool:
+        """Return True if 'name' is used as a function-like macro in the source.
+
+        A name is considered psub-like if the source file contains a line of the
+        form '#define NAME(' (no space before the paren), which is the C signature
+        for a function-like macro -- these map to Flux #psub, not #def.
+
+        We also look for '#if NAME(' usage patterns (e.g. __has_feature calls),
+        which implies the name is already expected to be callable.
+        """
+        import re
+        src = self._src_bytes.decode('utf-8', errors='replace')
+        # Match: #define NAME( ...
+        if re.search(r'#\s*define\s+' + re.escape(name) + r'\s*\(', src):
+            return True
+        # Match: #if NAME( ... (called like a function in a condition)
+        if re.search(r'#\s*if\s+' + re.escape(name) + r'\s*\(', src):
+            return True
+        return False
+
+    def _emit_pp_define(self, rest):
+        """Emit a Flux translation of a #define directive body (everything after
+        '#define ').  Handles:
+          - Include guards (#define FOO with no body)
+          - Object-like macros (#define FOO value)
+          - Function-like macros (#define FOO(a, b) body)
+        """
+        import re
+        rest = rest.strip()
+        if not rest:
+            return
+
+        # Check discard lists before any translation.
+        macro_name_only = re.match(r'^(\w+)', rest)
+        if macro_name_only:
+            mname = macro_name_only.group(1)
+            if mname in _MACRO_DISCARD_SILENT:
+                return
+            if mname in _MACRO_DISCARD_STUB:
+                self._emit(f"#def {mname} 1;")
+                return
+
+        # Function-like macro: name immediately followed by '(' (no space)
+        m = re.match(r'^(\w+)\(([^)]*)\)\s*(.*)', rest, re.DOTALL)
+        if m and rest.index('(') == len(m.group(1)):
+            name = m.group(1)
+            raw_params = m.group(2)
+            body = m.group(3).strip()
+            params = [p.strip() for p in raw_params.split(',') if p.strip()]
+
+            if not body:
+                # Empty function-like macro -- emit as empty #psub
+                param_str = ', '.join(params)
+                self._emit(f"#psub {name}({param_str});")
+                self._emit("")
+                return
+
+            # Translate body tokens
+            translated = self._translate_pp_macro_body_str(body)
+
+            # Multi-statement body: split on ';' and join with # line-continuation
+            if ';' in translated or (translated.startswith('do') and 'while' in translated):
+                param_str = ', '.join(params)
+                stmts = [s.strip() for s in translated.split(';') if s.strip()]
+                if len(stmts) <= 1:
+                    self._emit(f"#psub {name}({param_str}) {translated};")
+                else:
+                    first_stmt = stmts[0]
+                    self._emit(f"#psub {name}({param_str}) {first_stmt} #")
+                    for stmt in stmts[1:-1]:
+                        self._emit(f"    {stmt} #")
+                    self._emit(f"    {stmts[-1]};")
+                self._emit("")
+                return
+
+            param_str = ', '.join(params)
+            self._emit(f"#psub {name}({param_str}) {translated};")
+            self._emit("")
+            return
+
+        # Object-like macro: name [body]
+        m = re.match(r'^(\w+)(?:\s+(.*))?$', rest, re.DOTALL)
+        if not m:
+            self._emit(f"// #define {rest}  // untranslated")
+            return
+
+        name = m.group(1)
+        body = (m.group(2) or '').strip()
+
+        if not body:
+            # Guard-style #define with no value -- emit as #def NAME 1
+            self._emit(f"#def {name} 1;")
+            return
+
+        # Try integer literal
+        try:
+            val = int(body.rstrip('uUlL'), 0)
+            if val < 0:
+                flux_type = 'int' if val >= -(2**31) else 'long'
+            else:
+                flux_type = 'uint' if val <= 0xFFFFFFFF else 'ulong'
+            self._emit(f"{flux_type} {name} = {val};")
+            return
+        except ValueError:
+            pass
+
+        # Try float literal
+        try:
+            float(body.rstrip('fF'))
+            self._emit(f"double {name} = {body};")
+            return
+        except ValueError:
+            pass
+
+        # String literal
+        if body.startswith('"'):
+            self._emit(f"byte* {name} = {body};")
+            return
+
+        # Multi-statement object-like macro
+        if ';' in body:
+            self._emit(f"// macro (multi-statement, manual translation needed): {name} {body}")
+            return
+
+        # Expression object-like macro -- emit as parameterless macro
+        translated = self._translate_pp_macro_body_str(body)
+        self._emit(f"macro {name}")
+        self._emit("{")
+        self._emit(f"    {translated}")
+        self._emit("};")
+        self._emit("")
+
+    def _translate_pp_macro_body_str(self, body):
+        """Translate a macro body string (already joined, no backslash continuations)
+        to Flux syntax.  Applies the same transforms as _translate_macro_body but
+        works on a plain string rather than a token list."""
+        import re
+        # ## token-paste: prefix##param -> prefix{param}
+        body = re.sub(r'(\w*)##(\w+)', lambda m2: f"{m2.group(1)}{{{m2.group(2)}}}", body)
+        # Bitwise NOT: ~ -> `! (only when used as unary, i.e. after operator chars)
+        body = re.sub(r'(?<![a-zA-Z0-9_])~', '`!', body)
+        # Address-of: unary & -> @  (heuristic: & after (, ,, =, or at start)
+        body = re.sub(r'(?<=[(,=\s])&(?=\w)', '@', body)
+        # -> member access -> .
+        body = body.replace('->', '.')
+        # Uppercase hex literals
+        body = re.sub(r'0x([0-9a-fA-F]+)', lambda m2: '0x' + m2.group(1).upper(), body)
+        # /* ... */ comments -> /// ... ///
+        body = re.sub(r'/\*.*?\*/', lambda m2: '/// ' + m2.group(0)[2:-2].strip() + ' ///', body)
+        return body.strip()
 
     # -----------------------------------------------------------------------
     # Top-level dispatcher
@@ -366,9 +955,24 @@ class CTranslator:
         self._emitted_types.add(name)
         self._emit(f"struct {name}")
         self._emit("{")
+        def _field_comment(field):
+            for tok in self.tu.get_tokens(extent=field.extent):
+                if tok.kind == cx.TokenKind.COMMENT:
+                    t = tok.spelling
+                    if t.startswith("/**<") or t.startswith("/*!<"):
+                        inner = t[4:-2].strip() if t.endswith("*/") else t[4:].strip()
+                        return " // " + inner
+                    elif t.startswith("/*"):
+                        inner = t[2:-2].strip() if t.endswith("*/") else t[2:].strip()
+                        return " // " + inner
+                    elif t.startswith("//"):
+                        return " " + t.strip()
+            return ""
+
         for field in fields:
             if field.kind == CursorKind.FIELD_DECL:
                 ftype = self._flux_type(field.type, field.spelling)
+                fc = _field_comment(field)
                 # Bitfield
                 if field.is_bitfield():
                     width = field.get_bitfield_width()
@@ -377,7 +981,7 @@ class CTranslator:
                     signed = canon.kind in (TypeKind.CHAR_S, TypeKind.SCHAR, TypeKind.SHORT,
                                             TypeKind.INT, TypeKind.LONG, TypeKind.LONGLONG)
                     prefix = "signed " if signed else ""
-                    self._emit(f"    {prefix}data{{{width}}} {_rename(field.spelling)};")
+                    self._emit(f"    {prefix}data{{{width}}} {_rename(field.spelling)};{fc}")
                 else:
                     # Check for _Alignas attribute
                     align_val = self._get_field_align(field)
@@ -387,9 +991,9 @@ class CTranslator:
                         signed = canon.kind in (TypeKind.CHAR_S, TypeKind.SCHAR, TypeKind.SHORT,
                                                 TypeKind.INT, TypeKind.LONG, TypeKind.LONGLONG)
                         sign = "signed " if signed else ""
-                        self._emit(f"    {sign}data{{{bits}}} {_rename(field.spelling)}; // _Alignas({align_val})")
+                        self._emit(f"    {sign}data{{{bits}}} {_rename(field.spelling)}; // _Alignas({align_val}){fc}")
                     else:
-                        self._emit(f"    {ftype} {_rename(field.spelling)};")
+                        self._emit(f"    {ftype} {_rename(field.spelling)};{fc}")
         self._emit("};")
         self._emit("")
 
@@ -432,7 +1036,20 @@ class CTranslator:
                     ftype = "long" if val < -(2**31) else "int"
                 else:
                     ftype = "ulong" if val > 0xFFFFFFFF else "uint"
-                self._emit(f"{ftype} {e.spelling} = {val};")
+                comment = ""
+                for tok in self.tu.get_tokens(extent=e.extent):
+                    if tok.kind == cx.TokenKind.COMMENT:
+                        t = tok.spelling
+                        if t.startswith("/**<") or t.startswith("/*!<"):
+                            inner = t[4:-2].strip() if t.endswith("*/") else t[4:].strip()
+                            comment = " // " + inner
+                        elif t.startswith("/*"):
+                            inner = t[2:-2].strip() if t.endswith("*/") else t[2:].strip()
+                            comment = " // " + inner
+                        elif t.startswith("//"):
+                            comment = " " + t.strip()
+                        break
+                self._emit(f"{ftype} {e.spelling} = {val};{comment}")
             self._emit("")
             return
 
@@ -442,14 +1059,38 @@ class CTranslator:
 
         sequential = all(e.enum_value == i for i, e in enumerate(enumerators))
 
+        def _trailing_comment(enumerator):
+            """Return the first trailing comment token in this enumerator's
+            extent, converted to a Flux line comment, or '' if none."""
+            for tok in self.tu.get_tokens(extent=enumerator.extent):
+                if tok.kind != cx.TokenKind.COMMENT:
+                    continue
+                text = tok.spelling
+                # /**< ... */ style -- strip the markers and return inline
+                if text.startswith("/**<") or text.startswith("/*!<"):
+                    inner = text[4:]
+                    if inner.endswith("*/"):
+                        inner = inner[:-2]
+                    return " // " + inner.strip()
+                # /** ... */ style
+                if text.startswith("/*"):
+                    inner = text[2:]
+                    if inner.endswith("*/"):
+                        inner = inner[:-2]
+                    return " // " + inner.strip()
+                if text.startswith("//"):
+                    return " " + text.strip()
+            return ""
+
         self._emit(f"enum {name}")
         self._emit("{")
         parts = []
         for e in enumerators:
+            comment = _trailing_comment(e)
             if sequential:
-                parts.append(f"    {e.spelling}")
+                parts.append(f"    {e.spelling}{comment}")
             else:
-                parts.append(f"    {e.spelling} = {e.enum_value}")
+                parts.append(f"    {e.spelling} = {e.enum_value}{comment}")
         self._emit(",\n".join(parts))
         self._emit("};")
         self._emit("")
@@ -1716,6 +2357,40 @@ def translate_directory(dir_path, out_dir=None, clang_args=None):
             print(f"cft: error translating {stem}: {e}", file=sys.stderr)
 
 
+def _clang_args_with_include(input_path):
+    """Return clang args with -I flags prepended for the input path's parent
+    and its parent (to cover both 'llvm-c/foo.h' and sibling includes).
+    Starts from the configured default args so any user-set flags are preserved."""
+    base_args = list(CFT_CONFIG.default_clang_args)
+    # Collect candidate include roots from the input path itself.
+    abs_input = os.path.abspath(input_path)
+    dirs_to_add = []
+    if os.path.isdir(abs_input):
+        # Directory mode: add the directory itself and its parent.
+        dirs_to_add = [abs_input, os.path.dirname(abs_input)]
+    else:
+        # File mode: add the file's directory and its parent.
+        file_dir = os.path.dirname(abs_input)
+        dirs_to_add = [file_dir, os.path.dirname(file_dir)]
+    # Also add any configured include_roots.
+    for root in CFT_CONFIG.include_roots:
+        dirs_to_add.append(os.path.abspath(root))
+    # Prepend unique -I flags (skip blanks, skip dirs already in base_args).
+    existing = set()
+    for i, arg in enumerate(base_args):
+        if arg == "-I" and i + 1 < len(base_args):
+            existing.add(os.path.abspath(base_args[i + 1]))
+        elif arg.startswith("-I"):
+            existing.add(os.path.abspath(arg[2:]))
+    extra = []
+    seen = set()
+    for d in dirs_to_add:
+        if d and d not in existing and d not in seen:
+            extra += ["-I", d]
+            seen.add(d)
+    return extra + base_args
+
+
 def main():
     print("C -> Flux Translation Utility\n\n"
           "\tConvert C source files individually or in batch mode.\n\n"
@@ -1743,7 +2418,8 @@ def main():
 
     if os.path.isdir(input_path):
         out_dir = sys.argv[2] if len(sys.argv) >= 3 else None
-        translate_directory(input_path, out_dir=out_dir)
+        clang_args = _clang_args_with_include(input_path)
+        translate_directory(input_path, out_dir=out_dir, clang_args=clang_args)
         return
 
     if not os.path.isfile(input_path):
@@ -1751,7 +2427,8 @@ def main():
         sys.exit(1)
 
     already_translated = set()
-    result = translate_file(input_path, already_translated=already_translated)
+    clang_args = _clang_args_with_include(input_path)
+    result = translate_file(input_path, clang_args=clang_args, already_translated=already_translated)
 
     if len(sys.argv) >= 3:
         out_path = sys.argv[2]
