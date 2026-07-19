@@ -37,7 +37,7 @@ namespace standard
             def win_input(byte[] buffer, int max_len) -> int;
 #endif; // Windows
 #ifdef __LINUX__
-            //def nix_input(byte[] buffer, int max_len) -> int;
+            def nix_input(byte[] buffer, int max_len) -> int;
 #endif; // Linux
 #ifdef __MACOS__
             def mac_input(byte[] buffer, int max_len) -> int;
@@ -57,7 +57,6 @@ namespace standard
             def mac_print(byte* msg, int x) -> void;
 #endif;
 
-#ifdef __ARCH_X86_64__
 #ifdef __WINDOWS__
             // INPUT DEFINITIONS
             def win_input(byte[] buf, int max_len) -> int
@@ -66,6 +65,7 @@ namespace standard
                 i32* bytes_read_ptr = @bytes_read,
                      mode_ptr = @original_mode;
                 
+#ifdef __ARCH_X86_64__
                 volatile asm
                 {
                     // Get stdin handle
@@ -112,6 +112,9 @@ namespace standard
                     movl ($2), %eax
                 } : : "r"(buf), "r"(max_len), "r"(bytes_read_ptr), "r"(mode_ptr)
                   : "rax","rcx","rdx","r8","r9","r10","r11","r12","memory";
+#endif; // ARCH 86 64
+#ifdef __ARCH_ARM64__
+#endif; // ARCH ARM
                 for (int i; i < bytes_read; i++)
                 {
                     if (buf[i] == '\r' | buf[i] == '\n')
@@ -121,41 +124,82 @@ namespace standard
                 };
                 return bytes_read;
             };
-#endif;
-#endif; // ARCH 86 64
-#ifdef __ARCH_ARM64__
-#endif; // ARCH ARM
+#endif; // WINDOWS
+/// --- --- --- --- --- ///
+#ifdef __LINUX__
+            def nix_input(byte[] buffer, int max_len) -> int
+            {
+                i64 count = max_len;
+                i64 bytes_read = 0;
 
+#ifdef __ARCH_X86_64__
+                volatile asm
+                {
+                    // Linux syscall: read(int fd, void *buf, size_t count)
+                    // syscall number: 0 (read)
+                    // fd: 0 (STDIN_FILENO)
+                    movq $$0, %rax
+                    movq $$0, %rdi
+                    movq $0, %rsi
+                    movq $1, %rdx
+                    syscall
+                } : "r"(bytes_read) : "r"(buffer), "r"(count)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
+#endif; // ARCH X86_64
+#ifdef __ARCH_ARM64__
+                volatile asm
+                {
+                    // Linux ARM64 syscall: read(int fd, void *buf, size_t count)
+                    // syscall number: 63 (read)
+                    // fd: 0 (STDIN_FILENO)
+                    mov x8, #63
+                    mov x0, #0
+                    ldr x1, [sp]
+                    ldr x2, [sp, #8]
+                    svc #0
+                } : "r"(bytes_read) : "r"(buffer), "r"(count)
+                  : "x0","x1","x2","x3","x4","x5",
+                    "x6","x7","x8","x9","x10","x11",
+                    "x12","x13","x14","x15","x16",
+                    "x17","memory";
+#endif; // ARCH ARM64
+
+                if (bytes_read <= 0)
+                {
+                    return 0;
+                };
+
+                // Strip trailing \r and \n
+                for (int i = 0; i < (int)bytes_read; i++)
+                {
+                    if (buffer[i] == '\r' | buffer[i] == '\n')
+                    {
+                        buffer[i] = 0;
+                        return i;
+                    };
+                };
+
+                return (int)bytes_read;
+            };
+#endif; // LINUX
+#ifdef __MACOS__
+#endif; // MACOS
+
+// INPUT WRAPPER
             def input(byte[] buffer, int max_len) -> int
             {
-                switch (CURRENT_OS)
-                {
 #ifdef __WINDOWS__
-                    case (1)
-                    {
-                        return win_input(buffer, max_len);
-                    }
-#endif;
+                return win_input(buffer, max_len);
+#endif; // WINDOWS
 #ifdef __LINUX__
-                    case (2)
-                    {
-                        return 0;
-                        //return nix_input(buffer, max_len);
-                    }
-#endif;
+                return nix_input(buffer, max_len);
+#endif; // LINUX
 #ifdef __MACOS__
-                    case (3)
-                    {
-                        return 0;
-                        //return mac_input(buffer, max_len);
-                    }
-#endif;
-                    default
-                    { return 0; };
-                };
                 return 0;
+                //return mac_input(buffer, max_len);
+#endif; // MACOS
             };
-// INPUT DEFINITIONS END
+// INPUT WRAPPER END
 
 // OUTPUT FUNCTIONS BEGIN
 #ifdef __WINDOWS__
