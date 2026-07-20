@@ -178,11 +178,11 @@ def test_multi_stub() -> bool
     print("\n[TEST 2] Multi-stub independence (6 concurrent stubs)\n");
 
     ulong p0 = alloc_stub_page(),
-          p1 = alloc_stub_page(),
-          p2 = alloc_stub_page(),
-          p3 = alloc_stub_page(),
-          p4 = alloc_stub_page(),
-          p5 = alloc_sub_page();
+          p1 = #",
+          p2 = #",
+          p3 = #",
+          p4 = #",
+          p5 = #";
 
     write_stubs(p0,p1,p2,p3,p4,p5);
 

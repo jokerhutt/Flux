@@ -98,6 +98,7 @@ If you like Flux, please consider contributing to the language or joining the [F
 - [Calling Conventions](#calling-conventions)
 - [Stringification with `$`](#stringification-with)
 - [Codification](#codification)
+- [The Ditto Operator](#the-ditto-operator)
 - [Compile Time Execution with `comptime`](#compile-time-execution-with-comptime)
 - [Emitting code back into your source file with `emitflux`](#emitflux)
 - [Keyword list](#keyword-list)
@@ -1988,6 +1989,40 @@ Alternatively you may void cast.
 
 ---
 
+<a id="the-ditto-operator"></a>
+
+## **The Ditto Operator `#"`**  
+The ditto operator repeats the previous initializer expression in a multi-declarator variable declaration. It is shorthand for writing the same expression again.
+```
+ulong p0 = alloc_stub_page(),
+      p1 = #",
+      p2 = #",
+      p3 = #",
+      p4 = #",
+      p5 = #";
+```
+Is identical to:
+```
+ulong p0 = alloc_stub_page(),
+      p1 = alloc_stub_page(),
+      p2 = alloc_stub_page(),
+      p3 = alloc_stub_page(),
+      p4 = alloc_stub_page(),
+      p5 = alloc_stub_page();
+```
+This works for any initializer expression, including those with side effects:
+```
+int i;
+int x = ++i,   // 1
+    y = #",    // 2
+    z = #";    // 3
+```
+Each `#"` produces an independent evaluation of the repeated expression — it is not a reference to the prior variable's value.
+
+`#"` must be followed immediately by `,` or `;`. It is not valid as part of a larger expression (for now).
+
+---
+
 <a id="custom-infix-operators-and-overloading"></a>
 ## **Custom infix operators and overloading**
 - Custom:
@@ -3701,6 +3736,7 @@ CHAIN_ARROW = "<-"
 RECURSE_ARROW = "<~"      // def foo() <~ void;  // Emits musttail, 0 stack growth
 NO_MANGLE = "!!"          // prevent the compiler from mangling the function name
 FUNCTION_POINTER = "{}*"
+DITTO =  #"
 ```
 
 ---

@@ -598,6 +598,33 @@ Stage 2: generating for type float, tag FLOAT
 
 ---
 
+## Ditto
+**`#"`** - Ditto
+Used to repeat an assignment in a list of assignments.
+```
+#import <standard.fx>;
+
+using standard::io::console;
+
+def main() -> int
+{
+    int i;
+    int x = ++i,
+        y = #",
+        z = #";
+
+    println(z);
+    
+    return 0;
+};
+```
+Result:
+```
+3
+```
+
+---
+
 ## Range
 
 **`..`** - Range
@@ -784,6 +811,7 @@ Higher rows bind more tightly. Within a row, associativity is left-to-right unle
 | `._` | Member | Tagged union discriminant |
 | `$` | Stringify | Stringification |
 | `~$` | Codify | Codification |
+| `#"` | Ditto | Repeat previous assignment in list |
 | `..` | Range | Inclusive range |
 | `(type)` | Type | Cast |
 | `(void)` | Type | Free / deallocate |
