@@ -478,7 +478,6 @@ class ArraySlice(Expression):
         return None
 
 
-
 @dataclass
 class BitSlice(Expression):
     """Bit-slice expression: value[start``end]
@@ -639,6 +638,25 @@ class CompoundAssignment(Statement):
     def __repr__(self) -> str:
         return f"{self.target} {self.op_token} {self.value}"
 
+
+@dataclass
+class RangeAssignment(Statement):
+    """Set-notation range fill assignment: array[start..end] = {fill};
+
+    Assigns the fill value to every element of 'array' from index 'start'
+    to index 'end' (inclusive).
+
+    Example:
+        x[0..5] = {0};     // zero-fill indices 0 through 5
+        x[2..4] = {255b};  // fill bytes 2-4 with 255
+    """
+    array: Expression
+    start: Expression
+    end: Expression
+    fill: Expression
+
+    def __repr__(self) -> str:
+        return f"{self.array}[{self.start}..{self.end}] = {{{self.fill}}};"
 
 @dataclass
 class TernaryAssign(Statement):

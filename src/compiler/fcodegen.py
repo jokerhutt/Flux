@@ -4494,6 +4494,111 @@ class CodegenVisitor:
         builder.position_at_start(merge_block)
         return None
 
+    def visit_RangeAssignment(self, node, builder, module):
+        """Codegen for set-notation range fill: array[start..end] = {fill};
+
+        Resolves the array pointer, evaluates start/end/fill once, then emits
+        a counted loop that stores fill into every element from start to end
+        inclusive.
+        """
+        from fast import Identifier, Literal
+
+        # -- Resolve array pointer ------------------------------------------
+        # Use visit() so Identifier resolution goes through the normal path
+        # (type metadata, loaded globals, etc.) matching visit_ArrayAccess.
+        arr_ptr = self.visit(node.array, builder, module)
+
+        # Mirror visit_ArrayAccess lines 3935-3941: if we got T** (plain pointer
+        # variable stored as an alloca) load it once to get T*.
+        _ts    = getattr(arr_ptr, '_flux_type_spec', None)
+        _depth = getattr(_ts, 'pointer_depth', 1) if _ts else 1
+        _is_arr = getattr(_ts, 'is_array', False) if _ts else False
+        if (not _is_arr and _depth <= 1 and
+                isinstance(arr_ptr, (ir.AllocaInstr, ir.GlobalVariable)) and
+                isinstance(arr_ptr.type, ir.PointerType) and
+                isinstance(arr_ptr.type.pointee, ir.PointerType) and
+                not isinstance(arr_ptr.type.pointee.pointee, ir.ArrayType) and
+                not isinstance(arr_ptr.type.pointee.pointee, ir.PointerType)):
+            arr_ptr = builder.load(arr_ptr, name="ra_ptr_loaded")
+
+        # arr_ptr is now [N x T]* or T*
+        if isinstance(arr_ptr.type, ir.PointerType) and isinstance(arr_ptr.type.pointee, ir.ArrayType):
+            elem_type = arr_ptr.type.pointee.element
+            use_2d_gep = True
+        elif isinstance(arr_ptr.type, ir.PointerType):
+            elem_type = arr_ptr.type.pointee
+            use_2d_gep = False
+        else:
+            raise FluxCodegenError(
+                f"Range assignment target is not a pointer type: {arr_ptr.type}", node, module)
+
+        i32 = ir.IntType(32)
+
+        # -- Evaluate start, end, fill once before the loop -----------------
+        start_val = self.visit(node.start, builder, module)
+        end_val   = self.visit(node.end,   builder, module)
+        fill_val  = self.visit(node.fill,  builder, module)
+
+        # Normalise to i32
+        def _to_i32(v, name):
+            if isinstance(v.type, ir.IntType):
+                if v.type.width < 32:
+                    return builder.zext(v, i32, name=name + "_ext")
+                elif v.type.width > 32:
+                    return builder.trunc(v, i32, name=name + "_trunc")
+            return v
+
+        start_i32 = _to_i32(start_val, "ra_start")
+        end_i32   = _to_i32(end_val,   "ra_end")
+
+        # Coerce fill to elem_type
+        if fill_val.type != elem_type:
+            if isinstance(fill_val.type, ir.IntType) and isinstance(elem_type, ir.IntType):
+                if fill_val.type.width < elem_type.width:
+                    fill_val = builder.zext(fill_val, elem_type, name="ra_fill_ext")
+                elif fill_val.type.width > elem_type.width:
+                    fill_val = builder.trunc(fill_val, elem_type, name="ra_fill_trunc")
+            elif isinstance(fill_val.type, ir.DoubleType) and isinstance(elem_type, ir.FloatType):
+                fill_val = builder.fptrunc(fill_val, elem_type, name="ra_fill_fptrunc")
+            elif isinstance(fill_val.type, ir.FloatType) and isinstance(elem_type, ir.DoubleType):
+                fill_val = builder.fpext(fill_val, elem_type, name="ra_fill_fpext")
+
+        # -- Emit loop: for i = start; i <= end; i++ -----------------------
+        func        = builder.block.function
+        cond_block  = func.append_basic_block("ra.cond")
+        body_block  = func.append_basic_block("ra.body")
+        end_block   = func.append_basic_block("ra.end")
+
+        idx_ptr = builder.alloca(i32, name="ra.idx")
+        builder.store(start_i32, idx_ptr)
+        builder.branch(cond_block)
+
+        # cond: i <= end
+        builder.position_at_start(cond_block)
+        cur_idx = builder.load(idx_ptr, name="ra.i")
+        cmp = builder.icmp_signed('<=', cur_idx, end_i32, name="ra.cond")
+        builder.cbranch(cmp, body_block, end_block)
+
+        # body: arr[i] = fill; i++
+        builder.position_at_start(body_block)
+        cur_idx_body = builder.load(idx_ptr, name="ra.i.body")
+        if use_2d_gep:
+            elem_ptr = builder.gep(
+                arr_ptr,
+                [ir.Constant(i32, 0), cur_idx_body],
+                inbounds=True,
+                name="ra.elem"
+            )
+        else:
+            elem_ptr = builder.gep(arr_ptr, [cur_idx_body], inbounds=True, name="ra.elem")
+        builder.store(fill_val, elem_ptr)
+        next_idx = builder.add(cur_idx_body, ir.Constant(i32, 1), name="ra.next")
+        builder.store(next_idx, idx_ptr)
+        builder.branch(cond_block)
+
+        builder.position_at_start(end_block)
+        return None
+
     def visit_Block(self, node, builder, module):
         import inspect as _inspect
         result = None

@@ -1,10 +1,12 @@
-#import "standard.fx";
+#import <standard.fx>;
+
+using standard::io::console;
 
 def main() -> int
 {
     while (void is false) // !void == true, void == 0, !0 = 1, void == false
     {
-        print("[void is not true]\0");
+        print("[void is not true]"); // Use g"" strings to avoid overflow
     };
 	return 0;
 };

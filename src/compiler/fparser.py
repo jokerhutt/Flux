@@ -8054,7 +8054,7 @@ class FluxParser:
 
         while True:
             if self.expect(TokenType.LEFT_BRACKET):
-                # Array access or array slice [start:end]
+                # Array access or array slice [start:end] or range assignment [start..end] = {fill}
                 tok = self.current_token
                 self.advance()
                 start_index = self.expression()
@@ -8074,6 +8074,16 @@ class FluxParser:
                 else:
                     # Regular array access
                     self.consume(TokenType.RIGHT_BRACKET)
+                    # Check for set-notation range assignment: array[start..end] = {fill}
+                    # start_index will be a RangeExpression if the subscript was `start..end`
+                    if isinstance(start_index, RangeExpression) and self.expect(TokenType.ASSIGN):
+                        self.advance()  # consume '='
+                        self.consume(TokenType.LEFT_BRACE, "Expected '{' after '=' in range assignment")
+                        fill = self.expression()
+                        self.consume(TokenType.RIGHT_BRACE, "Expected '}' after fill value in range assignment")
+                        expr = RangeAssignment(expr, start_index.start, start_index.end, fill).set_location(tok.line, tok.column)
+                        # RangeAssignment is a statement; break out of postfix loop
+                        break
                     expr = ArrayAccess(expr, start_index).set_location(tok.line, tok.column)
             elif self.expect(TokenType.LEFT_PAREN):
                 # Function call
@@ -8541,7 +8551,7 @@ class FluxParser:
             return Literal(tok.value, DataType.CHAR).set_location(tok.line, tok.column)
         elif self.expect(TokenType.BYTE_LITERAL):
             tok = self.current_token
-            value = int(tok.value)
+            value = int(tok.value, 0)
             self.advance()
             return Literal(value, DataType.BYTE).set_location(tok.line, tok.column)
         elif self.expect(TokenType.STRING_LITERAL):

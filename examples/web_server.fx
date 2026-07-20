@@ -1,14 +1,17 @@
 // Basic HTTP Server in Flux - Debug Version
 // Demonstrates TCP server handling simple HTTP GET requests
 
-#import "standard.fx", "net_windows.fx";
+#import <standard.fx>, <net_windows.fx>;
+
+using standard::sockets,
+      standard::io::console;
 
 // HTTP response helper
 def build_http_response(byte* content, int content_len, byte* buffer) -> int
 {
     // Build HTTP/1.1 200 OK response
-    byte* header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: \0";
-    byte* header_end = "\r\n\r\n\0";
+    byte* header = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ";
+    byte* header_end = "\r\n\r\n";
     
     // Copy header
     int pos = 0;
@@ -86,7 +89,7 @@ def parse_request_path(byte* request, byte* path_buffer, int max_len) -> int
         path_len = path_len + 1;
         i = i + 1;
     };
-    path_buffer[path_len] = '\0';
+    path_buffer[path_len] = '';
     
     return path_len;
 };
@@ -113,12 +116,12 @@ def handle_client(int client_sock) -> void
         int path_len = parse_request_path(@request_buffer[0], @path_buffer[0], 256);
         
         // Print request info
-        print("Request: \0");
+        print("Request: ");
         if (path_len > 0)
         {
             print(@path_buffer[0], path_len);
         };
-        print("\n\0");
+        print("\n");
         
         // Generate response based on path
         byte* content;
@@ -132,7 +135,7 @@ def handle_client(int client_sock) -> void
             content = "
 <html>
     <body>
-        <h1>Flux HTTP Server</h1><p>Welcome to the Flux web server!</p><p>Try: <a href='/about'>/about</a> or <a href='/time'>/time</a></p></body></html>\0";
+        <h1>Flux HTTP Server</h1><p>Welcome to the Flux web server!</p><p>Try: <a href='/about'>/about</a> or <a href='/time'>/time</a></p></body></html>";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         }
@@ -146,7 +149,7 @@ def handle_client(int client_sock) -> void
         <p>Flux is a systems programming language.</p>
         <p><a href='/'>Go to the root of the site.</a></p>
     </body>
-</html>\0";
+</html>";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         }
@@ -160,7 +163,7 @@ def handle_client(int client_sock) -> void
         <p>Time to look at the clock.</p>
         <p><a href='/'>Go to the root of the site.</a></p>
     </body>
-</html>\0";
+</html>";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         }
@@ -172,7 +175,7 @@ def handle_client(int client_sock) -> void
         <h1>404 Not Found</h1>
         <p>The requested page was not found.</p>
     </body>
-</html>\0";
+</html>";
             content_len = 0;
             while (content[content_len] != 0) { content_len = content_len + 1; };
         };
@@ -193,25 +196,25 @@ def main() -> int
     int init_result = init();
     if (init_result != 0)
     {
-        print("Failed to initialize Winsock\n\0");
+        print("Failed to initialize Winsock\n");
         return 1;
     };
     
-    print("Starting HTTP server on port 8080...\n\0");
+    print("Starting HTTP server on port 8080...\n");
     
     // Create server socket
     int server_sock = tcp_server_create((u16)8080, 10);
     if (server_sock < 0)
     {
-        print("Failed to create server socket\nserver_sock = \0");
+        print("Failed to create server socket\nserver_sock = ");
         print(server_sock);
         print();
         cleanup();
         return 1;
     };
     
-    print("Server listening on localhost:8080\n\0");
-    print("Press Ctrl+C to stop\n\n\0");
+    print("Server listening on localhost:8080\n");
+    print("Press Ctrl+C to stop\n\n");
     
     // Accept loop
     sockaddr_in client_addr;
@@ -225,11 +228,11 @@ def main() -> int
             byte* client_ip = get_ip_string(@client_addr);
             u16 client_port = get_port(@client_addr);
             
-            print("Connection from: \0");
+            print("Connection from: ");
             int ip_len = 0;
             while (client_ip[ip_len] != 0) { ip_len = ip_len + 1; };
             print(client_ip, ip_len);
-            print("\n\0");
+            print("\n");
             
             // Handle the request
             handle_client(client_sock);

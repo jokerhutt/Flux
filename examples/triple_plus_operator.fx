@@ -1,5 +1,6 @@
-#import "standard.fx";
+#import <standard.fx>;
 
+using standard::io::console;
 
 operator (int L, int R) [+++] -> int
 {
@@ -9,6 +10,6 @@ operator (int L, int R) [+++] -> int
 
 def main() -> int
 {
-    print(5 +++ 3);
+    print(5 +++ 3); // 10
     return 0;
 };

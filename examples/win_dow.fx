@@ -1,16 +1,16 @@
-#import "standard.fx", "windows.fx";
+#import <standard.fx>, <windows.fx>;
 
 using standard::system::windows;
 
 def main() -> int
 {
-    Window win("Flux Window\0", 800, 600, CW_USEDEFAULT, CW_USEDEFAULT);
+    Window win("Flux Window", 800, 600, CW_USEDEFAULT, CW_USEDEFAULT);
     SetForegroundWindow(win.handle);
     BringWindowToTop(win.handle);
 
     while (win.process_messages())
     {
-        //print("In main loop!\n\0");
+        //print("In main loop!\n");
     };
 
     system("pause\0");

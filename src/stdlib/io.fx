@@ -15,6 +15,7 @@
 #import <types.fx>;
 #endif;
 
+/// MOVE TO SYS.FX BEGIN ///
 #ifdef __WINDOWS__
 extern
 {
@@ -24,6 +25,7 @@ extern
         fclose(byte* stream) -> int;
 };
 #endif;
+/// /MOVETOSYS/ END ///
 
 namespace standard
 {
@@ -56,6 +58,45 @@ namespace standard
 #ifdef __MACOS__
             def mac_print(byte* msg, int x) -> void;
 #endif;
+            // GENERIC
+            def print() -> void, // no param = newline
+                print(noopstr, int) -> void,
+                print(noopstr) -> void,
+                print(bool) -> void,
+                printchar(noopstr) -> void,
+                print(byte) -> void,
+                print(i8) -> void,
+                print(i16) -> void,
+                print(u16) -> void,
+                print(int) -> void,
+                print(i32) -> void,
+                print(uint) -> void,
+                print(u32) -> void,
+                print_hex_byte(byte) -> void,
+                print_hex_u32(u32) -> void,
+                print(i64) -> void,
+                print(u64) -> void,
+                print(long) -> void,
+                print(ulong) -> void,
+                print(float) -> void,
+                print(float,int) -> void,
+                print(double) -> void,
+                print(double,int) -> void,
+                println(noopstr) -> void,   // newline print overloads
+                println(byte) -> void,
+                println(bool) -> void,
+                println(i8) -> void,
+                println(i16) -> void,
+                println(u16) -> void,
+                println(int) -> void,
+                println(uint) -> void,
+                printhbline(byte) -> void,
+                println(long) -> void,
+                println(ulong) -> void,
+                println(float) -> void,
+                println(float,int) -> void,
+                println(double) -> void,
+                println(double,int) -> void;
 
 #ifdef __WINDOWS__
             // INPUT DEFINITIONS
@@ -129,8 +170,8 @@ namespace standard
 #ifdef __LINUX__
             def nix_input(byte[] buffer, int max_len) -> int
             {
-                i64 count = max_len;
-                i64 bytes_read = 0;
+                i64 count = max_len,
+                    bytes_read = 0;
 
 #ifdef __ARCH_X86_64__
                 volatile asm
@@ -169,20 +210,82 @@ namespace standard
                     return 0;
                 };
 
-                // Strip trailing \r and \n
-                for (int i = 0; i < (int)bytes_read; i++)
+                for (int i; i < max_len; i++)
                 {
-                    if (buffer[i] == '\r' | buffer[i] == '\n')
+                    if (buffer[i] == '\n' | buffer[i] == '\r')
                     {
-                        buffer[i] = 0;
-                        return i;
+                        buffer[i] = '\0';
                     };
                 };
 
-                return (int)bytes_read;
+                return bytes_read;
             };
 #endif; // LINUX
 #ifdef __MACOS__
+            def mac_input(byte[] buffer, int max_len) -> int
+            {
+                i64 count = max_len,
+                    bytes_read = 0;
+
+#ifdef __ARCH_X86_64__
+                volatile asm
+                {
+                    // macOS x86_64 (Darwin) syscall convention:
+                    // Syscall number in rax
+                    // Parameters: rdi, rsi, rdx, r10, r8, r9
+                    // Use syscall instruction
+                    // Syscall numbers: BSD base 0x2000000
+                    
+                    // macOS syscall: read(int fd, void *buf, size_t count)
+                    // syscall number: 0x2000003 (BSD read = 3, + 0x2000000)
+                    // fd: 0 (STDIN_FILENO)
+                    movq $$0x2000003, %rax
+                    movq $$0, %rdi
+                    movq $0, %rsi
+                    movq $1, %rdx
+                    syscall
+                } : "r"(bytes_read) : "r"(buffer), "r"(count)
+                  : "rax","rdi","rsi","rdx","rcx","r11","memory";
+#endif; // ARCH X86_64
+#ifdef __ARCH_ARM64__
+                volatile asm
+                {
+                    // macOS ARM64 (Darwin) syscall convention:
+                    // x16: syscall number
+                    // x0-x5: parameters
+                    // svc #0x80 to invoke
+                    // Return value in x0
+                    
+                    // macOS syscall: read(int fd, void *buf, size_t count)
+                    // syscall number: 3 (BSD read)
+                    // fd: 0 (STDIN_FILENO)
+                    mov x16, #3
+                    mov x0, #0
+                    ldr x1, [sp]
+                    ldr x2, [sp, #8]
+                    svc #0x80
+                } : "r"(bytes_read) : "r"(buffer), "r"(count)
+                  : "x0","x1","x2","x3","x4","x5",
+                    "x6","x7","x8","x9","x10","x11",
+                    "x12","x13","x14","x15","x16",
+                    "x17","memory";
+#endif; // ARCH ARM64
+
+                if (bytes_read <= 0)
+                {
+                    return 0;
+                };
+
+                for (int i; i < max_len; i++)
+                {
+                    if (buffer[i] == '\n' | buffer[i] == '\r')
+                    {
+                        buffer[i] = '\0';
+                    };
+                };
+
+                return bytes_read;
+            };
 #endif; // MACOS
 
 // INPUT WRAPPER
@@ -195,18 +298,16 @@ namespace standard
                 return nix_input(buffer, max_len);
 #endif; // LINUX
 #ifdef __MACOS__
-                return 0;
-                //return mac_input(buffer, max_len);
+                return mac_input(buffer, max_len);
 #endif; // MACOS
             };
 // INPUT WRAPPER END
 
 // OUTPUT FUNCTIONS BEGIN
 #ifdef __WINDOWS__
-#ifdef __ARCH_X86_64__
-            // OUTPUT DEFINITIONS
             def win_print(byte* msg, int x) -> void
             {
+#ifdef __ARCH_X86_64__
                 volatile asm
                 {
                     // BOOL ok = WriteFile(WIN_STDOUT_HANDLE, msg, x, NULL, NULL)
@@ -220,20 +321,8 @@ namespace standard
                     addq $$40, %rsp
                 } : : "r"(msg), "r"(x), "r"(WIN_STDOUT_HANDLE)
                     : "rax","rcx","rdx","r8","r9","r10","r11","memory";
-                return;
-            };
-
-            def reset_from_input() -> void
-            {
-                char bs = 8;
-                win_print(@bs,1);
-                win_print(@bs,1);
-                return;
-            };
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
-            def win_print(byte* msg, int x) -> void
-            {
                 volatile asm
                 {
                     // Windows ARM64 calling convention:
@@ -264,18 +353,26 @@ namespace standard
                 } : : "r"(msg), "r"(x) : "x0", "x1", "x2", "x3", "x4", "x5","x6","x7",
                                          "x8", "x9", "x10","x11","x12","x13",
                                          "x14","x15","x16","x17","x19","memory";
+#endif; // ARCH ARM
                 return;
             };
-#endif; // ARCH ARM
+
+            def reset_from_input() -> void
+            {
+                char bs = 8;
+                win_print(@bs,1);
+                win_print(@bs,1);
+                return;
+            };
 #endif; // WINDOWS
 
 #ifdef __LINUX__
-#ifdef __ARCH_X86_64__
             def nix_print(byte* msg, int x) -> void
             {
                 // Convert count to 64-bit for syscall
                 i64 count = x;
-                
+
+#ifdef __ARCH_X86_64__
                 volatile asm
                 {
                     // Linux syscall: write(int fd, const void *buf, size_t count)
@@ -290,15 +387,8 @@ namespace standard
                     movq $1, %rdx
                     syscall
                 } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","rcx","r11","memory";
-                return;
-            };
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
-            def nix_print(byte* msg, int x) -> void
-            {
-                // Convert count to 64-bit for syscall
-                i64 count = x;
-                
                 volatile asm
                 {
                     // Linux ARM64 syscall convention:
@@ -321,18 +411,17 @@ namespace standard
                                               "x6","x7","x8","x9","x10","x11",
                                               "x12","x13","x14","x15","x16",
                                               "x17","memory";
+#endif; // ARCH ARM
                 return;
             };
-#endif; // ARCH ARM
 #endif; // LINUX
 
 #ifdef __MACOS__
-#ifdef __ARCH_X86_64__
             def mac_print(byte* msg, int x) -> void
             {
-                // Convert count to 64-bit for syscall
-                i64 count = x;
-                
+                int count = x;
+
+#ifdef __ARCH_X86_64__
                 volatile asm
                 {
                     // macOS x86_64 (Darwin) syscall convention:
@@ -355,12 +444,8 @@ namespace standard
                     movq $1, %rdx
                     syscall
                 } : : "r"(msg), "r"(count) : "rax","rdi","rsi","rdx","r10","r8","r9","rcx","r11","memory";
-                return;
-            };
 #endif; // ARCH 86 64
 #ifdef __ARCH_ARM64__
-            def mac_print(byte* msg, int x) -> void
-            {
                 volatile asm
                 {
                     mov x0, #1
@@ -369,38 +454,23 @@ namespace standard
                     movz x16, #0x4
                     svc #0x80
                 } : : "r"(msg), "r"(count) : "x0","x1","x2","x16","memory";
+#endif; // ARCH ARM
                 return;
             };
-#endif; // ARCH ARM
 #endif; // MACOS
 
-            // GENERIC
+            // GENERIC (noopstr)
     		def print(noopstr s, int len) -> void
     		{
-    			// Designed to use sys.fx to determine which OS we're on
-    			// and call the appropriate print function.
-                switch (CURRENT_OS)
-                {
 #ifdef __WINDOWS__
-                    case (1) // Windows
-                    {
-                        win_print(@s, len);
-                    }
+                win_print(@s, len);
 #endif;
 #ifdef __LINUX__
-                    case (2) // Linux
-                    {
-                        nix_print(@s, len);
-                    }
+                nix_print(@s, len);
 #endif;
 #ifdef __MACOS__
-                    case (3) // Darwin (Mac)
-                    {
-                        mac_print(@s, len);
-                    }
+                mac_print(@s, len);
 #endif;
-                    default { return; }; // Unknown - exit() for now
-                };
     			(void)s;
     			return;
     		};
@@ -408,75 +478,19 @@ namespace standard
             def print(noopstr s) -> void
             {
                 int len = standard::strings::strlen(@s);
-                // GENERIC PRINT
-                //
-                // Designed to use sys.fx to determine which OS we're on
-                // and call the appropriate print function.
-                switch (CURRENT_OS)
-                {
+
 #ifdef __WINDOWS__
-                    case (1) // Windows
-                    {
-                        win_print(@s, len);
-                    }
+                win_print(@s, len);
 #endif;
 #ifdef __LINUX__
-                    case (2) // Linux
-                    {
-                        nix_print(@s, len);
-                    }
+                nix_print(@s, len);
 #endif;
 #ifdef __MACOS__
-                    case (3) // Darwin (Mac)
-                    {
-                        mac_print(@s, len);
-                    }
+                mac_print(@s, len);
 #endif;
-                    default { return; }; // Unknown - exit() for now
-                };
                 (void)s;
                 return;
             };
-
-            // GENERIC
-            def print() -> void,
-                print(noopstr, int) -> void,
-                print(noopstr) -> void,
-                print(bool) -> void,
-                printchar(noopstr) -> void,
-                print(byte) -> void,
-                print(i8) -> void,
-                print(i16) -> void,
-                print(u16) -> void,
-                print(int) -> void,
-                print(i32) -> void,
-                print(uint) -> void,
-                print(u32) -> void,
-                print_hex_byte(byte) -> void,
-                print_hex_u32(u32) -> void,
-                print(i64) -> void,
-                print(u64) -> void,
-                print(long) -> void,
-                print(ulong) -> void,
-                print(float) -> void,
-                print(float,int) -> void,
-                print(double) -> void,
-                print(double,int) -> void,
-                println(noopstr) -> void,   // newline print overloads
-                println(byte) -> void,
-                println(bool) -> void,
-                println(i8) -> void,
-                println(i16) -> void,
-                println(u16) -> void,
-                println(int) -> void,
-                println(uint) -> void,
-                printhbline(byte) -> void,
-                println(long) -> void,
-                println(ulong) -> void,
-                println(float) -> void,
-                println(float,int) -> void,
-                println(double) -> void,
-                println(double,int) -> void;
 
             def print(bool b) -> void
             {
@@ -719,41 +733,24 @@ namespace standard
                 };
             };
 
-            // GENERIC
+            // GENERIC (no param = newline)
             def print() -> void
             {
-                // No params = newline printed
-                // GENERIC PRINT
-                //
-                // Designed to use sys.fx to determine which OS we're on
-                // and call the appropriate print function.
-                switch (CURRENT_OS)
-                {
 #ifdef __WINDOWS__
-                    case (1) // Windows
-                    {
-                        win_print("\n", 1);
-                    }
+                win_print("\r\n", 1);
 #endif;
 #ifdef __LINUX__
-                    case (2) // Linux
-                    {
-                        nix_print("\n", 1);
-                    }
+                nix_print("\n", 1);
 #endif;
 #ifdef __MACOS__
-                    case (3) // Darwin (Mac)
-                    {
-                        mac_print("\n", 1);
-                    }
+                mac_print("\n", 1);
 #endif;
-                    default { return; }; // Unknown - exit() for now
-                };
                 return;
             };
         };      // CONSOLE //
 
                 // FILE //
+                // NEEDS MAJOR UPGRADE //
         namespace file
         {
 #ifdef __WINDOWS__

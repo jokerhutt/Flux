@@ -1,4 +1,6 @@
-#import "standard.fx";
+#import <standard.fx>;
+
+using standard::io::console;
 
 enum myenum {
 	val1 = 100,
@@ -8,6 +10,6 @@ enum myenum {
 
 def main() -> int
 {
-	myenum.val1;
+	println(f"{myenum.val1}");
 	return 0;
 };

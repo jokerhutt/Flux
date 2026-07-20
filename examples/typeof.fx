@@ -1,4 +1,4 @@
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
 
@@ -8,9 +8,9 @@ struct mystr
 
 def main() -> int
 {
-	if (typeof(mystr) == struct)
+	if (typeof(mystr) == typeof(struct))
 	{
-		print("Got struct!\0");
+		print(f"Got {typeof(mystr)}!");
 	};
 	return 0;
 };

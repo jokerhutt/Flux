@@ -1,4 +1,4 @@
-#import "standard.fx", "vectors.fx", "windows.fx", "opengl.fx", "allocators.fx";
+#import <standard.fx>, <windows.fx>, <opengl.fx>;
 
 using standard::system::windows,
       standard::vectors,

@@ -25,21 +25,9 @@
 //                               fresh template, and confirm the new stub works
 //                               correctly after the old one is gone.
 
-#import "standard.fx";
+#import <standard.fx>;
 
 using standard::io::console;
-
-// ============================================================================
-// Win32 memory primitives
-// ============================================================================
-
-extern
-{
-    def !!
-        VirtualAlloc(ulong, size_t, u32, u32)  -> ulong,
-        VirtualFree(ulong, size_t, u32)        -> bool,
-        VirtualProtect(ulong, size_t, u32, u32*) -> bool;
-};
 
 // ============================================================================
 // Target functions
@@ -67,14 +55,7 @@ def write_stub(ulong page) -> void
     byte* p = (byte*)page;
     p[0]  = (byte)0x48;
     p[1]  = (byte)0xB8;
-    p[2]  = (byte)0x00;
-    p[3]  = (byte)0x00;
-    p[4]  = (byte)0x00;
-    p[5]  = (byte)0x00;
-    p[6]  = (byte)0x00;
-    p[7]  = (byte)0x00;
-    p[8]  = (byte)0x00;
-    p[9]  = (byte)0x00;
+    p[2..9] = {0x00b}; // SET NOTATION
     p[10] = (byte)0xFF;
     p[11] = (byte)0xE0;
 };

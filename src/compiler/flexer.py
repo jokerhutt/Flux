@@ -841,6 +841,10 @@ class FluxLexer:
                 if self.current_char() and self.current_char() == 'l':
                     self.advance()  # consume 'l'
                     return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for b (byte) suffix
+                if self.current_char() and self.current_char() == 'b':
+                    self.advance()  # consume 'b'
+                    return Token(TokenType.BYTE_LITERAL, result, start_pos[0], start_pos[1])
                 
                 return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
             
@@ -863,6 +867,10 @@ class FluxLexer:
                 if self.current_char() and self.current_char() == 'l':
                     self.advance()  # consume 'l'
                     return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for b (byte) suffix
+                if self.current_char() and self.current_char() == 'b':
+                    self.advance()  # consume 'b'
+                    return Token(TokenType.BYTE_LITERAL, result, start_pos[0], start_pos[1])
                 
                 return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
 
@@ -885,6 +893,10 @@ class FluxLexer:
                 if self.current_char() and self.current_char() == 'l':
                     self.advance()  # consume 'l'
                     return Token(TokenType.SLONG_LITERAL, result, start_pos[0], start_pos[1])
+                # Check for b (byte) suffix
+                if self.current_char() and self.current_char() == 'b':
+                    self.advance()  # consume 'b'
+                    return Token(TokenType.BYTE_LITERAL, result, start_pos[0], start_pos[1])
                 
                 return Token(TokenType.SINT_LITERAL, result, start_pos[0], start_pos[1])
             
