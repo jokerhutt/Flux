@@ -385,7 +385,7 @@ class FXPreprocessor:
             params = [p.strip() for p in raw_params.split(',') if p.strip()]
             body = rest[paren_close + 1:].strip()
             self.macros[name] = (params, body)
-            print(f"[PREPROCESSOR] Defined macro: {name}({', '.join(params)}) = {body}")
+            print(f"[PREPROCESSOR] Defined PSUB: {name}({', '.join(params)}) = {body}")
             self.line_map.append((getattr(self, '_current_file', self.source_file), self._current_local_lineno))
             self.output_lines.append('')
             return i + 1

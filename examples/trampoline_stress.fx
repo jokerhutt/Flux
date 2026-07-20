@@ -14,7 +14,7 @@
 //
 //   3. Round-robin churn       - cycle through all targets in order across a
 //                               large number of iterations; validates that
-//                               repeated patch → call → verify is stable.
+//                               repeated patch -> call -> verify is stable.
 //
 //   4. Accumulator chain       - feed the output of one trampoline call as
 //                               the input of the next, building a running
@@ -33,11 +33,11 @@ using standard::io::console;
 // Target functions
 // ============================================================================
 
-def op_double(ulong x)  -> ulong { return x * (ulong)2;       };
-def op_add100(ulong x)  -> ulong { return x + (ulong)100;     };
+def op_double(ulong x)  -> ulong { return x * 2ul;       };
+def op_add100(ulong x)  -> ulong { return x + 100ul;     };
 def op_square(ulong x)  -> ulong { return x * x;              };
-def op_sub7(ulong x)    -> ulong { return x - (ulong)7;       };
-def op_xor(ulong x)     -> ulong { return x xor (ulong)0xDEAD;  };
+def op_sub7(ulong x)    -> ulong { return x - 7ul;       };
+def op_xor(ulong x)     -> ulong { return x xor 0xDEADul;  };
 def op_identity(ulong x)-> ulong { return x;                  };
 
 // ============================================================================
@@ -46,31 +46,31 @@ def op_identity(ulong x)-> ulong { return x;                  };
 
 def alloc_stub_page() -> ulong
 {
-    ulong page = VirtualAlloc((ulong)0, (size_t)4096, (u32)0x3000, (u32)0x40);
+    ulong page = VirtualAlloc(0, 4096, 0x3000, 0x40);
     return page;
 };
 
 def write_stub(ulong page) -> void
 {
     byte* p = (byte*)page;
-    p[0]  = (byte)0x48;
-    p[1]  = (byte)0xB8;
+    p[0]  = 0x48b;
+    p[1]  = 0xB8b;
     p[2..9] = {0x00b}; // SET NOTATION
-    p[10] = (byte)0xFF;
-    p[11] = (byte)0xE0;
+    p[10] = 0xFFb;
+    p[11] = 0xE0b;
 };
 
 def patch_target(ulong page, ulong target_addr) -> void
 {
     byte* p = (byte*)page;
-    p[2] = (byte)(target_addr & (ulong)0xFF);
-    p[3] = (byte)((target_addr >> (ulong)8)  & (ulong)0xFF);
-    p[4] = (byte)((target_addr >> (ulong)16) & (ulong)0xFF);
-    p[5] = (byte)((target_addr >> (ulong)24) & (ulong)0xFF);
-    p[6] = (byte)((target_addr >> (ulong)32) & (ulong)0xFF);
-    p[7] = (byte)((target_addr >> (ulong)40) & (ulong)0xFF);
-    p[8] = (byte)((target_addr >> (ulong)48) & (ulong)0xFF);
-    p[9] = (byte)((target_addr >> (ulong)56) & (ulong)0xFF);
+    p[2] = (byte)(target_addr & 0xFFul);
+    p[3] = (byte)((target_addr >> 8ul)  & 0xFFul);
+    p[4] = (byte)((target_addr >> 16ul) & 0xFFul);
+    p[5] = (byte)((target_addr >> 24ul) & 0xFFul);
+    p[6] = (byte)((target_addr >> 32ul) & 0xFFul);
+    p[7] = (byte)((target_addr >> 40ul) & 0xFFul);
+    p[8] = (byte)((target_addr >> 48ul) & 0xFFul);
+    p[9] = (byte)((target_addr >> 56ul) & 0xFFul);
 };
 
 // ============================================================================
@@ -81,17 +81,17 @@ def pass(ulong got, ulong expected) -> bool
 {
     if (got == expected)
     {
-        print("    PASS (got \0");
+        print("    PASS (got ");
         print(got);
-        print(")\n\0");
+        print(")\n");
         return true;
     };
 
-    print("    FAIL  got=\0");
+    print("    FAIL  got=");
     print(got);
-    print("  expected=\0");
+    print("  expected=");
     print(expected);
-    print("\n\0");
+    print("\n");
     return false;
 };
 
@@ -107,9 +107,10 @@ def pass(ulong got, ulong expected) -> bool
 
 def test_rapid_retarget() -> bool
 {
-    print("\n[TEST 1] Rapid retargeting (10 000 iterations)\n\0");
+    print("\n[TEST 1] Rapid retargeting (10 000 iterations)\n");
 
-    ulong page = alloc_stub_page();
+    ulong page = alloc_stub_page(),
+          result;
     write_stub(page);
     def{}* fn(ulong) -> ulong = (byte*)page;
 
@@ -118,13 +119,13 @@ def test_rapid_retarget() -> bool
 
     for (int i = 0; i < 10000; i++)
     {
-        ulong result = (ulong)0;
+        result = 0;
 
         if (i % 2 == 0)
         {
             patch_target(page, (ulong)@op_double);
-            result = fn((ulong)3);
-            if (result != (ulong)6)
+            result = fn(3);
+            if (result != 6ul)
             {
                 failures = failures + 1;
                 ok = false;
@@ -134,8 +135,8 @@ def test_rapid_retarget() -> bool
         if (i % 2 != 0)
         {
             patch_target(page, (ulong)@op_add100);
-            result = fn((ulong)3);
-            if (result != (ulong)103)
+            result = fn(3);
+            if (result != 103ul)
             {
                 failures = failures + 1;
                 ok = false;
@@ -143,17 +144,17 @@ def test_rapid_retarget() -> bool
         };
     };
 
-    VirtualFree(page, (size_t)0, (u32)0x8000);
+    VirtualFree(page, 0, 0x8000);
 
     if (ok)
     {
-        print("    PASS - 0 failures in 10 000 calls\n\0");
+        print("    PASS - 0 failures in 10 000 calls\n");
         return true;
     };
 
-    print("    FAIL - \0");
+    print("    FAIL - ");
     print(failures);
-    print(" mismatches\n\0");
+    print(" mismatches\n");
     return false;
 };
 
@@ -165,23 +166,25 @@ def test_rapid_retarget() -> bool
 // No stub should ever dispatch to another stub's target.
 // ============================================================================
 
+#psub write_stubs(a,b,c,d,e,f) write_stub(a); #
+                               write_stub(b); #
+                               write_stub(c); #
+                               write_stub(d); #
+                               write_stub(e); #
+                               write_stub(f);
+
 def test_multi_stub() -> bool
 {
-    print("\n[TEST 2] Multi-stub independence (6 concurrent stubs)\n\0");
+    print("\n[TEST 2] Multi-stub independence (6 concurrent stubs)\n");
 
-    ulong p0 = alloc_stub_page();
-    ulong p1 = alloc_stub_page();
-    ulong p2 = alloc_stub_page();
-    ulong p3 = alloc_stub_page();
-    ulong p4 = alloc_stub_page();
-    ulong p5 = alloc_stub_page();
+    ulong p0 = alloc_stub_page(),
+          p1 = alloc_stub_page(),
+          p2 = alloc_stub_page(),
+          p3 = alloc_stub_page(),
+          p4 = alloc_stub_page(),
+          p5 = alloc_sub_page();
 
-    write_stub(p0);
-    write_stub(p1);
-    write_stub(p2);
-    write_stub(p3);
-    write_stub(p4);
-    write_stub(p5);
+    write_stubs(p0,p1,p2,p3,p4,p5);
 
     patch_target(p0, (ulong)@op_double);
     patch_target(p1, (ulong)@op_add100);
@@ -190,39 +193,39 @@ def test_multi_stub() -> bool
     patch_target(p4, (ulong)@op_xor);
     patch_target(p5, (ulong)@op_identity);
 
-    def{}* f0(ulong) -> ulong = (byte*)p0;
-    def{}* f1(ulong) -> ulong = (byte*)p1;
-    def{}* f2(ulong) -> ulong = (byte*)p2;
-    def{}* f3(ulong) -> ulong = (byte*)p3;
-    def{}* f4(ulong) -> ulong = (byte*)p4;
-    def{}* f5(ulong) -> ulong = (byte*)p5;
+    def{}* f0(ulong) -> ulong = (@)p0,
+           f1(ulong) -> ulong = (@)p1,
+           f2(ulong) -> ulong = (@)p2,
+           f3(ulong) -> ulong = (@)p3,
+           f4(ulong) -> ulong = (@)p4,
+           f5(ulong) -> ulong = (@)p5;
 
     bool ok = true;
     ulong x = (ulong)10;
 
     // --- Round A: initial assignment ---
-    print("  Round A (initial patch):\n\0");
+    print("  Round A (initial patch):\n");
 
-    print("    f0(op_double,  10) -> \0");
-    ok = pass(f0(x), (ulong)20)    & ok;
+    print("    f0(op_double,  10) -> ");
+    ok = pass(f0(x), 20ul)    & ok;
 
-    print("    f1(op_add100,  10) -> \0");
-    ok = pass(f1(x), (ulong)110)   & ok;
+    print("    f1(op_add100,  10) -> ");
+    ok = pass(f1(x), 110ul)   & ok;
 
-    print("    f2(op_square,  10) -> \0");
-    ok = pass(f2(x), (ulong)100)   & ok;
+    print("    f2(op_square,  10) -> ");
+    ok = pass(f2(x), 100ul)   & ok;
 
-    print("    f3(op_sub7,    10) -> \0");
-    ok = pass(f3(x), (ulong)3)     & ok;
+    print("    f3(op_sub7,    10) -> ");
+    ok = pass(f3(x), 3ul)     & ok;
 
-    print("    f4(op_xor,     10) -> \0");
-    ok = pass(f4(x), (ulong)10 xor (ulong)0xDEAD) & ok;
+    print("    f4(op_xor,     10) -> ");
+    ok = pass(f4(x), 10ul xor 0xDEADul) & ok;
 
-    print("    f5(op_identity,10) -> \0");
-    ok = pass(f5(x), (ulong)10)    & ok;
+    print("    f5(op_identity,10) -> ");
+    ok = pass(f5(x), 10ul)    & ok;
 
     // --- Round B: cross-patch (rotate targets one slot) ---
-    print("  Round B (rotated patch):\n\0");
+    print("  Round B (rotated patch):\n");
 
     patch_target(p0, (ulong)@op_add100);
     patch_target(p1, (ulong)@op_square);
@@ -231,30 +234,30 @@ def test_multi_stub() -> bool
     patch_target(p4, (ulong)@op_identity);
     patch_target(p5, (ulong)@op_double);
 
-    print("    f0(op_add100,  10) -> \0");
-    ok = pass(f0(x), (ulong)110)   & ok;
+    print("    f0(op_add100,  10) -> ");
+    ok = pass(f0(x), 110ul)   & ok;
 
-    print("    f1(op_square,  10) -> \0");
-    ok = pass(f1(x), (ulong)100)   & ok;
+    print("    f1(op_square,  10) -> ");
+    ok = pass(f1(x), 100ul)   & ok;
 
-    print("    f2(op_sub7,    10) -> \0");
-    ok = pass(f2(x), (ulong)3)     & ok;
+    print("    f2(op_sub7,    10) -> ");
+    ok = pass(f2(x), 3ul)     & ok;
 
-    print("    f3(op_xor,     10) -> \0");
-    ok = pass(f3(x), (ulong)10 xor (ulong)0xDEAD) & ok;
+    print("    f3(op_xor,     10) -> ");
+    ok = pass(f3(x), 10ul xor 0xDEADul) & ok;
 
-    print("    f4(op_identity,10) -> \0");
-    ok = pass(f4(x), (ulong)10)    & ok;
+    print("    f4(op_identity,10) -> ");
+    ok = pass(f4(x), 10ul)    & ok;
 
-    print("    f5(op_double,  10) -> \0");
-    ok = pass(f5(x), (ulong)20)    & ok;
+    print("    f5(op_double,  10) -> ");
+    ok = pass(f5(x), 20ul)    & ok;
 
-    VirtualFree(p0, (size_t)0, (u32)0x8000);
-    VirtualFree(p1, (size_t)0, (u32)0x8000);
-    VirtualFree(p2, (size_t)0, (u32)0x8000);
-    VirtualFree(p3, (size_t)0, (u32)0x8000);
-    VirtualFree(p4, (size_t)0, (u32)0x8000);
-    VirtualFree(p5, (size_t)0, (u32)0x8000);
+    VirtualFree(p0, 0, 0x8000);
+    VirtualFree(p1, 0, 0x8000);
+    VirtualFree(p2, 0, 0x8000);
+    VirtualFree(p3, 0, 0x8000);
+    VirtualFree(p4, 0, 0x8000);
+    VirtualFree(p5, 0, 0x8000);
 
     return ok;
 };
@@ -262,40 +265,41 @@ def test_multi_stub() -> bool
 // ============================================================================
 // TEST 3 - Round-robin churn
 //
-// Cycle targets A→B→C→D→E→F→A... for 6 000 calls (1 000 full rotations).
+// Cycle targets A->B->C->D->E->F->A... for 6 000 calls (1 000 full rotations).
 // Each call uses input 5 and checks the known result.
 // ============================================================================
 
 def test_round_robin() -> bool
 {
-    print("\n[TEST 3] Round-robin churn (6 000 calls, 1 000 rotations)\n\0");
+    print("\n[TEST 3] Round-robin churn (6 000 calls, 1 000 rotations)\n");
 
     ulong page = alloc_stub_page();
     write_stub(page);
     def{}* fn(ulong) -> ulong = (byte*)page;
 
     bool ok       = true;
-    int  failures = 0;
-    ulong x       = (ulong)5;
+    int  failures;
+    ulong x       = 5,
+          r;
 
     for (int i = 0; i < 1000; i++)
     {
-        ulong r = (ulong)0;
+        r = 0;
 
         // Slot 0 - op_double
         patch_target(page, (ulong)@op_double);
         r = fn(x);
-        if (r != (ulong)10) { failures = failures + 1; ok = false; };
+        if (r != 10ul) { failures = failures + 1; ok = false; };
 
         // Slot 1 - op_add100
         patch_target(page, (ulong)@op_add100);
         r = fn(x);
-        if (r != (ulong)105) { failures = failures + 1; ok = false; };
+        if (r != 105ul) { failures = failures + 1; ok = false; };
 
         // Slot 2 - op_square
         patch_target(page, (ulong)@op_square);
         r = fn(x);
-        if (r != (ulong)25) { failures = failures + 1; ok = false; };
+        if (r != 25ul) { failures = failures + 1; ok = false; };
 
         // Slot 3 - op_sub7
         patch_target(page, (ulong)@op_sub7);
@@ -305,25 +309,25 @@ def test_round_robin() -> bool
         // Slot 4 - op_xor
         patch_target(page, (ulong)@op_xor);
         r = fn(x);
-        if (r != ((ulong)5 xor (ulong)0xDEAD)) { failures = failures + 1; ok = false; };
+        if (r != (5ul xor 0xDEADul)) { failures = failures + 1; ok = false; };
 
         // Slot 5 - op_identity
         patch_target(page, (ulong)@op_identity);
         r = fn(x);
-        if (r != (ulong)5) { failures = failures + 1; ok = false; };
+        if (r != 5ul) { failures = failures + 1; ok = false; };
     };
 
-    VirtualFree(page, (size_t)0, (u32)0x8000);
+    VirtualFree(page, 0, 0x8000);
 
     if (ok)
     {
-        print("    PASS - 0 failures in 6 000 calls\n\0");
+        print("    PASS - 0 failures in 6 000 calls\n");
         return true;
     };
 
-    print("    FAIL - \0");
+    print("    FAIL - ");
     print(failures);
-    print(" mismatches\n\0");
+    print(" mismatches\n");
     return false;
 };
 
@@ -345,30 +349,30 @@ def test_round_robin() -> bool
 
 def test_accumulator() -> bool
 {
-    print("\n[TEST 4] Accumulator chain\n\0");
+    print("\n[TEST 4] Accumulator chain\n");
 
     ulong page = alloc_stub_page();
     write_stub(page);
     def{}* fn(ulong) -> ulong = (byte*)page;
 
     // Manually compute the first 5-step chain so we have a known expected value.
-    ulong acc      = (ulong)1;
-    ulong expected = (ulong)1;
+    ulong acc      = 1,
+          expected = 1;
 
     // step 0
-    expected = expected * (ulong)2;
+    expected = expected * 2ul;
     // step 1
-    expected = expected + (ulong)100;
+    expected = expected + 100ul;
     // step 2
     expected = expected * expected;
     // step 3
-    expected = expected - (ulong)7;
+    expected = expected - 7ul;
     // step 4
     expected = expected;    // identity
 
-    print("  Manually computed 5-step expected: \0");
+    print("  Manually computed 5-step expected: ");
     print(expected);
-    print("\n\0");
+    print("\n");
 
     // Now run via trampoline
     patch_target(page, (ulong)@op_double);
@@ -386,18 +390,18 @@ def test_accumulator() -> bool
     patch_target(page, (ulong)@op_identity);
     acc = fn(acc);
 
-    print("  Trampoline chain result:           \0");
+    print("  Trampoline chain result:           ");
     print(acc);
     print("\n  ");
 
     bool ok = pass(acc, expected);
 
-    VirtualFree(page, (size_t)0, (u32)0x8000);
+    VirtualFree(page, 0, 0x8000);
     return ok;
 };
 
 // ============================================================================
-// TEST 5 - Re-entrant stub reuse (free → reallocate → rewrite → call)
+// TEST 5 - Re-entrant stub reuse (free -> reallocate -> rewrite -> call)
 //
 // Allocate, use, free, then allocate again and write a fresh stub.
 // Proves the mechanism is not relying on any residual executable state
@@ -406,7 +410,7 @@ def test_accumulator() -> bool
 
 def test_reuse() -> bool
 {
-    print("\n[TEST 5] Re-entrant stub reuse\n\0");
+    print("\n[TEST 5] Re-entrant stub reuse\n");
 
     bool ok = true;
 
@@ -416,11 +420,11 @@ def test_reuse() -> bool
     def{}* fn(ulong) -> ulong = (byte*)page;
 
     patch_target(page, (ulong)@op_double);
-    ulong r1 = fn((ulong)9);
-    print("  First lifetime  op_double(9) -> \0");
-    ok = pass(r1, (ulong)18) & ok;
+    ulong r1 = fn(9ul);
+    print("  First lifetime  op_double(9) -> ");
+    ok = pass(r1, 18ul) & ok;
 
-    VirtualFree(page, (size_t)0, (u32)0x8000);
+    VirtualFree(page, 0, 0x8000);
 
     // --- Second lifetime (fresh allocation) ---
     ulong page2 = alloc_stub_page();
@@ -428,16 +432,16 @@ def test_reuse() -> bool
     def{}* fn2(ulong) -> ulong = (byte*)page2;
 
     patch_target(page2, (ulong)@op_square);
-    ulong r2 = fn2((ulong)9);
-    print("  Second lifetime op_square(9) -> \0");
-    ok = pass(r2, (ulong)81) & ok;
+    ulong r2 = fn2(9ul);
+    print("  Second lifetime op_square(9) -> ");
+    ok = pass(r2, 81ul) & ok;
 
     patch_target(page2, (ulong)@op_add100);
-    ulong r3 = fn2((ulong)9);
-    print("  Repatch         op_add100(9) -> \0");
-    ok = pass(r3, (ulong)109) & ok;
+    ulong r3 = fn2(9ul);
+    print("  Repatch         op_add100(9) -> ");
+    ok = pass(r3, 109ul) & ok;
 
-    VirtualFree(page2, (size_t)0, (u32)0x8000);
+    VirtualFree(page2, 0, 0x8000);
 
     return ok;
 };
@@ -448,41 +452,41 @@ def test_reuse() -> bool
 
 def main() -> int
 {
-    print("=== Flux Trampoline Stress Test ===\n\0");
+    print("=== Flux Trampoline Stress Test ===\n");
 
-    bool t1 = test_rapid_retarget();
-    bool t2 = test_multi_stub();
-    bool t3 = test_round_robin();
-    bool t4 = test_accumulator();
-    bool t5 = test_reuse();
+    bool t1 = test_rapid_retarget(),
+         t2 = test_multi_stub(),
+         t3 = test_round_robin(),
+         t4 = test_accumulator(),
+         t5 = test_reuse();
 
-    print("\n========================================\n\0");
-    print("Results:\n\0");
+    print("\n========================================\n");
+    print("Results:\n");
 
-    print("  Test 1 (rapid retarget)    : \0");
-    if (t1) { print("PASS\n\0"); };
-    if (!t1) { print("FAIL\n\0"); };
+    print("  Test 1 (rapid retarget)    : ");
+    if (t1) { print("PASS\n"); };
+    if (!t1) { print("FAIL\n"); };
 
-    print("  Test 2 (multi-stub)        : \0");
-    if (t2) { print("PASS\n\0"); };
-    if (!t2) { print("FAIL\n\0"); };
+    print("  Test 2 (multi-stub)        : ");
+    if (t2) { print("PASS\n"); };
+    if (!t2) { print("FAIL\n"); };
 
-    print("  Test 3 (round-robin churn) : \0");
-    if (t3) { print("PASS\n\0"); };
-    if (!t3) { print("FAIL\n\0"); };
+    print("  Test 3 (round-robin churn) : ");
+    if (t3) { print("PASS\n"); };
+    if (!t3) { print("FAIL\n"); };
 
-    print("  Test 4 (accumulator chain) : \0");
-    if (t4) { print("PASS\n\0"); };
-    if (!t4) { print("FAIL\n\0"); };
+    print("  Test 4 (accumulator chain) : ");
+    if (t4) { print("PASS\n"); };
+    if (!t4) { print("FAIL\n"); };
 
-    print("  Test 5 (stub reuse)        : \0");
-    if (t5) { print("PASS\n\0"); };
-    if (!t5) { print("FAIL\n\0"); };
+    print("  Test 5 (stub reuse)        : ");
+    if (t5) { print("PASS\n"); };
+    if (!t5) { print("FAIL\n"); };
 
     bool all = t1 & t2 & t3 & t4 & t5;
-    print("========================================\n\0");
-    if (all)  { print("ALL TESTS PASSED\n\0"); };
-    if (!all) { print("ONE OR MORE TESTS FAILED\n\0"); };
+    print("========================================\n");
+    if (all)  { print("ALL TESTS PASSED\n"); };
+    if (!all) { print("ONE OR MORE TESTS FAILED\n"); };
 
     return 0;
 };

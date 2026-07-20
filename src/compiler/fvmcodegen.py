@@ -20,7 +20,7 @@ from fast import (
     ComptimeBlock, EmitFlux,
     VariableDeclaration,
     TypeDeclaration,
-    Assignment, CompoundAssignment,
+    Assignment, CompoundAssignment, RangeAssignment,
     BinaryOp, UnaryOp,
     Literal, Identifier, StringLiteral, FStringLiteral,
     FunctionCall, MethodCall, MemberAccess,
@@ -858,6 +858,7 @@ class FVMCodegen:
         elif t is TypeDeclaration:       self._visit_type_decl(node)
         elif t is Assignment:            self._visit_assignment(node)
         elif t is CompoundAssignment:    self._visit_compound_assign(node)
+        elif t is RangeAssignment:       self._visit_range_assignment(node)
         elif t is ExpressionStatement:   self._visit_expr_stmt(node)
         elif t is IfStatement:           self._visit_if(node)
         elif t is ForLoop:               self._visit_for(node)
@@ -1295,6 +1296,70 @@ class FVMCodegen:
                 node
             )
 
+    def _visit_range_assignment(self, node: RangeAssignment):
+        """Desugar range fill: array[start..end] = {fill}
+        Emits a counted loop using the FVM's ARRAY_STORE opcode.
+        Only plain identifier array targets are supported in comptime.
+        """
+        if not isinstance(node.array, Identifier):
+            raise FVMCodegenError(
+                'fvmcodegen: range assignment target must be a simple identifier in comptime',
+                node
+            )
+        arr_name = node.array.name
+        arr_slot = self._alloc_local(arr_name)
+
+        # Allocate a loop counter slot
+        counter_name = self._fresh_tmp()
+        counter_slot = self._alloc_local(counter_name)
+
+        # Evaluate start/end/fill once into locals
+        start_name = self._fresh_tmp()
+        end_name   = self._fresh_tmp()
+        fill_name  = self._fresh_tmp()
+        start_slot = self._alloc_local(start_name)
+        end_slot   = self._alloc_local(end_name)
+        fill_slot  = self._alloc_local(fill_name)
+
+        self._visit_expr(node.start)
+        self._emit(_instr(Op.LOCAL_SET, start_slot))
+        self._visit_expr(node.end)
+        self._emit(_instr(Op.LOCAL_SET, end_slot))
+        self._visit_expr(node.fill)
+        self._emit(_instr(Op.LOCAL_SET, fill_slot))
+
+        # counter = start
+        self._emit(_instr(Op.LOCAL_GET, start_slot))
+        self._emit(_instr(Op.LOCAL_SET, counter_slot))
+
+        # cond_ip: while counter <= end
+        cond_ip = self._current_ip()
+        self._emit(_instr(Op.LOCAL_GET, counter_slot))
+        self._emit(_instr(Op.LOCAL_GET, end_slot))
+        self._emit(_instr(Op.CMP_LE))
+        jump_end = self._current_ip()
+        self._emit(_instr(Op.JNF, 0))  # patched below
+
+        # body: array[counter] = fill
+        self._emit(_instr(Op.LOCAL_GET, arr_slot))
+        self._emit(_instr(Op.LOCAL_GET, counter_slot))
+        self._emit(_instr(Op.LOCAL_GET, fill_slot))
+        self._emit(_instr(Op.ARRAY_STORE))
+        self._emit(_instr(Op.LOCAL_SET, arr_slot))
+
+        # counter++
+        self._emit(_instr(Op.LOCAL_GET, counter_slot))
+        self._emit(_instr(Op.PUSH, Val(TTag.INT, 1)))
+        self._emit(_instr(Op.ADD))
+        self._emit(_instr(Op.LOCAL_SET, counter_slot))
+
+        # jump back to cond
+        self._emit(_instr(Op.JMP, cond_ip))
+
+        # patch the exit jump
+        end_ip = self._current_ip()
+        self._patch_at(jump_end, Op.JNF, end_ip)
+
     def _visit_compound_assign(self, node: CompoundAssignment):
         """Desugar compound assignment: x op= val  ->  x = x op val"""
         if not isinstance(node.target, Identifier):
@@ -1381,6 +1446,7 @@ class FVMCodegen:
         elif t is MemberAccess:        return self._visit_member_access(node)
         elif t is Assignment:          self._visit_assignment(node); return False
         elif t is CompoundAssignment:  self._visit_compound_assign(node); return False
+        elif t is RangeAssignment:     self._visit_range_assignment(node); return False
         elif t is AddressOf:           return self._visit_address_of(node)
         elif t is PointerDeref:        return self._visit_pointer_deref(node)
         elif t is SizeOf:              return self._visit_sizeof(node)

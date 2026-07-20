@@ -5402,7 +5402,14 @@ class FluxParser:
                         initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
                     elif self.expect(TokenType.ASSIGN):
                         self.advance()
-                        initializers.append(self.expression())
+                        if self.expect(TokenType.DITTO):
+                            import copy
+                            if not initializers or initializers[-1] is None:
+                                self.error("Ditto operator '#\"' used before any initializer to repeat")
+                            self.advance()
+                            initializers.append(copy.deepcopy(initializers[-1]))
+                        else:
+                            initializers.append(self.expression())
                     else:
                         initializers.append(None)
                 # If no per-name initializers were collected and a bulk assign/from follows, apply it.
@@ -5437,7 +5444,12 @@ class FluxParser:
                         initializers.append(AddressOf(rhs).set_location(addr_tok.line, addr_tok.column))
                     elif self.expect(TokenType.ASSIGN):
                         self.advance()
-                        initializers.append(self.expression())
+                        if self.expect(TokenType.DITTO):
+                            import copy
+                            self.advance()
+                            initializers.append(copy.deepcopy(initializers[-1]))
+                        else:
+                            initializers.append(self.expression())
                         # Record byte* string-literal initialisers in comma-chain so ~$varname can splice them
                         if (isinstance(initializers[-1], StringLiteral) and
                                 type_spec.is_pointer and type_spec.base_type == DataType.BYTE):
@@ -8523,12 +8535,12 @@ class FluxParser:
             return Literal(value, DataType.UINT).set_location(tok.line, tok.column)
         elif self.expect(TokenType.SLONG_LITERAL):
             tok = self.current_token
-            value = float(tok.value)
+            value = int(tok.value, 0)
             self.advance()
             return Literal(value, DataType.SLONG).set_location(tok.line, tok.column)
         elif self.expect(TokenType.ULONG_LITERAL):
             tok = self.current_token
-            value = float(tok.value)
+            value = int(tok.value, 0)
             self.advance()
             return Literal(value, DataType.ULONG).set_location(tok.line, tok.column)
         elif self.expect(TokenType.FLOAT):
